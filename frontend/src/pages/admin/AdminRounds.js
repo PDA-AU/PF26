@@ -165,12 +165,11 @@ export default function AdminRounds() {
     };
 
     const toggleTag = (tag) => {
-        setFormData(prev => ({
-            ...prev,
-            tags: prev.tags.includes(tag) 
-                ? prev.tags.filter(t => t !== tag)
-                : [...prev.tags, tag]
-        }));
+        setFormData(prev => {
+            const hasTag = prev.tags.includes(tag);
+            const newTags = hasTag ? prev.tags.filter(t => t !== tag) : [...prev.tags, tag];
+            return { ...prev, tags: newTags };
+        });
     };
 
     const getStateBadgeColor = (state) => {
