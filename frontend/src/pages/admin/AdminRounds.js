@@ -146,12 +146,15 @@ export default function AdminRounds() {
     };
 
     const updateCriteria = (index, field, value) => {
-        setFormData(prev => ({
-            ...prev,
-            evaluation_criteria: prev.evaluation_criteria.map((c, i) => 
-                i === index ? { ...c, [field]: field === 'max_marks' ? parseFloat(value) || 0 : value } : c
-            )
-        }));
+        setFormData(prev => {
+            const newCriteria = [...prev.evaluation_criteria];
+            if (field === 'max_marks') {
+                newCriteria[index] = { ...newCriteria[index], max_marks: parseFloat(value) || 0 };
+            } else {
+                newCriteria[index] = { ...newCriteria[index], [field]: value };
+            }
+            return { ...prev, evaluation_criteria: newCriteria };
+        });
     };
 
     const removeCriteria = (index) => {
