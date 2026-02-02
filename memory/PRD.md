@@ -28,6 +28,7 @@ Build a production-ready, full-stack event management website for Persofest'26, 
 - ✅ Participant management (profile, profile picture upload)
 - ✅ Round CRUD operations (create, update, delete, state management)
 - ✅ Score entry and evaluation system
+- ✅ **Bulk score import from Excel** (with template download)
 - ✅ Elimination logic (top K or minimum score)
 - ✅ Leaderboard calculation
 - ✅ Export endpoints (participants, rounds, leaderboard)
@@ -42,8 +43,12 @@ Build a production-ready, full-stack event management website for Persofest'26, 
 - ✅ Admin dashboard (stats, charts, quick actions)
 - ✅ Admin rounds management
 - ✅ Admin participants management with filters
-- ✅ Admin scoring page
+- ✅ Admin scoring page with **bulk Excel import**
 - ✅ Admin leaderboard with export
+
+### Scripts
+- ✅ setup.sh - Installs dependencies, creates venv, initializes database
+- ✅ start.sh - Starts both backend and frontend servers
 
 ### Design
 - ✅ Neo-brutalism UI with purple primary color
