@@ -3,10 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import axios from 'axios';
 import { toast } from 'sonner';
-import { 
-    Calendar, Plus, Edit2, Trash2, Play, Lock, LogOut, Sparkles,
-    LayoutDashboard, Users, Trophy, ChevronRight
-} from 'lucide-react';
+import { Calendar, Plus, Edit2, Trash2, Play, Lock, LogOut, Sparkles, LayoutDashboard, Users, Trophy, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -16,127 +13,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-const ROUND_MODES = ['Online', 'Offline'];
-const TAGS_LIST = ['Creative', 'Aptitude', 'Communication'];
-
-const CriteriaRow = ({ criteria, index, onUpdate, onRemove, canRemove }) => {
-    return (
-        <div className="flex gap-2 items-center">
-            <Input
-                placeholder="Criteria name"
-                value={criteria.name}
-                onChange={(e) => onUpdate(index, 'name', e.target.value)}
-                className="neo-input flex-1"
-            />
-            <Input
-                type="number"
-                placeholder="Max"
-                value={criteria.max_marks || ''}
-                onChange={(e) => onUpdate(index, 'max_marks', e.target.value)}
-                className="neo-input w-24"
-            />
-            {canRemove && (
-                <Button type="button" onClick={() => onRemove(index)} variant="outline" size="sm" className="border-2 border-black">
-                    <Trash2 className="w-4 h-4" />
-                </Button>
-            )}
-        </div>
-    );
-};
-
-const TagButton = ({ tag, isSelected, onClick }) => {
-    return (
-        <button
-            type="button"
-            onClick={() => onClick(tag)}
-            className={`tag border-2 border-black ${isSelected ? 'tag-primary' : 'bg-white'}`}
-        >
-            {tag}
-        </button>
-    );
-};
-
-const RoundCard = ({ round, onEdit, onDelete, onStateChange }) => {
-    const getStateBadgeColor = (state) => {
-        const colors = {
-            'Draft': 'bg-gray-100 text-gray-800 border-gray-500',
-            'Published': 'bg-blue-100 text-blue-800 border-blue-500',
-            'Active': 'bg-green-100 text-green-800 border-green-500',
-            'Completed': 'bg-purple-100 text-purple-800 border-purple-500'
-        };
-        return colors[state] || colors['Draft'];
-    };
-
-    return (
-        <div className="neo-card hover-lift" data-testid={`round-card-${round.round_no}`}>
-            <div className="flex justify-between items-start mb-4">
-                <span className="bg-primary text-white px-2 py-1 border-2 border-black font-bold text-sm">
-                    {round.round_no}
-                </span>
-                <span className={`tag border-2 ${getStateBadgeColor(round.state)}`}>
-                    {round.state}
-                </span>
-            </div>
-
-            <h3 className="font-heading font-bold text-xl mb-2">{round.name}</h3>
-            <p className="text-gray-600 text-sm mb-4 line-clamp-2">{round.description || 'No description'}</p>
-
-            {round.tags && round.tags.length > 0 && (
-                <div className="flex flex-wrap gap-1 mb-4">
-                    {round.tags.map(tag => (
-                        <span key={tag} className="text-xs bg-secondary px-2 py-1 border border-black">{tag}</span>
-                    ))}
-                </div>
-            )}
-
-            <div className="text-sm text-gray-500 mb-4">
-                <p><strong>Mode:</strong> {round.mode}</p>
-                <p><strong>Date:</strong> {round.date ? new Date(round.date).toLocaleDateString() : 'TBA'}</p>
-                {round.is_frozen && (
-                    <p className="text-primary font-bold flex items-center gap-1 mt-2">
-                        <Lock className="w-4 h-4" /> Frozen
-                    </p>
-                )}
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-                {!round.is_frozen && (
-                    <>
-                        <Button size="sm" variant="outline" onClick={() => onEdit(round)} className="border-2 border-black">
-                            <Edit2 className="w-4 h-4" />
-                        </Button>
-                        {round.state === 'Draft' && (
-                            <Button size="sm" variant="outline" onClick={() => onDelete(round.id)} className="border-2 border-black text-red-500">
-                                <Trash2 className="w-4 h-4" />
-                            </Button>
-                        )}
-                    </>
-                )}
-                
-                {round.state === 'Draft' && (
-                    <Button size="sm" onClick={() => onStateChange(round.id, 'Published')} className="bg-blue-500 text-white border-2 border-black">
-                        Publish
-                    </Button>
-                )}
-                
-                {round.state === 'Published' && (
-                    <Button size="sm" onClick={() => onStateChange(round.id, 'Active')} className="bg-green-500 text-white border-2 border-black">
-                        <Play className="w-4 h-4 mr-1" /> Activate
-                    </Button>
-                )}
-
-                {(round.state === 'Active' || round.state === 'Completed') && (
-                    <Link to={`/admin/scoring/${round.id}`}>
-                        <Button size="sm" className="bg-primary text-white border-2 border-black">
-                            <ChevronRight className="w-4 h-4 mr-1" /> Scores
-                        </Button>
-                    </Link>
-                )}
-            </div>
-        </div>
-    );
-};
-
 export default function AdminRounds() {
     const navigate = useNavigate();
     const { logout, getAuthHeader } = useAuth();
@@ -144,15 +20,11 @@ export default function AdminRounds() {
     const [loading, setLoading] = useState(true);
     const [dialogOpen, setDialogOpen] = useState(false);
     const [editingRound, setEditingRound] = useState(null);
-    const [formData, setFormData] = useState({
-        name: '',
-        description: '',
-        tags: [],
-        date: '',
-        mode: 'Offline',
-        conducted_by: '',
-        evaluation_criteria: [{ name: '', max_marks: 0 }]
-    });
+    const [name, setName] = useState('');
+    const [description, setDescription] = useState('');
+    const [date, setDate] = useState('');
+    const [mode, setMode] = useState('Offline');
+    const [conductedBy, setConductedBy] = useState('');
 
     const fetchRounds = async () => {
         try {
@@ -165,41 +37,36 @@ export default function AdminRounds() {
         }
     };
 
-    useEffect(() => {
-        fetchRounds();
-    }, []);
+    useEffect(() => { fetchRounds(); }, []);
 
     const resetForm = () => {
-        setFormData({
-            name: '',
-            description: '',
-            tags: [],
-            date: '',
-            mode: 'Offline',
-            conducted_by: '',
-            evaluation_criteria: [{ name: '', max_marks: 0 }]
-        });
+        setName('');
+        setDescription('');
+        setDate('');
+        setMode('Offline');
+        setConductedBy('');
         setEditingRound(null);
     };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
-            const validCriteria = formData.evaluation_criteria.filter(c => c.name && c.max_marks > 0);
             const payload = {
-                ...formData,
-                date: formData.date ? new Date(formData.date).toISOString() : null,
-                evaluation_criteria: validCriteria
+                name,
+                description,
+                date: date ? new Date(date).toISOString() : null,
+                mode,
+                conducted_by: conductedBy,
+                evaluation_criteria: [{ name: 'Overall', max_marks: 100 }]
             };
 
             if (editingRound) {
                 await axios.put(`${API}/admin/rounds/${editingRound.id}`, payload, { headers: getAuthHeader() });
-                toast.success('Round updated successfully');
+                toast.success('Round updated');
             } else {
                 await axios.post(`${API}/admin/rounds`, payload, { headers: getAuthHeader() });
-                toast.success('Round created successfully');
+                toast.success('Round created');
             }
-
             setDialogOpen(false);
             resetForm();
             fetchRounds();
@@ -210,85 +77,43 @@ export default function AdminRounds() {
 
     const handleEdit = (round) => {
         setEditingRound(round);
-        const criteria = round.evaluation_criteria && round.evaluation_criteria.length > 0 
-            ? round.evaluation_criteria 
-            : [{ name: '', max_marks: 0 }];
-        setFormData({
-            name: round.name,
-            description: round.description || '',
-            tags: round.tags || [],
-            date: round.date ? new Date(round.date).toISOString().split('T')[0] : '',
-            mode: round.mode,
-            conducted_by: round.conducted_by || '',
-            evaluation_criteria: criteria
-        });
+        setName(round.name);
+        setDescription(round.description || '');
+        setDate(round.date ? new Date(round.date).toISOString().split('T')[0] : '');
+        setMode(round.mode);
+        setConductedBy(round.conducted_by || '');
         setDialogOpen(true);
     };
 
     const handleDelete = async (roundId) => {
-        if (!window.confirm('Are you sure you want to delete this round?')) return;
+        if (!window.confirm('Delete this round?')) return;
         try {
             await axios.delete(`${API}/admin/rounds/${roundId}`, { headers: getAuthHeader() });
             toast.success('Round deleted');
             fetchRounds();
         } catch (error) {
-            toast.error(error.response?.data?.detail || 'Failed to delete round');
+            toast.error('Failed to delete');
         }
     };
 
     const handleStateChange = async (roundId, newState) => {
         try {
             await axios.put(`${API}/admin/rounds/${roundId}`, { state: newState }, { headers: getAuthHeader() });
-            toast.success(`Round state changed to ${newState}`);
+            toast.success(`State changed to ${newState}`);
             fetchRounds();
         } catch (error) {
-            toast.error(error.response?.data?.detail || 'Failed to update state');
+            toast.error('Failed to update state');
         }
     };
 
-    const addCriteria = () => {
-        setFormData(prev => ({
-            ...prev,
-            evaluation_criteria: [...prev.evaluation_criteria, { name: '', max_marks: 0 }]
-        }));
-    };
+    const handleLogout = () => { logout(); navigate('/'); };
 
-    const updateCriteria = (index, field, value) => {
-        const newCriteria = [...formData.evaluation_criteria];
-        if (field === 'max_marks') {
-            newCriteria[index] = { ...newCriteria[index], max_marks: parseFloat(value) || 0 };
-        } else {
-            newCriteria[index] = { ...newCriteria[index], [field]: value };
-        }
-        setFormData(prev => ({ ...prev, evaluation_criteria: newCriteria }));
+    const getBadgeColor = (state) => {
+        if (state === 'Draft') return 'bg-gray-100 text-gray-800';
+        if (state === 'Published') return 'bg-blue-100 text-blue-800';
+        if (state === 'Active') return 'bg-green-100 text-green-800';
+        return 'bg-purple-100 text-purple-800';
     };
-
-    const removeCriteria = (index) => {
-        const newCriteria = formData.evaluation_criteria.filter((_, i) => i !== index);
-        setFormData(prev => ({ ...prev, evaluation_criteria: newCriteria }));
-    };
-
-    const toggleTag = (tag) => {
-        const hasTag = formData.tags.includes(tag);
-        const newTags = hasTag ? formData.tags.filter(t => t !== tag) : [...formData.tags, tag];
-        setFormData(prev => ({ ...prev, tags: newTags }));
-    };
-
-    const handleLogout = () => {
-        logout();
-        navigate('/');
-    };
-
-    const handleDialogChange = (open) => {
-        setDialogOpen(open);
-        if (!open) resetForm();
-    };
-
-    const handleNameChange = (e) => setFormData(prev => ({ ...prev, name: e.target.value }));
-    const handleDescChange = (e) => setFormData(prev => ({ ...prev, description: e.target.value }));
-    const handleDateChange = (e) => setFormData(prev => ({ ...prev, date: e.target.value }));
-    const handleConductedByChange = (e) => setFormData(prev => ({ ...prev, conducted_by: e.target.value }));
-    const handleModeChange = (value) => setFormData(prev => ({ ...prev, mode: value }));
 
     return (
         <div className="min-h-screen bg-muted">
@@ -300,110 +125,70 @@ export default function AdminRounds() {
                                 <div className="w-10 h-10 bg-white border-2 border-black shadow-neo flex items-center justify-center">
                                     <Sparkles className="w-6 h-6 text-primary" />
                                 </div>
-                                <span className="font-heading font-black text-xl tracking-tight hidden md:block">PERSOFEST'26</span>
+                                <span className="font-heading font-black text-xl hidden md:block">PERSOFEST'26</span>
                             </Link>
                             <span className="bg-accent text-black px-2 py-1 border-2 border-black text-xs font-bold">ADMIN</span>
                         </div>
-                        <Button variant="outline" onClick={handleLogout} className="bg-white text-black border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all">
+                        <Button variant="outline" onClick={handleLogout} className="bg-white text-black border-2 border-black shadow-neo">
                             <LogOut className="w-5 h-5" />
                         </Button>
                     </div>
                 </div>
             </header>
 
-            <nav className="bg-white border-b-2 border-black overflow-x-auto">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex gap-1">
-                        <Link to="/admin" className="px-4 py-3 font-bold text-sm hover:bg-muted transition-colors">
-                            <LayoutDashboard className="w-4 h-4 inline mr-2" />Dashboard
-                        </Link>
-                        <Link to="/admin/rounds" className="px-4 py-3 font-bold text-sm border-b-4 border-primary bg-secondary">
-                            <Calendar className="w-4 h-4 inline mr-2" />Rounds
-                        </Link>
-                        <Link to="/admin/participants" className="px-4 py-3 font-bold text-sm hover:bg-muted transition-colors">
-                            <Users className="w-4 h-4 inline mr-2" />Participants
-                        </Link>
-                        <Link to="/admin/leaderboard" className="px-4 py-3 font-bold text-sm hover:bg-muted transition-colors">
-                            <Trophy className="w-4 h-4 inline mr-2" />Leaderboard
-                        </Link>
-                    </div>
+            <nav className="bg-white border-b-2 border-black">
+                <div className="max-w-7xl mx-auto px-4 flex gap-1">
+                    <Link to="/admin" className="px-4 py-3 font-bold text-sm"><LayoutDashboard className="w-4 h-4 inline mr-2" />Dashboard</Link>
+                    <Link to="/admin/rounds" className="px-4 py-3 font-bold text-sm border-b-4 border-primary bg-secondary"><Calendar className="w-4 h-4 inline mr-2" />Rounds</Link>
+                    <Link to="/admin/participants" className="px-4 py-3 font-bold text-sm"><Users className="w-4 h-4 inline mr-2" />Participants</Link>
+                    <Link to="/admin/leaderboard" className="px-4 py-3 font-bold text-sm"><Trophy className="w-4 h-4 inline mr-2" />Leaderboard</Link>
                 </div>
             </nav>
 
-            <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
-                    <div>
-                        <h1 className="font-heading font-bold text-3xl">Round Management</h1>
-                        <p className="text-gray-600">Create and manage competition rounds</p>
-                    </div>
-                    <Dialog open={dialogOpen} onOpenChange={handleDialogChange}>
+            <main className="max-w-7xl mx-auto px-4 py-8">
+                <div className="flex justify-between items-center mb-8">
+                    <h1 className="font-heading font-bold text-3xl">Round Management</h1>
+                    <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm(); }}>
                         <DialogTrigger asChild>
-                            <Button className="bg-primary text-white border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none" data-testid="create-round-btn">
+                            <Button className="bg-primary text-white border-2 border-black shadow-neo" data-testid="create-round-btn">
                                 <Plus className="w-5 h-5 mr-2" /> Create Round
                             </Button>
                         </DialogTrigger>
-                        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto border-4 border-black shadow-neo-lg">
+                        <DialogContent className="border-4 border-black">
                             <DialogHeader>
-                                <DialogTitle className="font-heading font-bold text-2xl">
-                                    {editingRound ? 'Edit Round' : 'Create New Round'}
-                                </DialogTitle>
+                                <DialogTitle className="font-heading font-bold text-2xl">{editingRound ? 'Edit Round' : 'Create Round'}</DialogTitle>
                             </DialogHeader>
-                            <form onSubmit={handleSubmit} className="space-y-6">
-                                <div className="grid md:grid-cols-2 gap-4">
-                                    <div className="space-y-2">
-                                        <Label className="font-bold">Round Name *</Label>
-                                        <Input value={formData.name} onChange={handleNameChange} required className="neo-input" data-testid="round-name-input" />
+                            <form onSubmit={handleSubmit} className="space-y-4">
+                                <div>
+                                    <Label className="font-bold">Name *</Label>
+                                    <Input value={name} onChange={(e) => setName(e.target.value)} required className="neo-input" />
+                                </div>
+                                <div>
+                                    <Label className="font-bold">Description</Label>
+                                    <Textarea value={description} onChange={(e) => setDescription(e.target.value)} className="neo-input" />
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <Label className="font-bold">Date</Label>
+                                        <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="neo-input" />
                                     </div>
-                                    <div className="space-y-2">
-                                        <Label className="font-bold">Mode *</Label>
-                                        <Select value={formData.mode} onValueChange={handleModeChange}>
+                                    <div>
+                                        <Label className="font-bold">Mode</Label>
+                                        <Select value={mode} onValueChange={setMode}>
                                             <SelectTrigger className="neo-input"><SelectValue /></SelectTrigger>
                                             <SelectContent>
-                                                {ROUND_MODES.map(mode => (<SelectItem key={mode} value={mode}>{mode}</SelectItem>))}
+                                                <SelectItem value="Online">Online</SelectItem>
+                                                <SelectItem value="Offline">Offline</SelectItem>
                                             </SelectContent>
                                         </Select>
                                     </div>
                                 </div>
-
-                                <div className="space-y-2">
-                                    <Label className="font-bold">Description</Label>
-                                    <Textarea value={formData.description} onChange={handleDescChange} className="neo-input min-h-[100px]" data-testid="round-description-input" />
+                                <div>
+                                    <Label className="font-bold">Conducted By</Label>
+                                    <Input value={conductedBy} onChange={(e) => setConductedBy(e.target.value)} className="neo-input" />
                                 </div>
-
-                                <div className="grid md:grid-cols-2 gap-4">
-                                    <div className="space-y-2">
-                                        <Label className="font-bold">Date</Label>
-                                        <Input type="date" value={formData.date} onChange={handleDateChange} className="neo-input" />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <Label className="font-bold">Conducted By</Label>
-                                        <Input value={formData.conducted_by} onChange={handleConductedByChange} className="neo-input" placeholder="Faculty/Team name" />
-                                    </div>
-                                </div>
-
-                                <div className="space-y-2">
-                                    <Label className="font-bold">Tags</Label>
-                                    <div className="flex flex-wrap gap-2">
-                                        {TAGS_LIST.map(tag => (<TagButton key={tag} tag={tag} isSelected={formData.tags.includes(tag)} onClick={toggleTag} />))}
-                                    </div>
-                                </div>
-
-                                <div className="space-y-2">
-                                    <div className="flex justify-between items-center">
-                                        <Label className="font-bold">Evaluation Criteria</Label>
-                                        <Button type="button" onClick={addCriteria} variant="outline" size="sm" className="border-2 border-black">
-                                            <Plus className="w-4 h-4 mr-1" /> Add
-                                        </Button>
-                                    </div>
-                                    <div className="space-y-2">
-                                        {formData.evaluation_criteria.map((criteria, idx) => (
-                                            <CriteriaRow key={idx} criteria={criteria} index={idx} onUpdate={updateCriteria} onRemove={removeCriteria} canRemove={formData.evaluation_criteria.length > 1} />
-                                        ))}
-                                    </div>
-                                </div>
-
-                                <Button type="submit" className="w-full bg-primary text-white border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none" data-testid="submit-round-btn">
-                                    {editingRound ? 'Update Round' : 'Create Round'}
+                                <Button type="submit" className="w-full bg-primary text-white border-2 border-black shadow-neo">
+                                    {editingRound ? 'Update' : 'Create'}
                                 </Button>
                             </form>
                         </DialogContent>
@@ -411,20 +196,40 @@ export default function AdminRounds() {
                 </div>
 
                 {loading ? (
-                    <div className="neo-card text-center py-12">
-                        <div className="loading-spinner mx-auto"></div>
-                        <p className="mt-4">Loading rounds...</p>
-                    </div>
+                    <div className="neo-card text-center py-12"><div className="loading-spinner mx-auto"></div></div>
                 ) : rounds.length === 0 ? (
                     <div className="neo-card text-center py-12">
                         <Calendar className="w-16 h-16 mx-auto mb-4 text-gray-400" />
-                        <h3 className="font-heading font-bold text-xl mb-2">No Rounds Yet</h3>
-                        <p className="text-gray-600">Create your first competition round to get started.</p>
+                        <h3 className="font-heading font-bold text-xl">No Rounds Yet</h3>
                     </div>
                 ) : (
                     <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {rounds.map(round => (
-                            <RoundCard key={round.id} round={round} onEdit={handleEdit} onDelete={handleDelete} onStateChange={handleStateChange} />
+                            <div key={round.id} className="neo-card" data-testid={`round-card-${round.round_no}`}>
+                                <div className="flex justify-between mb-4">
+                                    <span className="bg-primary text-white px-2 py-1 border-2 border-black font-bold text-sm">{round.round_no}</span>
+                                    <span className={`tag border-2 border-black ${getBadgeColor(round.state)}`}>{round.state}</span>
+                                </div>
+                                <h3 className="font-heading font-bold text-xl mb-2">{round.name}</h3>
+                                <p className="text-gray-600 text-sm mb-4">{round.description || 'No description'}</p>
+                                <p className="text-sm text-gray-500 mb-4">Mode: {round.mode} | Date: {round.date ? new Date(round.date).toLocaleDateString() : 'TBA'}</p>
+                                {round.is_frozen && <p className="text-primary font-bold mb-4"><Lock className="w-4 h-4 inline" /> Frozen</p>}
+                                <div className="flex flex-wrap gap-2">
+                                    {!round.is_frozen && (
+                                        <>
+                                            <Button size="sm" variant="outline" onClick={() => handleEdit(round)} className="border-2 border-black"><Edit2 className="w-4 h-4" /></Button>
+                                            {round.state === 'Draft' && <Button size="sm" variant="outline" onClick={() => handleDelete(round.id)} className="border-2 border-black text-red-500"><Trash2 className="w-4 h-4" /></Button>}
+                                        </>
+                                    )}
+                                    {round.state === 'Draft' && <Button size="sm" onClick={() => handleStateChange(round.id, 'Published')} className="bg-blue-500 text-white border-2 border-black">Publish</Button>}
+                                    {round.state === 'Published' && <Button size="sm" onClick={() => handleStateChange(round.id, 'Active')} className="bg-green-500 text-white border-2 border-black"><Play className="w-4 h-4 mr-1" />Activate</Button>}
+                                    {(round.state === 'Active' || round.state === 'Completed') && (
+                                        <Link to={`/admin/scoring/${round.id}`}>
+                                            <Button size="sm" className="bg-primary text-white border-2 border-black"><ChevronRight className="w-4 h-4" />Scores</Button>
+                                        </Link>
+                                    )}
+                                </div>
+                            </div>
                         ))}
                     </div>
                 )}
