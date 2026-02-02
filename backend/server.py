@@ -585,6 +585,166 @@ async def enter_scores(
     return {"message": "Scores saved successfully"}
 
 
+@api_router.post("/admin/rounds/{round_id}/import-scores")
+async def import_scores_from_excel(
+    round_id: int,
+    file: UploadFile = File(...),
+    admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Import scores from Excel file.
+    Expected columns: Register Number, Present (Yes/No), [Criteria columns...]
+    """
+    from openpyxl import load_workbook
+    
+    round = db.query(Round).filter(Round.id == round_id).first()
+    if not round:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
+    
+    if round.is_frozen:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Round is frozen")
+    
+    # Validate file type
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only Excel files (.xlsx, .xls) are allowed")
+    
+    try:
+        contents = await file.read()
+        wb = load_workbook(filename=io.BytesIO(contents))
+        ws = wb.active
+        
+        # Get headers
+        headers = [cell.value for cell in ws[1]]
+        if not headers or 'Register Number' not in headers:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Excel must have 'Register Number' column")
+        
+        # Get criteria names from round
+        criteria_names = [c["name"] for c in round.evaluation_criteria] if round.evaluation_criteria else []
+        max_score = sum(c["max_marks"] for c in round.evaluation_criteria) if round.evaluation_criteria else 100
+        
+        imported_count = 0
+        errors = []
+        
+        for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+            if not row or not row[0]:
+                continue
+            
+            row_dict = dict(zip(headers, row))
+            register_number = str(row_dict.get('Register Number', '')).strip()
+            
+            if not register_number:
+                continue
+            
+            # Find participant
+            participant = db.query(User).filter(
+                User.register_number == register_number,
+                User.role == UserRole.PARTICIPANT
+            ).first()
+            
+            if not participant:
+                errors.append(f"Row {row_idx}: Register number {register_number} not found")
+                continue
+            
+            # Parse presence
+            present_val = str(row_dict.get('Present', 'Yes')).strip().lower()
+            is_present = present_val in ('yes', 'y', '1', 'true', 'present')
+            
+            # Parse criteria scores
+            criteria_scores = {}
+            for cname in criteria_names:
+                if cname in row_dict and row_dict[cname] is not None:
+                    try:
+                        criteria_scores[cname] = float(row_dict[cname])
+                    except (ValueError, TypeError):
+                        criteria_scores[cname] = 0
+                else:
+                    criteria_scores[cname] = 0
+            
+            # Calculate totals
+            total = sum(criteria_scores.values())
+            normalized = (total / max_score * 100) if max_score > 0 else 0
+            
+            # Update or create score
+            existing = db.query(Score).filter(
+                Score.participant_id == participant.id,
+                Score.round_id == round_id
+            ).first()
+            
+            if existing:
+                existing.criteria_scores = criteria_scores
+                existing.total_score = total
+                existing.normalized_score = normalized
+                existing.is_present = is_present
+            else:
+                new_score = Score(
+                    participant_id=participant.id,
+                    round_id=round_id,
+                    criteria_scores=criteria_scores,
+                    total_score=total,
+                    normalized_score=normalized,
+                    is_present=is_present
+                )
+                db.add(new_score)
+            
+            imported_count += 1
+        
+        db.commit()
+        
+        return {
+            "message": f"Successfully imported {imported_count} scores",
+            "imported": imported_count,
+            "errors": errors[:10] if errors else []
+        }
+        
+    except Exception as e:
+        logger.error(f"Excel import error: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to parse Excel: {str(e)}")
+
+
+@api_router.get("/admin/rounds/{round_id}/score-template")
+async def download_score_template(
+    round_id: int,
+    admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """Download Excel template for bulk score import"""
+    round = db.query(Round).filter(Round.id == round_id).first()
+    if not round:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
+    
+    # Get active participants
+    participants = db.query(User).filter(
+        User.role == UserRole.PARTICIPANT,
+        User.status == ParticipantStatus.ACTIVE
+    ).order_by(User.name).all()
+    
+    criteria_names = [c["name"] for c in round.evaluation_criteria] if round.evaluation_criteria else ["Score"]
+    
+    wb = Workbook()
+    ws = wb.active
+    ws.title = f"{round.round_no} Scores"
+    
+    # Headers
+    headers = ["Register Number", "Name", "Present"] + criteria_names
+    ws.append(headers)
+    
+    # Add participant rows
+    for p in participants:
+        row = [p.register_number, p.name, "Yes"] + [0] * len(criteria_names)
+        ws.append(row)
+    
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={round.round_no}_score_template.xlsx"}
+    )
+
+
 @api_router.post("/admin/rounds/{round_id}/freeze")
 async def freeze_round(round_id: int, admin: User = Depends(get_current_admin), db: Session = Depends(get_db)):
     round = db.query(Round).filter(Round.id == round_id).first()
