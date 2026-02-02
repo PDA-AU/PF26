@@ -67,8 +67,6 @@ Build a production-ready, full-stack event management website for Persofest'26, 
 
 ### P1 (High Priority)
 - [ ] Email notifications on registration
-- [ ] Round-wise detailed scoring criteria editor
-- [ ] Bulk score import from Excel
 - [ ] Advanced analytics charts
 
 ### P2 (Medium Priority)
@@ -78,7 +76,7 @@ Build a production-ready, full-stack event management website for Persofest'26, 
 - [ ] Public leaderboard option
 
 ## Next Tasks
-1. Add more detailed evaluation criteria editor
-2. Implement email notifications
+1. Add email notifications
+2. Implement password reset
 3. Add advanced filtering in leaderboard
 4. Create participant certificates generation
