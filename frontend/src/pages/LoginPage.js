@@ -1,0 +1,169 @@
+import React, { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '@/context/AuthContext';
+import { toast } from 'sonner';
+import { Eye, EyeOff, Sparkles, ArrowLeft } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+
+export default function LoginPage() {
+    const navigate = useNavigate();
+    const { login } = useAuth();
+    const [formData, setFormData] = useState({
+        register_number: '',
+        password: ''
+    });
+    const [showPassword, setShowPassword] = useState(false);
+    const [loading, setLoading] = useState(false);
+
+    const handleChange = (e) => {
+        setFormData(prev => ({
+            ...prev,
+            [e.target.name]: e.target.value
+        }));
+    };
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+
+        try {
+            const user = await login(formData.register_number, formData.password);
+            toast.success('Login successful!');
+            navigate(user.role === 'admin' ? '/admin' : '/dashboard');
+        } catch (error) {
+            console.error('Login failed:', error);
+            toast.error(error.response?.data?.detail || 'Login failed. Please check your credentials.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div className="min-h-screen bg-white flex">
+            {/* Decorative Side Panel */}
+            <div className="hidden lg:flex lg:w-1/2 bg-primary relative overflow-hidden">
+                {/* Decorative Shapes */}
+                <div className="absolute top-20 left-10 w-32 h-32 bg-accent border-4 border-black rounded-full animate-float"></div>
+                <div className="absolute bottom-40 right-20 w-24 h-24 bg-secondary border-4 border-black animate-float" style={{ animationDelay: '1s' }}></div>
+                <div className="absolute top-1/2 left-1/4 w-20 h-20 bg-white border-4 border-black rotate-45 animate-float" style={{ animationDelay: '0.5s' }}></div>
+                
+                <div className="relative z-10 flex flex-col justify-center items-center w-full p-12 text-white">
+                    <div className="w-20 h-20 bg-white border-4 border-black shadow-neo-lg flex items-center justify-center mb-8">
+                        <Sparkles className="w-10 h-10 text-primary" />
+                    </div>
+                    <h1 className="font-heading font-black text-5xl tracking-tighter mb-4 text-center">
+                        PERSOFEST'26
+                    </h1>
+                    <p className="text-xl text-center max-w-md opacity-90">
+                        Welcome back! Login to access your dashboard and track your competition progress.
+                    </p>
+                </div>
+            </div>
+
+            {/* Login Form */}
+            <div className="flex-1 flex items-center justify-center p-8">
+                <div className="w-full max-w-md">
+                    <Link to="/" className="inline-flex items-center gap-2 text-gray-600 hover:text-black mb-8 transition-colors">
+                        <ArrowLeft className="w-5 h-5" />
+                        <span className="font-medium">Back to Home</span>
+                    </Link>
+
+                    <div className="lg:hidden flex items-center gap-2 mb-8">
+                        <div className="w-10 h-10 bg-primary border-2 border-black shadow-neo flex items-center justify-center">
+                            <Sparkles className="w-6 h-6 text-white" />
+                        </div>
+                        <span className="font-heading font-black text-xl">PERSOFEST'26</span>
+                    </div>
+
+                    <h2 className="font-heading font-bold text-3xl md:text-4xl tracking-tight mb-2">
+                        Welcome Back
+                    </h2>
+                    <p className="text-gray-600 mb-8">
+                        Enter your credentials to access your account
+                    </p>
+
+                    <form onSubmit={handleSubmit} className="space-y-6">
+                        <div className="space-y-2">
+                            <Label htmlFor="register_number" className="font-bold">
+                                Register Number
+                            </Label>
+                            <Input
+                                id="register_number"
+                                name="register_number"
+                                type="text"
+                                placeholder="Enter your 10-digit register number"
+                                value={formData.register_number}
+                                onChange={handleChange}
+                                required
+                                maxLength={10}
+                                className="neo-input"
+                                data-testid="login-register-number"
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="password" className="font-bold">
+                                Password
+                            </Label>
+                            <div className="relative">
+                                <Input
+                                    id="password"
+                                    name="password"
+                                    type={showPassword ? 'text' : 'password'}
+                                    placeholder="Enter your password"
+                                    value={formData.password}
+                                    onChange={handleChange}
+                                    required
+                                    minLength={6}
+                                    className="neo-input pr-12"
+                                    data-testid="login-password"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowPassword(!showPassword)}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-black"
+                                    data-testid="toggle-password-visibility"
+                                >
+                                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                                </button>
+                            </div>
+                        </div>
+
+                        <Button
+                            type="submit"
+                            disabled={loading}
+                            className="w-full bg-primary text-white border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all py-6 text-lg font-bold"
+                            data-testid="login-submit-btn"
+                        >
+                            {loading ? (
+                                <span className="flex items-center gap-2">
+                                    <div className="loading-spinner w-5 h-5"></div>
+                                    Logging in...
+                                </span>
+                            ) : (
+                                'Login'
+                            )}
+                        </Button>
+                    </form>
+
+                    <p className="text-center mt-8 text-gray-600">
+                        Don't have an account?{' '}
+                        <Link to="/register" className="font-bold text-primary hover:underline" data-testid="goto-register-link">
+                            Register here
+                        </Link>
+                    </p>
+
+                    <div className="mt-8 p-4 bg-muted border-2 border-black">
+                        <p className="text-sm text-gray-600">
+                            <strong>Admin Login:</strong><br />
+                            Register Number: 0000000000<br />
+                            Password: admin123
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
