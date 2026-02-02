@@ -4,7 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { 
-    Calendar, Plus, Edit2, Trash2, Eye, Play, Lock, LogOut, Sparkles,
+    Calendar, Plus, Edit2, Trash2, Play, Lock, LogOut, Sparkles,
     LayoutDashboard, Users, Trophy, ChevronRight
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -16,13 +16,130 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-const ROUND_STATES = ['Draft', 'Published', 'Active', 'Completed'];
 const ROUND_MODES = ['Online', 'Offline'];
-const TAGS = ['Creative', 'Aptitude', 'Communication'];
+const TAGS_LIST = ['Creative', 'Aptitude', 'Communication'];
+
+const CriteriaRow = ({ criteria, index, onUpdate, onRemove, canRemove }) => {
+    return (
+        <div className="flex gap-2 items-center">
+            <Input
+                placeholder="Criteria name"
+                value={criteria.name}
+                onChange={(e) => onUpdate(index, 'name', e.target.value)}
+                className="neo-input flex-1"
+            />
+            <Input
+                type="number"
+                placeholder="Max"
+                value={criteria.max_marks || ''}
+                onChange={(e) => onUpdate(index, 'max_marks', e.target.value)}
+                className="neo-input w-24"
+            />
+            {canRemove && (
+                <Button type="button" onClick={() => onRemove(index)} variant="outline" size="sm" className="border-2 border-black">
+                    <Trash2 className="w-4 h-4" />
+                </Button>
+            )}
+        </div>
+    );
+};
+
+const TagButton = ({ tag, isSelected, onClick }) => {
+    return (
+        <button
+            type="button"
+            onClick={() => onClick(tag)}
+            className={`tag border-2 border-black ${isSelected ? 'tag-primary' : 'bg-white'}`}
+        >
+            {tag}
+        </button>
+    );
+};
+
+const RoundCard = ({ round, onEdit, onDelete, onStateChange }) => {
+    const getStateBadgeColor = (state) => {
+        const colors = {
+            'Draft': 'bg-gray-100 text-gray-800 border-gray-500',
+            'Published': 'bg-blue-100 text-blue-800 border-blue-500',
+            'Active': 'bg-green-100 text-green-800 border-green-500',
+            'Completed': 'bg-purple-100 text-purple-800 border-purple-500'
+        };
+        return colors[state] || colors['Draft'];
+    };
+
+    return (
+        <div className="neo-card hover-lift" data-testid={`round-card-${round.round_no}`}>
+            <div className="flex justify-between items-start mb-4">
+                <span className="bg-primary text-white px-2 py-1 border-2 border-black font-bold text-sm">
+                    {round.round_no}
+                </span>
+                <span className={`tag border-2 ${getStateBadgeColor(round.state)}`}>
+                    {round.state}
+                </span>
+            </div>
+
+            <h3 className="font-heading font-bold text-xl mb-2">{round.name}</h3>
+            <p className="text-gray-600 text-sm mb-4 line-clamp-2">{round.description || 'No description'}</p>
+
+            {round.tags && round.tags.length > 0 && (
+                <div className="flex flex-wrap gap-1 mb-4">
+                    {round.tags.map(tag => (
+                        <span key={tag} className="text-xs bg-secondary px-2 py-1 border border-black">{tag}</span>
+                    ))}
+                </div>
+            )}
+
+            <div className="text-sm text-gray-500 mb-4">
+                <p><strong>Mode:</strong> {round.mode}</p>
+                <p><strong>Date:</strong> {round.date ? new Date(round.date).toLocaleDateString() : 'TBA'}</p>
+                {round.is_frozen && (
+                    <p className="text-primary font-bold flex items-center gap-1 mt-2">
+                        <Lock className="w-4 h-4" /> Frozen
+                    </p>
+                )}
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+                {!round.is_frozen && (
+                    <>
+                        <Button size="sm" variant="outline" onClick={() => onEdit(round)} className="border-2 border-black">
+                            <Edit2 className="w-4 h-4" />
+                        </Button>
+                        {round.state === 'Draft' && (
+                            <Button size="sm" variant="outline" onClick={() => onDelete(round.id)} className="border-2 border-black text-red-500">
+                                <Trash2 className="w-4 h-4" />
+                            </Button>
+                        )}
+                    </>
+                )}
+                
+                {round.state === 'Draft' && (
+                    <Button size="sm" onClick={() => onStateChange(round.id, 'Published')} className="bg-blue-500 text-white border-2 border-black">
+                        Publish
+                    </Button>
+                )}
+                
+                {round.state === 'Published' && (
+                    <Button size="sm" onClick={() => onStateChange(round.id, 'Active')} className="bg-green-500 text-white border-2 border-black">
+                        <Play className="w-4 h-4 mr-1" /> Activate
+                    </Button>
+                )}
+
+                {(round.state === 'Active' || round.state === 'Completed') && (
+                    <Link to={`/admin/scoring/${round.id}`}>
+                        <Button size="sm" className="bg-primary text-white border-2 border-black">
+                            <ChevronRight className="w-4 h-4 mr-1" /> Scores
+                        </Button>
+                    </Link>
+                )}
+            </div>
+        </div>
+    );
+};
 
 export default function AdminRounds() {
     const navigate = useNavigate();
-    const { user, logout, getAuthHeader } = useAuth();
+    const { logout, getAuthHeader } = useAuth();
     const [rounds, setRounds] = useState([]);
     const [loading, setLoading] = useState(true);
     const [dialogOpen, setDialogOpen] = useState(false);
@@ -37,15 +154,9 @@ export default function AdminRounds() {
         evaluation_criteria: [{ name: '', max_marks: 0 }]
     });
 
-    useEffect(() => {
-        fetchRounds();
-    }, []);
-
     const fetchRounds = async () => {
         try {
-            const response = await axios.get(`${API}/admin/rounds`, {
-                headers: getAuthHeader()
-            });
+            const response = await axios.get(`${API}/admin/rounds`, { headers: getAuthHeader() });
             setRounds(response.data);
         } catch (error) {
             toast.error('Failed to load rounds');
@@ -53,6 +164,10 @@ export default function AdminRounds() {
             setLoading(false);
         }
     };
+
+    useEffect(() => {
+        fetchRounds();
+    }, []);
 
     const resetForm = () => {
         setFormData({
@@ -70,21 +185,18 @@ export default function AdminRounds() {
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
+            const validCriteria = formData.evaluation_criteria.filter(c => c.name && c.max_marks > 0);
             const payload = {
                 ...formData,
                 date: formData.date ? new Date(formData.date).toISOString() : null,
-                evaluation_criteria: formData.evaluation_criteria.filter(c => c.name && c.max_marks > 0)
+                evaluation_criteria: validCriteria
             };
 
             if (editingRound) {
-                await axios.put(`${API}/admin/rounds/${editingRound.id}`, payload, {
-                    headers: getAuthHeader()
-                });
+                await axios.put(`${API}/admin/rounds/${editingRound.id}`, payload, { headers: getAuthHeader() });
                 toast.success('Round updated successfully');
             } else {
-                await axios.post(`${API}/admin/rounds`, payload, {
-                    headers: getAuthHeader()
-                });
+                await axios.post(`${API}/admin/rounds`, payload, { headers: getAuthHeader() });
                 toast.success('Round created successfully');
             }
 
@@ -98,6 +210,9 @@ export default function AdminRounds() {
 
     const handleEdit = (round) => {
         setEditingRound(round);
+        const criteria = round.evaluation_criteria && round.evaluation_criteria.length > 0 
+            ? round.evaluation_criteria 
+            : [{ name: '', max_marks: 0 }];
         setFormData({
             name: round.name,
             description: round.description || '',
@@ -105,20 +220,15 @@ export default function AdminRounds() {
             date: round.date ? new Date(round.date).toISOString().split('T')[0] : '',
             mode: round.mode,
             conducted_by: round.conducted_by || '',
-            evaluation_criteria: round.evaluation_criteria?.length > 0 
-                ? round.evaluation_criteria 
-                : [{ name: '', max_marks: 0 }]
+            evaluation_criteria: criteria
         });
         setDialogOpen(true);
     };
 
     const handleDelete = async (roundId) => {
         if (!window.confirm('Are you sure you want to delete this round?')) return;
-        
         try {
-            await axios.delete(`${API}/admin/rounds/${roundId}`, {
-                headers: getAuthHeader()
-            });
+            await axios.delete(`${API}/admin/rounds/${roundId}`, { headers: getAuthHeader() });
             toast.success('Round deleted');
             fetchRounds();
         } catch (error) {
@@ -128,9 +238,7 @@ export default function AdminRounds() {
 
     const handleStateChange = async (roundId, newState) => {
         try {
-            await axios.put(`${API}/admin/rounds/${roundId}`, { state: newState }, {
-                headers: getAuthHeader()
-            });
+            await axios.put(`${API}/admin/rounds/${roundId}`, { state: newState }, { headers: getAuthHeader() });
             toast.success(`Round state changed to ${newState}`);
             fetchRounds();
         } catch (error) {
@@ -146,40 +254,24 @@ export default function AdminRounds() {
     };
 
     const updateCriteria = (index, field, value) => {
-        setFormData(prev => {
-            const newCriteria = [...prev.evaluation_criteria];
-            if (field === 'max_marks') {
-                newCriteria[index] = { ...newCriteria[index], max_marks: parseFloat(value) || 0 };
-            } else {
-                newCriteria[index] = { ...newCriteria[index], [field]: value };
-            }
-            return { ...prev, evaluation_criteria: newCriteria };
-        });
+        const newCriteria = [...formData.evaluation_criteria];
+        if (field === 'max_marks') {
+            newCriteria[index] = { ...newCriteria[index], max_marks: parseFloat(value) || 0 };
+        } else {
+            newCriteria[index] = { ...newCriteria[index], [field]: value };
+        }
+        setFormData(prev => ({ ...prev, evaluation_criteria: newCriteria }));
     };
 
     const removeCriteria = (index) => {
-        setFormData(prev => ({
-            ...prev,
-            evaluation_criteria: prev.evaluation_criteria.filter((_, i) => i !== index)
-        }));
+        const newCriteria = formData.evaluation_criteria.filter((_, i) => i !== index);
+        setFormData(prev => ({ ...prev, evaluation_criteria: newCriteria }));
     };
 
     const toggleTag = (tag) => {
-        setFormData(prev => {
-            const hasTag = prev.tags.includes(tag);
-            const newTags = hasTag ? prev.tags.filter(t => t !== tag) : [...prev.tags, tag];
-            return { ...prev, tags: newTags };
-        });
-    };
-
-    const getStateBadgeColor = (state) => {
-        const colors = {
-            'Draft': 'bg-gray-100 text-gray-800 border-gray-500',
-            'Published': 'bg-blue-100 text-blue-800 border-blue-500',
-            'Active': 'bg-green-100 text-green-800 border-green-500',
-            'Completed': 'bg-purple-100 text-purple-800 border-purple-500'
-        };
-        return colors[state] || colors['Draft'];
+        const hasTag = formData.tags.includes(tag);
+        const newTags = hasTag ? formData.tags.filter(t => t !== tag) : [...formData.tags, tag];
+        setFormData(prev => ({ ...prev, tags: newTags }));
     };
 
     const handleLogout = () => {
@@ -187,9 +279,19 @@ export default function AdminRounds() {
         navigate('/');
     };
 
+    const handleDialogChange = (open) => {
+        setDialogOpen(open);
+        if (!open) resetForm();
+    };
+
+    const handleNameChange = (e) => setFormData(prev => ({ ...prev, name: e.target.value }));
+    const handleDescChange = (e) => setFormData(prev => ({ ...prev, description: e.target.value }));
+    const handleDateChange = (e) => setFormData(prev => ({ ...prev, date: e.target.value }));
+    const handleConductedByChange = (e) => setFormData(prev => ({ ...prev, conducted_by: e.target.value }));
+    const handleModeChange = (value) => setFormData(prev => ({ ...prev, mode: value }));
+
     return (
         <div className="min-h-screen bg-muted">
-            {/* Header */}
             <header className="bg-primary text-white border-b-4 border-black sticky top-0 z-50">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="flex justify-between items-center h-16">
@@ -202,18 +304,13 @@ export default function AdminRounds() {
                             </Link>
                             <span className="bg-accent text-black px-2 py-1 border-2 border-black text-xs font-bold">ADMIN</span>
                         </div>
-                        <Button
-                            variant="outline"
-                            onClick={handleLogout}
-                            className="bg-white text-black border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all"
-                        >
+                        <Button variant="outline" onClick={handleLogout} className="bg-white text-black border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all">
                             <LogOut className="w-5 h-5" />
                         </Button>
                     </div>
                 </div>
             </header>
 
-            {/* Navigation */}
             <nav className="bg-white border-b-2 border-black overflow-x-auto">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="flex gap-1">
@@ -234,18 +331,14 @@ export default function AdminRounds() {
             </nav>
 
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-                {/* Header */}
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
                     <div>
                         <h1 className="font-heading font-bold text-3xl">Round Management</h1>
                         <p className="text-gray-600">Create and manage competition rounds</p>
                     </div>
-                    <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
+                    <Dialog open={dialogOpen} onOpenChange={handleDialogChange}>
                         <DialogTrigger asChild>
-                            <Button 
-                                className="bg-primary text-white border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
-                                data-testid="create-round-btn"
-                            >
+                            <Button className="bg-primary text-white border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none" data-testid="create-round-btn">
                                 <Plus className="w-5 h-5 mr-2" /> Create Round
                             </Button>
                         </DialogTrigger>
@@ -259,24 +352,14 @@ export default function AdminRounds() {
                                 <div className="grid md:grid-cols-2 gap-4">
                                     <div className="space-y-2">
                                         <Label className="font-bold">Round Name *</Label>
-                                        <Input
-                                            value={formData.name}
-                                            onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                                            required
-                                            className="neo-input"
-                                            data-testid="round-name-input"
-                                        />
+                                        <Input value={formData.name} onChange={handleNameChange} required className="neo-input" data-testid="round-name-input" />
                                     </div>
                                     <div className="space-y-2">
                                         <Label className="font-bold">Mode *</Label>
-                                        <Select value={formData.mode} onValueChange={(value) => setFormData(prev => ({ ...prev, mode: value }))}>
-                                            <SelectTrigger className="neo-input">
-                                                <SelectValue />
-                                            </SelectTrigger>
+                                        <Select value={formData.mode} onValueChange={handleModeChange}>
+                                            <SelectTrigger className="neo-input"><SelectValue /></SelectTrigger>
                                             <SelectContent>
-                                                {ROUND_MODES.map(mode => (
-                                                    <SelectItem key={mode} value={mode}>{mode}</SelectItem>
-                                                ))}
+                                                {ROUND_MODES.map(mode => (<SelectItem key={mode} value={mode}>{mode}</SelectItem>))}
                                             </SelectContent>
                                         </Select>
                                     </div>
@@ -284,48 +367,24 @@ export default function AdminRounds() {
 
                                 <div className="space-y-2">
                                     <Label className="font-bold">Description</Label>
-                                    <Textarea
-                                        value={formData.description}
-                                        onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                                        className="neo-input min-h-[100px]"
-                                        data-testid="round-description-input"
-                                    />
+                                    <Textarea value={formData.description} onChange={handleDescChange} className="neo-input min-h-[100px]" data-testid="round-description-input" />
                                 </div>
 
                                 <div className="grid md:grid-cols-2 gap-4">
                                     <div className="space-y-2">
                                         <Label className="font-bold">Date</Label>
-                                        <Input
-                                            type="date"
-                                            value={formData.date}
-                                            onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
-                                            className="neo-input"
-                                        />
+                                        <Input type="date" value={formData.date} onChange={handleDateChange} className="neo-input" />
                                     </div>
                                     <div className="space-y-2">
                                         <Label className="font-bold">Conducted By</Label>
-                                        <Input
-                                            value={formData.conducted_by}
-                                            onChange={(e) => setFormData(prev => ({ ...prev, conducted_by: e.target.value }))}
-                                            className="neo-input"
-                                            placeholder="Faculty/Team name"
-                                        />
+                                        <Input value={formData.conducted_by} onChange={handleConductedByChange} className="neo-input" placeholder="Faculty/Team name" />
                                     </div>
                                 </div>
 
                                 <div className="space-y-2">
                                     <Label className="font-bold">Tags</Label>
                                     <div className="flex flex-wrap gap-2">
-                                        {TAGS.map(tag => (
-                                            <button
-                                                key={tag}
-                                                type="button"
-                                                onClick={() => toggleTag(tag)}
-                                                className={`tag border-2 border-black ${formData.tags.includes(tag) ? 'tag-primary' : 'bg-white'}`}
-                                            >
-                                                {tag}
-                                            </button>
-                                        ))}
+                                        {TAGS_LIST.map(tag => (<TagButton key={tag} tag={tag} isSelected={formData.tags.includes(tag)} onClick={toggleTag} />))}
                                     </div>
                                 </div>
 
@@ -337,36 +396,13 @@ export default function AdminRounds() {
                                         </Button>
                                     </div>
                                     <div className="space-y-2">
-                                        {formData.evaluation_criteria.map((criteria, index) => (
-                                            <div key={index} className="flex gap-2 items-center">
-                                                <Input
-                                                    placeholder="Criteria name"
-                                                    value={criteria.name}
-                                                    onChange={(e) => updateCriteria(index, 'name', e.target.value)}
-                                                    className="neo-input flex-1"
-                                                />
-                                                <Input
-                                                    type="number"
-                                                    placeholder="Max"
-                                                    value={criteria.max_marks || ''}
-                                                    onChange={(e) => updateCriteria(index, 'max_marks', e.target.value)}
-                                                    className="neo-input w-24"
-                                                />
-                                                {formData.evaluation_criteria.length > 1 && (
-                                                    <Button type="button" onClick={() => removeCriteria(index)} variant="outline" size="sm" className="border-2 border-black">
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </Button>
-                                                )}
-                                            </div>
+                                        {formData.evaluation_criteria.map((criteria, idx) => (
+                                            <CriteriaRow key={idx} criteria={criteria} index={idx} onUpdate={updateCriteria} onRemove={removeCriteria} canRemove={formData.evaluation_criteria.length > 1} />
                                         ))}
                                     </div>
                                 </div>
 
-                                <Button 
-                                    type="submit" 
-                                    className="w-full bg-primary text-white border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none"
-                                    data-testid="submit-round-btn"
-                                >
+                                <Button type="submit" className="w-full bg-primary text-white border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none" data-testid="submit-round-btn">
                                     {editingRound ? 'Update Round' : 'Create Round'}
                                 </Button>
                             </form>
@@ -374,7 +410,6 @@ export default function AdminRounds() {
                     </Dialog>
                 </div>
 
-                {/* Rounds Grid */}
                 {loading ? (
                     <div className="neo-card text-center py-12">
                         <div className="loading-spinner mx-auto"></div>
@@ -389,98 +424,7 @@ export default function AdminRounds() {
                 ) : (
                     <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {rounds.map(round => (
-                            <div key={round.id} className="neo-card hover-lift" data-testid={`round-card-${round.round_no}`}>
-                                <div className="flex justify-between items-start mb-4">
-                                    <div>
-                                        <span className="bg-primary text-white px-2 py-1 border-2 border-black font-bold text-sm">
-                                            {round.round_no}
-                                        </span>
-                                    </div>
-                                    <span className={`tag border-2 ${getStateBadgeColor(round.state)}`}>
-                                        {round.state}
-                                    </span>
-                                </div>
-
-                                <h3 className="font-heading font-bold text-xl mb-2">{round.name}</h3>
-                                <p className="text-gray-600 text-sm mb-4 line-clamp-2">{round.description || 'No description'}</p>
-
-                                {round.tags?.length > 0 && (
-                                    <div className="flex flex-wrap gap-1 mb-4">
-                                        {round.tags.map(tag => (
-                                            <span key={tag} className="text-xs bg-secondary px-2 py-1 border border-black">{tag}</span>
-                                        ))}
-                                    </div>
-                                )}
-
-                                <div className="text-sm text-gray-500 mb-4">
-                                    <p><strong>Mode:</strong> {round.mode}</p>
-                                    <p><strong>Date:</strong> {round.date ? new Date(round.date).toLocaleDateString() : 'TBA'}</p>
-                                    {round.is_frozen && (
-                                        <p className="text-primary font-bold flex items-center gap-1 mt-2">
-                                            <Lock className="w-4 h-4" /> Frozen
-                                        </p>
-                                    )}
-                                </div>
-
-                                <div className="flex flex-wrap gap-2">
-                                    {!round.is_frozen && (
-                                        <>
-                                            <Button 
-                                                size="sm" 
-                                                variant="outline" 
-                                                onClick={() => handleEdit(round)}
-                                                className="border-2 border-black"
-                                                data-testid={`edit-round-${round.round_no}`}
-                                            >
-                                                <Edit2 className="w-4 h-4" />
-                                            </Button>
-                                            {round.state === 'Draft' && (
-                                                <Button 
-                                                    size="sm" 
-                                                    variant="outline" 
-                                                    onClick={() => handleDelete(round.id)}
-                                                    className="border-2 border-black text-red-500"
-                                                    data-testid={`delete-round-${round.round_no}`}
-                                                >
-                                                    <Trash2 className="w-4 h-4" />
-                                                </Button>
-                                            )}
-                                        </>
-                                    )}
-                                    
-                                    {round.state === 'Draft' && (
-                                        <Button 
-                                            size="sm"
-                                            onClick={() => handleStateChange(round.id, 'Published')}
-                                            className="bg-blue-500 text-white border-2 border-black"
-                                        >
-                                            Publish
-                                        </Button>
-                                    )}
-                                    
-                                    {round.state === 'Published' && (
-                                        <Button 
-                                            size="sm"
-                                            onClick={() => handleStateChange(round.id, 'Active')}
-                                            className="bg-green-500 text-white border-2 border-black"
-                                        >
-                                            <Play className="w-4 h-4 mr-1" /> Activate
-                                        </Button>
-                                    )}
-
-                                    {(round.state === 'Active' || round.state === 'Completed') && (
-                                        <Link to={`/admin/scoring/${round.id}`}>
-                                            <Button 
-                                                size="sm"
-                                                className="bg-primary text-white border-2 border-black"
-                                                data-testid={`score-round-${round.round_no}`}
-                                            >
-                                                <ChevronRight className="w-4 h-4 mr-1" /> Scores
-                                            </Button>
-                                        </Link>
-                                    )}
-                                </div>
-                            </div>
+                            <RoundCard key={round.id} round={round} onEdit={handleEdit} onDelete={handleDelete} onStateChange={handleStateChange} />
                         ))}
                     </div>
                 )}
