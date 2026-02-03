@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import axios from 'axios';
@@ -43,11 +43,7 @@ export default function AdminParticipants() {
         search: ''
     });
 
-    useEffect(() => {
-        fetchParticipants();
-    }, [filters]);
-
-    const fetchParticipants = async () => {
+    const fetchParticipants = useCallback(async () => {
         try {
             const params = new URLSearchParams();
             if (filters.department) params.append('department', filters.department);
@@ -65,7 +61,11 @@ export default function AdminParticipants() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [filters, getAuthHeader]);
+
+    useEffect(() => {
+        fetchParticipants();
+    }, [fetchParticipants]);
 
     const handleStatusChange = async (participantId, newStatus) => {
         try {

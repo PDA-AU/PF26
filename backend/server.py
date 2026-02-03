@@ -3,7 +3,7 @@ from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import func, case
+from sqlalchemy import func, case, text
 import os
 import logging
 from pathlib import Path
@@ -51,11 +51,31 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 
+def _ensure_round_description_pdf_column():
+    try:
+        with engine.begin() as conn:
+            result = conn.execute(
+                text(
+                    """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'rounds' AND column_name = 'description_pdf'
+                    """
+                )
+            ).fetchone()
+            if not result:
+                conn.execute(text("ALTER TABLE rounds ADD COLUMN description_pdf VARCHAR(500)"))
+                logger.info("Added rounds.description_pdf column")
+    except Exception as exc:
+        logger.warning(f"Could not ensure description_pdf column: {exc}")
+
+
 # ==================== STARTUP ====================
 @app.on_event("startup")
 async def startup_event():
     db = next(get_db())
     try:
+        _ensure_round_description_pdf_column()
         # Initialize system config
         reg_config = db.query(SystemConfig).filter(SystemConfig.key == "registration_open").first()
         if not reg_config:
@@ -423,6 +443,10 @@ async def create_round(round_data: RoundCreate, admin: User = Depends(get_curren
     round_num = 1 if not last_round else int(last_round.round_no[2:]) + 1
     round_no = f"PF{round_num:02d}"
     
+    criteria = [c.model_dump() for c in round_data.evaluation_criteria] if round_data.evaluation_criteria else None
+    if not criteria:
+        criteria = [{"name": "Overall", "max_marks": 100}]
+
     new_round = Round(
         round_no=round_no,
         name=round_data.name,
@@ -432,7 +456,7 @@ async def create_round(round_data: RoundCreate, admin: User = Depends(get_curren
         mode=RoundMode[round_data.mode.name],
         conducted_by=round_data.conducted_by,
         state=RoundState.DRAFT,
-        evaluation_criteria=[c.model_dump() for c in round_data.evaluation_criteria] if round_data.evaluation_criteria else None
+        evaluation_criteria=criteria
     )
     
     db.add(new_round)
@@ -471,7 +495,10 @@ async def update_round(
     if round_data.state is not None:
         round.state = RoundState[round_data.state.name]
     if round_data.evaluation_criteria is not None:
-        round.evaluation_criteria = [c.model_dump() for c in round_data.evaluation_criteria]
+        criteria = [c.model_dump() for c in round_data.evaluation_criteria] if round_data.evaluation_criteria else []
+        if not criteria:
+            criteria = [{"name": "Overall", "max_marks": 100}]
+        round.evaluation_criteria = criteria
     if round_data.elimination_type is not None:
         round.elimination_type = round_data.elimination_type
     if round_data.elimination_value is not None:
@@ -480,6 +507,37 @@ async def update_round(
     db.commit()
     db.refresh(round)
     
+    return RoundResponse.model_validate(round)
+
+@api_router.post("/admin/rounds/{round_id}/description-pdf", response_model=RoundResponse)
+async def upload_round_description_pdf(
+    round_id: int,
+    file: UploadFile = File(...),
+    admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    round = db.query(Round).filter(Round.id == round_id).first()
+    if not round:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
+
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only PDF files are allowed")
+
+    filename = f"{round.round_no}_{uuid.uuid4().hex}.pdf"
+    file_path = UPLOAD_DIR / filename
+
+    if round.description_pdf:
+        old_path = UPLOAD_DIR / round.description_pdf
+        if old_path.exists():
+            old_path.unlink(missing_ok=True)
+
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    round.description_pdf = filename
+    db.commit()
+    db.refresh(round)
+
     return RoundResponse.model_validate(round)
 
 
@@ -789,6 +847,20 @@ async def freeze_round(round_id: int, admin: User = Depends(get_current_admin), 
     db.commit()
     
     return {"message": "Round frozen and eliminations applied"}
+
+@api_router.post("/admin/rounds/{round_id}/unfreeze")
+async def unfreeze_round(round_id: int, admin: User = Depends(get_current_admin), db: Session = Depends(get_db)):
+    round = db.query(Round).filter(Round.id == round_id).first()
+    if not round:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
+
+    if not round.is_frozen:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Round is not frozen")
+
+    round.is_frozen = False
+    round.state = RoundState.ACTIVE
+    db.commit()
+    return {"message": "Round unfrozen"}
 
 
 # ==================== ADMIN LEADERBOARD ====================

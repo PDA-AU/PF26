@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import axios from 'axios';
 import { toast } from 'sonner';
-import { Calendar, Plus, Edit2, Trash2, Play, Lock, LogOut, Sparkles, LayoutDashboard, Users, Trophy, ChevronRight } from 'lucide-react';
+import { Calendar, Plus, Edit2, Trash2, Play, Lock, LogOut, Sparkles, LayoutDashboard, Users, Trophy, ChevronRight, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -25,8 +25,10 @@ export default function AdminRounds() {
     const [date, setDate] = useState('');
     const [mode, setMode] = useState('Offline');
     const [conductedBy, setConductedBy] = useState('');
+    const [criteria, setCriteria] = useState([{ name: 'Overall', max_marks: 100 }]);
+    const [roundPdfFile, setRoundPdfFile] = useState(null);
 
-    const fetchRounds = async () => {
+    const fetchRounds = useCallback(async () => {
         try {
             const response = await axios.get(`${API}/admin/rounds`, { headers: getAuthHeader() });
             setRounds(response.data);
@@ -35,9 +37,9 @@ export default function AdminRounds() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [getAuthHeader]);
 
-    useEffect(() => { fetchRounds(); }, []);
+    useEffect(() => { fetchRounds(); }, [fetchRounds]);
 
     const resetForm = () => {
         setName('');
@@ -45,27 +47,43 @@ export default function AdminRounds() {
         setDate('');
         setMode('Offline');
         setConductedBy('');
+        setCriteria([{ name: 'Overall', max_marks: 100 }]);
+        setRoundPdfFile(null);
         setEditingRound(null);
     };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
+            const cleanedCriteria = criteria
+                .map((c) => ({ name: c.name.trim(), max_marks: parseFloat(c.max_marks) || 0 }))
+                .filter((c) => c.name);
+            const finalCriteria = cleanedCriteria.length > 0 ? cleanedCriteria : [{ name: 'Overall', max_marks: 100 }];
             const payload = {
                 name,
                 description,
                 date: date ? new Date(date).toISOString() : null,
                 mode,
                 conducted_by: conductedBy,
-                evaluation_criteria: [{ name: 'Overall', max_marks: 100 }]
+                evaluation_criteria: finalCriteria
             };
 
+            let savedRound = null;
             if (editingRound) {
-                await axios.put(`${API}/admin/rounds/${editingRound.id}`, payload, { headers: getAuthHeader() });
+                const response = await axios.put(`${API}/admin/rounds/${editingRound.id}`, payload, { headers: getAuthHeader() });
+                savedRound = response.data;
                 toast.success('Round updated');
             } else {
-                await axios.post(`${API}/admin/rounds`, payload, { headers: getAuthHeader() });
+                const response = await axios.post(`${API}/admin/rounds`, payload, { headers: getAuthHeader() });
+                savedRound = response.data;
                 toast.success('Round created');
+            }
+            if (roundPdfFile && savedRound) {
+                const formData = new FormData();
+                formData.append('file', roundPdfFile);
+                await axios.post(`${API}/admin/rounds/${savedRound.id}/description-pdf`, formData, {
+                    headers: { ...getAuthHeader(), 'Content-Type': 'multipart/form-data' }
+                });
             }
             setDialogOpen(false);
             resetForm();
@@ -82,6 +100,11 @@ export default function AdminRounds() {
         setDate(round.date ? new Date(round.date).toISOString().split('T')[0] : '');
         setMode(round.mode);
         setConductedBy(round.conducted_by || '');
+        setCriteria((round.evaluation_criteria && round.evaluation_criteria.length > 0)
+            ? round.evaluation_criteria.map((c) => ({ name: c.name || '', max_marks: c.max_marks || 0 }))
+            : [{ name: 'Overall', max_marks: 100 }]
+        );
+        setRoundPdfFile(null);
         setDialogOpen(true);
     };
 
@@ -186,6 +209,56 @@ export default function AdminRounds() {
                                 <div>
                                     <Label className="font-bold">Conducted By</Label>
                                     <Input value={conductedBy} onChange={(e) => setConductedBy(e.target.value)} className="neo-input" />
+                                </div>
+                                <div className="space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <Label className="font-bold">Evaluation Criteria</Label>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            className="border-2 border-black"
+                                            onClick={() => setCriteria((prev) => [...prev, { name: '', max_marks: 0 }])}
+                                        >
+                                            <Plus className="w-4 h-4 mr-2" /> Add
+                                        </Button>
+                                    </div>
+                                    <div className="space-y-2">
+                                        {criteria.map((c, idx) => (
+                                            <div key={`${c.name}-${idx}`} className="grid grid-cols-[1fr_120px_auto] gap-2 items-center">
+                                                <Input
+                                                    value={c.name}
+                                                    onChange={(e) => setCriteria((prev) => prev.map((item, i) => i === idx ? { ...item, name: e.target.value } : item))}
+                                                    placeholder="Criteria name"
+                                                    className="neo-input"
+                                                />
+                                                <Input
+                                                    type="number"
+                                                    value={c.max_marks}
+                                                    onChange={(e) => setCriteria((prev) => prev.map((item, i) => i === idx ? { ...item, max_marks: e.target.value } : item))}
+                                                    placeholder="Max marks"
+                                                    className="neo-input"
+                                                />
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    className="border-2 border-black"
+                                                    onClick={() => setCriteria((prev) => prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev)}
+                                                    disabled={criteria.length === 1}
+                                                >
+                                                    <X className="w-4 h-4" />
+                                                </Button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div>
+                                    <Label className="font-bold">Round Description PDF</Label>
+                                    <Input
+                                        type="file"
+                                        accept="application/pdf"
+                                        className="neo-input"
+                                        onChange={(e) => setRoundPdfFile(e.target.files?.[0] || null)}
+                                    />
                                 </div>
                                 <Button type="submit" className="w-full bg-primary text-white border-2 border-black shadow-neo">
                                     {editingRound ? 'Update' : 'Create'}

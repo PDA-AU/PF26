@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import axios from 'axios';
@@ -27,6 +27,17 @@ export default function ParticipantDashboard() {
         email: user?.email || ''
     });
 
+    const fetchRoundStatuses = useCallback(async () => {
+        try {
+            const response = await axios.get(`${API}/me/rounds`, {
+                headers: getAuthHeader()
+            });
+            setRoundStatuses(response.data);
+        } catch (error) {
+            console.error('Failed to fetch round statuses:', error);
+        }
+    }, [getAuthHeader]);
+
     useEffect(() => {
         if (user) {
             fetchRoundStatuses();
@@ -36,18 +47,7 @@ export default function ParticipantDashboard() {
                 email: user.email
             });
         }
-    }, [user]);
-
-    const fetchRoundStatuses = async () => {
-        try {
-            const response = await axios.get(`${API}/me/rounds`, {
-                headers: getAuthHeader()
-            });
-            setRoundStatuses(response.data);
-        } catch (error) {
-            console.error('Failed to fetch round statuses:', error);
-        }
-    };
+    }, [fetchRoundStatuses, user]);
 
     const handleCopyReferral = () => {
         navigator.clipboard.writeText(user.referral_code);

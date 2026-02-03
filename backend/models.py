@@ -88,6 +88,7 @@ class Round(Base):
     conducted_by = Column(String(255), nullable=True)
     state = Column(SQLEnum(RoundState), default=RoundState.DRAFT, nullable=False)
     evaluation_criteria = Column(JSON, nullable=True)  # [{"name": "Creativity", "max_marks": 25}, ...]
+    description_pdf = Column(String(500), nullable=True)
     elimination_type = Column(String(20), nullable=True)  # "top_k" or "min_score"
     elimination_value = Column(Float, nullable=True)  # K value or minimum score
     is_frozen = Column(Boolean, default=False)

@@ -4,15 +4,18 @@ import { useAuth } from '@/context/AuthContext';
 import axios from 'axios';
 import { Calendar, MapPin, Users, Trophy, Star, ArrowRight, Menu, X, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-export default function LandingPage() {
+export default function PersofestHome() {
     const { user } = useAuth();
     const [rounds, setRounds] = useState([]);
     const [topReferrers, setTopReferrers] = useState([]);
     const [registrationOpen, setRegistrationOpen] = useState(true);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+    const [roundDialogOpen, setRoundDialogOpen] = useState(false);
+    const [selectedRound, setSelectedRound] = useState(null);
 
     useEffect(() => {
         fetchPublicData();
@@ -42,21 +45,23 @@ export default function LandingPage() {
         });
     };
 
+    const openRoundDetails = (round) => {
+        setSelectedRound(round);
+        setRoundDialogOpen(true);
+    };
+
+    const getRoundPdfUrl = (round) => {
+        if (!round?.description_pdf) return null;
+        return `${process.env.REACT_APP_BACKEND_URL}/uploads/${round.description_pdf}`;
+    };
+
     return (
         <div className="min-h-screen bg-white overflow-hidden">
-            {/* Decorative Background Shapes */}
-            <div className="fixed inset-0 pointer-events-none overflow-hidden">
-                <div className="absolute top-20 left-10 w-32 h-32 bg-secondary border-3 border-black rounded-full animate-float opacity-60" style={{ animationDelay: '0s' }}></div>
-                <div className="absolute top-40 right-20 w-24 h-24 bg-accent border-3 border-black animate-float opacity-60" style={{ animationDelay: '1s' }}></div>
-                <div className="absolute bottom-40 left-20 w-20 h-20 bg-primary border-3 border-black rotate-45 animate-float opacity-60" style={{ animationDelay: '2s' }}></div>
-                <div className="absolute bottom-20 right-40 w-28 h-28 bg-secondary border-3 border-black rounded-full animate-float opacity-60" style={{ animationDelay: '0.5s' }}></div>
-            </div>
-
             {/* Navigation */}
             <nav className="sticky top-0 z-50 bg-white border-b-2 border-black">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="flex justify-between items-center h-16">
-                        <Link to="/" className="flex items-center gap-2">
+                        <Link to="/persofest" className="flex items-center gap-2">
                             <div className="w-10 h-10 bg-primary border-2 border-black shadow-neo flex items-center justify-center">
                                 <Sparkles className="w-6 h-6 text-white" />
                             </div>
@@ -255,6 +260,15 @@ export default function LandingPage() {
                                     key={round.id} 
                                     className="neo-card hover-lift"
                                     data-testid={`round-card-${round.round_no}`}
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => openRoundDetails(round)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' || e.key === ' ') {
+                                            e.preventDefault();
+                                            openRoundDetails(round);
+                                        }
+                                    }}
                                 >
                                     <div className="flex items-center justify-between mb-4">
                                         <span className="bg-primary text-white px-3 py-1 border-2 border-black font-bold text-sm">
@@ -281,6 +295,45 @@ export default function LandingPage() {
                         </div>
                     )}
                 </div>
+                <Dialog open={roundDialogOpen} onOpenChange={setRoundDialogOpen}>
+                    <DialogContent className="border-4 border-black">
+                        <DialogHeader>
+                            <DialogTitle className="font-heading font-bold text-2xl">
+                                {selectedRound?.name || 'Round Details'}
+                            </DialogTitle>
+                        </DialogHeader>
+                        {selectedRound && (
+                            <div className="space-y-4">
+                                <div className="flex items-center gap-2">
+                                    <span className="bg-primary text-white px-2 py-1 border-2 border-black font-bold text-sm">
+                                        {selectedRound.round_no}
+                                    </span>
+                                    <span className={`tag ${selectedRound.mode === 'Online' ? 'tag-accent' : 'tag-secondary'}`}>
+                                        {selectedRound.mode}
+                                    </span>
+                                </div>
+                                <p className="text-gray-600">{selectedRound.description || 'Details coming soon'}</p>
+                                <div className="flex items-center gap-2 text-sm text-gray-500">
+                                    <Calendar className="w-4 h-4" />
+                                    <span>{formatDate(selectedRound.date)}</span>
+                                </div>
+                                <div className="pt-2">
+                                    {getRoundPdfUrl(selectedRound) ? (
+                                        <a href={getRoundPdfUrl(selectedRound)} target="_blank" rel="noreferrer">
+                                            <Button className="bg-primary text-white border-2 border-black shadow-neo">
+                                                View PDF
+                                            </Button>
+                                        </a>
+                                    ) : (
+                                        <Button disabled className="border-2 border-black">
+                                            No PDF Available
+                                        </Button>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </DialogContent>
+                </Dialog>
             </section>
 
             {/* Top Referrers Section */}

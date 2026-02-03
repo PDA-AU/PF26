@@ -156,27 +156,23 @@
     margin-top: 0.5rem;
 }
 
-/* Decorative shapes */
-.shape-circle {
-    width: 100px;
-    height: 100px;
-    border: 3px solid black;
-    border-radius: 50%;
-    position: absolute;
+
+/* Scroll reveal */
+.reveal {
+    opacity: 0;
+    transform: translateY(24px);
+    transition: opacity 600ms ease, transform 600ms ease;
 }
 
-.shape-square {
-    width: 80px;
-    height: 80px;
-    border: 3px solid black;
-    position: absolute;
+.reveal.reveal-visible {
+    opacity: 1;
+    transform: translateY(0);
 }
 
-.shape-triangle {
-    width: 0;
-    height: 0;
-    border-left: 50px solid transparent;
-    border-right: 50px solid transparent;
-    border-bottom: 86px solid;
-    position: absolute;
+@media (prefers-reduced-motion: reduce) {
+    .reveal {
+        opacity: 1;
+        transform: none;
+        transition: none;
+    }
 }

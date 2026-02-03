@@ -137,7 +137,7 @@ export default function RegisterPage() {
                     <p className="text-gray-600 mb-6">
                         Sorry, registrations are currently closed. Please check back later or contact the organizers.
                     </p>
-                    <Link to="/">
+                    <Link to="/persofest">
                         <Button className="bg-primary text-white border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all">
                             <ArrowLeft className="mr-2 w-5 h-5" /> Back to Home
                         </Button>
@@ -152,7 +152,7 @@ export default function RegisterPage() {
             {/* Header */}
             <div className="bg-primary border-b-4 border-black py-4">
                 <div className="max-w-4xl mx-auto px-4 flex items-center justify-between">
-                    <Link to="/" className="flex items-center gap-2 text-white">
+                    <Link to="/persofest" className="flex items-center gap-2 text-white">
                         <ArrowLeft className="w-5 h-5" />
                         <span className="font-medium">Back</span>
                     </Link>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import axios from 'axios';
@@ -27,9 +27,7 @@ export default function AdminScoring() {
     const [eliminationConfig, setEliminationConfig] = useState({ type: 'top_k', value: 10 });
     const fileInputRef = useRef(null);
 
-    useEffect(() => { fetchRoundData(); }, [roundId]);
-
-    const fetchRoundData = async () => {
+    const fetchRoundData = useCallback(async () => {
         try {
             const [roundRes, participantsRes] = await Promise.all([
                 axios.get(`${API}/admin/rounds`, { headers: getAuthHeader() }),
@@ -46,7 +44,9 @@ export default function AdminScoring() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [getAuthHeader, roundId, search]);
+
+    useEffect(() => { fetchRoundData(); }, [fetchRoundData]);
 
     const handleSearch = async () => {
         try {
@@ -148,6 +148,16 @@ export default function AdminScoring() {
         }
     };
 
+    const unfreezeRound = async () => {
+        try {
+            await axios.post(`${API}/admin/rounds/${roundId}/unfreeze`, {}, { headers: getAuthHeader() });
+            toast.success('Round unfrozen');
+            fetchRoundData();
+        } catch (error) {
+            toast.error(error.response?.data?.detail || 'Failed to unfreeze round');
+        }
+    };
+
     const handleLogout = () => { logout(); navigate('/'); };
 
     if (loading) {
@@ -217,7 +227,7 @@ export default function AdminScoring() {
                             </div>
                         </div>
 
-                        {!round.is_frozen && (
+                        {!round.is_frozen ? (
                             <div className="flex flex-wrap gap-2">
                                 <Button onClick={downloadTemplate} variant="outline" className="border-2 border-black shadow-neo" data-testid="download-template-btn">
                                     <Download className="w-4 h-4 mr-2" /> Template
@@ -242,7 +252,9 @@ export default function AdminScoring() {
                                             </DialogTitle>
                                         </DialogHeader>
                                         <div className="space-y-4">
-                                            <p className="text-gray-600">This action is <strong>irreversible</strong>.</p>
+                                            <p className="text-gray-600">
+                                                This action completes the round. You can unfreeze later, but eliminations are not reverted.
+                                            </p>
                                             <div className="space-y-4 p-4 bg-muted border-2 border-black">
                                                 <div className="space-y-2">
                                                     <Label className="font-bold">Elimination Rule</Label>
@@ -266,6 +278,12 @@ export default function AdminScoring() {
                                         </div>
                                     </DialogContent>
                                 </Dialog>
+                            </div>
+                        ) : (
+                            <div className="flex flex-wrap gap-2">
+                                <Button onClick={unfreezeRound} className="bg-orange-500 text-white border-2 border-black shadow-neo">
+                                    <Lock className="w-4 h-4 mr-2" /> Unfreeze
+                                </Button>
                             </div>
                         )}
                     </div>

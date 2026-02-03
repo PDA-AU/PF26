@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import axios from 'axios';
@@ -39,11 +39,7 @@ export default function AdminLeaderboard() {
         search: ''
     });
 
-    useEffect(() => {
-        fetchLeaderboard();
-    }, [filters]);
-
-    const fetchLeaderboard = async () => {
+    const fetchLeaderboard = useCallback(async () => {
         try {
             const params = new URLSearchParams();
             if (filters.department) params.append('department', filters.department);
@@ -59,7 +55,11 @@ export default function AdminLeaderboard() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [filters, getAuthHeader]);
+
+    useEffect(() => {
+        fetchLeaderboard();
+    }, [fetchLeaderboard]);
 
     const handleExport = async (format) => {
         try {

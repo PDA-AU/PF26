@@ -177,6 +177,7 @@ class RoundResponse(BaseModel):
     conducted_by: Optional[str]
     state: RoundStateEnum
     evaluation_criteria: Optional[List[Dict[str, Any]]]
+    description_pdf: Optional[str] = None
     elimination_type: Optional[str]
     elimination_value: Optional[float]
     is_frozen: bool
@@ -193,6 +194,7 @@ class RoundPublicResponse(BaseModel):
     description: Optional[str]
     date: Optional[datetime]
     mode: RoundModeEnum
+    description_pdf: Optional[str] = None
     
     class Config:
         from_attributes = True

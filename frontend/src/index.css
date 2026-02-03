@@ -101,51 +101,13 @@ code {
            placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-primary;
 }
 
-/* Animations */
-@keyframes float {
-    0%, 100% { transform: translateY(0px); }
-    50% { transform: translateY(-10px); }
-}
-
 @keyframes pulse-slow {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.7; }
 }
 
-.animate-float {
-    animation: float 3s ease-in-out infinite;
-}
-
 .animate-pulse-slow {
     animation: pulse-slow 2s ease-in-out infinite;
-}
-
-/* Background shapes */
-.bg-shapes::before {
-    content: '';
-    position: absolute;
-    width: 200px;
-    height: 200px;
-    background: #C4B5FD;
-    border: 3px solid black;
-    border-radius: 50%;
-    top: 10%;
-    left: 5%;
-    z-index: -1;
-    animation: float 6s ease-in-out infinite;
-}
-
-.bg-shapes::after {
-    content: '';
-    position: absolute;
-    width: 150px;
-    height: 150px;
-    background: #FDE047;
-    border: 3px solid black;
-    top: 60%;
-    right: 10%;
-    z-index: -1;
-    animation: float 4s ease-in-out infinite reverse;
 }
 
 /* Custom scrollbar */

@@ -1,0 +1,45 @@
+{
+  "programs": [
+    {
+      "title": "Communication Mastery",
+      "description": "Weekly practice circles and feedback sessions.",
+      "tag": "Skill",
+      "poster_url": "https://your-cdn-or-instagram-image-url"
+    },
+    {
+      "title": "Leadership Labs",
+      "description": "Role-play and reflection sessions to build confident leadership.",
+      "tag": "Leadership",
+      "poster_url": ""
+    },
+    {
+      "title": "Career Readiness",
+      "description": "Mock interviews, resume clinics, and professional communication.",
+      "tag": "Career",
+      "poster_url": ""
+    }
+  ],
+  "events": [
+    {
+      "title": "Leadership Workshop",
+      "date": "2026-03-15",
+      "format": "On Campus",
+      "description": "Interactive session on leadership fundamentals.",
+      "poster_url": "https://your-cdn-or-instagram-image-url"
+    },
+    {
+      "title": "Public Speaking Sprint",
+      "date": "2026-04-02",
+      "format": "Auditorium",
+      "description": "Short talks, instant feedback, and confidence drills.",
+      "poster_url": ""
+    },
+    {
+      "title": "Personality Growth Meetup",
+      "date": "2026-04-20",
+      "format": "Club Room",
+      "description": "Peer-led session on habits, mindset, and growth.",
+      "poster_url": ""
+    }
+  ]
+}

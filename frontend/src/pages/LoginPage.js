@@ -44,11 +44,6 @@ export default function LoginPage() {
         <div className="min-h-screen bg-white flex">
             {/* Decorative Side Panel */}
             <div className="hidden lg:flex lg:w-1/2 bg-primary relative overflow-hidden">
-                {/* Decorative Shapes */}
-                <div className="absolute top-20 left-10 w-32 h-32 bg-accent border-4 border-black rounded-full animate-float"></div>
-                <div className="absolute bottom-40 right-20 w-24 h-24 bg-secondary border-4 border-black animate-float" style={{ animationDelay: '1s' }}></div>
-                <div className="absolute top-1/2 left-1/4 w-20 h-20 bg-white border-4 border-black rotate-45 animate-float" style={{ animationDelay: '0.5s' }}></div>
-                
                 <div className="relative z-10 flex flex-col justify-center items-center w-full p-12 text-white">
                     <div className="w-20 h-20 bg-white border-4 border-black shadow-neo-lg flex items-center justify-center mb-8">
                         <Sparkles className="w-10 h-10 text-primary" />
@@ -65,7 +60,7 @@ export default function LoginPage() {
             {/* Login Form */}
             <div className="flex-1 flex items-center justify-center p-8">
                 <div className="w-full max-w-md">
-                    <Link to="/" className="inline-flex items-center gap-2 text-gray-600 hover:text-black mb-8 transition-colors">
+                    <Link to="/persofest" className="inline-flex items-center gap-2 text-gray-600 hover:text-black mb-8 transition-colors">
                         <ArrowLeft className="w-5 h-5" />
                         <span className="font-medium">Back to Home</span>
                     </Link>

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 
 const AuthContext = createContext(null);
@@ -11,31 +11,15 @@ export const AuthProvider = ({ children }) => {
     const [accessToken, setAccessToken] = useState(localStorage.getItem('accessToken'));
     const [refreshToken, setRefreshToken] = useState(localStorage.getItem('refreshToken'));
 
-    useEffect(() => {
-        if (accessToken) {
-            fetchUser();
-        } else {
-            setLoading(false);
-        }
+    const logout = useCallback(() => {
+        setUser(null);
+        setAccessToken(null);
+        setRefreshToken(null);
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('refreshToken');
     }, []);
 
-    const fetchUser = async () => {
-        try {
-            const response = await axios.get(`${API}/me`, {
-                headers: { Authorization: `Bearer ${accessToken}` }
-            });
-            setUser(response.data);
-        } catch (error) {
-            console.error('Failed to fetch user:', error);
-            if (error.response?.status === 401) {
-                await tryRefreshToken();
-            }
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const tryRefreshToken = async () => {
+    const tryRefreshToken = useCallback(async () => {
         if (!refreshToken) {
             logout();
             return;
@@ -54,7 +38,31 @@ export const AuthProvider = ({ children }) => {
             console.error('Token refresh failed:', error);
             logout();
         }
-    };
+    }, [logout, refreshToken]);
+
+    const fetchUser = useCallback(async () => {
+        try {
+            const response = await axios.get(`${API}/me`, {
+                headers: { Authorization: `Bearer ${accessToken}` }
+            });
+            setUser(response.data);
+        } catch (error) {
+            console.error('Failed to fetch user:', error);
+            if (error.response?.status === 401) {
+                await tryRefreshToken();
+            }
+        } finally {
+            setLoading(false);
+        }
+    }, [accessToken, tryRefreshToken]);
+
+    useEffect(() => {
+        if (accessToken) {
+            fetchUser();
+        } else {
+            setLoading(false);
+        }
+    }, [accessToken, fetchUser]);
 
     const login = async (registerNumber, password) => {
         const response = await axios.post(`${API}/auth/login`, {
@@ -79,14 +87,6 @@ export const AuthProvider = ({ children }) => {
         localStorage.setItem('refreshToken', refresh_token);
         setUser(newUser);
         return newUser;
-    };
-
-    const logout = () => {
-        setUser(null);
-        setAccessToken(null);
-        setRefreshToken(null);
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
     };
 
     const updateUser = (updatedData) => {

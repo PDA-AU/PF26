@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import axios from 'axios';
@@ -18,11 +18,7 @@ export default function AdminDashboard() {
     const [stats, setStats] = useState(null);
     const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        fetchDashboardStats();
-    }, []);
-
-    const fetchDashboardStats = async () => {
+    const fetchDashboardStats = useCallback(async () => {
         try {
             const response = await axios.get(`${API}/admin/dashboard`, {
                 headers: getAuthHeader()
@@ -34,7 +30,11 @@ export default function AdminDashboard() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [getAuthHeader]);
+
+    useEffect(() => {
+        fetchDashboardStats();
+    }, [fetchDashboardStats]);
 
     const toggleRegistration = async () => {
         try {

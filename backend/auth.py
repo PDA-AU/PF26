@@ -5,6 +5,8 @@ from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
+import bcrypt
+import hashlib
 import os
 from dotenv import load_dotenv
 from pathlib import Path
@@ -24,11 +26,23 @@ security = HTTPBearer()
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        pw_bytes = plain_password.encode('utf-8')
+    except Exception:
+        pw_bytes = str(plain_password).encode('utf-8')
+    digest = hashlib.sha256(pw_bytes).digest()
+    return bcrypt.checkpw(digest, hashed_password.encode('utf-8'))
 
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    # Always pre-hash password with SHA-256, then bcrypt the digest
+    try:
+        pw_bytes = password.encode('utf-8')
+    except Exception:
+        pw_bytes = str(password).encode('utf-8')
+    digest = hashlib.sha256(pw_bytes).digest()
+    hashed = bcrypt.hashpw(digest, bcrypt.gensalt())
+    return hashed.decode('utf-8')
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:

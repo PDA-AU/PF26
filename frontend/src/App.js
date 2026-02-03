@@ -5,7 +5,8 @@ import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 
 // Pages
-import LandingPage from "@/pages/LandingPage";
+import PersofestHome from "@/pages/PersofestHome";
+import PdaHome from "@/pages/PdaHome";
 import LoginPage from "@/pages/LoginPage";
 import RegisterPage from "@/pages/RegisterPage";
 import ParticipantDashboard from "@/pages/ParticipantDashboard";
@@ -64,7 +65,8 @@ function AppRoutes() {
     return (
         <Routes>
             {/* Public Routes */}
-            <Route path="/" element={<LandingPage />} />
+            <Route path="/" element={<PdaHome />} />
+            <Route path="/persofest" element={<PersofestHome />} />
             <Route path="/login" element={
                 <PublicRoute>
                     <LoginPage />
