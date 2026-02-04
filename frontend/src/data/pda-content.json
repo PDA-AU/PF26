@@ -1,45 +1,42 @@
 {
+  "group_photo_url": "",
   "programs": [
-    {
-      "title": "Communication Mastery",
-      "description": "Weekly practice circles and feedback sessions.",
-      "tag": "Skill",
-      "poster_url": "https://your-cdn-or-instagram-image-url"
-    },
-    {
-      "title": "Leadership Labs",
-      "description": "Role-play and reflection sessions to build confident leadership.",
-      "tag": "Leadership",
-      "poster_url": ""
-    },
-    {
-      "title": "Career Readiness",
-      "description": "Mock interviews, resume clinics, and professional communication.",
-      "tag": "Career",
-      "poster_url": ""
-    }
-  ],
-  "events": [
-    {
-      "title": "Leadership Workshop",
-      "date": "2026-03-15",
-      "format": "On Campus",
-      "description": "Interactive session on leadership fundamentals.",
-      "poster_url": "https://your-cdn-or-instagram-image-url"
-    },
-    {
-      "title": "Public Speaking Sprint",
-      "date": "2026-04-02",
-      "format": "Auditorium",
-      "description": "Short talks, instant feedback, and confidence drills.",
-      "poster_url": ""
-    },
-    {
-      "title": "Personality Growth Meetup",
-      "date": "2026-04-20",
-      "format": "Club Room",
-      "description": "Peer-led session on habits, mindset, and growth.",
-      "poster_url": ""
-    }
-  ]
+  {
+    "title": "Level Up Globally",
+    "description": "An expert alumni talk by Sri Vignesh Devarajan on studying and working opportunities in Germany, covering tuition fees, accommodation, and global career exposure.",
+    "tag": "Career Guidance",
+    "poster_url": "https://instagram.fmaa2-3.fna.fbcdn.net/v/t51.82787-15/549286487_18184510894328622_3297168925444960537_n.webp?_nc_cat=100&ig_cache_key=MzcyMzM4Mzc0MDc1MjI5Nzg3OQ%3D%3D.3-ccb7-5&ccb=7-5&_nc_sid=58cdad&efg=eyJ2ZW5jb2RlX3RhZyI6InhwaWRzLjE0NDB4MTQ0MC5zZHIuQzMifQ%3D%3D&_nc_ohc=M8kknIuWRkMQ7kNvwERRLt-&_nc_oc=AdnpzP5prKd3T-3IbjTM5Z92uTBBZcawK_2AJtFZ1CWChG03gInB3A6IQuJzK4lzBXbS4MNDXz7ILLkXxTtUQEOe&_nc_ad=z-m&_nc_cid=2034&_nc_zt=23&_nc_ht=instagram.fmaa2-3.fna&_nc_gid=VvJ3vQGlnuXYtLBK2aFxPA&oh=00_AfskSiFUFOwZC7VZ3H9JgX_re9kiWu7Pif54TDjPTqBglw&oe=698854CF"
+  },
+  {
+    "title": "Internship Awareness Drive",
+    "description": "A two-day awareness program where senior students shared internship preparation strategies including resume building, aptitude skills, and interview hacks.",
+    "tag": "Placement Support",
+    "poster_url": "https://your-cdn-or-instagram-image-url"
+  },
+  {
+    "title": "Brain Buzz – Weekly Quiz Launch",
+    "description": "A weekly interactive quiz initiative conducted every Friday on Instagram Stories to boost vocabulary, general knowledge, and current affairs awareness.",
+    "tag": "Student Engagement",
+    "poster_url": "https://your-cdn-or-instagram-image-url"
+  }
+]
+,
+"events": [
+  {
+    "title": "Vocal Vista – Communication Development Program",
+    "date": "2026-01-21 to 2026-01-22",
+    "format": "Offline (Rajam Hall)",
+    "description": "Vocal Vista was a two-day interactive communication development event for first-year students aimed at reducing stage fear, building confidence, and enhancing effective speaking skills through fun, team-based activities like storytelling, creative pitching, and impromptu speaking. The event was guided by jury Dr. ARS Jayanth, Professor, DASH – MIT. Participants rated the event 4.21/5 with 88.7% showing interest in future PDA programs.",
+    "poster_url":"https://instagram.fmaa2-4.fna.fbcdn.net/v/t51.82787-15/610731516_18197683567328622_9142466432399615517_n.webp?_nc_cat=110&ig_cache_key=MzgwNDYyOTc5MzI5OTgzMDAzNg%3D%3D.3-ccb7-5&ccb=7-5&_nc_sid=58cdad&efg=eyJ2ZW5jb2RlX3RhZyI6InhwaWRzLjExNTJ4MTQ0MC5zZHIuQzMifQ%3D%3D&_nc_ohc=kXWo2oSnocoQ7kNvwFCi8O8&_nc_oc=AdnUqaXScR3wBcv4ao_lOA27uxUVMRTrcCToedBnkX5DKZ7xYJQxq0U5rD0RdyRXZhYzY9cAIWCRyUY63KAFJR_-&_nc_ad=z-m&_nc_cid=2034&_nc_zt=23&_nc_ht=instagram.fmaa2-4.fna&_nc_gid=rUdATKHQ0_zQlr6jmH5JKA&oh=00_AftLdR_6e6Hqpyg4sdKzIV-eM3uU_lXWkKQjs-EDbVHaxg&oe=698837ED"
+  },
+  {
+    "title": "CRESTORA’25 – Interdepartmental Talent Festival",
+    "date": "2025-10-18",
+    "format": "Hybrid (Online + Offline)",
+    "description": "CRESTORA’25 is PDA’s flagship 10-round interdepartmental talent odyssey conducted with 12+ clubs, focusing on creativity, communication, teamwork, innovation, analytical thinking, and personality development across diverse competitive and rolling events.",
+    "poster_url": "https://instagram.fmaa2-3.fna.fbcdn.net/v/t51.82787-15/559472461_18187161781328622_2776332242797297589_n.webp?_nc_cat=103&ig_cache_key=MzczNzQwNDY2NjUwNjQ4MDk1OQ%3D%3D.3-ccb7-5&ccb=7-5&_nc_sid=58cdad&efg=eyJ2ZW5jb2RlX3RhZyI6InhwaWRzLjE0NDB4MTgwMC5zZHIuQzMifQ%3D%3D&_nc_ohc=K6Fz3e-_scoQ7kNvwFDteqT&_nc_oc=Adl5PCk0ERDm7X6ykOpTvuZz2GYRtSRCZj-Wwq1Z6slJZ4vImKu-f-qPTrwdDgPxeKdyl8oAXP9TMn-Dz_CKgzNY&_nc_ad=z-m&_nc_cid=2034&_nc_zt=23&_nc_ht=instagram.fmaa2-3.fna&_nc_gid=zcQvrpoWDiO_6dsoyz6ZYw&oh=00_AfurdZRnYAK-kELNPfC4dkxwkwzKO8OsMKSozmq91b3YeA&oe=6988222A"
+  }
+]
+
+
 }

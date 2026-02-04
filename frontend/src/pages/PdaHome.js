@@ -1,9 +1,11 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Calendar, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import pdaData from '@/data/pda-content.json';
 import pdaLogo from '@/assets/pda-logo.png';
+import pdaGroupPhoto from '@/assets/pda-group-photo.png';
 
 const highlightStats = [
     { label: 'Active Members', value: '350+' },
@@ -46,6 +48,8 @@ const formatDate = (dateString) => {
 
 export default function PdaHome() {
     const revealObserverRef = useRef(null);
+    const [posterDialogOpen, setPosterDialogOpen] = useState(false);
+    const [selectedPoster, setSelectedPoster] = useState(null);
 
     useEffect(() => {
         const elements = document.querySelectorAll('[data-reveal]');
@@ -81,9 +85,16 @@ export default function PdaHome() {
 
     const programs = pdaData?.programs || [];
     const events = sortByDateAsc(pdaData?.events || []);
+    const heroImageSrc = pdaData?.group_photo_url || pdaData?.hero_image_url || pdaGroupPhoto || pdaLogo;
+
+    const openPoster = (poster) => {
+        if (!poster?.src) return;
+        setSelectedPoster(poster);
+        setPosterDialogOpen(true);
+    };
 
     return (
-        <div className="min-h-screen bg-[#f7f5f0] text-[#0f1115]">
+	        <div className="min-h-screen bg-[#f7f5f0] text-[#0f1115]">
             <header className="sticky top-0 z-50 border-b border-black/10 bg-[#f7f5f0]/90 backdrop-blur">
                 <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-5 py-4">
                     <Link to="/" className="flex items-center gap-3">
@@ -124,14 +135,14 @@ export default function PdaHome() {
                                 </Link>
                             </div>
                         </div>
-                        <div className="relative" data-reveal>
-                            <div className="absolute -top-6 left-6 h-24 w-24 rounded-full bg-[#f6c347]/25 blur-2xl" />
-                            <div className="rounded-3xl border border-black/10 bg-white p-6 shadow-2xl backdrop-blur">
-                                <img src={pdaLogo} alt="PDA logo" className="h-48 w-48 rounded-2xl object-cover" />
-                                <div className="mt-6 space-y-3 text-sm text-slate-600">
-                                    <div className="flex items-center gap-2">
-                                        <Sparkles className="h-4 w-4 text-[#f6c347]" />
-                                        Mentorship circles, weekly skill labs, and peer accountability.
+		                        <div className="relative w-full md:max-w-md" data-reveal>
+		                            <div className="absolute -top-6 left-6 h-24 w-24 rounded-full bg-[#f6c347]/25 blur-2xl" />
+		                            <div className="rounded-3xl border border-black/10 bg-white p-6 shadow-2xl backdrop-blur">
+		                                <img src={heroImageSrc} alt="PDA group" className="h-64 w-full rounded-2xl object-cover" />
+		                                <div className="mt-6 space-y-3 text-sm text-slate-600">
+		                                    <div className="flex items-center gap-2">
+		                                        <Sparkles className="h-4 w-4 text-[#f6c347]" />
+		                                        Mentorship circles, weekly skill labs, and peer accountability.
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <Sparkles className="h-4 w-4 text-[#f6c347]" />
@@ -195,28 +206,41 @@ export default function PdaHome() {
                             See Persofest’26
                         </Link>
                     </div>
-                    <div className="mt-8 grid gap-6 md:grid-cols-3" data-reveal>
-                        {programs.length > 0 ? (
-                            programs.map((program) => (
-                                <div key={program.title} className="rounded-2xl border border-black/10 bg-white p-5 transition hover:-translate-y-1 hover:border-black/20">
-                                    {program.poster_url ? (
-                                        <img
-                                            src={program.poster_url}
-                                            alt={program.title}
-                                            loading="lazy"
+	                    <div className="mt-8 grid gap-6 md:grid-cols-3" data-reveal>
+	                        {programs.length > 0 ? (
+	                            programs.map((program) => (
+	                                <button
+	                                    key={program.title}
+	                                    type="button"
+	                                    onClick={() =>
+	                                        openPoster({
+	                                            src: program.poster_url,
+	                                            title: program.title,
+	                                            meta: program.tag || 'Program'
+	                                        })
+	                                    }
+	                                    className={`rounded-2xl border border-black/10 bg-white p-5 text-left transition hover:-translate-y-1 hover:border-black/20 ${
+	                                        program.poster_url ? 'cursor-pointer' : 'cursor-default'
+	                                    }`}
+	                                >
+	                                    {program.poster_url ? (
+	                                        <img
+	                                            src={program.poster_url}
+	                                            alt={program.title}
+	                                            loading="lazy"
                                             className="mb-4 h-40 w-full rounded-xl object-cover"
                                         />
                                     ) : null}
                                     <span className="inline-flex rounded-full border border-[#f6c347]/40 px-3 py-1 text-xs uppercase tracking-[0.2em] text-[#f6c347]">
                                         {program.tag || 'Program'}
-                                    </span>
-                                    <h3 className="mt-4 text-xl font-heading font-bold">{program.title}</h3>
-                                    <p className="mt-2 text-sm text-slate-600">{program.description}</p>
-                                </div>
-                            ))
-                        ) : (
-                            <div className="col-span-full rounded-2xl border border-black/10 bg-white p-6 text-center text-sm text-slate-500">
-                                Program updates are coming soon.
+	                                    </span>
+	                                    <h3 className="mt-4 text-xl font-heading font-bold">{program.title}</h3>
+	                                    <p className="mt-2 text-sm text-slate-600">{program.description}</p>
+	                                </button>
+	                            ))
+	                        ) : (
+	                            <div className="col-span-full rounded-2xl border border-black/10 bg-white p-6 text-center text-sm text-slate-500">
+	                                Program updates are coming soon.
                             </div>
                         )}
                     </div>
@@ -232,14 +256,27 @@ export default function PdaHome() {
                             View Calendar
                         </Button>
                     </div>
-                    <div className="mt-8 grid gap-6 md:grid-cols-3" data-reveal>
-                        {events.length > 0 ? (
-                            events.map((event) => (
-                                <div key={`${event.title}-${event.date}`} className="rounded-2xl border border-black/10 bg-white p-5">
-                                    {event.poster_url ? (
-                                        <img
-                                            src={event.poster_url}
-                                            alt={event.title}
+	                    <div className="mt-8 grid gap-6 md:grid-cols-3" data-reveal>
+	                        {events.length > 0 ? (
+	                            events.map((event) => (
+	                                <button
+	                                    key={`${event.title}-${event.date}`}
+	                                    type="button"
+	                                    onClick={() =>
+	                                        openPoster({
+	                                            src: event.poster_url,
+	                                            title: event.title,
+	                                            meta: `${formatDate(event.date)} · ${event.format}`
+	                                        })
+	                                    }
+	                                    className={`rounded-2xl border border-black/10 bg-white p-5 text-left ${
+	                                        event.poster_url ? 'cursor-pointer' : 'cursor-default'
+	                                    }`}
+	                                >
+	                                    {event.poster_url ? (
+	                                        <img
+	                                            src={event.poster_url}
+	                                            alt={event.title}
                                             loading="lazy"
                                             className="mb-4 h-40 w-full rounded-xl object-cover"
                                         />
@@ -247,14 +284,14 @@ export default function PdaHome() {
                                     <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-slate-500">
                                         <Calendar className="h-4 w-4 text-[#f6c347]" />
                                         {formatDate(event.date)} · {event.format}
-                                    </div>
-                                    <h3 className="mt-4 text-xl font-heading font-bold">{event.title}</h3>
-                                    <p className="mt-2 text-sm text-slate-600">{event.description}</p>
-                                </div>
-                            ))
-                        ) : (
-                            <div className="col-span-full rounded-2xl border border-black/10 bg-white p-6 text-center text-sm text-slate-500">
-                                Upcoming events will be announced soon.
+	                                    </div>
+	                                    <h3 className="mt-4 text-xl font-heading font-bold">{event.title}</h3>
+	                                    <p className="mt-2 text-sm text-slate-600">{event.description}</p>
+	                                </button>
+	                            ))
+	                        ) : (
+	                            <div className="col-span-full rounded-2xl border border-black/10 bg-white p-6 text-center text-sm text-slate-500">
+	                                Upcoming events will be announced soon.
                             </div>
                         )}
                     </div>
@@ -274,7 +311,7 @@ export default function PdaHome() {
                 </section>
             </main>
 
-            <footer className="border-t border-black/10 bg-white py-8">
+	            <footer className="border-t border-black/10 bg-white py-8">
                 <div className="mx-auto flex w-full max-w-6xl flex-col items-start gap-4 px-5 text-sm text-slate-500 md:flex-row md:items-center md:justify-between">
                     <div className="flex items-center gap-3">
                         <img src={pdaLogo} alt="PDA" className="h-8 w-8 rounded-full border border-black/10 object-cover" />
@@ -286,7 +323,27 @@ export default function PdaHome() {
                         <a href="#" className="hover:text-[#0f1115]">Contact</a>
                     </div>
                 </div>
-            </footer>
-        </div>
-    );
+	            </footer>
+
+	            <Dialog open={posterDialogOpen} onOpenChange={setPosterDialogOpen}>
+	                <DialogContent className="max-w-3xl bg-white p-0">
+	                    <DialogHeader className="px-6 pb-4 pt-6">
+	                        <DialogTitle className="text-xl font-heading font-black">{selectedPoster?.title}</DialogTitle>
+	                        {selectedPoster?.meta ? (
+	                            <p className="mt-1 text-xs uppercase tracking-[0.2em] text-slate-500">{selectedPoster.meta}</p>
+	                        ) : null}
+	                    </DialogHeader>
+	                    {selectedPoster?.src ? (
+	                        <div className="px-6 pb-6">
+	                            <img
+	                                src={selectedPoster.src}
+	                                alt={selectedPoster.title || 'Poster'}
+	                                className="max-h-[70vh] w-full rounded-2xl object-contain"
+	                            />
+	                        </div>
+	                    ) : null}
+	                </DialogContent>
+	            </Dialog>
+	        </div>
+	    );
 }
