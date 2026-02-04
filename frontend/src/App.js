@@ -5,16 +5,17 @@ import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 
 // Pages
-import PersofestHome from "@/pages/PersofestHome";
+import PersofestHome from "@/pages/persofest/PersofestHome";
 import PdaHome from "@/pages/PdaHome";
-import LoginPage from "@/pages/LoginPage";
-import RegisterPage from "@/pages/RegisterPage";
-import ParticipantDashboard from "@/pages/ParticipantDashboard";
-import AdminDashboard from "@/pages/admin/AdminDashboard";
-import AdminRounds from "@/pages/admin/AdminRounds";
-import AdminParticipants from "@/pages/admin/AdminParticipants";
-import AdminScoring from "@/pages/admin/AdminScoring";
-import AdminLeaderboard from "@/pages/admin/AdminLeaderboard";
+import PdaAdmin from "@/pages/PdaAdmin";
+import LoginPage from "@/pages/persofest/LoginPage";
+import RegisterPage from "@/pages/persofest/RegisterPage";
+import ParticipantDashboard from "@/pages/persofest/ParticipantDashboard";
+import AdminDashboard from "@/pages/persofest/admin/AdminDashboard";
+import AdminRounds from "@/pages/persofest/admin/AdminRounds";
+import AdminParticipants from "@/pages/persofest/admin/AdminParticipants";
+import AdminScoring from "@/pages/persofest/admin/AdminScoring";
+import AdminLeaderboard from "@/pages/persofest/admin/AdminLeaderboard";
 
 // Protected Route Components
 const ProtectedRoute = ({ children, adminOnly = false }) => {
@@ -66,6 +67,7 @@ function AppRoutes() {
         <Routes>
             {/* Public Routes */}
             <Route path="/" element={<PdaHome />} />
+            <Route path="/pda-admin" element={<PdaAdmin />} />
             <Route path="/persofest" element={<PersofestHome />} />
             <Route path="/login" element={
                 <PublicRoute>

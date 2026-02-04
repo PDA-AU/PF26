@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, UploadFile, File, Query
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, UploadFile, File, Query, Header
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -15,15 +15,18 @@ import io
 from openpyxl import Workbook
 from fastapi.responses import StreamingResponse
 import csv
+import boto3
 
 from database import engine, get_db, Base
-from models import User, Round, Score, SystemConfig, UserRole, RoundState, ParticipantStatus, Department, YearOfStudy, Gender, RoundMode
+from models import User, Round, Score, SystemConfig, Program, Event, UserRole, RoundState, ParticipantStatus, Department, YearOfStudy, Gender, RoundMode
 from schemas import (
     UserRegister, UserLogin, TokenResponse, RefreshTokenRequest, UserResponse, UserUpdate,
     ParticipantListResponse, RoundCreate, RoundUpdate, RoundResponse, RoundPublicResponse,
-    ScoreEntry, ScoreUpdate, ScoreResponse, ParticipantRoundStatus, LeaderboardEntry,
+    ScoreEntry, ScoreUpdate, ScoreResponse, ParticipantRoundStatus, AdminParticipantRoundStat, LeaderboardEntry,
     DashboardStats, TopReferrer, DepartmentEnum, YearOfStudyEnum, GenderEnum, 
-    ParticipantStatusEnum, RoundStateEnum
+    ParticipantStatusEnum, RoundStateEnum,
+    ProgramCreate, ProgramUpdate, ProgramResponse,
+    EventCreate, EventUpdate, EventResponse
 )
 from auth import (
     verify_password, get_password_hash, create_access_token, create_refresh_token,
@@ -40,6 +43,18 @@ Base.metadata.create_all(bind=engine)
 UPLOAD_DIR = Path(os.environ.get('UPLOAD_DIR', '/app/backend/uploads'))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
+S3_BUCKET_NAME = os.environ.get("S3_BUCKET_NAME")
+AWS_REGION = os.environ.get("AWS_REGION")
+AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY")
+
+S3_CLIENT = boto3.client(
+    "s3",
+    region_name=AWS_REGION,
+    aws_access_key_id=AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=AWS_SECRET_ACCESS_KEY
+)
+
 app = FastAPI(title="Persofest'26 API", version="1.0.0")
 api_router = APIRouter(prefix="/api")
 
@@ -49,6 +64,14 @@ app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+PDA_ADMIN_PASSWORD = "pda@1984"
+
+
+def require_pda_admin(x_pda_admin: str = Header(None, alias="X-PDA-ADMIN")):
+    if x_pda_admin != PDA_ADMIN_PASSWORD:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid PDA admin credentials")
+    return True
 
 
 def _ensure_round_description_pdf_column():
@@ -68,6 +91,38 @@ def _ensure_round_description_pdf_column():
                 logger.info("Added rounds.description_pdf column")
     except Exception as exc:
         logger.warning(f"Could not ensure description_pdf column: {exc}")
+
+
+def _build_s3_url(key: str) -> str:
+    if not S3_BUCKET_NAME or not AWS_REGION:
+        raise RuntimeError("S3 configuration missing")
+    return f"https://{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{key}"
+
+
+def _upload_to_s3(file: UploadFile, key_prefix: str, allowed_types: Optional[List[str]] = None) -> str:
+    if not S3_BUCKET_NAME or not AWS_REGION:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="S3 not configured")
+    if not file.content_type:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing file content type")
+    if allowed_types and file.content_type not in allowed_types:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file type")
+
+    extension = Path(file.filename or "").suffix.lower()
+    unique_name = f"{uuid.uuid4().hex}{extension}"
+    key = f"{key_prefix.rstrip('/')}/{unique_name}"
+
+    try:
+        S3_CLIENT.upload_fileobj(
+            file.file,
+            S3_BUCKET_NAME,
+            key,
+            ExtraArgs={"ContentType": file.content_type}
+        )
+    except Exception as exc:
+        logger.error(f"S3 upload failed: {exc}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Upload failed")
+
+    return _build_s3_url(key)
 
 
 # ==================== STARTUP ====================
@@ -240,26 +295,15 @@ async def upload_profile_picture(
     # Validate file type
     if not file.content_type or not file.content_type.startswith("image/png"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only PNG images are allowed")
-    
+
     # Validate file size (max 2MB)
     contents = await file.read()
     if len(contents) > 2 * 1024 * 1024:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File size exceeds 2MB limit")
-    
-    # Save file
-    filename = f"{current_user.id}_{uuid.uuid4().hex}.png"
-    file_path = UPLOAD_DIR / filename
-    
-    with open(file_path, "wb") as f:
-        f.write(contents)
-    
-    # Delete old profile picture
-    if current_user.profile_picture:
-        old_path = UPLOAD_DIR / current_user.profile_picture.split("/")[-1]
-        if old_path.exists():
-            old_path.unlink()
-    
-    current_user.profile_picture = f"/uploads/{filename}"
+    file.file = io.BytesIO(contents)
+
+    s3_url = _upload_to_s3(file, "persofest/profiles", allowed_types=["image/png"])
+    current_user.profile_picture = s3_url
     db.commit()
     db.refresh(current_user)
     
@@ -322,6 +366,192 @@ async def get_top_referrers(db: Session = Depends(get_db)):
 async def get_registration_status(db: Session = Depends(get_db)):
     config = db.query(SystemConfig).filter(SystemConfig.key == "registration_open").first()
     return {"registration_open": config.value == "true" if config else True}
+
+
+# ==================== PDA PUBLIC ROUTES ====================
+@api_router.get("/pda/programs", response_model=List[ProgramResponse])
+async def get_pda_programs(db: Session = Depends(get_db)):
+    programs = db.query(Program).order_by(Program.created_at.desc()).all()
+    return [ProgramResponse.model_validate(p) for p in programs]
+
+
+@api_router.get("/pda/events", response_model=List[EventResponse])
+async def get_pda_events(db: Session = Depends(get_db)):
+    events = db.query(Event).order_by(Event.start_date.is_(None), Event.start_date.asc(), Event.created_at.desc()).all()
+    return [EventResponse.model_validate(e) for e in events]
+
+
+@api_router.get("/pda/featured-event", response_model=EventResponse)
+async def get_featured_event(db: Session = Depends(get_db)):
+    event = db.query(Event).filter(Event.is_featured == True).order_by(Event.updated_at.desc()).first()
+    if not event:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No featured event")
+    return EventResponse.model_validate(event)
+
+
+# ==================== PDA ADMIN ROUTES ====================
+@api_router.post("/pda-admin/programs", response_model=ProgramResponse)
+async def create_pda_program(
+    program_data: ProgramCreate,
+    _: bool = Depends(require_pda_admin),
+    db: Session = Depends(get_db)
+):
+    new_program = Program(
+        title=program_data.title,
+        description=program_data.description,
+        tag=program_data.tag,
+        poster_url=program_data.poster_url
+    )
+    db.add(new_program)
+    db.commit()
+    db.refresh(new_program)
+    return ProgramResponse.model_validate(new_program)
+
+
+@api_router.put("/pda-admin/programs/{program_id}", response_model=ProgramResponse)
+async def update_pda_program(
+    program_id: int,
+    program_data: ProgramUpdate,
+    _: bool = Depends(require_pda_admin),
+    db: Session = Depends(get_db)
+):
+    program = db.query(Program).filter(Program.id == program_id).first()
+    if not program:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Program not found")
+
+    if program_data.title is not None:
+        program.title = program_data.title
+    if program_data.description is not None:
+        program.description = program_data.description
+    if program_data.tag is not None:
+        program.tag = program_data.tag
+    if program_data.poster_url is not None:
+        program.poster_url = program_data.poster_url
+
+    db.commit()
+    db.refresh(program)
+    return ProgramResponse.model_validate(program)
+
+
+@api_router.delete("/pda-admin/programs/{program_id}")
+async def delete_pda_program(
+    program_id: int,
+    _: bool = Depends(require_pda_admin),
+    db: Session = Depends(get_db)
+):
+    program = db.query(Program).filter(Program.id == program_id).first()
+    if not program:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Program not found")
+    db.delete(program)
+    db.commit()
+    return {"message": "Program deleted successfully"}
+
+
+@api_router.post("/pda-admin/events", response_model=EventResponse)
+async def create_pda_event(
+    event_data: EventCreate,
+    _: bool = Depends(require_pda_admin),
+    db: Session = Depends(get_db)
+):
+    if event_data.is_featured:
+        db.query(Event).filter(Event.is_featured == True).update({"is_featured": False}, synchronize_session=False)
+
+    new_event = Event(
+        title=event_data.title,
+        start_date=event_data.start_date,
+        end_date=event_data.end_date,
+        format=event_data.format,
+        description=event_data.description,
+        poster_url=event_data.poster_url,
+        hero_caption=event_data.hero_caption,
+        hero_url=event_data.hero_url,
+        is_featured=event_data.is_featured
+    )
+    db.add(new_event)
+    db.commit()
+    db.refresh(new_event)
+    return EventResponse.model_validate(new_event)
+
+
+@api_router.put("/pda-admin/events/{event_id}", response_model=EventResponse)
+async def update_pda_event(
+    event_id: int,
+    event_data: EventUpdate,
+    _: bool = Depends(require_pda_admin),
+    db: Session = Depends(get_db)
+):
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+
+    if event_data.is_featured is True:
+        db.query(Event).filter(Event.is_featured == True, Event.id != event_id).update({"is_featured": False}, synchronize_session=False)
+
+    if event_data.title is not None:
+        event.title = event_data.title
+    if event_data.start_date is not None:
+        event.start_date = event_data.start_date
+    if event_data.end_date is not None:
+        event.end_date = event_data.end_date
+    if event_data.format is not None:
+        event.format = event_data.format
+    if event_data.description is not None:
+        event.description = event_data.description
+    if event_data.poster_url is not None:
+        event.poster_url = event_data.poster_url
+    if event_data.hero_caption is not None:
+        event.hero_caption = event_data.hero_caption
+    if event_data.hero_url is not None:
+        event.hero_url = event_data.hero_url
+    if event_data.is_featured is not None:
+        event.is_featured = event_data.is_featured
+
+    db.commit()
+    db.refresh(event)
+    return EventResponse.model_validate(event)
+
+
+@api_router.post("/pda-admin/events/{event_id}/feature", response_model=EventResponse)
+async def feature_pda_event(
+    event_id: int,
+    _: bool = Depends(require_pda_admin),
+    db: Session = Depends(get_db)
+):
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+
+    db.query(Event).filter(Event.is_featured == True, Event.id != event_id).update({"is_featured": False}, synchronize_session=False)
+    event.is_featured = True
+    db.commit()
+    db.refresh(event)
+    return EventResponse.model_validate(event)
+
+
+@api_router.delete("/pda-admin/events/{event_id}")
+async def delete_pda_event(
+    event_id: int,
+    _: bool = Depends(require_pda_admin),
+    db: Session = Depends(get_db)
+):
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+    db.delete(event)
+    db.commit()
+    return {"message": "Event deleted successfully"}
+
+
+@api_router.post("/pda-admin/posters")
+async def upload_pda_poster(
+    file: UploadFile = File(...),
+    _: bool = Depends(require_pda_admin)
+):
+    if not file.filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing filename")
+    allowed_types = ["image/png", "image/jpeg", "image/webp"]
+    url = _upload_to_s3(file, "posters", allowed_types=allowed_types)
+    return {"url": url}
 
 
 # ==================== ADMIN ROUTES ====================
@@ -429,6 +659,50 @@ async def update_participant_status(
     return {"message": "Status updated successfully"}
 
 
+@api_router.get("/admin/participants/{participant_id}/rounds", response_model=List[AdminParticipantRoundStat])
+async def get_participant_round_stats(
+    participant_id: int,
+    admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    participant = db.query(User).filter(User.id == participant_id, User.role == UserRole.PARTICIPANT).first()
+    if not participant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Participant not found")
+
+    rounds = db.query(Round).order_by(Round.id).all()
+    stats = []
+    for round in rounds:
+        score = db.query(Score).filter(Score.participant_id == participant_id, Score.round_id == round.id).first()
+        if score:
+            if not score.is_present:
+                status_label = "Absent"
+            elif participant.status == ParticipantStatus.ELIMINATED:
+                status_label = "Eliminated"
+            else:
+                status_label = "Active"
+            is_present = score.is_present
+            total_score = score.total_score
+            normalized_score = score.normalized_score
+        else:
+            status_label = "Pending"
+            is_present = None
+            total_score = None
+            normalized_score = None
+
+        stats.append(AdminParticipantRoundStat(
+            round_id=round.id,
+            round_no=round.round_no,
+            round_name=round.name,
+            round_state=RoundStateEnum[round.state.name],
+            status=status_label,
+            is_present=is_present,
+            total_score=total_score,
+            normalized_score=normalized_score
+        ))
+
+    return stats
+
+
 # ==================== ADMIN ROUND MANAGEMENT ====================
 @api_router.get("/admin/rounds", response_model=List[RoundResponse])
 async def get_all_rounds(admin: User = Depends(get_current_admin), db: Session = Depends(get_db)):
@@ -523,18 +797,8 @@ async def upload_round_description_pdf(
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only PDF files are allowed")
 
-    filename = f"{round.round_no}_{uuid.uuid4().hex}.pdf"
-    file_path = UPLOAD_DIR / filename
-
-    if round.description_pdf:
-        old_path = UPLOAD_DIR / round.description_pdf
-        if old_path.exists():
-            old_path.unlink(missing_ok=True)
-
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
-    round.description_pdf = filename
+    s3_url = _upload_to_s3(file, "persofest/rounds", allowed_types=["application/pdf"])
+    round.description_pdf = s3_url
     db.commit()
     db.refresh(round)
 
@@ -910,7 +1174,8 @@ async def get_leaderboard(
             "year_of_study": p.year_of_study,
             "cumulative_score": cumulative,
             "rounds_participated": rounds_participated,
-            "status": p.status
+            "status": p.status,
+            "profile_picture": p.profile_picture
         })
     
     # Sort by cumulative score
@@ -928,7 +1193,8 @@ async def get_leaderboard(
             year_of_study=YearOfStudyEnum[entry["year_of_study"].name],
             cumulative_score=entry["cumulative_score"],
             rounds_participated=entry["rounds_participated"],
-            status=ParticipantStatusEnum[entry["status"].name]
+            status=ParticipantStatusEnum[entry["status"].name],
+            profile_picture=entry.get("profile_picture")
         ))
     
     return result

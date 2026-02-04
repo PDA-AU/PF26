@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, date
 from enum import Enum
 import re
 
@@ -127,6 +127,7 @@ class ParticipantListResponse(BaseModel):
     register_number: str
     name: str
     email: str
+    profile_picture: Optional[str] = None
     department: DepartmentEnum
     year_of_study: YearOfStudyEnum
     gender: GenderEnum
@@ -234,6 +235,17 @@ class ParticipantRoundStatus(BaseModel):
     is_present: Optional[bool] = None
 
 
+class AdminParticipantRoundStat(BaseModel):
+    round_id: int
+    round_no: str
+    round_name: str
+    round_state: RoundStateEnum
+    status: str
+    is_present: Optional[bool] = None
+    total_score: Optional[float] = None
+    normalized_score: Optional[float] = None
+
+
 # Leaderboard
 class LeaderboardEntry(BaseModel):
     rank: int
@@ -245,6 +257,7 @@ class LeaderboardEntry(BaseModel):
     cumulative_score: float
     rounds_participated: int
     status: ParticipantStatusEnum
+    profile_picture: Optional[str] = None
 
 
 # Dashboard Stats
@@ -258,6 +271,74 @@ class DashboardStats(BaseModel):
     gender_distribution: Dict[str, int]
     department_distribution: Dict[str, int]
     year_distribution: Dict[str, int]
+
+
+# PDA Home Content
+class ProgramCreate(BaseModel):
+    title: str = Field(..., min_length=2)
+    description: Optional[str] = None
+    tag: Optional[str] = None
+    poster_url: Optional[str] = None
+
+
+class ProgramUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    tag: Optional[str] = None
+    poster_url: Optional[str] = None
+
+
+class ProgramResponse(BaseModel):
+    id: int
+    title: str
+    description: Optional[str]
+    tag: Optional[str]
+    poster_url: Optional[str]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class EventCreate(BaseModel):
+    title: str = Field(..., min_length=2)
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    format: Optional[str] = None
+    description: Optional[str] = None
+    poster_url: Optional[str] = None
+    hero_caption: Optional[str] = None
+    hero_url: Optional[str] = None
+    is_featured: bool = False
+
+
+class EventUpdate(BaseModel):
+    title: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    format: Optional[str] = None
+    description: Optional[str] = None
+    poster_url: Optional[str] = None
+    hero_caption: Optional[str] = None
+    hero_url: Optional[str] = None
+    is_featured: Optional[bool] = None
+
+
+class EventResponse(BaseModel):
+    id: int
+    title: str
+    start_date: Optional[date]
+    end_date: Optional[date]
+    format: Optional[str]
+    description: Optional[str]
+    poster_url: Optional[str]
+    hero_caption: Optional[str]
+    hero_url: Optional[str]
+    is_featured: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 # Top Referrers

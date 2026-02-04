@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, Enum as SQLEnum, ForeignKey, Text, JSON
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, Date, Enum as SQLEnum, ForeignKey, Text, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -121,4 +121,33 @@ class SystemConfig(Base):
     id = Column(Integer, primary_key=True, index=True)
     key = Column(String(100), unique=True, nullable=False)
     value = Column(String(500), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class Program(Base):
+    __tablename__ = "programs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    tag = Column(String(100), nullable=True)
+    poster_url = Column(String(500), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class Event(Base):
+    __tablename__ = "events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(255), nullable=False)
+    start_date = Column(Date, nullable=True)
+    end_date = Column(Date, nullable=True)
+    format = Column(String(150), nullable=True)
+    description = Column(Text, nullable=True)
+    poster_url = Column(String(500), nullable=True)
+    hero_caption = Column(Text, nullable=True)
+    hero_url = Column(String(500), nullable=True)
+    is_featured = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

@@ -52,6 +52,7 @@ export default function PersofestHome() {
 
     const getRoundPdfUrl = (round) => {
         if (!round?.description_pdf) return null;
+        if (round.description_pdf.startsWith('http')) return round.description_pdf;
         return `${process.env.REACT_APP_BACKEND_URL}/uploads/${round.description_pdf}`;
     };
 

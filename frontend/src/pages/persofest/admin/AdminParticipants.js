@@ -8,6 +8,7 @@ import {
     Trophy, UserCheck, UserX, Download
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -35,6 +36,10 @@ export default function AdminParticipants() {
     const { logout, getAuthHeader } = useAuth();
     const [participants, setParticipants] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [selectedParticipant, setSelectedParticipant] = useState(null);
+    const [roundStats, setRoundStats] = useState([]);
+    const [roundStatsLoading, setRoundStatsLoading] = useState(false);
+    const [roundStatsError, setRoundStatsError] = useState('');
     const [filters, setFilters] = useState({
         department: '',
         year: '',
@@ -122,6 +127,29 @@ export default function AdminParticipants() {
     const handleLogout = () => {
         logout();
         navigate('/');
+    };
+
+    const getProfileImageUrl = (participant) => {
+        if (!participant?.profile_picture) return null;
+        if (participant.profile_picture.startsWith('http')) return participant.profile_picture;
+        return `${process.env.REACT_APP_BACKEND_URL}${participant.profile_picture}`;
+    };
+
+    const openParticipantModal = async (participant) => {
+        setSelectedParticipant(participant);
+        setRoundStats([]);
+        setRoundStatsError('');
+        setRoundStatsLoading(true);
+        try {
+            const response = await axios.get(`${API}/admin/participants/${participant.id}/rounds`, {
+                headers: getAuthHeader()
+            });
+            setRoundStats(response.data || []);
+        } catch (error) {
+            setRoundStatsError('Failed to load round stats');
+        } finally {
+            setRoundStatsLoading(false);
+        }
     };
 
     return (
@@ -302,7 +330,12 @@ export default function AdminParticipants() {
                             </thead>
                             <tbody>
                                 {participants.map(participant => (
-                                    <tr key={participant.id} data-testid={`participant-row-${participant.register_number}`}>
+                                    <tr
+                                        key={participant.id}
+                                        data-testid={`participant-row-${participant.register_number}`}
+                                        className="cursor-pointer hover:bg-secondary"
+                                        onClick={() => openParticipantModal(participant)}
+                                    >
                                         <td className="font-mono font-bold">{participant.register_number}</td>
                                         <td className="font-medium">{participant.name}</td>
                                         <td className="text-sm">{participant.email}</td>
@@ -326,7 +359,10 @@ export default function AdminParticipants() {
                                                 <Button
                                                     size="sm"
                                                     variant="outline"
-                                                    onClick={() => handleStatusChange(participant.id, 'Eliminated')}
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        handleStatusChange(participant.id, 'Eliminated');
+                                                    }}
                                                     className="border-2 border-black text-red-500"
                                                     data-testid={`eliminate-${participant.register_number}`}
                                                 >
@@ -336,7 +372,10 @@ export default function AdminParticipants() {
                                                 <Button
                                                     size="sm"
                                                     variant="outline"
-                                                    onClick={() => handleStatusChange(participant.id, 'Active')}
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        handleStatusChange(participant.id, 'Active');
+                                                    }}
                                                     className="border-2 border-black text-green-500"
                                                     data-testid={`activate-${participant.register_number}`}
                                                 >
@@ -351,6 +390,103 @@ export default function AdminParticipants() {
                     </div>
                 )}
             </main>
+
+            <Dialog open={Boolean(selectedParticipant)} onOpenChange={() => setSelectedParticipant(null)}>
+                <DialogContent className="max-w-3xl bg-white">
+                    {selectedParticipant ? (
+                        <>
+                            <DialogHeader>
+                                <DialogTitle className="text-2xl font-heading font-black">Participant Details</DialogTitle>
+                                <p className="text-sm text-gray-600">Profile + round stats snapshot.</p>
+                            </DialogHeader>
+                            <div className="grid gap-6 md:grid-cols-[0.9fr_1.1fr]">
+                                <div className="rounded-2xl border-2 border-black bg-[#fff3cc] p-5">
+                                    <div className="flex flex-col items-center text-center gap-3">
+                                        {selectedParticipant.profile_picture ? (
+                                            <img
+                                                src={getProfileImageUrl(selectedParticipant)}
+                                                alt={selectedParticipant.name}
+                                                className="h-28 w-28 rounded-full border-4 border-black object-cover"
+                                            />
+                                        ) : (
+                                            <div className="h-28 w-28 rounded-full border-4 border-black bg-white text-3xl font-bold flex items-center justify-center">
+                                                {selectedParticipant.name?.charAt(0)?.toUpperCase() || '?'}
+                                            </div>
+                                        )}
+                                        <div>
+                                            <h3 className="font-heading font-bold text-xl">{selectedParticipant.name}</h3>
+                                            <p className="text-sm text-gray-700">{selectedParticipant.register_number}</p>
+                                            <p className="text-sm text-gray-700">{selectedParticipant.email}</p>
+                                        </div>
+                                        <div className="w-full text-left space-y-2 text-sm">
+                                            <div className="flex justify-between">
+                                                <span className="font-semibold">Department</span>
+                                                <span>{DEPARTMENTS.find(d => d.value === selectedParticipant.department)?.label || selectedParticipant.department}</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="font-semibold">Year</span>
+                                                <span>{selectedParticipant.year_of_study}</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="font-semibold">Gender</span>
+                                                <span>{selectedParticipant.gender}</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="font-semibold">Status</span>
+                                                <span>{selectedParticipant.status}</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="font-semibold">Referrals</span>
+                                                <span>{selectedParticipant.referral_count}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="rounded-2xl border-2 border-black bg-white p-5">
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h4 className="font-heading font-bold text-lg">Round Stats</h4>
+                                        <span className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">
+                                            {roundStats.length} rounds
+                                        </span>
+                                    </div>
+                                    {roundStatsLoading ? (
+                                        <div className="text-sm text-gray-600">Loading round stats...</div>
+                                    ) : roundStatsError ? (
+                                        <div className="text-sm text-red-600">{roundStatsError}</div>
+                                    ) : roundStats.length === 0 ? (
+                                        <div className="text-sm text-gray-600">No rounds yet.</div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            {roundStats.map((round) => (
+                                                <details key={round.round_id} className="rounded-xl border border-black/10 bg-[#fff8e1] px-4 py-3">
+                                                    <summary className="flex cursor-pointer list-none items-center justify-between">
+                                                        <div>
+                                                            <p className="text-xs uppercase tracking-[0.2em] text-gray-500">
+                                                                {round.round_no} · {round.round_state}
+                                                            </p>
+                                                            <p className="font-semibold">{round.round_name}</p>
+                                                        </div>
+                                                        <span className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-700">
+                                                            {round.status}
+                                                        </span>
+                                                    </summary>
+                                                    <div className="mt-3 grid grid-cols-2 gap-2 text-sm text-gray-700">
+                                                        <div>Present: {round.is_present === null ? '—' : round.is_present ? 'Yes' : 'No'}</div>
+                                                        <div>Score: {round.total_score ?? '—'}</div>
+                                                        <div>Normalized: {round.normalized_score ?? '—'}</div>
+                                                        <div></div>
+                                                    </div>
+                                                </details>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </>
+                    ) : null}
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

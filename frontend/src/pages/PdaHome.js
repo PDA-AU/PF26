@@ -3,9 +3,11 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, Calendar, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import pdaData from '@/data/pda-content.json';
+import axios from 'axios';
 import pdaLogo from '@/assets/pda-logo.png';
 import pdaGroupPhoto from '@/assets/pda-group-photo.png';
+
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 const highlightStats = [
     { label: 'Active Members', value: '350+' },
@@ -31,25 +33,39 @@ const values = [
 
 const sortByDateAsc = (items) => {
     return [...items].sort((a, b) => {
-        const aDate = a.date ? new Date(a.date).getTime() : 0;
-        const bDate = b.date ? new Date(b.date).getTime() : 0;
+        const aDate = a.start_date ? new Date(a.start_date).getTime() : Number.MAX_SAFE_INTEGER;
+        const bDate = b.start_date ? new Date(b.start_date).getTime() : Number.MAX_SAFE_INTEGER;
         return aDate - bDate;
     });
 };
 
-const formatDate = (dateString) => {
-    if (!dateString) return 'TBA';
-    return new Date(dateString).toLocaleDateString('en-IN', {
+const formatDate = (value) => {
+    if (!value) return 'TBA';
+    const date = value instanceof Date ? value : new Date(value);
+    return date.toLocaleDateString('en-IN', {
         day: 'numeric',
         month: 'short',
         year: 'numeric'
     });
 };
 
+const formatDateRange = (event) => {
+    if (!event?.start_date) return 'TBA';
+    const start = new Date(event.start_date);
+    const end = event.end_date ? new Date(event.end_date) : null;
+    if (end && start.toDateString() !== end.toDateString()) {
+        return `${formatDate(start)} - ${formatDate(end)}`;
+    }
+    return formatDate(start);
+};
+
 export default function PdaHome() {
     const revealObserverRef = useRef(null);
     const [posterDialogOpen, setPosterDialogOpen] = useState(false);
     const [selectedPoster, setSelectedPoster] = useState(null);
+    const [programs, setPrograms] = useState([]);
+    const [events, setEvents] = useState([]);
+    const [featuredEvent, setFeaturedEvent] = useState(null);
 
     useEffect(() => {
         const elements = document.querySelectorAll('[data-reveal]');
@@ -81,11 +97,29 @@ export default function PdaHome() {
                 revealObserverRef.current.disconnect();
             }
         };
+    }, [programs, events, featuredEvent]);
+
+    useEffect(() => {
+        const fetchPdaContent = async () => {
+            try {
+                const [programsRes, eventsRes] = await Promise.all([
+                    axios.get(`${API}/pda/programs`),
+                    axios.get(`${API}/pda/events`)
+                ]);
+                const programData = programsRes.data || [];
+                const eventData = eventsRes.data || [];
+                setPrograms(programData);
+                setEvents(sortByDateAsc(eventData));
+                setFeaturedEvent(eventData.find(event => event.is_featured) || null);
+            } catch (error) {
+                console.error('Failed to load PDA content:', error);
+            }
+        };
+
+        fetchPdaContent();
     }, []);
 
-    const programs = pdaData?.programs || [];
-    const events = sortByDateAsc(pdaData?.events || []);
-    const heroImageSrc = pdaData?.group_photo_url || pdaData?.hero_image_url || pdaGroupPhoto || pdaLogo;
+    const heroImageSrc = pdaGroupPhoto || pdaLogo;
 
     const openPoster = (poster) => {
         if (!poster?.src) return;
@@ -153,6 +187,57 @@ export default function PdaHome() {
                         </div>
                     </div>
                 </section>
+
+                {featuredEvent ? (
+                    <section className="mx-auto w-full max-w-6xl px-5 pb-8">
+                        <div className="grid gap-6 rounded-3xl border border-black/10 bg-gradient-to-r from-[#fff1c7] via-[#fff8e8] to-white p-6 md:grid-cols-[1.2fr_0.8fr]" data-reveal>
+                            <div>
+                                <p className="text-xs uppercase tracking-[0.4em] text-[#b48900]">Current Event</p>
+                                <h2 className="mt-3 text-3xl font-heading font-black text-[#0f1115]">
+                                    {featuredEvent.title}
+                                </h2>
+                                <p className="mt-4 text-sm text-slate-600 md:text-base">
+                                    {featuredEvent.hero_caption || featuredEvent.description || 'Event details coming soon.'}
+                                </p>
+                                <div className="mt-5 flex flex-wrap items-center gap-3 text-xs uppercase tracking-[0.2em] text-slate-500">
+                                    <span className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1">
+                                        <Calendar className="h-4 w-4 text-[#f6c347]" />
+                                        {formatDateRange(featuredEvent)}
+                                    </span>
+                                    {featuredEvent.format ? (
+                                        <span className="inline-flex items-center rounded-full border border-black/10 bg-white px-3 py-1">
+                                            {featuredEvent.format}
+                                        </span>
+                                    ) : null}
+                                </div>
+                                {featuredEvent.hero_url ? (
+                                    <a
+                                        href={featuredEvent.hero_url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="mt-6 inline-flex items-center gap-2 rounded-md bg-[#0f1115] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#1f2330]"
+                                    >
+                                        Explore Event
+                                        <ArrowRight className="h-4 w-4" />
+                                    </a>
+                                ) : null}
+                            </div>
+                            <div className="flex items-center justify-center">
+                                {featuredEvent.poster_url ? (
+                                    <img
+                                        src={featuredEvent.poster_url}
+                                        alt={featuredEvent.title}
+                                        className="h-56 w-full rounded-2xl border border-black/10 object-cover md:h-full"
+                                    />
+                                ) : (
+                                    <div className="flex h-56 w-full items-center justify-center rounded-2xl border border-dashed border-black/20 bg-white text-sm text-slate-500">
+                                        Poster coming soon
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </section>
+                ) : null}
 
                 <section className="mx-auto w-full max-w-6xl px-5 py-14" data-reveal>
                     <div className="grid gap-6 md:grid-cols-4">
@@ -262,16 +347,16 @@ export default function PdaHome() {
 	                                <button
 	                                    key={`${event.title}-${event.date}`}
 	                                    type="button"
-	                                    onClick={() =>
-	                                        openPoster({
-	                                            src: event.poster_url,
-	                                            title: event.title,
-	                                            meta: `${formatDate(event.date)} · ${event.format}`
-	                                        })
-	                                    }
-	                                    className={`rounded-2xl border border-black/10 bg-white p-5 text-left ${
-	                                        event.poster_url ? 'cursor-pointer' : 'cursor-default'
-	                                    }`}
+                                    onClick={() =>
+                                        openPoster({
+                                            src: event.poster_url,
+                                            title: event.title,
+                                            meta: `${formatDateRange(event)}${event.format ? ` · ${event.format}` : ''}`
+                                        })
+                                    }
+                                    className={`rounded-2xl border border-black/10 bg-white p-5 text-left ${
+                                        event.poster_url ? 'cursor-pointer' : 'cursor-default'
+                                    }`}
 	                                >
 	                                    {event.poster_url ? (
 	                                        <img
@@ -283,8 +368,8 @@ export default function PdaHome() {
                                     ) : null}
                                     <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-slate-500">
                                         <Calendar className="h-4 w-4 text-[#f6c347]" />
-                                        {formatDate(event.date)} · {event.format}
-	                                    </div>
+                                        {formatDateRange(event)}{event.format ? ` · ${event.format}` : ''}
+                                    </div>
 	                                    <h3 className="mt-4 text-xl font-heading font-bold">{event.title}</h3>
 	                                    <p className="mt-2 text-sm text-slate-600">{event.description}</p>
 	                                </button>

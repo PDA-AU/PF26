@@ -116,6 +116,12 @@ export default function ParticipantDashboard() {
         toast.success('Logged out successfully');
     };
 
+    const getProfileImageUrl = () => {
+        if (!user.profile_picture) return undefined;
+        if (user.profile_picture.startsWith('http')) return user.profile_picture;
+        return `${process.env.REACT_APP_BACKEND_URL}${user.profile_picture}`;
+    };
+
     const getStatusIcon = (status) => {
         switch (status) {
             case 'Active':
@@ -201,7 +207,7 @@ export default function ParticipantDashboard() {
                             <div className="text-center mb-6">
                                 <div className="relative inline-block">
                                     <Avatar className="w-24 h-24 border-4 border-black">
-                                        <AvatarImage src={user.profile_picture ? `${process.env.REACT_APP_BACKEND_URL}${user.profile_picture}` : undefined} />
+                                        <AvatarImage src={getProfileImageUrl()} />
                                         <AvatarFallback className="bg-primary text-white text-2xl font-bold">
                                             {user.name.charAt(0).toUpperCase()}
                                         </AvatarFallback>
