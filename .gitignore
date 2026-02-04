@@ -93,3 +93,5 @@ android-sdk/ -e
 # Environment files
 *.env
 *.env.*
+.emergent
+.pytest_cache

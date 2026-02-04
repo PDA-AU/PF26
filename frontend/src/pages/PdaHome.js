@@ -128,18 +128,22 @@ export default function PdaHome() {
     };
 
     return (
-	        <div className="min-h-screen bg-[#f7f5f0] text-[#0f1115]">
-            <header className="sticky top-0 z-50 border-b border-black/10 bg-[#f7f5f0]/90 backdrop-blur">
+        <div className="min-h-screen bg-[#f3efe6] text-[#11131a]">
+            <header className="sticky top-0 z-50 border-b border-black/10 bg-[#f3efe6]/90 backdrop-blur">
                 <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-5 py-4">
                     <Link to="/" className="flex items-center gap-3">
                         <img src={pdaLogo} alt="Personality Development Association" className="h-11 w-11 rounded-full border border-black/10 object-cover" />
-                        <div>
-                            <p className="text-sm uppercase tracking-[0.3em] text-slate-500">Personality Development</p>
-                            <p className="text-lg font-heading font-black">Association</p>
+                        <div className="leading-none">
+                            <p className="text-sm font-heading font-black uppercase tracking-[0.22em] text-[#b8890b] sm:text-base md:text-lg">
+                                Personality Development
+                            </p>
+                            <p className="text-sm font-heading font-black uppercase tracking-[0.22em] text-[#b8890b] sm:text-base md:text-lg">
+                                Association
+                            </p>
                         </div>
                     </Link>
                     <div className="flex items-center gap-3">
-                        <Link to="/persofest" className="hidden text-sm font-semibold text-slate-600 transition hover:text-[#0f1115] md:block">
+                        <Link to="/persofest" className="hidden text-sm font-semibold text-slate-700 transition hover:text-[#0f1115] md:block">
                             Persofest’26
                         </Link>
                         <Button className="bg-[#f6c347] text-black shadow-none hover:bg-[#ffd16b]">Join PDA</Button>
@@ -149,39 +153,59 @@ export default function PdaHome() {
 
             <main>
                 <section className="relative overflow-hidden">
-                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,209,107,0.18),_transparent_60%)]" />
-                    <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-10 px-5 py-16 md:flex-row md:items-center md:py-24">
+                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(246,195,71,0.28),_transparent_55%)]" />
+                    <div className="absolute inset-y-0 right-0 hidden w-1/2 bg-gradient-to-l from-white/70 via-white/30 to-transparent lg:block" />
+                    <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-10 px-5 py-12 md:flex-row md:items-center md:py-24">
                         <div className="max-w-xl" data-reveal>
-                            <p className="mb-3 text-xs uppercase tracking-[0.5em] text-[#f6c347]">Personality Development Association</p>
-                            <h1 className="text-4xl font-heading font-black leading-tight md:text-6xl">
-                                Grow confidence, communication, and character with PDA.
+                            <div className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1 text-[11px] uppercase tracking-[0.4em] text-[#b8890b]">
+                                Official Student Club
+                            </div>
+                            <h1 className="mt-4 text-3xl font-heading font-black leading-tight sm:text-4xl md:text-6xl">
+                                Building confident communicators for campus and beyond.
                             </h1>
-                            <p className="mt-5 text-base text-slate-600 md:text-lg">
-                                A student-led community designed to elevate soft skills, leadership, and real-world readiness through curated programs and energetic workshops.
+                            <p className="mt-4 text-sm text-slate-700 sm:text-base md:text-lg">
+                                PDA is the campus club for soft-skill excellence — a professional-grade environment for leadership, public speaking, and career readiness.
                             </p>
-                            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+                            <div className="mt-6 flex flex-col gap-3 sm:flex-row">
                                 <Button className="bg-[#f6c347] text-black shadow-none hover:bg-[#ffd16b]">
                                     Become a Member
                                 </Button>
-                                <Link to="/persofest" className="inline-flex items-center gap-2 rounded-md border border-black/10 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-black/20 hover:text-[#0f1115]">
+                                <Link to="/persofest" className="inline-flex items-center gap-2 rounded-md border border-black/15 bg-white/70 px-4 py-2 text-sm font-semibold text-slate-800 transition hover:border-black/30 hover:text-[#0f1115]">
                                     Explore Persofest’26
                                     <ArrowRight className="h-4 w-4" />
                                 </Link>
                             </div>
+                            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+                                <div className="rounded-2xl border border-black/10 bg-white/80 p-4 text-center">
+                                    <p className="text-lg font-heading font-black text-[#0f1115]">Weekly</p>
+                                    <p className="text-xs uppercase tracking-[0.25em] text-slate-600">Skill Labs</p>
+                                </div>
+                                <div className="rounded-2xl border border-black/10 bg-white/80 p-4 text-center">
+                                    <p className="text-lg font-heading font-black text-[#0f1115]">Mentors</p>
+                                    <p className="text-xs uppercase tracking-[0.25em] text-slate-600">Alumni + Pros</p>
+                                </div>
+                                <div className="rounded-2xl border border-black/10 bg-white/80 p-4 text-center">
+                                    <p className="text-lg font-heading font-black text-[#0f1115]">Flagship</p>
+                                    <p className="text-xs uppercase tracking-[0.25em] text-slate-600">Persofest</p>
+                                </div>
+                            </div>
                         </div>
-		                        <div className="relative w-full md:max-w-md" data-reveal>
-		                            <div className="absolute -top-6 left-6 h-24 w-24 rounded-full bg-[#f6c347]/25 blur-2xl" />
-		                            <div className="rounded-3xl border border-black/10 bg-white p-6 shadow-2xl backdrop-blur">
-		                                <img src={heroImageSrc} alt="PDA group" className="h-64 w-full rounded-2xl object-cover" />
-		                                <div className="mt-6 space-y-3 text-sm text-slate-600">
-		                                    <div className="flex items-center gap-2">
-		                                        <Sparkles className="h-4 w-4 text-[#f6c347]" />
-		                                        Mentorship circles, weekly skill labs, and peer accountability.
+                        <div className="relative w-full md:max-w-md" data-reveal>
+                            <div className="absolute -top-6 left-6 h-24 w-24 rounded-full bg-[#f6c347]/25 blur-2xl" />
+                            <div className="rounded-3xl border border-black/10 bg-white p-5 shadow-2xl backdrop-blur sm:p-6">
+                                <img src={heroImageSrc} alt="PDA group" className="h-56 w-full rounded-2xl object-cover sm:h-64" />
+                                <div className="mt-5 space-y-3 text-sm text-slate-700">
+                                    <div className="flex items-center gap-2">
+                                        <Sparkles className="h-4 w-4 text-[#f6c347]" />
+                                        Mentorship circles, weekly skill labs, and peer accountability.
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <Sparkles className="h-4 w-4 text-[#f6c347]" />
                                         Signature events that spotlight student voices.
                                     </div>
+                                </div>
+                                <div className="mt-5 rounded-2xl border border-black/10 bg-[#11131a] px-4 py-3 text-[11px] uppercase tracking-[0.25em] text-[#f6c347]">
+                                    New Season Intake Open
                                 </div>
                             </div>
                         </div>
@@ -192,20 +216,20 @@ export default function PdaHome() {
                     <section className="mx-auto w-full max-w-6xl px-5 pb-8">
                         <div className="grid gap-6 rounded-3xl border border-black/10 bg-gradient-to-r from-[#fff1c7] via-[#fff8e8] to-white p-6 md:grid-cols-[1.2fr_0.8fr]" data-reveal>
                             <div>
-                                <p className="text-xs uppercase tracking-[0.4em] text-[#b48900]">Current Event</p>
+                                <p className="text-xs uppercase tracking-[0.4em] text-[#8b6a00]">Current Event</p>
                                 <h2 className="mt-3 text-3xl font-heading font-black text-[#0f1115]">
                                     {featuredEvent.title}
                                 </h2>
-                                <p className="mt-4 text-sm text-slate-600 md:text-base">
+                                <p className="mt-4 text-sm text-slate-700 md:text-base">
                                     {featuredEvent.hero_caption || featuredEvent.description || 'Event details coming soon.'}
                                 </p>
-                                <div className="mt-5 flex flex-wrap items-center gap-3 text-xs uppercase tracking-[0.2em] text-slate-500">
-                                    <span className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1">
+                                <div className="mt-5 flex flex-wrap items-center gap-3 text-xs uppercase tracking-[0.2em] text-slate-600">
+                                    <span className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1 text-[#0f1115]">
                                         <Calendar className="h-4 w-4 text-[#f6c347]" />
                                         {formatDateRange(featuredEvent)}
                                     </span>
                                     {featuredEvent.format ? (
-                                        <span className="inline-flex items-center rounded-full border border-black/10 bg-white px-3 py-1">
+                                        <span className="inline-flex items-center rounded-full border border-black/10 bg-white px-3 py-1 text-[#0f1115]">
                                             {featuredEvent.format}
                                         </span>
                                     ) : null}
@@ -239,40 +263,40 @@ export default function PdaHome() {
                     </section>
                 ) : null}
 
-                <section className="mx-auto w-full max-w-6xl px-5 py-14" data-reveal>
-                    <div className="grid gap-6 md:grid-cols-4">
+                <section className="mx-auto w-full max-w-6xl px-5 py-10 md:py-14" data-reveal>
+                    <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-4">
                         {highlightStats.map((stat) => (
-                            <div key={stat.label} className="rounded-2xl border border-black/10 bg-white p-5 text-center">
-                                <p className="text-2xl font-heading font-black text-[#f6c347]">{stat.value}</p>
-                                <p className="text-xs uppercase tracking-[0.3em] text-slate-500">{stat.label}</p>
+                            <div key={stat.label} className="rounded-2xl border border-black/10 bg-white p-5 text-center shadow-sm">
+                                <p className="text-2xl font-heading font-black text-[#b8890b]">{stat.value}</p>
+                                <p className="text-xs uppercase tracking-[0.3em] text-slate-600">{stat.label}</p>
                             </div>
                         ))}
                     </div>
                 </section>
 
-                <section className="mx-auto w-full max-w-6xl px-5 py-14">
+                <section className="mx-auto w-full max-w-6xl px-5 py-10 md:py-14">
                     <div className="grid gap-10 md:grid-cols-[1.1fr_1fr]">
                         <div data-reveal>
-                            <h2 className="text-3xl font-heading font-black">What PDA delivers</h2>
-                            <p className="mt-4 text-slate-600">
+                            <h2 className="text-2xl font-heading font-black sm:text-3xl">What PDA delivers</h2>
+                            <p className="mt-4 text-slate-700">
                                 PDA bridges classroom learning with real-world confidence. We curate spaces where students practice communication, sharpen leadership, and grow together.
                             </p>
                             <div className="mt-8 space-y-5">
                                 {values.map((value) => (
-                                    <div key={value.title} className="rounded-xl border border-black/10 bg-white p-4">
+                                    <div key={value.title} className="rounded-xl border border-black/10 bg-white p-4 shadow-sm">
                                         <h3 className="font-heading text-lg font-bold">{value.title}</h3>
-                                        <p className="mt-2 text-sm text-slate-600">{value.description}</p>
+                                        <p className="mt-2 text-sm text-slate-700">{value.description}</p>
                                     </div>
                                 ))}
                             </div>
                         </div>
-                        <div className="rounded-3xl border border-black/10 bg-gradient-to-br from-[#fff8e8] via-[#fff4d8] to-[#f7f0da] p-8" data-reveal>
-                            <p className="text-xs uppercase tracking-[0.4em] text-slate-500">Our Focus</p>
-                            <h3 className="mt-3 text-2xl font-heading font-black">Skill-first growth paths</h3>
-                            <p className="mt-4 text-slate-600">
+                        <div className="rounded-3xl border border-black/10 bg-gradient-to-br from-[#fff8e8] via-[#fff4d8] to-[#f7f0da] p-6 shadow-sm sm:p-8" data-reveal>
+                            <p className="text-xs uppercase tracking-[0.4em] text-slate-600">Our Focus</p>
+                            <h3 className="mt-3 text-xl font-heading font-black sm:text-2xl">Skill-first growth paths</h3>
+                            <p className="mt-4 text-slate-700">
                                 Each program combines expert sessions, peer practice, and measurable progress so every member leaves with confidence they can demonstrate.
                             </p>
-                            <ul className="mt-6 space-y-3 text-sm text-slate-600">
+                            <ul className="mt-6 space-y-3 text-sm text-slate-700">
                                 <li>Speaking practice with supportive coaching.</li>
                                 <li>Leadership labs led by alumni and mentors.</li>
                                 <li>Career readiness sprints and mock sessions.</li>
@@ -281,19 +305,19 @@ export default function PdaHome() {
                     </div>
                 </section>
 
-                <section className="mx-auto w-full max-w-6xl px-5 py-14">
+                <section className="mx-auto w-full max-w-6xl px-5 py-10 md:py-14">
                     <div className="flex items-center justify-between gap-4" data-reveal>
                         <div>
                             <p className="text-xs uppercase tracking-[0.4em] text-[#f6c347]">Programs</p>
-                            <h2 className="text-3xl font-heading font-black">Programs & Activities</h2>
+                            <h2 className="text-2xl font-heading font-black sm:text-3xl">Programs & Activities</h2>
                         </div>
-                        <Link to="/persofest" className="text-sm font-semibold text-slate-500 transition hover:text-[#0f1115]">
+                        <Link to="/persofest" className="text-sm font-semibold text-slate-700 transition hover:text-[#0f1115]">
                             See Persofest’26
                         </Link>
                     </div>
-	                    <div className="mt-8 grid gap-6 md:grid-cols-3" data-reveal>
+	                    <div className="mt-6 grid auto-rows-fr gap-6 md:grid-cols-3" data-reveal>
 	                        {programs.length > 0 ? (
-	                            programs.map((program) => (
+	                            programs.slice(0, 6).map((program) => (
 	                                <button
 	                                    key={program.title}
 	                                    type="button"
@@ -304,7 +328,7 @@ export default function PdaHome() {
 	                                            meta: program.tag || 'Program'
 	                                        })
 	                                    }
-	                                    className={`rounded-2xl border border-black/10 bg-white p-5 text-left transition hover:-translate-y-1 hover:border-black/20 ${
+	                                    className={`flex h-full flex-col rounded-2xl border border-black/10 bg-white p-5 text-left transition hover:-translate-y-1 hover:border-black/25 hover:shadow-md ${
 	                                        program.poster_url ? 'cursor-pointer' : 'cursor-default'
 	                                    }`}
 	                                >
@@ -316,34 +340,35 @@ export default function PdaHome() {
                                             className="mb-4 h-40 w-full rounded-xl object-cover"
                                         />
                                     ) : null}
-                                    <span className="inline-flex rounded-full border border-[#f6c347]/40 px-3 py-1 text-xs uppercase tracking-[0.2em] text-[#f6c347]">
+                                    <span className="inline-flex rounded-full border border-[#f6c347]/50 px-3 py-1 text-xs uppercase tracking-[0.2em] text-[#b8890b]">
                                         {program.tag || 'Program'}
 	                                    </span>
 	                                    <h3 className="mt-4 text-xl font-heading font-bold">{program.title}</h3>
-	                                    <p className="mt-2 text-sm text-slate-600">{program.description}</p>
+	                                    <p className="mt-2 text-sm text-slate-700">{program.description}</p>
+                                        <span className="mt-auto" />
 	                                </button>
 	                            ))
 	                        ) : (
-	                            <div className="col-span-full rounded-2xl border border-black/10 bg-white p-6 text-center text-sm text-slate-500">
+	                            <div className="col-span-full rounded-2xl border border-black/10 bg-white p-6 text-center text-sm text-slate-600">
 	                                Program updates are coming soon.
                             </div>
                         )}
                     </div>
                 </section>
 
-                <section className="mx-auto w-full max-w-6xl px-5 py-14">
+                <section className="mx-auto w-full max-w-6xl px-5 py-10 md:py-14">
                     <div className="flex items-center justify-between gap-4" data-reveal>
                         <div>
                             <p className="text-xs uppercase tracking-[0.4em] text-[#f6c347]">Events</p>
-                            <h2 className="text-3xl font-heading font-black">Events & Workshops</h2>
+                            <h2 className="text-2xl font-heading font-black sm:text-3xl">Events & Workshops</h2>
                         </div>
-                        <Button variant="outline" className="border-black/10 text-[#0f1115] hover:bg-white">
+                        <Button variant="outline" className="border-black/15 text-[#0f1115] hover:bg-white">
                             View Calendar
                         </Button>
                     </div>
-	                    <div className="mt-8 grid gap-6 md:grid-cols-3" data-reveal>
+	                    <div className="mt-6 grid auto-rows-fr gap-6 md:grid-cols-3" data-reveal>
 	                        {events.length > 0 ? (
-	                            events.map((event) => (
+	                            events.slice(0, 6).map((event) => (
 	                                <button
 	                                    key={`${event.title}-${event.date}`}
 	                                    type="button"
@@ -354,7 +379,7 @@ export default function PdaHome() {
                                             meta: `${formatDateRange(event)}${event.format ? ` · ${event.format}` : ''}`
                                         })
                                     }
-                                    className={`rounded-2xl border border-black/10 bg-white p-5 text-left ${
+                                    className={`flex h-full flex-col rounded-2xl border border-black/10 bg-white p-5 text-left hover:border-black/25 hover:shadow-md ${
                                         event.poster_url ? 'cursor-pointer' : 'cursor-default'
                                     }`}
 	                                >
@@ -366,26 +391,28 @@ export default function PdaHome() {
                                             className="mb-4 h-40 w-full rounded-xl object-cover"
                                         />
                                     ) : null}
-                                    <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-slate-500">
+                                    <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-slate-600">
                                         <Calendar className="h-4 w-4 text-[#f6c347]" />
                                         {formatDateRange(event)}{event.format ? ` · ${event.format}` : ''}
                                     </div>
 	                                    <h3 className="mt-4 text-xl font-heading font-bold">{event.title}</h3>
-	                                    <p className="mt-2 text-sm text-slate-600">{event.description}</p>
+	                                    <p className="mt-2 text-sm text-slate-700">{event.description}</p>
+                                        <span className="mt-auto" />
 	                                </button>
 	                            ))
 	                        ) : (
-	                            <div className="col-span-full rounded-2xl border border-black/10 bg-white p-6 text-center text-sm text-slate-500">
+	                            <div className="col-span-full rounded-2xl border border-black/10 bg-white p-6 text-center text-sm text-slate-600">
 	                                Upcoming events will be announced soon.
                             </div>
                         )}
                     </div>
                 </section>
 
-                <section className="mx-auto w-full max-w-6xl px-5 py-14" data-reveal>
-                    <div className="rounded-3xl border border-black/10 bg-gradient-to-r from-[#f6c347]/15 via-[#f6c347]/5 to-transparent p-8 md:p-12">
-                        <h2 className="text-3xl font-heading font-black text-[#0f1115]">Ready to explore Persofest’26?</h2>
-                        <p className="mt-3 max-w-2xl text-slate-600">
+                <section className="mx-auto w-full max-w-6xl px-5 py-10 md:py-14" data-reveal>
+                    <div className="rounded-3xl border border-black/10 bg-gradient-to-r from-[#11131a] via-[#1a1d26] to-[#11131a] p-8 text-white md:p-12">
+                        <p className="text-xs uppercase tracking-[0.4em] text-[#f6c347]">Flagship Festival</p>
+                        <h2 className="mt-3 text-2xl font-heading font-black text-white sm:text-3xl">Ready to explore Persofest’26?</h2>
+                        <p className="mt-3 max-w-2xl text-slate-200">
                             Discover our flagship personality development festival, its rounds, and the opportunities waiting for you.
                         </p>
                         <Link to="/persofest" className="mt-6 inline-flex items-center gap-2 rounded-md bg-[#f6c347] px-4 py-2 text-sm font-semibold text-black hover:bg-[#ffd16b]">
@@ -396,8 +423,8 @@ export default function PdaHome() {
                 </section>
             </main>
 
-	            <footer className="border-t border-black/10 bg-white py-8">
-                <div className="mx-auto flex w-full max-w-6xl flex-col items-start gap-4 px-5 text-sm text-slate-500 md:flex-row md:items-center md:justify-between">
+            <footer className="border-t border-black/10 bg-white py-8">
+                <div className="mx-auto flex w-full max-w-6xl flex-col items-start gap-4 px-5 text-sm text-slate-600 md:flex-row md:items-center md:justify-between">
                     <div className="flex items-center gap-3">
                         <img src={pdaLogo} alt="PDA" className="h-8 w-8 rounded-full border border-black/10 object-cover" />
                         <span>Personality Development Association</span>
@@ -408,7 +435,7 @@ export default function PdaHome() {
                         <a href="#" className="hover:text-[#0f1115]">Contact</a>
                     </div>
                 </div>
-	            </footer>
+            </footer>
 
 	            <Dialog open={posterDialogOpen} onOpenChange={setPosterDialogOpen}>
 	                <DialogContent className="max-w-3xl bg-white p-0">
