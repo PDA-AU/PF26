@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Calendar, Sparkles } from 'lucide-react';
+import { ArrowRight, Calendar, Instagram, Linkedin, Mail, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import axios from 'axios';
@@ -10,10 +10,10 @@ import pdaGroupPhoto from '@/assets/pda-group-photo.png';
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 const highlightStats = [
-    { label: 'Active Members', value: '350+' },
-    { label: 'Workshops Hosted', value: '45' },
-    { label: 'Student Reach', value: '2,000+' },
-    { label: 'Annual Flagship Events', value: '8' }
+    { label: 'Active members', value: '150+' },
+    { label: 'Years', value: '40+' },
+    { label: 'Sessions', value: '20+' },
+    { label: 'Books PDA Library', value: '8000+' }
 ];
 
 const values = [
@@ -135,19 +135,12 @@ export default function PdaHome() {
                         <img src={pdaLogo} alt="Personality Development Association" className="h-11 w-11 rounded-full border border-black/10 object-cover" />
                         <div className="leading-none">
                             <p className="text-sm font-heading font-black uppercase tracking-[0.22em] text-[#b8890b] sm:text-base md:text-lg">
-                                Personality Development
+                                Personality Development Association
                             </p>
-                            <p className="text-sm font-heading font-black uppercase tracking-[0.22em] text-[#b8890b] sm:text-base md:text-lg">
-                                Association
-                            </p>
+                          
                         </div>
                     </Link>
-                    <div className="flex items-center gap-3">
-                        <Link to="/persofest" className="hidden text-sm font-semibold text-slate-700 transition hover:text-[#0f1115] md:block">
-                            Persofest’26
-                        </Link>
-                        <Button className="bg-[#f6c347] text-black shadow-none hover:bg-[#ffd16b]">Join PDA</Button>
-                    </div>
+                    
                 </div>
             </header>
 
@@ -158,14 +151,17 @@ export default function PdaHome() {
                     <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-10 px-5 py-12 md:flex-row md:items-center md:py-24">
                         <div className="max-w-xl" data-reveal>
                             <div className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1 text-[11px] uppercase tracking-[0.4em] text-[#b8890b]">
-                                Official Student Club
+                                Since 1984
                             </div>
                             <h1 className="mt-4 text-3xl font-heading font-black leading-tight sm:text-4xl md:text-6xl">
-                                Building confident communicators for campus and beyond.
+                              PDA MIT
                             </h1>
                             <p className="mt-4 text-sm text-slate-700 sm:text-base md:text-lg">
-                                PDA is the campus club for soft-skill excellence — a professional-grade environment for leadership, public speaking, and career readiness.
+                                The Personality Development Association (PDA) is one of the oldest and most respected student organizations at MIT. Established in 1984, PDA is dedicated to the holistic development of students, focusing on personal growth alongside academic and professional excellence.
                             </p>
+                            <div className="mt-4 inline-flex items-center gap-2 rounded-2xl border border-black/10 bg-white px-4 py-2 text-xs uppercase tracking-[0.25em] text-[#0f1115]">
+                                Our Motto: "Discover Thyself"
+                            </div>
                             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
                                 <Button className="bg-[#f6c347] text-black shadow-none hover:bg-[#ffd16b]">
                                     Become a Member
@@ -177,16 +173,16 @@ export default function PdaHome() {
                             </div>
                             <div className="mt-6 grid gap-3 sm:grid-cols-3">
                                 <div className="rounded-2xl border border-black/10 bg-white/80 p-4 text-center">
-                                    <p className="text-lg font-heading font-black text-[#0f1115]">Weekly</p>
-                                    <p className="text-xs uppercase tracking-[0.25em] text-slate-600">Skill Labs</p>
+                                    <p className="text-lg font-heading font-black text-[#0f1115]">Career</p>
+                                    <p className="text-xs uppercase tracking-[0.25em] text-slate-600">Guidance</p>
                                 </div>
                                 <div className="rounded-2xl border border-black/10 bg-white/80 p-4 text-center">
-                                    <p className="text-lg font-heading font-black text-[#0f1115]">Mentors</p>
-                                    <p className="text-xs uppercase tracking-[0.25em] text-slate-600">Alumni + Pros</p>
+                                    <p className="text-lg font-heading font-black text-[#0f1115]">Internship</p>
+                                    <p className="text-xs uppercase tracking-[0.25em] text-slate-600">Placement Prep</p>
                                 </div>
                                 <div className="rounded-2xl border border-black/10 bg-white/80 p-4 text-center">
-                                    <p className="text-lg font-heading font-black text-[#0f1115]">Flagship</p>
-                                    <p className="text-xs uppercase tracking-[0.25em] text-slate-600">Persofest</p>
+                                    <p className="text-lg font-heading font-black text-[#0f1115]">Softskills</p>
+                                    <p className="text-xs uppercase tracking-[0.25em] text-slate-600">Development</p>
                                 </div>
                             </div>
                         </div>
@@ -197,15 +193,11 @@ export default function PdaHome() {
                                 <div className="mt-5 space-y-3 text-sm text-slate-700">
                                     <div className="flex items-center gap-2">
                                         <Sparkles className="h-4 w-4 text-[#f6c347]" />
-                                        Mentorship circles, weekly skill labs, and peer accountability.
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <Sparkles className="h-4 w-4 text-[#f6c347]" />
-                                        Signature events that spotlight student voices.
+                                        The Dedicated Team Continuing the Legacy of PDA
                                     </div>
                                 </div>
                                 <div className="mt-5 rounded-2xl border border-black/10 bg-[#11131a] px-4 py-3 text-[11px] uppercase tracking-[0.25em] text-[#f6c347]">
-                                    New Season Intake Open
+                                    Stars Behind Crestora'25, PERSOFEST'26
                                 </div>
                             </div>
                         </div>
@@ -216,7 +208,7 @@ export default function PdaHome() {
                     <section className="mx-auto w-full max-w-6xl px-5 pb-8">
                         <div className="grid gap-6 rounded-3xl border border-black/10 bg-gradient-to-r from-[#fff1c7] via-[#fff8e8] to-white p-6 md:grid-cols-[1.2fr_0.8fr]" data-reveal>
                             <div>
-                                <p className="text-xs uppercase tracking-[0.4em] text-[#8b6a00]">Current Event</p>
+                                <p className="text-xs uppercase tracking-[0.4em] text-[#8b6a00]">Featured</p>
                                 <h2 className="mt-3 text-3xl font-heading font-black text-[#0f1115]">
                                     {featuredEvent.title}
                                 </h2>
@@ -291,16 +283,27 @@ export default function PdaHome() {
                             </div>
                         </div>
                         <div className="rounded-3xl border border-black/10 bg-gradient-to-br from-[#fff8e8] via-[#fff4d8] to-[#f7f0da] p-6 shadow-sm sm:p-8" data-reveal>
-                            <p className="text-xs uppercase tracking-[0.4em] text-slate-600">Our Focus</p>
-                            <h3 className="mt-3 text-xl font-heading font-black sm:text-2xl">Skill-first growth paths</h3>
+                            <p className="text-xs uppercase tracking-[0.4em] text-slate-600">Founder Tribute</p>
+                            <div className="mt-4 flex flex-col items-center gap-4 text-center">
+                                <img
+                                    src={pdaLogo}
+                                    alt="Prof. Dr. K. V. Narayanan"
+                                    className="h-24 w-24 rounded-2xl border border-black/10 object-cover"
+                                />
+                                <div>
+                                    <h3 className="text-xl font-heading font-black sm:text-2xl">Prof. Dr. K. V. Narayanan</h3>
+                                    <p className="text-sm text-slate-600">Founder of the Personality Development Association</p>
+                                </div>
+                            </div>
                             <p className="mt-4 text-slate-700">
-                                Each program combines expert sessions, peer practice, and measurable progress so every member leaves with confidence they can demonstrate.
+                                Personality Development Association was started in February 1984 by Prof. K. V. Narayanan and Prof. S. Renganathan with five students for enhancing the overall personality of MIT students.
                             </p>
-                            <ul className="mt-6 space-y-3 text-sm text-slate-700">
-                                <li>Speaking practice with supportive coaching.</li>
-                                <li>Leadership labs led by alumni and mentors.</li>
-                                <li>Career readiness sprints and mock sessions.</li>
-                            </ul>
+                            <p className="mt-4 text-slate-700">
+                                Department of Instrumentation Engineering recognizing the attributions of Prof K V Narayanan has named a conference hall as KVN Seminar Hall.
+                            </p>
+                            <p className="mt-4 text-sm font-semibold text-slate-700">
+                                “True education empowers students to discover knowledge for themselves.”
+                            </p>
                         </div>
                     </div>
                 </section>
@@ -311,9 +314,7 @@ export default function PdaHome() {
                             <p className="text-xs uppercase tracking-[0.4em] text-[#f6c347]">Programs</p>
                             <h2 className="text-2xl font-heading font-black sm:text-3xl">Programs & Activities</h2>
                         </div>
-                        <Link to="/persofest" className="text-sm font-semibold text-slate-700 transition hover:text-[#0f1115]">
-                            See Persofest’26
-                        </Link>
+                     
                     </div>
 	                    <div className="mt-6 grid auto-rows-fr gap-6 md:grid-cols-3" data-reveal>
 	                        {programs.length > 0 ? (
@@ -362,9 +363,7 @@ export default function PdaHome() {
                             <p className="text-xs uppercase tracking-[0.4em] text-[#f6c347]">Events</p>
                             <h2 className="text-2xl font-heading font-black sm:text-3xl">Events & Workshops</h2>
                         </div>
-                        <Button variant="outline" className="border-black/15 text-[#0f1115] hover:bg-white">
-                            View Calendar
-                        </Button>
+
                     </div>
 	                    <div className="mt-6 grid auto-rows-fr gap-6 md:grid-cols-3" data-reveal>
 	                        {events.length > 0 ? (
@@ -423,16 +422,46 @@ export default function PdaHome() {
                 </section>
             </main>
 
-            <footer className="border-t border-black/10 bg-white py-8">
-                <div className="mx-auto flex w-full max-w-6xl flex-col items-start gap-4 px-5 text-sm text-slate-600 md:flex-row md:items-center md:justify-between">
-                    <div className="flex items-center gap-3">
-                        <img src={pdaLogo} alt="PDA" className="h-8 w-8 rounded-full border border-black/10 object-cover" />
-                        <span>Personality Development Association</span>
+            <footer className="border-t border-black/10 bg-white py-10">
+                <div className="mx-auto grid w-full max-w-6xl gap-6 px-5 text-sm text-slate-600 md:grid-cols-[1.2fr_0.8fr] md:items-center">
+                    <div className="flex items-start gap-4">
+                        <img src={pdaLogo} alt="PDA" className="h-12 w-12 rounded-2xl border border-black/10 object-cover" />
+                        <div>
+                            <p className="font-heading text-lg font-black text-[#0f1115]">Personality Development Association</p>
+                            <p className="mt-1 text-sm text-slate-600">Contact us</p>
+                            <a
+                                href="mailto:pda@mitindia.edu"
+                                className="mt-2 inline-flex items-center gap-2 text-sm text-slate-700 hover:text-[#0f1115]"
+                            >
+                                <Mail className="h-4 w-4" />
+                                pda@mitindia.edu
+                            </a>
+                        </div>
                     </div>
-                    <div className="flex flex-wrap gap-4">
-                        <Link to="/persofest" className="hover:text-[#0f1115]">Persofest’26</Link>
-                        <a href="#" className="hover:text-[#0f1115]">Join the community</a>
-                        <a href="#" className="hover:text-[#0f1115]">Contact</a>
+                    <div className="flex flex-col gap-3 md:items-end">
+                        <div className="flex flex-wrap gap-4">
+                            <Link to="/persofest" className="font-semibold text-slate-700 hover:text-[#0f1115]">Persofest’26</Link>
+                        </div>
+                        <div className="flex flex-wrap gap-4 text-slate-700">
+                            <a
+                                href="https://www.instagram.com/pda_mit/"
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-2 hover:text-[#0f1115]"
+                            >
+                                <Instagram className="h-4 w-4" />
+                                Instagram
+                            </a>
+                            <a
+                                href="https://www.linkedin.com/company/personality-development-association-mit/"
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-2 hover:text-[#0f1115]"
+                            >
+                                <Linkedin className="h-4 w-4" />
+                                LinkedIn
+                            </a>
+                        </div>
                     </div>
                 </div>
             </footer>
