@@ -7,7 +7,9 @@ import { AuthProvider, useAuth } from "@/context/AuthContext";
 // Pages
 import PersofestHome from "@/pages/persofest/PersofestHome";
 import PdaHome from "@/pages/PdaHome";
-import PdaAdmin from "@/pages/PdaAdmin";
+import ItemsAdmin from "@/pages/HomeAdmin/ItemsAdmin";
+import TeamAdmin from "@/pages/HomeAdmin/TeamAdmin";
+import GalleryAdmin from "@/pages/HomeAdmin/GalleryAdmin";
 import LoginPage from "@/pages/persofest/LoginPage";
 import RegisterPage from "@/pages/persofest/RegisterPage";
 import ParticipantDashboard from "@/pages/persofest/ParticipantDashboard";
@@ -67,7 +69,10 @@ function AppRoutes() {
         <Routes>
             {/* Public Routes */}
             <Route path="/" element={<PdaHome />} />
-            <Route path="/pda-admin" element={<PdaAdmin />} />
+            <Route path="/pda-admin" element={<Navigate to="/pda-admin/items" replace />} />
+            <Route path="/pda-admin/items" element={<ItemsAdmin />} />
+            <Route path="/pda-admin/team" element={<TeamAdmin />} />
+            <Route path="/pda-admin/gallery" element={<GalleryAdmin />} />
             <Route path="/persofest" element={<PersofestHome />} />
             <Route path="/login" element={
                 <PublicRoute>

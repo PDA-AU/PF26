@@ -1,4 +1,5 @@
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, UploadFile, File, Query, Header
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -18,15 +19,17 @@ import csv
 import boto3
 
 from database import engine, get_db, Base
-from models import User, Round, Score, SystemConfig, Program, Event, UserRole, RoundState, ParticipantStatus, Department, YearOfStudy, Gender, RoundMode
+from models import User, Round, Score, SystemConfig, Program, Event, PdaItem, PdaTeam, PdaGallery, UserRole, RoundState, ParticipantStatus, Department, YearOfStudy, Gender, RoundMode
 from schemas import (
     UserRegister, UserLogin, TokenResponse, RefreshTokenRequest, UserResponse, UserUpdate,
     ParticipantListResponse, RoundCreate, RoundUpdate, RoundResponse, RoundPublicResponse,
     ScoreEntry, ScoreUpdate, ScoreResponse, ParticipantRoundStatus, AdminParticipantRoundStat, LeaderboardEntry,
     DashboardStats, TopReferrer, DepartmentEnum, YearOfStudyEnum, GenderEnum, 
-    ParticipantStatusEnum, RoundStateEnum,
+    ParticipantStatusEnum, RoundStateEnum, RoundStatsResponse, RoundStatsTopEntry,
     ProgramCreate, ProgramUpdate, ProgramResponse,
-    EventCreate, EventUpdate, EventResponse
+    EventCreate, EventUpdate, EventResponse,
+    PdaTeamCreate, PdaTeamUpdate, PdaTeamResponse,
+    PdaGalleryCreate, PdaGalleryUpdate, PdaGalleryResponse
 )
 from auth import (
     verify_password, get_password_hash, create_access_token, create_refresh_token,
@@ -66,10 +69,34 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 PDA_ADMIN_PASSWORD = "pda@1984"
+optional_bearer = HTTPBearer(auto_error=False)
 
 
-def require_pda_admin(x_pda_admin: str = Header(None, alias="X-PDA-ADMIN")):
-    if x_pda_admin != PDA_ADMIN_PASSWORD:
+def _get_admin_from_bearer(credentials: Optional[HTTPAuthorizationCredentials], db: Session) -> Optional[User]:
+    if not credentials:
+        return None
+    token = credentials.credentials
+    payload = decode_token(token)
+    if payload.get("type") != "access":
+        return None
+    register_number: str = payload.get("sub")
+    if not register_number:
+        return None
+    user = db.query(User).filter(User.register_number == register_number).first()
+    if not user or user.role != UserRole.ADMIN:
+        return None
+    return user
+
+
+def require_pda_admin(
+    x_pda_admin: str = Header(None, alias="X-PDA-ADMIN"),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_bearer),
+    db: Session = Depends(get_db)
+):
+    if x_pda_admin and x_pda_admin == PDA_ADMIN_PASSWORD:
+        return True
+    admin_user = _get_admin_from_bearer(credentials, db)
+    if not admin_user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid PDA admin credentials")
     return True
 
@@ -91,6 +118,139 @@ def _ensure_round_description_pdf_column():
                 logger.info("Added rounds.description_pdf column")
     except Exception as exc:
         logger.warning(f"Could not ensure description_pdf column: {exc}")
+
+
+def _ensure_pda_items_table():
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS pda_items (
+                        id SERIAL PRIMARY KEY,
+                        type VARCHAR(20) NOT NULL,
+                        title VARCHAR(255) NOT NULL,
+                        description TEXT,
+                        tag VARCHAR(100),
+                        poster_url VARCHAR(500),
+                        start_date DATE,
+                        end_date DATE,
+                        format VARCHAR(150),
+                        hero_caption TEXT,
+                        hero_url VARCHAR(500),
+                        is_featured BOOLEAN DEFAULT FALSE,
+                        created_at TIMESTAMPTZ DEFAULT now(),
+                        updated_at TIMESTAMPTZ
+                    )
+                    """
+                )
+            )
+
+            existing = conn.execute(text("SELECT COUNT(*) FROM pda_items")).scalar() or 0
+            if existing == 0:
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO pda_items (type, title, description, tag, poster_url, is_featured, created_at, updated_at)
+                        SELECT 'program', title, description, tag, poster_url, COALESCE(is_featured, false), created_at, updated_at
+                        FROM programs
+                        """
+                    )
+                )
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO pda_items (type, title, start_date, end_date, format, description, poster_url, hero_caption, hero_url, is_featured, created_at, updated_at)
+                        SELECT 'event', title, start_date, end_date, format, description, poster_url, hero_caption, hero_url, is_featured, created_at, updated_at
+                        FROM events
+                        """
+                    )
+                )
+                logger.info("Migrated programs and events into pda_items")
+    except Exception as exc:
+        logger.warning(f"Could not ensure pda_items table: {exc}")
+
+
+def _ensure_pda_team_table():
+    seed_rows = [
+        {"team_designation": "Chairperson", "name": "Akshaya B G", "regno": "2022505024"},
+        {"team_designation": "Vice Chairperson", "name": "Saravanan.T.S", "regno": "2022503574"},
+        {"team_designation": "General Secretary", "name": "Jayavarshini R", "regno": "2022503521"},
+        {"team_designation": "General Secretary", "name": "Prem Kumar S", "regno": "2022501015"},
+        {"team_designation": "General Secretary", "name": "Varshigashree M", "regno": "2022504033"},
+        {"team_designation": "Head of Content Creation", "name": "Tirzah Sulamite K", "regno": "2022508008"},
+        {"team_designation": "Head of Content Creation", "name": "Vimalraj M", "regno": "2022504523"},
+        {"team_designation": "Head of Content Creation", "name": "Neelavathy G", "regno": "2022503513"},
+        {"team_designation": "Head of Event Management", "name": "Dhivya M", "regno": "2022511020"},
+        {"team_designation": "Head of Event Management", "name": "Gopi M", "regno": "2022506004"},
+        {"team_designation": "Head of Design", "name": "Vijay G K", "regno": "2022503053"},
+        {"team_designation": "Head of Design", "name": "Vithula V", "regno": "2022505032"},
+        {"team_designation": "Head of Website Design", "name": "Udhaya Kumar K", "regno": "2022503051"},
+        {"team_designation": "Chief Librarian", "name": "Madhesh P B", "regno": "2022507011"},
+        {"team_designation": "Head of Public Relation", "name": "Manjuvarsheni T", "regno": "2022510055"},
+        {"team_designation": "Head of Public Relation", "name": "Megavarthini G", "regno": "2022510041"},
+        {"team_designation": "Head of Podcast", "name": "Sinjini Bhalla", "regno": "2022501051"},
+        {"team_designation": "Treasurer", "name": "Darsan S", "regno": "2023508017"},
+        {"team_designation": "Treasurer", "name": "Srimathi S", "regno": "2023510055"}
+    ]
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS pda_team (
+                        id SERIAL PRIMARY KEY,
+                        name VARCHAR(255) NOT NULL,
+                        regno VARCHAR(20) UNIQUE NOT NULL,
+                        dept VARCHAR(150),
+                        email VARCHAR(255),
+                        phno VARCHAR(20),
+                        team_designation VARCHAR(150) NOT NULL,
+                        photo_url VARCHAR(500),
+                        instagram_url VARCHAR(500),
+                        linkedin_url VARCHAR(500),
+                        created_at TIMESTAMPTZ DEFAULT now(),
+                        updated_at TIMESTAMPTZ
+                    )
+                    """
+                )
+            )
+            existing = conn.execute(text("SELECT COUNT(*) FROM pda_team")).scalar() or 0
+            if existing == 0 and seed_rows:
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO pda_team (team_designation, name, regno, created_at)
+                        VALUES (:team_designation, :name, :regno, now())
+                        """
+                    ),
+                    seed_rows
+                )
+                logger.info("Seeded pda_team members")
+    except Exception as exc:
+        logger.warning(f"Could not ensure pda_team table: {exc}")
+
+
+def _ensure_pda_gallery_table():
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS pda_gallery (
+                        id SERIAL PRIMARY KEY,
+                        photo_url VARCHAR(500) NOT NULL,
+                        caption TEXT,
+                        "order" INTEGER DEFAULT 0,
+                        is_featured BOOLEAN DEFAULT FALSE,
+                        created_at TIMESTAMPTZ DEFAULT now(),
+                        updated_at TIMESTAMPTZ
+                    )
+                    """
+                )
+            )
+    except Exception as exc:
+        logger.warning(f"Could not ensure pda_gallery table: {exc}")
 
 
 def _build_s3_url(key: str) -> str:
@@ -131,6 +291,9 @@ async def startup_event():
     db = next(get_db())
     try:
         _ensure_round_description_pdf_column()
+        _ensure_pda_items_table()
+        _ensure_pda_team_table()
+        _ensure_pda_gallery_table()
         # Initialize system config
         reg_config = db.query(SystemConfig).filter(SystemConfig.key == "registration_open").first()
         if not reg_config:
@@ -371,22 +534,36 @@ async def get_registration_status(db: Session = Depends(get_db)):
 # ==================== PDA PUBLIC ROUTES ====================
 @api_router.get("/pda/programs", response_model=List[ProgramResponse])
 async def get_pda_programs(db: Session = Depends(get_db)):
-    programs = db.query(Program).order_by(Program.created_at.desc()).all()
+    programs = db.query(PdaItem).filter(PdaItem.type == "program").order_by(PdaItem.created_at.desc()).all()
     return [ProgramResponse.model_validate(p) for p in programs]
 
 
 @api_router.get("/pda/events", response_model=List[EventResponse])
 async def get_pda_events(db: Session = Depends(get_db)):
-    events = db.query(Event).order_by(Event.start_date.is_(None), Event.start_date.asc(), Event.created_at.desc()).all()
+    events = db.query(PdaItem).filter(PdaItem.type == "event").order_by(
+        PdaItem.start_date.is_(None), PdaItem.start_date.asc(), PdaItem.created_at.desc()
+    ).all()
     return [EventResponse.model_validate(e) for e in events]
 
 
 @api_router.get("/pda/featured-event", response_model=EventResponse)
 async def get_featured_event(db: Session = Depends(get_db)):
-    event = db.query(Event).filter(Event.is_featured == True).order_by(Event.updated_at.desc()).first()
+    event = db.query(PdaItem).filter(PdaItem.type == "event", PdaItem.is_featured == True).order_by(PdaItem.updated_at.desc()).first()
     if not event:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No featured event")
     return EventResponse.model_validate(event)
+
+
+@api_router.get("/pda/team", response_model=List[PdaTeamResponse])
+async def get_pda_team(db: Session = Depends(get_db)):
+    team = db.query(PdaTeam).order_by(PdaTeam.team_designation.asc(), PdaTeam.name.asc()).all()
+    return [PdaTeamResponse.model_validate(member) for member in team]
+
+
+@api_router.get("/pda/gallery", response_model=List[PdaGalleryResponse])
+async def get_pda_gallery(db: Session = Depends(get_db)):
+    gallery = db.query(PdaGallery).order_by(PdaGallery.order.asc(), PdaGallery.created_at.desc()).all()
+    return [PdaGalleryResponse.model_validate(item) for item in gallery]
 
 
 # ==================== PDA ADMIN ROUTES ====================
@@ -396,11 +573,18 @@ async def create_pda_program(
     _: bool = Depends(require_pda_admin),
     db: Session = Depends(get_db)
 ):
-    new_program = Program(
+    new_program = PdaItem(
+        type="program",
         title=program_data.title,
         description=program_data.description,
         tag=program_data.tag,
-        poster_url=program_data.poster_url
+        poster_url=program_data.poster_url,
+        start_date=program_data.start_date,
+        end_date=program_data.end_date,
+        format=program_data.format,
+        hero_caption=program_data.hero_caption,
+        hero_url=program_data.hero_url,
+        is_featured=program_data.is_featured
     )
     db.add(new_program)
     db.commit()
@@ -415,7 +599,7 @@ async def update_pda_program(
     _: bool = Depends(require_pda_admin),
     db: Session = Depends(get_db)
 ):
-    program = db.query(Program).filter(Program.id == program_id).first()
+    program = db.query(PdaItem).filter(PdaItem.id == program_id, PdaItem.type == "program").first()
     if not program:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Program not found")
 
@@ -427,6 +611,18 @@ async def update_pda_program(
         program.tag = program_data.tag
     if program_data.poster_url is not None:
         program.poster_url = program_data.poster_url
+    if program_data.start_date is not None:
+        program.start_date = program_data.start_date
+    if program_data.end_date is not None:
+        program.end_date = program_data.end_date
+    if program_data.format is not None:
+        program.format = program_data.format
+    if program_data.hero_caption is not None:
+        program.hero_caption = program_data.hero_caption
+    if program_data.hero_url is not None:
+        program.hero_url = program_data.hero_url
+    if program_data.is_featured is not None:
+        program.is_featured = program_data.is_featured
 
     db.commit()
     db.refresh(program)
@@ -439,7 +635,7 @@ async def delete_pda_program(
     _: bool = Depends(require_pda_admin),
     db: Session = Depends(get_db)
 ):
-    program = db.query(Program).filter(Program.id == program_id).first()
+    program = db.query(PdaItem).filter(PdaItem.id == program_id, PdaItem.type == "program").first()
     if not program:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Program not found")
     db.delete(program)
@@ -453,10 +649,8 @@ async def create_pda_event(
     _: bool = Depends(require_pda_admin),
     db: Session = Depends(get_db)
 ):
-    if event_data.is_featured:
-        db.query(Event).filter(Event.is_featured == True).update({"is_featured": False}, synchronize_session=False)
-
-    new_event = Event(
+    new_event = PdaItem(
+        type="event",
         title=event_data.title,
         start_date=event_data.start_date,
         end_date=event_data.end_date,
@@ -480,12 +674,9 @@ async def update_pda_event(
     _: bool = Depends(require_pda_admin),
     db: Session = Depends(get_db)
 ):
-    event = db.query(Event).filter(Event.id == event_id).first()
+    event = db.query(PdaItem).filter(PdaItem.id == event_id, PdaItem.type == "event").first()
     if not event:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
-
-    if event_data.is_featured is True:
-        db.query(Event).filter(Event.is_featured == True, Event.id != event_id).update({"is_featured": False}, synchronize_session=False)
 
     if event_data.title is not None:
         event.title = event_data.title
@@ -517,11 +708,10 @@ async def feature_pda_event(
     _: bool = Depends(require_pda_admin),
     db: Session = Depends(get_db)
 ):
-    event = db.query(Event).filter(Event.id == event_id).first()
+    event = db.query(PdaItem).filter(PdaItem.id == event_id, PdaItem.type == "event").first()
     if not event:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
 
-    db.query(Event).filter(Event.is_featured == True, Event.id != event_id).update({"is_featured": False}, synchronize_session=False)
     event.is_featured = True
     db.commit()
     db.refresh(event)
@@ -542,6 +732,135 @@ async def delete_pda_event(
     return {"message": "Event deleted successfully"}
 
 
+@api_router.post("/pda-admin/team", response_model=PdaTeamResponse)
+async def create_pda_team_member(
+    team_data: PdaTeamCreate,
+    _: bool = Depends(require_pda_admin),
+    db: Session = Depends(get_db)
+):
+    new_member = PdaTeam(
+        name=team_data.name,
+        regno=team_data.regno,
+        dept=team_data.dept,
+        email=team_data.email,
+        phno=team_data.phno,
+        team_designation=team_data.team_designation,
+        photo_url=team_data.photo_url,
+        instagram_url=team_data.instagram_url,
+        linkedin_url=team_data.linkedin_url
+    )
+    db.add(new_member)
+    db.commit()
+    db.refresh(new_member)
+    return PdaTeamResponse.model_validate(new_member)
+
+
+@api_router.put("/pda-admin/team/{member_id}", response_model=PdaTeamResponse)
+async def update_pda_team_member(
+    member_id: int,
+    team_data: PdaTeamUpdate,
+    _: bool = Depends(require_pda_admin),
+    db: Session = Depends(get_db)
+):
+    member = db.query(PdaTeam).filter(PdaTeam.id == member_id).first()
+    if not member:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team member not found")
+
+    if team_data.name is not None:
+        member.name = team_data.name
+    if team_data.regno is not None:
+        member.regno = team_data.regno
+    if team_data.dept is not None:
+        member.dept = team_data.dept
+    if team_data.email is not None:
+        member.email = team_data.email
+    if team_data.phno is not None:
+        member.phno = team_data.phno
+    if team_data.team_designation is not None:
+        member.team_designation = team_data.team_designation
+    if team_data.photo_url is not None:
+        member.photo_url = team_data.photo_url
+    if team_data.instagram_url is not None:
+        member.instagram_url = team_data.instagram_url
+    if team_data.linkedin_url is not None:
+        member.linkedin_url = team_data.linkedin_url
+
+    db.commit()
+    db.refresh(member)
+    return PdaTeamResponse.model_validate(member)
+
+
+@api_router.delete("/pda-admin/team/{member_id}")
+async def delete_pda_team_member(
+    member_id: int,
+    _: bool = Depends(require_pda_admin),
+    db: Session = Depends(get_db)
+):
+    member = db.query(PdaTeam).filter(PdaTeam.id == member_id).first()
+    if not member:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team member not found")
+    db.delete(member)
+    db.commit()
+    return {"message": "Team member deleted successfully"}
+
+
+@api_router.post("/pda-admin/gallery", response_model=PdaGalleryResponse)
+async def create_pda_gallery_item(
+    gallery_data: PdaGalleryCreate,
+    _: bool = Depends(require_pda_admin),
+    db: Session = Depends(get_db)
+):
+    new_item = PdaGallery(
+        photo_url=gallery_data.photo_url,
+        caption=gallery_data.caption,
+        order=gallery_data.order or 0,
+        is_featured=gallery_data.is_featured
+    )
+    db.add(new_item)
+    db.commit()
+    db.refresh(new_item)
+    return PdaGalleryResponse.model_validate(new_item)
+
+
+@api_router.put("/pda-admin/gallery/{item_id}", response_model=PdaGalleryResponse)
+async def update_pda_gallery_item(
+    item_id: int,
+    gallery_data: PdaGalleryUpdate,
+    _: bool = Depends(require_pda_admin),
+    db: Session = Depends(get_db)
+):
+    item = db.query(PdaGallery).filter(PdaGallery.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gallery item not found")
+
+    if gallery_data.photo_url is not None:
+        item.photo_url = gallery_data.photo_url
+    if gallery_data.caption is not None:
+        item.caption = gallery_data.caption
+    if gallery_data.order is not None:
+        item.order = gallery_data.order
+    if gallery_data.is_featured is not None:
+        item.is_featured = gallery_data.is_featured
+
+    db.commit()
+    db.refresh(item)
+    return PdaGalleryResponse.model_validate(item)
+
+
+@api_router.delete("/pda-admin/gallery/{item_id}")
+async def delete_pda_gallery_item(
+    item_id: int,
+    _: bool = Depends(require_pda_admin),
+    db: Session = Depends(get_db)
+):
+    item = db.query(PdaGallery).filter(PdaGallery.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gallery item not found")
+    db.delete(item)
+    db.commit()
+    return {"message": "Gallery item deleted successfully"}
+
+
 @api_router.post("/pda-admin/posters")
 async def upload_pda_poster(
     file: UploadFile = File(...),
@@ -551,6 +870,30 @@ async def upload_pda_poster(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing filename")
     allowed_types = ["image/png", "image/jpeg", "image/webp"]
     url = _upload_to_s3(file, "posters", allowed_types=allowed_types)
+    return {"url": url}
+
+
+@api_router.post("/pda-admin/gallery-uploads")
+async def upload_pda_gallery_image(
+    file: UploadFile = File(...),
+    _: bool = Depends(require_pda_admin)
+):
+    if not file.filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing filename")
+    allowed_types = ["image/png", "image/jpeg", "image/webp"]
+    url = _upload_to_s3(file, "gallery", allowed_types=allowed_types)
+    return {"url": url}
+
+
+@api_router.post("/pda-admin/team-uploads")
+async def upload_pda_team_image(
+    file: UploadFile = File(...),
+    _: bool = Depends(require_pda_admin)
+):
+    if not file.filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing filename")
+    allowed_types = ["image/png", "image/jpeg", "image/webp"]
+    url = _upload_to_s3(file, "team", allowed_types=allowed_types)
     return {"url": url}
 
 
@@ -859,6 +1202,61 @@ async def get_round_participants(
         })
     
     return result
+
+
+@api_router.get("/admin/rounds/{round_id}/stats", response_model=RoundStatsResponse)
+async def get_round_stats(
+    round_id: int,
+    admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    round = db.query(Round).filter(Round.id == round_id).first()
+    if not round:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
+
+    participants = db.query(User).filter(User.role == UserRole.PARTICIPANT).all()
+    total_count = len(participants)
+
+    present_rows = (
+        db.query(Score, User)
+        .join(User, Score.participant_id == User.id)
+        .filter(Score.round_id == round_id, Score.is_present == True)
+        .all()
+    )
+    present_count = len(present_rows)
+    absent_count = max(total_count - present_count, 0)
+
+    scores = [float(score.normalized_score or 0) for score, _ in present_rows]
+    if scores:
+        min_score = min(scores)
+        max_score = max(scores)
+        avg_score = sum(scores) / len(scores)
+    else:
+        min_score = None
+        max_score = None
+        avg_score = None
+
+    top10_rows = sorted(present_rows, key=lambda row: float(row[0].normalized_score or 0), reverse=True)[:10]
+    top10 = [
+        RoundStatsTopEntry(
+            participant_id=user.id,
+            name=user.name,
+            register_number=user.register_number,
+            normalized_score=float(score.normalized_score or 0)
+        )
+        for score, user in top10_rows
+    ]
+
+    return RoundStatsResponse(
+        round_id=round_id,
+        total_count=total_count,
+        present_count=present_count,
+        absent_count=absent_count,
+        min_score=min_score,
+        max_score=max_score,
+        avg_score=avg_score,
+        top10=top10
+    )
 
 
 @api_router.post("/admin/rounds/{round_id}/scores")

@@ -132,6 +132,7 @@ class Program(Base):
     description = Column(Text, nullable=True)
     tag = Column(String(100), nullable=True)
     poster_url = Column(String(500), nullable=True)
+    is_featured = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -148,6 +149,54 @@ class Event(Base):
     poster_url = Column(String(500), nullable=True)
     hero_caption = Column(Text, nullable=True)
     hero_url = Column(String(500), nullable=True)
+    is_featured = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PdaItem(Base):
+    __tablename__ = "pda_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    type = Column(String(20), nullable=False)  # "program" | "event"
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    tag = Column(String(100), nullable=True)
+    poster_url = Column(String(500), nullable=True)
+    start_date = Column(Date, nullable=True)
+    end_date = Column(Date, nullable=True)
+    format = Column(String(150), nullable=True)
+    hero_caption = Column(Text, nullable=True)
+    hero_url = Column(String(500), nullable=True)
+    is_featured = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PdaTeam(Base):
+    __tablename__ = "pda_team"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    regno = Column(String(20), unique=True, nullable=False)
+    dept = Column(String(150), nullable=True)
+    email = Column(String(255), nullable=True)
+    phno = Column(String(20), nullable=True)
+    team_designation = Column(String(150), nullable=False)
+    photo_url = Column(String(500), nullable=True)
+    instagram_url = Column(String(500), nullable=True)
+    linkedin_url = Column(String(500), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PdaGallery(Base):
+    __tablename__ = "pda_gallery"
+
+    id = Column(Integer, primary_key=True, index=True)
+    photo_url = Column(String(500), nullable=False)
+    caption = Column(Text, nullable=True)
+    order = Column(Integer, default=0)
     is_featured = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

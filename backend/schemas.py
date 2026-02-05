@@ -201,6 +201,24 @@ class RoundPublicResponse(BaseModel):
         from_attributes = True
 
 
+class RoundStatsTopEntry(BaseModel):
+    participant_id: int
+    name: str
+    register_number: str
+    normalized_score: float
+
+
+class RoundStatsResponse(BaseModel):
+    round_id: int
+    total_count: int
+    present_count: int
+    absent_count: int
+    min_score: Optional[float]
+    max_score: Optional[float]
+    avg_score: Optional[float]
+    top10: List[RoundStatsTopEntry]
+
+
 # Score Schemas
 class ScoreEntry(BaseModel):
     participant_id: int
@@ -279,6 +297,12 @@ class ProgramCreate(BaseModel):
     description: Optional[str] = None
     tag: Optional[str] = None
     poster_url: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    format: Optional[str] = None
+    hero_caption: Optional[str] = None
+    hero_url: Optional[str] = None
+    is_featured: bool = False
 
 
 class ProgramUpdate(BaseModel):
@@ -286,14 +310,27 @@ class ProgramUpdate(BaseModel):
     description: Optional[str] = None
     tag: Optional[str] = None
     poster_url: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    format: Optional[str] = None
+    hero_caption: Optional[str] = None
+    hero_url: Optional[str] = None
+    is_featured: Optional[bool] = None
 
 
 class ProgramResponse(BaseModel):
     id: int
+    type: Optional[str] = None
     title: str
     description: Optional[str]
     tag: Optional[str]
     poster_url: Optional[str]
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    format: Optional[str] = None
+    hero_caption: Optional[str] = None
+    hero_url: Optional[str] = None
+    is_featured: bool
     created_at: datetime
 
     class Config:
@@ -326,6 +363,7 @@ class EventUpdate(BaseModel):
 
 class EventResponse(BaseModel):
     id: int
+    type: Optional[str] = None
     title: str
     start_date: Optional[date]
     end_date: Optional[date]
@@ -334,6 +372,73 @@ class EventResponse(BaseModel):
     poster_url: Optional[str]
     hero_caption: Optional[str]
     hero_url: Optional[str]
+    is_featured: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PdaTeamCreate(BaseModel):
+    name: str = Field(..., min_length=2)
+    regno: str = Field(..., min_length=6)
+    dept: Optional[str] = None
+    email: Optional[str] = None
+    phno: Optional[str] = None
+    team_designation: str = Field(..., min_length=2)
+    photo_url: Optional[str] = None
+    instagram_url: Optional[str] = None
+    linkedin_url: Optional[str] = None
+
+
+class PdaTeamUpdate(BaseModel):
+    name: Optional[str] = None
+    regno: Optional[str] = None
+    dept: Optional[str] = None
+    email: Optional[str] = None
+    phno: Optional[str] = None
+    team_designation: Optional[str] = None
+    photo_url: Optional[str] = None
+    instagram_url: Optional[str] = None
+    linkedin_url: Optional[str] = None
+
+
+class PdaTeamResponse(BaseModel):
+    id: int
+    name: str
+    regno: str
+    dept: Optional[str]
+    email: Optional[str]
+    phno: Optional[str]
+    team_designation: str
+    photo_url: Optional[str]
+    instagram_url: Optional[str]
+    linkedin_url: Optional[str]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PdaGalleryCreate(BaseModel):
+    photo_url: str = Field(..., min_length=5)
+    caption: Optional[str] = None
+    order: Optional[int] = 0
+    is_featured: bool = False
+
+
+class PdaGalleryUpdate(BaseModel):
+    photo_url: Optional[str] = None
+    caption: Optional[str] = None
+    order: Optional[int] = None
+    is_featured: Optional[bool] = None
+
+
+class PdaGalleryResponse(BaseModel):
+    id: int
+    photo_url: str
+    caption: Optional[str]
+    order: Optional[int]
     is_featured: bool
     created_at: datetime
 

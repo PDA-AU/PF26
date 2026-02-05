@@ -13,6 +13,32 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const LEADERBOARD_CACHE_TTL_MS = 10 * 60 * 1000;
+const ROUND_STATS_CACHE_TTL_MS = 10 * 60 * 1000;
+
+const getLeaderboardCacheKey = (params) => `pf26_leaderboard_${params || 'all'}`;
+const getRoundStatsCacheKey = (participantId) => `pf26_leaderboard_rounds_${participantId}`;
+
+const loadCache = (key, ttlMs) => {
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed.ts !== 'number' || parsed.data === undefined) return null;
+        if (Date.now() - parsed.ts > ttlMs) return null;
+        return parsed.data;
+    } catch (error) {
+        return null;
+    }
+};
+
+const saveCache = (key, data) => {
+    try {
+        localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data }));
+    } catch (error) {
+        // ignore storage errors
+    }
+};
 
 const DEPARTMENTS = [
     { value: "Artificial Intelligence and Data Science", label: "AI & DS" },
@@ -45,16 +71,27 @@ export default function AdminLeaderboard() {
     });
 
     const fetchLeaderboard = useCallback(async () => {
+        setLoading(true);
         try {
             const params = new URLSearchParams();
             if (filters.department) params.append('department', filters.department);
             if (filters.year) params.append('year', filters.year);
             if (filters.search) params.append('search', filters.search);
 
-            const response = await axios.get(`${API}/admin/leaderboard?${params.toString()}`, {
+            const paramString = params.toString();
+            const cacheKey = getLeaderboardCacheKey(paramString);
+            const cached = loadCache(cacheKey, LEADERBOARD_CACHE_TTL_MS);
+            if (cached) {
+                setLeaderboard(cached);
+                setLoading(false);
+                return;
+            }
+
+            const response = await axios.get(`${API}/admin/leaderboard?${paramString}`, {
                 headers: getAuthHeader()
             });
             setLeaderboard(response.data);
+            saveCache(cacheKey, response.data);
         } catch (error) {
             toast.error('Failed to load leaderboard');
         } finally {
@@ -105,10 +142,18 @@ export default function AdminLeaderboard() {
         setRoundStatsError('');
         setRoundStatsLoading(true);
         try {
+            const cacheKey = getRoundStatsCacheKey(entry.participant_id);
+            const cached = loadCache(cacheKey, ROUND_STATS_CACHE_TTL_MS);
+            if (cached) {
+                setRoundStats(cached);
+                setRoundStatsLoading(false);
+                return;
+            }
             const response = await axios.get(`${API}/admin/participants/${entry.participant_id}/rounds`, {
                 headers: getAuthHeader()
             });
             setRoundStats(response.data || []);
+            saveCache(cacheKey, response.data || []);
         } catch (error) {
             setRoundStatsError('Failed to load round stats');
         } finally {
@@ -150,20 +195,24 @@ export default function AdminLeaderboard() {
             </header>
 
             {/* Navigation */}
-            <nav className="bg-white border-b-2 border-black overflow-x-auto">
+            <nav className="bg-white border-b-2 border-black">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex gap-1">
-                        <Link to="/admin" className="px-4 py-3 font-bold text-sm hover:bg-muted transition-colors">
-                            <LayoutDashboard className="w-4 h-4 inline mr-2" />Dashboard
+                    <div className="flex gap-1 sm:gap-1">
+                        <Link to="/admin" aria-label="Dashboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
+                            <LayoutDashboard className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
+                            <span className="hidden sm:inline">Dashboard</span>
                         </Link>
-                        <Link to="/admin/rounds" className="px-4 py-3 font-bold text-sm hover:bg-muted transition-colors">
-                            <Calendar className="w-4 h-4 inline mr-2" />Rounds
+                        <Link to="/admin/rounds" aria-label="Rounds" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
+                            <Calendar className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
+                            <span className="hidden sm:inline">Rounds</span>
                         </Link>
-                        <Link to="/admin/participants" className="px-4 py-3 font-bold text-sm hover:bg-muted transition-colors">
-                            <Users className="w-4 h-4 inline mr-2" />Participants
+                        <Link to="/admin/participants" aria-label="Participants" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
+                            <Users className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
+                            <span className="hidden sm:inline">Participants</span>
                         </Link>
-                        <Link to="/admin/leaderboard" className="px-4 py-3 font-bold text-sm border-b-4 border-primary bg-secondary">
-                            <Trophy className="w-4 h-4 inline mr-2" />Leaderboard
+                        <Link to="/admin/leaderboard" aria-label="Leaderboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm border-b-4 border-primary bg-secondary">
+                            <Trophy className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
+                            <span className="hidden sm:inline">Leaderboard</span>
                         </Link>
                     </div>
                 </div>

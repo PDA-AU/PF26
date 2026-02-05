@@ -204,11 +204,25 @@ export default function AdminScoring() {
             </header>
 
             <nav className="bg-white border-b-2 border-black">
-                <div className="max-w-7xl mx-auto px-4 flex gap-1">
-                    <Link to="/admin" className="px-4 py-3 font-bold text-sm"><LayoutDashboard className="w-4 h-4 inline mr-2" />Dashboard</Link>
-                    <Link to="/admin/rounds" className="px-4 py-3 font-bold text-sm border-b-4 border-primary bg-secondary"><Calendar className="w-4 h-4 inline mr-2" />Rounds</Link>
-                    <Link to="/admin/participants" className="px-4 py-3 font-bold text-sm"><Users className="w-4 h-4 inline mr-2" />Participants</Link>
-                    <Link to="/admin/leaderboard" className="px-4 py-3 font-bold text-sm"><Trophy className="w-4 h-4 inline mr-2" />Leaderboard</Link>
+                <div className="max-w-7xl mx-auto px-4">
+                    <div className="flex gap-1 sm:gap-1">
+                        <Link to="/admin" aria-label="Dashboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm">
+                            <LayoutDashboard className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
+                            <span className="hidden sm:inline">Dashboard</span>
+                        </Link>
+                        <Link to="/admin/rounds" aria-label="Rounds" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm border-b-4 border-primary bg-secondary">
+                            <Calendar className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
+                            <span className="hidden sm:inline">Rounds</span>
+                        </Link>
+                        <Link to="/admin/participants" aria-label="Participants" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm">
+                            <Users className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
+                            <span className="hidden sm:inline">Participants</span>
+                        </Link>
+                        <Link to="/admin/leaderboard" aria-label="Leaderboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm">
+                            <Trophy className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
+                            <span className="hidden sm:inline">Leaderboard</span>
+                        </Link>
+                    </div>
                 </div>
             </nav>
 

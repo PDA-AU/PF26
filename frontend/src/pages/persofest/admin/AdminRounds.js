@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import axios from 'axios';
@@ -10,8 +10,36 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import RoundStatsCard from './RoundStatsCard';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const STATS_CACHE_TTL_MS = 10 * 60 * 1000;
+
+const getStatsCacheKey = (roundId) => `pf26_round_stats_${roundId}`;
+
+const loadCachedStats = (roundId) => {
+    try {
+        const raw = localStorage.getItem(getStatsCacheKey(roundId));
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed.ts !== 'number' || !parsed.data) return null;
+        if (Date.now() - parsed.ts > STATS_CACHE_TTL_MS) return null;
+        return parsed.data;
+    } catch (error) {
+        return null;
+    }
+};
+
+const saveCachedStats = (roundId, data) => {
+    try {
+        localStorage.setItem(getStatsCacheKey(roundId), JSON.stringify({
+            ts: Date.now(),
+            data
+        }));
+    } catch (error) {
+        // ignore storage errors
+    }
+};
 
 export default function AdminRounds() {
     const navigate = useNavigate();
@@ -27,6 +55,8 @@ export default function AdminRounds() {
     const [conductedBy, setConductedBy] = useState('');
     const [criteria, setCriteria] = useState([{ name: 'Overall', max_marks: 100 }]);
     const [roundPdfFile, setRoundPdfFile] = useState(null);
+    const [roundStats, setRoundStats] = useState({});
+    const roundStatsRef = useRef({});
 
     const fetchRounds = useCallback(async () => {
         try {
@@ -40,6 +70,67 @@ export default function AdminRounds() {
     }, [getAuthHeader]);
 
     useEffect(() => { fetchRounds(); }, [fetchRounds]);
+
+    useEffect(() => {
+        if (!rounds || rounds.length === 0) return;
+        const completedRounds = rounds.filter((r) => r.state === 'Completed');
+        const roundsToFetch = completedRounds.filter((r) => !roundStatsRef.current[r.id]);
+        if (roundsToFetch.length === 0) return;
+
+        const fetchStats = async (roundId) => {
+            try {
+                const cached = loadCachedStats(roundId);
+                if (cached) {
+                    setRoundStats((prev) => {
+                        const next = {
+                            ...prev,
+                            [roundId]: { loading: false, error: null, stats: cached }
+                        };
+                        roundStatsRef.current = next;
+                        return next;
+                    });
+                    return;
+                }
+                const response = await axios.get(`${API}/admin/rounds/${roundId}/stats`, {
+                    headers: getAuthHeader()
+                });
+                setRoundStats((prev) => {
+                    const next = {
+                        ...prev,
+                        [roundId]: {
+                            loading: false,
+                            error: null,
+                            stats: response.data
+                        }
+                    };
+                    roundStatsRef.current = next;
+                    return next;
+                });
+                saveCachedStats(roundId, response.data);
+            } catch (error) {
+                setRoundStats((prev) => {
+                    const next = {
+                        ...prev,
+                        [roundId]: { loading: false, error: 'Failed to load stats', stats: null }
+                    };
+                    roundStatsRef.current = next;
+                    return next;
+                });
+            }
+        };
+
+        roundsToFetch.forEach((r) => {
+            setRoundStats((prev) => {
+                const next = {
+                    ...prev,
+                    [r.id]: { loading: true, error: null, stats: null }
+                };
+                roundStatsRef.current = next;
+                return next;
+            });
+            fetchStats(r.id);
+        });
+    }, [rounds, getAuthHeader]);
 
     const resetForm = () => {
         setName('');
@@ -138,6 +229,7 @@ export default function AdminRounds() {
         return 'bg-purple-100 text-purple-800';
     };
 
+
     return (
         <div className="min-h-screen bg-muted">
             <header className="bg-primary text-white border-b-4 border-black sticky top-0 z-50">
@@ -160,11 +252,25 @@ export default function AdminRounds() {
             </header>
 
             <nav className="bg-white border-b-2 border-black">
-                <div className="max-w-7xl mx-auto px-4 flex gap-1">
-                    <Link to="/admin" className="px-4 py-3 font-bold text-sm"><LayoutDashboard className="w-4 h-4 inline mr-2" />Dashboard</Link>
-                    <Link to="/admin/rounds" className="px-4 py-3 font-bold text-sm border-b-4 border-primary bg-secondary"><Calendar className="w-4 h-4 inline mr-2" />Rounds</Link>
-                    <Link to="/admin/participants" className="px-4 py-3 font-bold text-sm"><Users className="w-4 h-4 inline mr-2" />Participants</Link>
-                    <Link to="/admin/leaderboard" className="px-4 py-3 font-bold text-sm"><Trophy className="w-4 h-4 inline mr-2" />Leaderboard</Link>
+                <div className="max-w-7xl mx-auto px-4">
+                    <div className="flex gap-1 sm:gap-1">
+                        <Link to="/admin" aria-label="Dashboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm">
+                            <LayoutDashboard className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
+                            <span className="hidden sm:inline">Dashboard</span>
+                        </Link>
+                        <Link to="/admin/rounds" aria-label="Rounds" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm border-b-4 border-primary bg-secondary">
+                            <Calendar className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
+                            <span className="hidden sm:inline">Rounds</span>
+                        </Link>
+                        <Link to="/admin/participants" aria-label="Participants" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm">
+                            <Users className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
+                            <span className="hidden sm:inline">Participants</span>
+                        </Link>
+                        <Link to="/admin/leaderboard" aria-label="Leaderboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm">
+                            <Trophy className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
+                            <span className="hidden sm:inline">Leaderboard</span>
+                        </Link>
+                    </div>
                 </div>
             </nav>
 
@@ -287,6 +393,7 @@ export default function AdminRounds() {
                                 <p className="text-gray-600 text-sm mb-4">{round.description || 'No description'}</p>
                                 <p className="text-sm text-gray-500 mb-4">Mode: {round.mode} | Date: {round.date ? new Date(round.date).toLocaleDateString() : 'TBA'}</p>
                                 {round.is_frozen && <p className="text-primary font-bold mb-4"><Lock className="w-4 h-4 inline" /> Frozen</p>}
+                                {round.state === 'Completed' && <RoundStatsCard roundId={round.id} statsState={roundStats[round.id]} />}
                                 <div className="flex flex-wrap gap-2">
                                     {!round.is_frozen && (
                                         <>
