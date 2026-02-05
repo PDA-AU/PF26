@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, UploadFile, File, Query, Header
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, UploadFile, File, Query, Header, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
@@ -19,17 +19,19 @@ import csv
 import boto3
 
 from database import engine, get_db, Base
-from models import User, Round, Score, SystemConfig, Program, Event, PdaItem, PdaTeam, PdaGallery, UserRole, RoundState, ParticipantStatus, Department, YearOfStudy, Gender, RoundMode
+from models import User, Round, Score, AdminLog, PdaAdmin, SystemConfig, PdaItem, PdaTeam, PdaGallery, UserRole, RoundState, ParticipantStatus, Department, YearOfStudy, Gender, RoundMode
 from schemas import (
     UserRegister, UserLogin, TokenResponse, RefreshTokenRequest, UserResponse, UserUpdate,
     ParticipantListResponse, RoundCreate, RoundUpdate, RoundResponse, RoundPublicResponse,
     ScoreEntry, ScoreUpdate, ScoreResponse, ParticipantRoundStatus, AdminParticipantRoundStat, LeaderboardEntry,
     DashboardStats, TopReferrer, DepartmentEnum, YearOfStudyEnum, GenderEnum, 
-    ParticipantStatusEnum, RoundStateEnum, RoundStatsResponse, RoundStatsTopEntry,
+    ParticipantStatusEnum, RoundStateEnum, RoundStatsResponse, RoundStatsTopEntry, ParticipantLeaderboardSummary,
+    AdminLogResponse,
     ProgramCreate, ProgramUpdate, ProgramResponse,
     EventCreate, EventUpdate, EventResponse,
     PdaTeamCreate, PdaTeamUpdate, PdaTeamResponse,
-    PdaGalleryCreate, PdaGalleryUpdate, PdaGalleryResponse
+    PdaGalleryCreate, PdaGalleryUpdate, PdaGalleryResponse,
+    PdaAdminCreate
 )
 from auth import (
     verify_password, get_password_hash, create_access_token, create_refresh_token,
@@ -58,6 +60,33 @@ S3_CLIENT = boto3.client(
     aws_secret_access_key=AWS_SECRET_ACCESS_KEY
 )
 
+
+def _is_superadmin(admin: User) -> bool:
+    return admin and admin.register_number == "0000000000"
+
+
+def _require_superadmin(admin: User = Depends(get_current_admin)) -> User:
+    if not _is_superadmin(admin):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superadmin access required")
+    return admin
+
+
+def log_admin_action(db: Session, admin: User, action: str, method: Optional[str] = None, path: Optional[str] = None, meta: Optional[dict] = None):
+    try:
+        entry = AdminLog(
+            admin_id=admin.id,
+            admin_register_number=admin.register_number,
+            admin_name=admin.name,
+            action=action,
+            method=method,
+            path=path,
+            meta=meta
+        )
+        db.add(entry)
+        db.commit()
+    except Exception:
+        db.rollback()
+
 app = FastAPI(title="Persofest'26 API", version="1.0.0")
 api_router = APIRouter(prefix="/api")
 
@@ -85,20 +114,20 @@ def _get_admin_from_bearer(credentials: Optional[HTTPAuthorizationCredentials], 
     user = db.query(User).filter(User.register_number == register_number).first()
     if not user or user.role != UserRole.ADMIN:
         return None
+    admin_link = db.query(PdaAdmin).filter(PdaAdmin.user_id == user.id).first()
+    if not admin_link:
+        return None
     return user
 
 
 def require_pda_admin(
-    x_pda_admin: str = Header(None, alias="X-PDA-ADMIN"),
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_bearer),
     db: Session = Depends(get_db)
-):
-    if x_pda_admin and x_pda_admin == PDA_ADMIN_PASSWORD:
-        return True
+) -> User:
     admin_user = _get_admin_from_bearer(credentials, db)
     if not admin_user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid PDA admin credentials")
-    return True
+    return admin_user
 
 
 def _ensure_round_description_pdf_column():
@@ -253,6 +282,53 @@ def _ensure_pda_gallery_table():
         logger.warning(f"Could not ensure pda_gallery table: {exc}")
 
 
+def _ensure_pda_admins_table():
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS pda_admins (
+                        id SERIAL PRIMARY KEY,
+                        user_id INTEGER UNIQUE NOT NULL,
+                        created_by INTEGER,
+                        created_at TIMESTAMPTZ DEFAULT now(),
+                        CONSTRAINT pda_admins_user_fk FOREIGN KEY(user_id) REFERENCES users(id),
+                        CONSTRAINT pda_admins_created_by_fk FOREIGN KEY(created_by) REFERENCES users(id)
+                    )
+                    """
+                )
+            )
+    except Exception as exc:
+        logger.warning(f"Could not ensure pda_admins table: {exc}")
+
+
+def _maybe_drop_legacy_pda_tables():
+    try:
+        with engine.begin() as conn:
+            for table_name in ("programs", "events"):
+                exists = conn.execute(
+                    text(
+                        """
+                        SELECT 1
+                        FROM information_schema.tables
+                        WHERE table_name = :table_name
+                        """
+                    ),
+                    {"table_name": table_name}
+                ).fetchone()
+                if not exists:
+                    continue
+                count = conn.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar() or 0
+                if count == 0:
+                    conn.execute(text(f"DROP TABLE IF EXISTS {table_name} CASCADE"))
+                    logger.info(f"Dropped legacy table {table_name} (empty)")
+                else:
+                    logger.warning(f"Legacy table {table_name} has {count} rows; leaving intact")
+    except Exception as exc:
+        logger.warning(f"Could not drop legacy PDA tables: {exc}")
+
+
 def _build_s3_url(key: str) -> str:
     if not S3_BUCKET_NAME or not AWS_REGION:
         raise RuntimeError("S3 configuration missing")
@@ -291,9 +367,11 @@ async def startup_event():
     db = next(get_db())
     try:
         _ensure_round_description_pdf_column()
+        _maybe_drop_legacy_pda_tables()
         _ensure_pda_items_table()
         _ensure_pda_team_table()
         _ensure_pda_gallery_table()
+        _ensure_pda_admins_table()
         # Initialize system config
         reg_config = db.query(SystemConfig).filter(SystemConfig.key == "registration_open").first()
         if not reg_config:
@@ -319,6 +397,15 @@ async def startup_event():
             db.add(admin_user)
             db.commit()
             logger.info("Default admin created: register_number=0000000000, password=admin123")
+            admin = admin_user
+
+        if admin:
+            admin_users = db.query(User).filter(User.role == UserRole.ADMIN).all()
+            for admin_user in admin_users:
+                existing_link = db.query(PdaAdmin).filter(PdaAdmin.user_id == admin_user.id).first()
+                if not existing_link:
+                    db.add(PdaAdmin(user_id=admin_user.id, created_by=admin.id))
+            db.commit()
     finally:
         db.close()
 
@@ -570,8 +657,9 @@ async def get_pda_gallery(db: Session = Depends(get_db)):
 @api_router.post("/pda-admin/programs", response_model=ProgramResponse)
 async def create_pda_program(
     program_data: ProgramCreate,
-    _: bool = Depends(require_pda_admin),
-    db: Session = Depends(get_db)
+    admin: Optional[User] = Depends(require_pda_admin),
+    db: Session = Depends(get_db),
+    request: Request = None
 ):
     new_program = PdaItem(
         type="program",
@@ -589,6 +677,8 @@ async def create_pda_program(
     db.add(new_program)
     db.commit()
     db.refresh(new_program)
+    if admin:
+        log_admin_action(db, admin, "Create PDA program", request.method if request else None, request.url.path if request else None, {"program_id": new_program.id})
     return ProgramResponse.model_validate(new_program)
 
 
@@ -596,8 +686,9 @@ async def create_pda_program(
 async def update_pda_program(
     program_id: int,
     program_data: ProgramUpdate,
-    _: bool = Depends(require_pda_admin),
-    db: Session = Depends(get_db)
+    admin: Optional[User] = Depends(require_pda_admin),
+    db: Session = Depends(get_db),
+    request: Request = None
 ):
     program = db.query(PdaItem).filter(PdaItem.id == program_id, PdaItem.type == "program").first()
     if not program:
@@ -626,28 +717,34 @@ async def update_pda_program(
 
     db.commit()
     db.refresh(program)
+    if admin:
+        log_admin_action(db, admin, "Update PDA program", request.method if request else None, request.url.path if request else None, {"program_id": program_id})
     return ProgramResponse.model_validate(program)
 
 
 @api_router.delete("/pda-admin/programs/{program_id}")
 async def delete_pda_program(
     program_id: int,
-    _: bool = Depends(require_pda_admin),
-    db: Session = Depends(get_db)
+    admin: Optional[User] = Depends(require_pda_admin),
+    db: Session = Depends(get_db),
+    request: Request = None
 ):
     program = db.query(PdaItem).filter(PdaItem.id == program_id, PdaItem.type == "program").first()
     if not program:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Program not found")
     db.delete(program)
     db.commit()
+    if admin:
+        log_admin_action(db, admin, "Delete PDA program", request.method if request else None, request.url.path if request else None, {"program_id": program_id})
     return {"message": "Program deleted successfully"}
 
 
 @api_router.post("/pda-admin/events", response_model=EventResponse)
 async def create_pda_event(
     event_data: EventCreate,
-    _: bool = Depends(require_pda_admin),
-    db: Session = Depends(get_db)
+    admin: Optional[User] = Depends(require_pda_admin),
+    db: Session = Depends(get_db),
+    request: Request = None
 ):
     new_event = PdaItem(
         type="event",
@@ -664,6 +761,8 @@ async def create_pda_event(
     db.add(new_event)
     db.commit()
     db.refresh(new_event)
+    if admin:
+        log_admin_action(db, admin, "Create PDA event", request.method if request else None, request.url.path if request else None, {"event_id": new_event.id})
     return EventResponse.model_validate(new_event)
 
 
@@ -671,8 +770,9 @@ async def create_pda_event(
 async def update_pda_event(
     event_id: int,
     event_data: EventUpdate,
-    _: bool = Depends(require_pda_admin),
-    db: Session = Depends(get_db)
+    admin: Optional[User] = Depends(require_pda_admin),
+    db: Session = Depends(get_db),
+    request: Request = None
 ):
     event = db.query(PdaItem).filter(PdaItem.id == event_id, PdaItem.type == "event").first()
     if not event:
@@ -699,14 +799,17 @@ async def update_pda_event(
 
     db.commit()
     db.refresh(event)
+    if admin:
+        log_admin_action(db, admin, "Update PDA event", request.method if request else None, request.url.path if request else None, {"event_id": event_id})
     return EventResponse.model_validate(event)
 
 
 @api_router.post("/pda-admin/events/{event_id}/feature", response_model=EventResponse)
 async def feature_pda_event(
     event_id: int,
-    _: bool = Depends(require_pda_admin),
-    db: Session = Depends(get_db)
+    admin: Optional[User] = Depends(require_pda_admin),
+    db: Session = Depends(get_db),
+    request: Request = None
 ):
     event = db.query(PdaItem).filter(PdaItem.id == event_id, PdaItem.type == "event").first()
     if not event:
@@ -715,28 +818,34 @@ async def feature_pda_event(
     event.is_featured = True
     db.commit()
     db.refresh(event)
+    if admin:
+        log_admin_action(db, admin, "Feature PDA event", request.method if request else None, request.url.path if request else None, {"event_id": event_id})
     return EventResponse.model_validate(event)
 
 
 @api_router.delete("/pda-admin/events/{event_id}")
 async def delete_pda_event(
     event_id: int,
-    _: bool = Depends(require_pda_admin),
-    db: Session = Depends(get_db)
+    admin: Optional[User] = Depends(require_pda_admin),
+    db: Session = Depends(get_db),
+    request: Request = None
 ):
-    event = db.query(Event).filter(Event.id == event_id).first()
+    event = db.query(PdaItem).filter(PdaItem.id == event_id, PdaItem.type == "event").first()
     if not event:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
     db.delete(event)
     db.commit()
+    if admin:
+        log_admin_action(db, admin, "Delete PDA event", request.method if request else None, request.url.path if request else None, {"event_id": event_id})
     return {"message": "Event deleted successfully"}
 
 
 @api_router.post("/pda-admin/team", response_model=PdaTeamResponse)
 async def create_pda_team_member(
     team_data: PdaTeamCreate,
-    _: bool = Depends(require_pda_admin),
-    db: Session = Depends(get_db)
+    admin: Optional[User] = Depends(require_pda_admin),
+    db: Session = Depends(get_db),
+    request: Request = None
 ):
     new_member = PdaTeam(
         name=team_data.name,
@@ -752,6 +861,8 @@ async def create_pda_team_member(
     db.add(new_member)
     db.commit()
     db.refresh(new_member)
+    if admin:
+        log_admin_action(db, admin, "Create team member", request.method if request else None, request.url.path if request else None, {"member_id": new_member.id})
     return PdaTeamResponse.model_validate(new_member)
 
 
@@ -759,8 +870,9 @@ async def create_pda_team_member(
 async def update_pda_team_member(
     member_id: int,
     team_data: PdaTeamUpdate,
-    _: bool = Depends(require_pda_admin),
-    db: Session = Depends(get_db)
+    admin: Optional[User] = Depends(require_pda_admin),
+    db: Session = Depends(get_db),
+    request: Request = None
 ):
     member = db.query(PdaTeam).filter(PdaTeam.id == member_id).first()
     if not member:
@@ -787,28 +899,34 @@ async def update_pda_team_member(
 
     db.commit()
     db.refresh(member)
+    if admin:
+        log_admin_action(db, admin, "Update team member", request.method if request else None, request.url.path if request else None, {"member_id": member_id})
     return PdaTeamResponse.model_validate(member)
 
 
 @api_router.delete("/pda-admin/team/{member_id}")
 async def delete_pda_team_member(
     member_id: int,
-    _: bool = Depends(require_pda_admin),
-    db: Session = Depends(get_db)
+    admin: Optional[User] = Depends(require_pda_admin),
+    db: Session = Depends(get_db),
+    request: Request = None
 ):
     member = db.query(PdaTeam).filter(PdaTeam.id == member_id).first()
     if not member:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team member not found")
     db.delete(member)
     db.commit()
+    if admin:
+        log_admin_action(db, admin, "Delete team member", request.method if request else None, request.url.path if request else None, {"member_id": member_id})
     return {"message": "Team member deleted successfully"}
 
 
 @api_router.post("/pda-admin/gallery", response_model=PdaGalleryResponse)
 async def create_pda_gallery_item(
     gallery_data: PdaGalleryCreate,
-    _: bool = Depends(require_pda_admin),
-    db: Session = Depends(get_db)
+    admin: Optional[User] = Depends(require_pda_admin),
+    db: Session = Depends(get_db),
+    request: Request = None
 ):
     new_item = PdaGallery(
         photo_url=gallery_data.photo_url,
@@ -819,6 +937,8 @@ async def create_pda_gallery_item(
     db.add(new_item)
     db.commit()
     db.refresh(new_item)
+    if admin:
+        log_admin_action(db, admin, "Create gallery item", request.method if request else None, request.url.path if request else None, {"gallery_id": new_item.id})
     return PdaGalleryResponse.model_validate(new_item)
 
 
@@ -826,8 +946,9 @@ async def create_pda_gallery_item(
 async def update_pda_gallery_item(
     item_id: int,
     gallery_data: PdaGalleryUpdate,
-    _: bool = Depends(require_pda_admin),
-    db: Session = Depends(get_db)
+    admin: Optional[User] = Depends(require_pda_admin),
+    db: Session = Depends(get_db),
+    request: Request = None
 ):
     item = db.query(PdaGallery).filter(PdaGallery.id == item_id).first()
     if not item:
@@ -844,57 +965,169 @@ async def update_pda_gallery_item(
 
     db.commit()
     db.refresh(item)
+    if admin:
+        log_admin_action(db, admin, "Update gallery item", request.method if request else None, request.url.path if request else None, {"gallery_id": item_id})
     return PdaGalleryResponse.model_validate(item)
 
 
 @api_router.delete("/pda-admin/gallery/{item_id}")
 async def delete_pda_gallery_item(
     item_id: int,
-    _: bool = Depends(require_pda_admin),
-    db: Session = Depends(get_db)
+    admin: Optional[User] = Depends(require_pda_admin),
+    db: Session = Depends(get_db),
+    request: Request = None
 ):
     item = db.query(PdaGallery).filter(PdaGallery.id == item_id).first()
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gallery item not found")
     db.delete(item)
     db.commit()
+    if admin:
+        log_admin_action(db, admin, "Delete gallery item", request.method if request else None, request.url.path if request else None, {"gallery_id": item_id})
     return {"message": "Gallery item deleted successfully"}
 
 
 @api_router.post("/pda-admin/posters")
 async def upload_pda_poster(
     file: UploadFile = File(...),
-    _: bool = Depends(require_pda_admin)
+    admin: Optional[User] = Depends(require_pda_admin),
+    db: Session = Depends(get_db),
+    request: Request = None
 ):
     if not file.filename:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing filename")
     allowed_types = ["image/png", "image/jpeg", "image/webp"]
     url = _upload_to_s3(file, "posters", allowed_types=allowed_types)
+    if admin:
+        log_admin_action(db, admin, "Upload PDA poster", request.method if request else None, request.url.path if request else None, {"file": file.filename})
     return {"url": url}
 
 
 @api_router.post("/pda-admin/gallery-uploads")
 async def upload_pda_gallery_image(
     file: UploadFile = File(...),
-    _: bool = Depends(require_pda_admin)
+    admin: Optional[User] = Depends(require_pda_admin),
+    db: Session = Depends(get_db),
+    request: Request = None
 ):
     if not file.filename:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing filename")
     allowed_types = ["image/png", "image/jpeg", "image/webp"]
     url = _upload_to_s3(file, "gallery", allowed_types=allowed_types)
+    if admin:
+        log_admin_action(db, admin, "Upload gallery image", request.method if request else None, request.url.path if request else None, {"file": file.filename})
     return {"url": url}
 
 
 @api_router.post("/pda-admin/team-uploads")
 async def upload_pda_team_image(
     file: UploadFile = File(...),
-    _: bool = Depends(require_pda_admin)
+    admin: Optional[User] = Depends(require_pda_admin),
+    db: Session = Depends(get_db),
+    request: Request = None
 ):
     if not file.filename:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing filename")
     allowed_types = ["image/png", "image/jpeg", "image/webp"]
     url = _upload_to_s3(file, "team", allowed_types=allowed_types)
+    if admin:
+        log_admin_action(db, admin, "Upload team image", request.method if request else None, request.url.path if request else None, {"file": file.filename})
     return {"url": url}
+
+
+@api_router.get("/pda-admin/superadmin/admins", response_model=List[UserResponse])
+async def list_pda_admins(
+    _: User = Depends(_require_superadmin),
+    db: Session = Depends(get_db)
+):
+    admins = (
+        db.query(User)
+        .join(PdaAdmin, PdaAdmin.user_id == User.id)
+        .order_by(PdaAdmin.created_at.desc())
+        .all()
+    )
+    return [UserResponse.model_validate(a) for a in admins]
+
+
+@api_router.post("/pda-admin/superadmin/admins", response_model=UserResponse)
+async def create_pda_admin(
+    admin_data: PdaAdminCreate,
+    superadmin: User = Depends(_require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    existing_by_reg = db.query(User).filter(User.register_number == admin_data.register_number).first()
+    existing_by_email = db.query(User).filter(User.email == admin_data.email).first()
+    if existing_by_email and (not existing_by_reg or existing_by_email.id != existing_by_reg.id):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already in use")
+
+    existing_user = existing_by_reg or existing_by_email
+    if existing_user:
+        already_admin = db.query(PdaAdmin).filter(PdaAdmin.user_id == existing_user.id).first()
+        if already_admin:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Admin already exists")
+        existing_user.role = UserRole.ADMIN
+        existing_user.name = admin_data.name or existing_user.name
+        existing_user.email = admin_data.email or existing_user.email
+        if admin_data.phone is not None:
+            existing_user.phone = (admin_data.phone or "0000000000")[:10]
+        if admin_data.gender:
+            existing_user.gender = Gender[admin_data.gender.name]
+        if admin_data.department:
+            existing_user.department = Department[admin_data.department.name]
+        if admin_data.year_of_study:
+            existing_user.year_of_study = YearOfStudy[admin_data.year_of_study.name]
+        if admin_data.password:
+            existing_user.hashed_password = get_password_hash(admin_data.password)
+        db.add(PdaAdmin(user_id=existing_user.id, created_by=superadmin.id))
+        db.commit()
+        db.refresh(existing_user)
+        log_admin_action(
+            db,
+            superadmin,
+            "Promote existing user to admin",
+            request.method if request else None,
+            request.url.path if request else None,
+            {"admin_id": existing_user.id}
+        )
+        return UserResponse.model_validate(existing_user)
+
+    new_admin = User(
+        register_number=admin_data.register_number,
+        email=admin_data.email,
+        hashed_password=get_password_hash(admin_data.password),
+        name=admin_data.name,
+        phone=(admin_data.phone or "0000000000")[:10],
+        gender=Gender[admin_data.gender.name] if admin_data.gender else Gender.MALE,
+        department=Department[admin_data.department.name] if admin_data.department else Department.AI_DS,
+        year_of_study=YearOfStudy[admin_data.year_of_study.name] if admin_data.year_of_study else YearOfStudy.FIRST,
+        role=UserRole.ADMIN,
+        referral_code=generate_referral_code(),
+        status=ParticipantStatus.ACTIVE
+    )
+    db.add(new_admin)
+    db.commit()
+    db.refresh(new_admin)
+    db.add(PdaAdmin(user_id=new_admin.id, created_by=superadmin.id))
+    db.commit()
+    log_admin_action(db, superadmin, "Create admin user", request.method if request else None, request.url.path if request else None, {"admin_id": new_admin.id})
+    return UserResponse.model_validate(new_admin)
+
+
+@api_router.get("/pda-admin/superadmin/logs", response_model=List[AdminLogResponse])
+async def get_homeadmin_logs(
+    _: User = Depends(_require_superadmin),
+    db: Session = Depends(get_db),
+    limit: int = 200
+):
+    logs = (
+        db.query(AdminLog)
+        .filter(AdminLog.path.like("/api/pda-admin%"))
+        .order_by(AdminLog.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return [AdminLogResponse.model_validate(l) for l in logs]
 
 
 # ==================== ADMIN ROUTES ====================
@@ -949,8 +1182,18 @@ async def toggle_registration(admin: User = Depends(get_current_admin), db: Sess
     else:
         db.add(SystemConfig(key="registration_open", value="false"))
     db.commit()
-    
-    return {"registration_open": config.value == "true" if config else False}
+
+    registration_open = config.value == "true" if config else False
+    log_admin_action(
+        db,
+        admin,
+        "toggle_registration",
+        method="POST",
+        path="/admin/toggle-registration",
+        meta={"registration_open": registration_open}
+    )
+
+    return {"registration_open": registration_open}
 
 
 # ==================== ADMIN PARTICIPANT MANAGEMENT ====================
@@ -998,7 +1241,14 @@ async def update_participant_status(
     
     participant.status = ParticipantStatus[new_status.name]
     db.commit()
-    
+    log_admin_action(
+        db,
+        admin,
+        "update_participant_status",
+        method="PUT",
+        path=f"/admin/participants/{participant_id}/status",
+        meta={"participant_id": participant_id, "new_status": new_status.value}
+    )
     return {"message": "Status updated successfully"}
 
 
@@ -1014,6 +1264,21 @@ async def get_participant_round_stats(
 
     rounds = db.query(Round).order_by(Round.id).all()
     stats = []
+    round_rank_maps = {}
+
+    for round in rounds:
+        if round.is_frozen and round.id not in round_rank_maps:
+            scores = (
+                db.query(Score)
+                .filter(Score.round_id == round.id, Score.is_present == True)
+                .order_by(Score.normalized_score.desc())
+                .all()
+            )
+            rank_map = {}
+            for idx, score in enumerate(scores):
+                rank_map[score.participant_id] = idx + 1
+            round_rank_maps[round.id] = rank_map
+
     for round in rounds:
         score = db.query(Score).filter(Score.participant_id == participant_id, Score.round_id == round.id).first()
         if score:
@@ -1026,11 +1291,13 @@ async def get_participant_round_stats(
             is_present = score.is_present
             total_score = score.total_score
             normalized_score = score.normalized_score
+            round_rank = round_rank_maps.get(round.id, {}).get(participant_id)
         else:
             status_label = "Pending"
             is_present = None
             total_score = None
             normalized_score = None
+            round_rank = None
 
         stats.append(AdminParticipantRoundStat(
             round_id=round.id,
@@ -1040,10 +1307,56 @@ async def get_participant_round_stats(
             status=status_label,
             is_present=is_present,
             total_score=total_score,
-            normalized_score=normalized_score
+            normalized_score=normalized_score,
+            round_rank=round_rank
         ))
 
     return stats
+
+
+@api_router.get("/admin/participants/{participant_id}/summary", response_model=ParticipantLeaderboardSummary)
+async def get_participant_leaderboard_summary(
+    participant_id: int,
+    admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    participant = db.query(User).filter(User.id == participant_id, User.role == UserRole.PARTICIPANT).first()
+    if not participant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Participant not found")
+
+    participants = db.query(User).filter(User.role == UserRole.PARTICIPANT).all()
+
+    frozen_rounds = db.query(Round).filter(Round.is_frozen == True).all()
+    frozen_round_ids = [r.id for r in frozen_rounds]
+
+    leaderboard = []
+    for p in participants:
+        scores = db.query(Score).filter(
+            Score.participant_id == p.id,
+            Score.round_id.in_(frozen_round_ids),
+            Score.is_present == True
+        ).all()
+        cumulative = sum(s.normalized_score for s in scores)
+        leaderboard.append({
+            "participant_id": p.id,
+            "cumulative_score": cumulative
+        })
+
+    leaderboard.sort(key=lambda x: x["cumulative_score"], reverse=True)
+
+    overall_rank = None
+    overall_points = 0
+    for idx, entry in enumerate(leaderboard):
+        if entry["participant_id"] == participant_id:
+            overall_rank = idx + 1
+            overall_points = entry["cumulative_score"]
+            break
+
+    return ParticipantLeaderboardSummary(
+        participant_id=participant_id,
+        overall_rank=overall_rank,
+        overall_points=overall_points
+    )
 
 
 # ==================== ADMIN ROUND MANAGEMENT ====================
@@ -1079,7 +1392,14 @@ async def create_round(round_data: RoundCreate, admin: User = Depends(get_curren
     db.add(new_round)
     db.commit()
     db.refresh(new_round)
-    
+    log_admin_action(
+        db,
+        admin,
+        "create_round",
+        method="POST",
+        path="/admin/rounds",
+        meta={"round_id": new_round.id, "round_no": new_round.round_no, "name": new_round.name}
+    )
     return RoundResponse.model_validate(new_round)
 
 
@@ -1123,7 +1443,14 @@ async def update_round(
     
     db.commit()
     db.refresh(round)
-    
+    log_admin_action(
+        db,
+        admin,
+        "update_round",
+        method="PUT",
+        path=f"/admin/rounds/{round_id}",
+        meta={"round_id": round.id, "round_no": round.round_no, "name": round.name}
+    )
     return RoundResponse.model_validate(round)
 
 @api_router.post("/admin/rounds/{round_id}/description-pdf", response_model=RoundResponse)
@@ -1144,7 +1471,14 @@ async def upload_round_description_pdf(
     round.description_pdf = s3_url
     db.commit()
     db.refresh(round)
-
+    log_admin_action(
+        db,
+        admin,
+        "upload_round_description_pdf",
+        method="POST",
+        path=f"/admin/rounds/{round_id}/description-pdf",
+        meta={"round_id": round_id, "round_no": round.round_no, "description_pdf": s3_url}
+    )
     return RoundResponse.model_validate(round)
 
 
@@ -1159,7 +1493,14 @@ async def delete_round(round_id: int, admin: User = Depends(get_current_admin), 
     
     db.delete(round)
     db.commit()
-    
+    log_admin_action(
+        db,
+        admin,
+        "delete_round",
+        method="DELETE",
+        path=f"/admin/rounds/{round_id}",
+        meta={"round_id": round_id, "round_no": round.round_no}
+    )
     return {"message": "Round deleted successfully"}
 
 
@@ -1302,6 +1643,14 @@ async def enter_scores(
             db.add(new_score)
     
     db.commit()
+    log_admin_action(
+        db,
+        admin,
+        "save_scores",
+        method="POST",
+        path=f"/admin/rounds/{round_id}/scores",
+        meta={"round_id": round_id, "count": len(scores)}
+    )
     return {"message": "Scores saved successfully"}
 
 
@@ -1410,6 +1759,15 @@ async def import_scores_from_excel(
             imported_count += 1
         
         db.commit()
+
+        log_admin_action(
+            db,
+            admin,
+            "import_scores",
+            method="POST",
+            path=f"/admin/rounds/{round_id}/import-scores",
+            meta={"round_id": round_id, "imported": imported_count, "errors": len(errors)}
+        )
         
         return {
             "message": f"Successfully imported {imported_count} scores",
@@ -1457,7 +1815,14 @@ async def download_score_template(
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
-    
+    log_admin_action(
+        db,
+        admin,
+        "download_score_template",
+        method="GET",
+        path=f"/admin/rounds/{round_id}/score-template",
+        meta={"round_id": round_id, "round_no": round.round_no}
+    )
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1507,7 +1872,14 @@ async def freeze_round(round_id: int, admin: User = Depends(get_current_admin), 
     round.is_frozen = True
     round.state = RoundState.COMPLETED
     db.commit()
-    
+    log_admin_action(
+        db,
+        admin,
+        "freeze_round",
+        method="POST",
+        path=f"/admin/rounds/{round_id}/freeze",
+        meta={"round_id": round_id, "round_no": round.round_no, "elimination_type": round.elimination_type, "elimination_value": round.elimination_value}
+    )
     return {"message": "Round frozen and eliminations applied"}
 
 @api_router.post("/admin/rounds/{round_id}/unfreeze")
@@ -1522,6 +1894,14 @@ async def unfreeze_round(round_id: int, admin: User = Depends(get_current_admin)
     round.is_frozen = False
     round.state = RoundState.ACTIVE
     db.commit()
+    log_admin_action(
+        db,
+        admin,
+        "unfreeze_round",
+        method="POST",
+        path=f"/admin/rounds/{round_id}/unfreeze",
+        meta={"round_id": round_id, "round_no": round.round_no}
+    )
     return {"message": "Round unfrozen"}
 
 
@@ -1568,11 +1948,14 @@ async def get_leaderboard(
             "participant_id": p.id,
             "register_number": p.register_number,
             "name": p.name,
+            "email": p.email,
             "department": p.department,
             "year_of_study": p.year_of_study,
+            "gender": p.gender,
             "cumulative_score": cumulative,
             "rounds_participated": rounds_participated,
             "status": p.status,
+            "referral_count": p.referral_count,
             "profile_picture": p.profile_picture
         })
     
@@ -1587,15 +1970,36 @@ async def get_leaderboard(
             participant_id=entry["participant_id"],
             register_number=entry["register_number"],
             name=entry["name"],
+            email=entry["email"],
             department=DepartmentEnum[entry["department"].name],
             year_of_study=YearOfStudyEnum[entry["year_of_study"].name],
+            gender=GenderEnum[entry["gender"].name],
             cumulative_score=entry["cumulative_score"],
             rounds_participated=entry["rounds_participated"],
             status=ParticipantStatusEnum[entry["status"].name],
+            referral_count=entry["referral_count"],
             profile_picture=entry.get("profile_picture")
         ))
     
     return result
+
+
+# ==================== ADMIN LOGS ====================
+@api_router.get("/admin/logs", response_model=List[AdminLogResponse])
+async def get_admin_logs(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    admin: User = Depends(_require_superadmin),
+    db: Session = Depends(get_db)
+):
+    logs = (
+        db.query(AdminLog)
+        .order_by(AdminLog.id.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return [AdminLogResponse.model_validate(l) for l in logs]
 
 
 # ==================== ADMIN EXPORT ====================
@@ -1625,6 +2029,15 @@ async def export_participants(
         p.department.value, p.year_of_study.value, p.status.value,
         p.referral_code, p.referral_count
     ] for p in participants]
+
+    log_admin_action(
+        db,
+        admin,
+        "export_participants",
+        method="GET",
+        path="/admin/export/participants",
+        meta={"format": format, "count": len(rows)}
+    )
     
     if format == "xlsx":
         wb = Workbook()
@@ -1679,6 +2092,15 @@ async def export_round_results(
             row.append(s.criteria_scores.get(cn, 0) if s.criteria_scores else 0)
         row.extend([s.total_score, s.normalized_score])
         rows.append(row)
+
+    log_admin_action(
+        db,
+        admin,
+        "export_round_results",
+        method="GET",
+        path=f"/admin/export/round/{round_id}",
+        meta={"format": format, "round_id": round_id, "round_no": round.round_no, "count": len(rows)}
+    )
     
     if format == "xlsx":
         wb = Workbook()
@@ -1746,6 +2168,15 @@ async def export_leaderboard(
     
     headers = ["Rank", "Register Number", "Name", "Department", "Year", "Status", "Cumulative Score", "Rounds Participated"]
     rows = [[i+1, e["register_number"], e["name"], e["department"], e["year"], e["status"], e["cumulative_score"], e["rounds_participated"]] for i, e in enumerate(leaderboard)]
+
+    log_admin_action(
+        db,
+        admin,
+        "export_leaderboard",
+        method="GET",
+        path="/admin/export/leaderboard",
+        meta={"format": format, "count": len(rows)}
+    )
     
     if format == "xlsx":
         wb = Workbook()

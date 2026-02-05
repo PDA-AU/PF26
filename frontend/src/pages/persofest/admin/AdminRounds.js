@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import axios from 'axios';
 import { toast } from 'sonner';
-import { Calendar, Plus, Edit2, Trash2, Play, Lock, LogOut, Sparkles, LayoutDashboard, Users, Trophy, ChevronRight, X } from 'lucide-react';
+import { Calendar, Plus, Edit2, Trash2, Play, Lock, LogOut, Sparkles, LayoutDashboard, Users, Trophy, ChevronRight, X, ListChecks } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -43,7 +43,8 @@ const saveCachedStats = (roundId, data) => {
 
 export default function AdminRounds() {
     const navigate = useNavigate();
-    const { logout, getAuthHeader } = useAuth();
+    const { user, logout, getAuthHeader } = useAuth();
+    const isSuperAdmin = user?.register_number === '0000000000';
     const [rounds, setRounds] = useState([]);
     const [loading, setLoading] = useState(true);
     const [dialogOpen, setDialogOpen] = useState(false);
@@ -270,6 +271,12 @@ export default function AdminRounds() {
                             <Trophy className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                             <span className="hidden sm:inline">Leaderboard</span>
                         </Link>
+                        {isSuperAdmin && (
+                            <Link to="/admin/logs" aria-label="Logs" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm">
+                                <ListChecks className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
+                                <span className="hidden sm:inline">Logs</span>
+                            </Link>
+                        )}
                     </div>
                 </div>
             </nav>

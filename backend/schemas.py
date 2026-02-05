@@ -262,6 +262,13 @@ class AdminParticipantRoundStat(BaseModel):
     is_present: Optional[bool] = None
     total_score: Optional[float] = None
     normalized_score: Optional[float] = None
+    round_rank: Optional[int] = None
+
+
+class ParticipantLeaderboardSummary(BaseModel):
+    participant_id: int
+    overall_rank: Optional[int] = None
+    overall_points: float = 0
 
 
 # Leaderboard
@@ -270,12 +277,41 @@ class LeaderboardEntry(BaseModel):
     participant_id: int
     register_number: str
     name: str
+    email: EmailStr
     department: DepartmentEnum
     year_of_study: YearOfStudyEnum
+    gender: GenderEnum
     cumulative_score: float
     rounds_participated: int
     status: ParticipantStatusEnum
+    referral_count: int
     profile_picture: Optional[str] = None
+
+
+class AdminLogResponse(BaseModel):
+    id: int
+    admin_id: int
+    admin_register_number: str
+    admin_name: str
+    action: str
+    method: Optional[str] = None
+    path: Optional[str] = None
+    meta: Optional[Dict[str, Any]] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PdaAdminCreate(BaseModel):
+    register_number: str = Field(..., min_length=10, max_length=10)
+    email: EmailStr
+    password: str = Field(..., min_length=6)
+    name: str = Field(..., min_length=2)
+    phone: Optional[str] = None
+    gender: Optional[GenderEnum] = None
+    department: Optional[DepartmentEnum] = None
+    year_of_study: Optional[YearOfStudyEnum] = None
 
 
 # Dashboard Stats

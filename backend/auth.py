@@ -11,7 +11,7 @@ import os
 from dotenv import load_dotenv
 from pathlib import Path
 from database import get_db
-from models import User, UserRole
+from models import User, UserRole, PdaAdmin
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -106,8 +106,17 @@ async def get_current_user(
     return user
 
 
-async def get_current_admin(current_user: User = Depends(get_current_user)) -> User:
+async def get_current_admin(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+) -> User:
     if current_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+    admin_link = db.query(PdaAdmin).filter(PdaAdmin.user_id == current_user.id).first()
+    if not admin_link:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"

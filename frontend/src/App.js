@@ -10,6 +10,7 @@ import PdaHome from "@/pages/PdaHome";
 import ItemsAdmin from "@/pages/HomeAdmin/ItemsAdmin";
 import TeamAdmin from "@/pages/HomeAdmin/TeamAdmin";
 import GalleryAdmin from "@/pages/HomeAdmin/GalleryAdmin";
+import SuperAdmin from "@/pages/HomeAdmin/SuperAdmin";
 import LoginPage from "@/pages/persofest/LoginPage";
 import RegisterPage from "@/pages/persofest/RegisterPage";
 import ParticipantDashboard from "@/pages/persofest/ParticipantDashboard";
@@ -18,6 +19,7 @@ import AdminRounds from "@/pages/persofest/admin/AdminRounds";
 import AdminParticipants from "@/pages/persofest/admin/AdminParticipants";
 import AdminScoring from "@/pages/persofest/admin/AdminScoring";
 import AdminLeaderboard from "@/pages/persofest/admin/AdminLeaderboard";
+import AdminLogs from "@/pages/persofest/admin/AdminLogs";
 
 // Protected Route Components
 const ProtectedRoute = ({ children, adminOnly = false }) => {
@@ -73,6 +75,7 @@ function AppRoutes() {
             <Route path="/pda-admin/items" element={<ItemsAdmin />} />
             <Route path="/pda-admin/team" element={<TeamAdmin />} />
             <Route path="/pda-admin/gallery" element={<GalleryAdmin />} />
+            <Route path="/pda-admin/superadmin" element={<SuperAdmin />} />
             <Route path="/persofest" element={<PersofestHome />} />
             <Route path="/login" element={
                 <PublicRoute>
@@ -116,6 +119,11 @@ function AppRoutes() {
             <Route path="/admin/leaderboard" element={
                 <ProtectedRoute adminOnly>
                     <AdminLeaderboard />
+                </ProtectedRoute>
+            } />
+            <Route path="/admin/logs" element={
+                <ProtectedRoute adminOnly>
+                    <AdminLogs />
                 </ProtectedRoute>
             } />
 

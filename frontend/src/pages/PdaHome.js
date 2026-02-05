@@ -61,6 +61,9 @@ const formatDateRange = (event) => {
 
 export default function PdaHome() {
     const revealObserverRef = useRef(null);
+    const programScrollRef = useRef(null);
+    const eventScrollRef = useRef(null);
+    const galleryScrollRef = useRef(null);
     const [posterDialogOpen, setPosterDialogOpen] = useState(false);
     const [selectedPoster, setSelectedPoster] = useState(null);
     const [programs, setPrograms] = useState([]);
@@ -191,6 +194,11 @@ export default function PdaHome() {
         setPosterDialogOpen(true);
     };
 
+    const scrollByOffset = (ref, offset) => {
+        if (!ref?.current) return;
+        ref.current.scrollBy({ left: offset, behavior: 'smooth' });
+    };
+
     const buildCardMeta = (item) => {
         const dateRange = formatDateRange(item);
         const formatLabel = item?.format ? ` · ${item.format}` : '';
@@ -210,7 +218,7 @@ export default function PdaHome() {
                         meta
                     })
                 }
-                className={`flex h-full flex-col rounded-2xl border border-black/10 bg-white p-5 text-left transition hover:-translate-y-1 hover:border-black/25 hover:shadow-md ${
+                className={`flex h-full min-h-[360px] w-full flex-col rounded-2xl border border-black/10 bg-white p-5 text-left transition hover:-translate-y-1 hover:border-black/25 hover:shadow-md ${
                     item.poster_url ? 'cursor-pointer' : 'cursor-default'
                 }`}
             >
@@ -228,8 +236,8 @@ export default function PdaHome() {
                         {meta}
                     </div>
                 ) : null}
-                <h3 className="mt-4 text-xl font-heading font-bold">{item.title}</h3>
-                <p className="mt-2 text-sm text-slate-700">{item.description}</p>
+                <h3 className="mt-4 text-xl font-heading font-bold line-clamp-2">{item.title}</h3>
+                <p className="mt-2 text-sm text-slate-700 line-clamp-3">{item.description}</p>
                 <span className="mt-auto" />
             </button>
         );
@@ -314,7 +322,7 @@ export default function PdaHome() {
 
                 {featuredEvents.length > 0 ? (
                     <section className="mx-auto w-full max-w-6xl px-5 pb-8">
-                        <div className="grid gap-6 rounded-3xl border border-black/10 bg-gradient-to-r from-[#fff1c7] via-[#fff8e8] to-white p-6 md:grid-cols-[1.2fr_0.8fr]" data-reveal>
+                        <div className="grid gap-6 rounded-3xl border border-black/10 bg-gradient-to-r from-[#fff1c7] via-[#fff8e8] to-white p-6 md:grid-cols-[1.2fr_0.8fr] md:min-h-[320px]" data-reveal>
                             <div className={`transition-opacity duration-700 ease-in-out ${isFeaturedFading ? 'opacity-0' : 'opacity-100'}`}>
                                 <p className="text-xs uppercase tracking-[0.4em] text-[#8b6a00]">Featured</p>
                                 <h2 className="mt-3 text-3xl font-heading font-black text-[#0f1115]">
@@ -366,11 +374,11 @@ export default function PdaHome() {
                                         <img
                                             src={featuredEvents[activeFeaturedIndex]?.poster_url}
                                             alt={featuredEvents[activeFeaturedIndex]?.title}
-                                            className="h-56 w-full rounded-2xl border border-black/10 object-cover md:h-full"
+                                            className="h-56 w-full rounded-2xl border border-black/10 object-cover md:h-[260px]"
                                         />
                                     </button>
                                 ) : (
-                                    <div className="flex h-56 w-full items-center justify-center rounded-2xl border border-dashed border-black/20 bg-white text-sm text-slate-500">
+                                    <div className="flex h-56 w-full items-center justify-center rounded-2xl border border-dashed border-black/20 bg-white text-sm text-slate-500 md:h-[260px]">
                                         Poster coming soon
                                     </div>
                                 )}
@@ -450,16 +458,50 @@ export default function PdaHome() {
                 <section className="mx-auto w-full max-w-6xl px-5 py-10 md:py-14">
                     <div className="flex items-center justify-between gap-4" data-reveal>
                         <div>
-                           
                             <h2 className="text-2xl font-heading font-black sm:text-3xl">Programs & Activities</h2>
                         </div>
-                     
                     </div>
-	                    <div className="mt-6 grid auto-rows-fr gap-6 md:grid-cols-3" data-reveal>
-	                        {programs.length > 0 ? (
+                    <div className="mt-6 hidden grid auto-rows-fr items-stretch gap-6 md:grid md:grid-cols-3" data-reveal>
+                        {programs.length > 0 ? (
                             programs.slice(0, 6).map((program) => renderCard(program, 'program'))
                         ) : (
                             <div className="col-span-full rounded-2xl border border-black/10 bg-white p-6 text-center text-sm text-slate-600">
+                                Program updates are coming soon.
+                            </div>
+                        )}
+                    </div>
+                    <div className="mt-6 md:hidden">
+                        {programs.length > 0 ? (
+                            <>
+                                <div
+                                    ref={programScrollRef}
+                                    className="flex gap-4 overflow-x-auto pb-4 no-scrollbar snap-x snap-mandatory"
+                                >
+                                    {programs.slice(0, 6).map((program) => (
+                                        <div key={`program-mobile-${program.id || program.title}`} className="min-w-[260px] snap-start">
+                                            {renderCard(program, 'program')}
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="flex items-center justify-center gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => scrollByOffset(programScrollRef, -280)}
+                                        className="rounded-full border border-[#c99612] bg-[#f6c347] px-3 py-2 text-xs uppercase tracking-[0.2em] text-[#11131a] hover:bg-[#ffd16b]"
+                                    >
+                                        Prev
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => scrollByOffset(programScrollRef, 280)}
+                                        className="rounded-full border border-[#c99612] bg-[#f6c347] px-3 py-2 text-xs uppercase tracking-[0.2em] text-[#11131a] hover:bg-[#ffd16b]"
+                                    >
+                                        Next
+                                    </button>
+                                </div>
+                            </>
+                        ) : (
+                            <div className="rounded-2xl border border-black/10 bg-white p-6 text-center text-sm text-slate-600">
                                 Program updates are coming soon.
                             </div>
                         )}
@@ -469,16 +511,50 @@ export default function PdaHome() {
                 <section className="mx-auto w-full max-w-6xl px-5 py-10 md:py-14">
                     <div className="flex items-center justify-between gap-4" data-reveal>
                         <div>
-                           
                             <h2 className="text-2xl font-heading font-black sm:text-3xl">Events & Workshops</h2>
                         </div>
-
                     </div>
-	                    <div className="mt-6 grid auto-rows-fr gap-6 md:grid-cols-3" data-reveal>
-	                        {events.length > 0 ? (
+                    <div className="mt-6 hidden grid auto-rows-fr items-stretch gap-6 md:grid md:grid-cols-3" data-reveal>
+                        {events.length > 0 ? (
                             events.slice(0, 6).map((event) => renderCard(event, 'event'))
                         ) : (
                             <div className="col-span-full rounded-2xl border border-black/10 bg-white p-6 text-center text-sm text-slate-600">
+                                Upcoming events will be announced soon.
+                            </div>
+                        )}
+                    </div>
+                    <div className="mt-6 md:hidden">
+                        {events.length > 0 ? (
+                            <>
+                                <div
+                                    ref={eventScrollRef}
+                                    className="flex gap-4 overflow-x-auto pb-4 no-scrollbar snap-x snap-mandatory"
+                                >
+                                    {events.slice(0, 6).map((event) => (
+                                        <div key={`event-mobile-${event.id || event.title}`} className="min-w-[260px] snap-start">
+                                            {renderCard(event, 'event')}
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="flex items-center justify-center gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => scrollByOffset(eventScrollRef, -280)}
+                                        className="rounded-full border border-[#c99612] bg-[#f6c347] px-3 py-2 text-xs uppercase tracking-[0.2em] text-[#11131a] hover:bg-[#ffd16b]"
+                                    >
+                                        Prev
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => scrollByOffset(eventScrollRef, 280)}
+                                        className="rounded-full border border-[#c99612] bg-[#f6c347] px-3 py-2 text-xs uppercase tracking-[0.2em] text-[#11131a] hover:bg-[#ffd16b]"
+                                    >
+                                        Next
+                                    </button>
+                                </div>
+                            </>
+                        ) : (
+                            <div className="rounded-2xl border border-black/10 bg-white p-6 text-center text-sm text-slate-600">
                                 Upcoming events will be announced soon.
                             </div>
                         )}
@@ -545,9 +621,9 @@ export default function PdaHome() {
                                                 href={member.instagram_url}
                                                 target="_blank"
                                                 rel="noreferrer"
-                                                className="inline-flex items-center gap-2 hover:text-[#0f1115]"
+                                                className="inline-flex items-center gap-2 text-[#b8890b] hover:text-[#0f1115]"
                                             >
-                                                <Instagram className="h-4 w-4" />
+                                                <Instagram className="h-4 w-4 text-[#f6c347]" />
                                                 Instagram
                                             </a>
                                         ) : null}
@@ -556,9 +632,9 @@ export default function PdaHome() {
                                                 href={member.linkedin_url}
                                                 target="_blank"
                                                 rel="noreferrer"
-                                                className="inline-flex items-center gap-2 hover:text-[#0f1115]"
+                                                className="inline-flex items-center gap-2 text-[#b8890b] hover:text-[#0f1115]"
                                             >
-                                                <Linkedin className="h-4 w-4" />
+                                                <Linkedin className="h-4 w-4 text-[#f6c347]" />
                                                 LinkedIn
                                             </a>
                                         ) : null}
@@ -581,10 +657,10 @@ export default function PdaHome() {
                             Moments from PDA events, workshops, and community highlights.
                         </p>
                     </div>
-                    <div className="mt-6 grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4" data-reveal>
+                    <div className="mt-6 hidden items-stretch gap-4 md:grid md:grid-cols-3 lg:grid-cols-4" data-reveal>
                         {galleryItems.length > 0 ? (
                             galleryItems.map((item) => (
-                                <div key={item.id} className="rounded-2xl border border-black/10 bg-white p-3 shadow-sm">
+                                <div key={item.id} className="flex h-full min-h-[220px] flex-col rounded-2xl border border-black/10 bg-white p-3 shadow-sm">
                                     <img
                                         src={item.photo_url}
                                         alt={item.caption || 'PDA gallery'}
@@ -597,6 +673,51 @@ export default function PdaHome() {
                             ))
                         ) : (
                             <div className="col-span-full rounded-2xl border border-black/10 bg-white p-6 text-center text-sm text-slate-600">
+                                Gallery updates are coming soon.
+                            </div>
+                        )}
+                    </div>
+                    <div className="mt-6 md:hidden">
+                        {galleryItems.length > 0 ? (
+                            <>
+                                <div
+                                    ref={galleryScrollRef}
+                                    className="flex gap-4 overflow-x-auto pb-4 no-scrollbar snap-x snap-mandatory"
+                                >
+                                    {galleryItems.map((item) => (
+                                        <div key={`gallery-mobile-${item.id}`} className="min-w-[220px] snap-start">
+                                            <div className="flex min-h-[210px] flex-col rounded-2xl border border-black/10 bg-white p-3 shadow-sm">
+                                                <img
+                                                    src={item.photo_url}
+                                                    alt={item.caption || 'PDA gallery'}
+                                                    className="h-40 w-full rounded-xl object-cover"
+                                                />
+                                                {item.caption ? (
+                                                    <p className="mt-3 text-sm text-slate-600">{item.caption}</p>
+                                                ) : null}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="flex items-center justify-center gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => scrollByOffset(galleryScrollRef, -240)}
+                                        className="rounded-full border border-[#c99612] bg-[#f6c347] px-3 py-2 text-xs uppercase tracking-[0.2em] text-[#11131a] hover:bg-[#ffd16b]"
+                                    >
+                                        Prev
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => scrollByOffset(galleryScrollRef, 240)}
+                                        className="rounded-full border border-[#c99612] bg-[#f6c347] px-3 py-2 text-xs uppercase tracking-[0.2em] text-[#11131a] hover:bg-[#ffd16b]"
+                                    >
+                                        Next
+                                    </button>
+                                </div>
+                            </>
+                        ) : (
+                            <div className="rounded-2xl border border-black/10 bg-white p-6 text-center text-sm text-slate-600">
                                 Gallery updates are coming soon.
                             </div>
                         )}

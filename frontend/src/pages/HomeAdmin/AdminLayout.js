@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { Eye, EyeOff, Sparkles, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -8,8 +8,8 @@ import { Label } from '@/components/ui/label';
 import { useAuth } from '@/context/AuthContext';
 
 export default function AdminLayout({ title, subtitle, children }) {
-    const { login, logout, isAdmin, loading: authLoading } = useAuth();
-    const location = useLocation();
+    const { login, logout, isAdmin, loading: authLoading, user } = useAuth();
+    const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
     const [loginForm, setLoginForm] = useState({ register_number: '', password: '' });
     const [showPassword, setShowPassword] = useState(false);
     const [loginLoading, setLoginLoading] = useState(false);
@@ -40,15 +40,19 @@ export default function AdminLayout({ title, subtitle, children }) {
         }
     };
 
-    const navItems = [
+    const baseNavItems = [
         { label: 'Items', path: '/pda-admin/items' },
         { label: 'Team', path: '/pda-admin/team' },
         { label: 'Gallery', path: '/pda-admin/gallery' }
     ];
 
+    const navItems = user?.register_number === "0000000000"
+        ? [...baseNavItems, { label: 'Superadmin', path: '/pda-admin/superadmin' }]
+        : baseNavItems;
+
     const navClass = (path) => (
         `rounded-full border px-4 py-2 text-xs uppercase tracking-[0.25em] transition ${
-            location.pathname === path
+            pathname === path
                 ? 'border-[#c99612] bg-[#11131a] text-[#f6c347]'
                 : 'border-black/10 bg-white text-slate-600 hover:border-black/30'
         }`

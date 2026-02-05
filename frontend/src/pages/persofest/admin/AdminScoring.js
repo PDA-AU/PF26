@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import axios from 'axios';
 import { toast } from 'sonner';
-import { Save, Lock, ArrowLeft, Search, LogOut, Sparkles, LayoutDashboard, Calendar, Users, Trophy, AlertTriangle, Upload, Download, FileSpreadsheet } from 'lucide-react';
+import { Save, Lock, ArrowLeft, Search, LogOut, Sparkles, LayoutDashboard, Calendar, Users, Trophy, AlertTriangle, Upload, Download, FileSpreadsheet, ListChecks } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -16,7 +16,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 export default function AdminScoring() {
     const { roundId } = useParams();
     const navigate = useNavigate();
-    const { logout, getAuthHeader } = useAuth();
+    const { user, logout, getAuthHeader } = useAuth();
     const [round, setRound] = useState(null);
     const [participants, setParticipants] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -26,6 +26,20 @@ export default function AdminScoring() {
     const [freezeDialogOpen, setFreezeDialogOpen] = useState(false);
     const [eliminationConfig, setEliminationConfig] = useState({ type: 'top_k', value: 10 });
     const fileInputRef = useRef(null);
+    const isSuperAdmin = user?.register_number === '0000000000';
+
+    const roundRankMap = (() => {
+        const map = {};
+        if (!round?.is_frozen) return map;
+        const scored = participants
+            .filter((p) => p.is_present)
+            .slice()
+            .sort((a, b) => (Number(b.normalized_score || 0) - Number(a.normalized_score || 0)));
+        scored.forEach((p, idx) => {
+            map[p.id] = idx + 1;
+        });
+        return map;
+    })();
 
     const fetchRoundData = useCallback(async () => {
         try {
@@ -222,6 +236,12 @@ export default function AdminScoring() {
                             <Trophy className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                             <span className="hidden sm:inline">Leaderboard</span>
                         </Link>
+                        {isSuperAdmin && (
+                            <Link to="/admin/logs" aria-label="Logs" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm">
+                                <ListChecks className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
+                                <span className="hidden sm:inline">Logs</span>
+                            </Link>
+                        )}
                     </div>
                 </div>
             </nav>
@@ -343,7 +363,8 @@ export default function AdminScoring() {
                                     <th>Present</th>
                                     {criteria.map(c => <th key={c.name}>{c.name} (/{c.max_marks})</th>)}
                                     <th>Total</th>
-                                    <th>Normalized</th>
+                                    <th>Round Score</th>
+                                    {round?.is_frozen && <th>Round Rank</th>}
                                 </tr>
                             </thead>
                             <tbody>
@@ -351,6 +372,7 @@ export default function AdminScoring() {
                                     const totalScore = criteria.reduce((sum, c) => sum + (p.criteria_scores?.[c.name] || 0), 0);
                                     const maxScore = criteria.reduce((sum, c) => sum + c.max_marks, 0);
                                     const normalized = maxScore > 0 ? (totalScore / maxScore * 100).toFixed(2) : 0;
+                                    const roundRank = round?.is_frozen ? (roundRankMap[p.id] || '—') : null;
                                     return (
                                         <tr key={p.id}>
                                             <td className="font-mono font-bold">{p.register_number}</td>
@@ -365,6 +387,7 @@ export default function AdminScoring() {
                                             ))}
                                             <td className="font-bold">{totalScore}</td>
                                             <td><span className="bg-primary text-white px-2 py-1 border-2 border-black font-bold">{normalized}</span></td>
+                                            {round?.is_frozen && <td className="font-bold">{roundRank}</td>}
                                         </tr>
                                     );
                                 })}

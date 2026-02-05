@@ -5,10 +5,10 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import { 
     Trophy, Search, Download, LogOut, Sparkles, LayoutDashboard,
-    Calendar, Users, Medal
+    Calendar, Users, Medal, ListChecks
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import ParticipantDetailsModal from './ParticipantDetailsModal';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -57,13 +57,14 @@ const YEARS = ["First Year", "Second Year", "Third Year"];
 
 export default function AdminLeaderboard() {
     const navigate = useNavigate();
-    const { logout, getAuthHeader } = useAuth();
+    const { user, logout, getAuthHeader } = useAuth();
     const [leaderboard, setLeaderboard] = useState([]);
     const [loading, setLoading] = useState(true);
     const [selectedEntry, setSelectedEntry] = useState(null);
     const [roundStats, setRoundStats] = useState([]);
     const [roundStatsLoading, setRoundStatsLoading] = useState(false);
     const [roundStatsError, setRoundStatsError] = useState('');
+    const isSuperAdmin = user?.register_number === '0000000000';
     const [filters, setFilters] = useState({
         department: '',
         year: '',
@@ -214,6 +215,12 @@ export default function AdminLeaderboard() {
                             <Trophy className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                             <span className="hidden sm:inline">Leaderboard</span>
                         </Link>
+                        {isSuperAdmin && (
+                            <Link to="/admin/logs" aria-label="Logs" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
+                                <ListChecks className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
+                                <span className="hidden sm:inline">Logs</span>
+                            </Link>
+                        )}
                     </div>
                 </div>
             </nav>
@@ -419,101 +426,18 @@ export default function AdminLeaderboard() {
                 )}
             </main>
 
-            <Dialog open={Boolean(selectedEntry)} onOpenChange={() => setSelectedEntry(null)}>
-                <DialogContent className="max-w-3xl bg-white">
-                    {selectedEntry ? (
-                        <>
-                            <DialogHeader>
-                                <DialogTitle className="text-2xl font-heading font-black">Leaderboard Entry</DialogTitle>
-                                <p className="text-sm text-gray-600">Profile + round stats snapshot.</p>
-                            </DialogHeader>
-                            <div className="grid gap-6 md:grid-cols-[0.9fr_1.1fr]">
-                                <div className="rounded-2xl border-2 border-black bg-[#fff3cc] p-5">
-                                    <div className="flex flex-col items-center text-center gap-3">
-                                        {selectedEntry.profile_picture ? (
-                                            <img
-                                                src={getProfileImageUrl(selectedEntry)}
-                                                alt={selectedEntry.name}
-                                                className="h-28 w-28 rounded-full border-4 border-black object-cover"
-                                            />
-                                        ) : (
-                                            <div className="h-28 w-28 rounded-full border-4 border-black bg-white text-3xl font-bold flex items-center justify-center">
-                                                {selectedEntry.name?.charAt(0)?.toUpperCase() || '?'}
-                                            </div>
-                                        )}
-                                        <div>
-                                            <h3 className="font-heading font-bold text-xl">{selectedEntry.name}</h3>
-                                            <p className="text-sm text-gray-700">{selectedEntry.register_number}</p>
-                                        </div>
-                                        <div className="w-full text-left space-y-2 text-sm">
-                                            <div className="flex justify-between">
-                                                <span className="font-semibold">Department</span>
-                                                <span>{DEPARTMENTS.find(d => d.value === selectedEntry.department)?.label || selectedEntry.department}</span>
-                                            </div>
-                                            <div className="flex justify-between">
-                                                <span className="font-semibold">Year</span>
-                                                <span>{selectedEntry.year_of_study}</span>
-                                            </div>
-                                            <div className="flex justify-between">
-                                                <span className="font-semibold">Status</span>
-                                                <span>{selectedEntry.status}</span>
-                                            </div>
-                                            <div className="flex justify-between">
-                                                <span className="font-semibold">Cumulative</span>
-                                                <span>{selectedEntry.cumulative_score?.toFixed(2)}</span>
-                                            </div>
-                                            <div className="flex justify-between">
-                                                <span className="font-semibold">Rounds</span>
-                                                <span>{selectedEntry.rounds_participated}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="rounded-2xl border-2 border-black bg-white p-5">
-                                    <div className="flex items-center justify-between mb-4">
-                                        <h4 className="font-heading font-bold text-lg">Round Stats</h4>
-                                        <span className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">
-                                            {roundStats.length} rounds
-                                        </span>
-                                    </div>
-                                    {roundStatsLoading ? (
-                                        <div className="text-sm text-gray-600">Loading round stats...</div>
-                                    ) : roundStatsError ? (
-                                        <div className="text-sm text-red-600">{roundStatsError}</div>
-                                    ) : roundStats.length === 0 ? (
-                                        <div className="text-sm text-gray-600">No rounds yet.</div>
-                                    ) : (
-                                        <div className="space-y-3">
-                                            {roundStats.map((round) => (
-                                                <details key={round.round_id} className="rounded-xl border border-black/10 bg-[#fff8e1] px-4 py-3">
-                                                    <summary className="flex cursor-pointer list-none items-center justify-between">
-                                                        <div>
-                                                            <p className="text-xs uppercase tracking-[0.2em] text-gray-500">
-                                                                {round.round_no} · {round.round_state}
-                                                            </p>
-                                                            <p className="font-semibold">{round.round_name}</p>
-                                                        </div>
-                                                        <span className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-700">
-                                                            {round.status}
-                                                        </span>
-                                                    </summary>
-                                                    <div className="mt-3 grid grid-cols-2 gap-2 text-sm text-gray-700">
-                                                        <div>Present: {round.is_present === null ? '—' : round.is_present ? 'Yes' : 'No'}</div>
-                                                        <div>Total Score: {round.total_score ?? '—'}</div>
-                                                        <div>Actual Score: {round.normalized_score ?? '—'}</div>
-                                                        <div></div>
-                                                    </div>
-                                                </details>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        </>
-                    ) : null}
-                </DialogContent>
-            </Dialog>
+            <ParticipantDetailsModal
+                open={Boolean(selectedEntry)}
+                onOpenChange={() => setSelectedEntry(null)}
+                participant={selectedEntry}
+                roundStats={roundStats}
+                roundStatsLoading={roundStatsLoading}
+                roundStatsError={roundStatsError}
+                overallPoints={selectedEntry ? selectedEntry.cumulative_score : null}
+                overallRank={selectedEntry ? selectedEntry.rank : null}
+                getProfileImageUrl={getProfileImageUrl}
+                departmentLabel={selectedEntry ? (DEPARTMENTS.find(d => d.value === selectedEntry.department)?.label || selectedEntry.department) : ''}
+            />
         </div>
     );
 }

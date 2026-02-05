@@ -5,14 +5,40 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import { 
     Users, Search, Filter, LogOut, Sparkles, LayoutDashboard, Calendar,
-    Trophy, UserCheck, UserX, Download
+    Trophy, UserCheck, UserX, Download, ListChecks
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import ParticipantDetailsModal from './ParticipantDetailsModal';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const PARTICIPANT_STATS_CACHE_TTL_MS = 10 * 60 * 1000;
+const PARTICIPANT_SUMMARY_CACHE_TTL_MS = 10 * 60 * 1000;
+
+const getParticipantStatsCacheKey = (participantId) => `pf26_participant_rounds_${participantId}`;
+const getParticipantSummaryCacheKey = (participantId) => `pf26_participant_summary_${participantId}`;
+
+const loadCache = (key, ttlMs) => {
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed.ts !== 'number' || parsed.data === undefined) return null;
+        if (Date.now() - parsed.ts > ttlMs) return null;
+        return parsed.data;
+    } catch (error) {
+        return null;
+    }
+};
+
+const saveCache = (key, data) => {
+    try {
+        localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data }));
+    } catch (error) {
+        // ignore storage errors
+    }
+};
 
 const DEPARTMENTS = [
     { value: "Artificial Intelligence and Data Science", label: "AI & DS" },
@@ -33,13 +59,15 @@ const STATUSES = ["Active", "Eliminated"];
 
 export default function AdminParticipants() {
     const navigate = useNavigate();
-    const { logout, getAuthHeader } = useAuth();
+    const { user, logout, getAuthHeader } = useAuth();
     const [participants, setParticipants] = useState([]);
     const [loading, setLoading] = useState(true);
     const [selectedParticipant, setSelectedParticipant] = useState(null);
     const [roundStats, setRoundStats] = useState([]);
     const [roundStatsLoading, setRoundStatsLoading] = useState(false);
     const [roundStatsError, setRoundStatsError] = useState('');
+    const [participantSummary, setParticipantSummary] = useState(null);
+    const isSuperAdmin = user?.register_number === '0000000000';
     const [filters, setFilters] = useState({
         department: '',
         year: '',
@@ -140,11 +168,31 @@ export default function AdminParticipants() {
         setRoundStats([]);
         setRoundStatsError('');
         setRoundStatsLoading(true);
+        setParticipantSummary(null);
         try {
-            const response = await axios.get(`${API}/admin/participants/${participant.id}/rounds`, {
-                headers: getAuthHeader()
-            });
-            setRoundStats(response.data || []);
+            const statsCacheKey = getParticipantStatsCacheKey(participant.id);
+            const cachedStats = loadCache(statsCacheKey, PARTICIPANT_STATS_CACHE_TTL_MS);
+            if (cachedStats) {
+                setRoundStats(cachedStats);
+            } else {
+                const response = await axios.get(`${API}/admin/participants/${participant.id}/rounds`, {
+                    headers: getAuthHeader()
+                });
+                setRoundStats(response.data || []);
+                saveCache(statsCacheKey, response.data || []);
+            }
+
+            const summaryCacheKey = getParticipantSummaryCacheKey(participant.id);
+            const cachedSummary = loadCache(summaryCacheKey, PARTICIPANT_SUMMARY_CACHE_TTL_MS);
+            if (cachedSummary) {
+                setParticipantSummary(cachedSummary);
+            } else {
+                const summaryResponse = await axios.get(`${API}/admin/participants/${participant.id}/summary`, {
+                    headers: getAuthHeader()
+                });
+                setParticipantSummary(summaryResponse.data || null);
+                saveCache(summaryCacheKey, summaryResponse.data || null);
+            }
         } catch (error) {
             setRoundStatsError('Failed to load round stats');
         } finally {
@@ -198,6 +246,12 @@ export default function AdminParticipants() {
                             <Trophy className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                             <span className="hidden sm:inline">Leaderboard</span>
                         </Link>
+                        {isSuperAdmin && (
+                            <Link to="/admin/logs" aria-label="Logs" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
+                                <ListChecks className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
+                                <span className="hidden sm:inline">Logs</span>
+                            </Link>
+                        )}
                     </div>
                 </div>
             </nav>
@@ -395,102 +449,18 @@ export default function AdminParticipants() {
                 )}
             </main>
 
-            <Dialog open={Boolean(selectedParticipant)} onOpenChange={() => setSelectedParticipant(null)}>
-                <DialogContent className="max-w-3xl bg-white">
-                    {selectedParticipant ? (
-                        <>
-                            <DialogHeader>
-                                <DialogTitle className="text-2xl font-heading font-black">Participant Details</DialogTitle>
-                                <p className="text-sm text-gray-600">Profile + round stats snapshot.</p>
-                            </DialogHeader>
-                            <div className="grid gap-6 md:grid-cols-[0.9fr_1.1fr]">
-                                <div className="rounded-2xl border-2 border-black bg-[#fff3cc] p-5">
-                                    <div className="flex flex-col items-center text-center gap-3">
-                                        {selectedParticipant.profile_picture ? (
-                                            <img
-                                                src={getProfileImageUrl(selectedParticipant)}
-                                                alt={selectedParticipant.name}
-                                                className="h-28 w-28 rounded-full border-4 border-black object-cover"
-                                            />
-                                        ) : (
-                                            <div className="h-28 w-28 rounded-full border-4 border-black bg-white text-3xl font-bold flex items-center justify-center">
-                                                {selectedParticipant.name?.charAt(0)?.toUpperCase() || '?'}
-                                            </div>
-                                        )}
-                                        <div>
-                                            <h3 className="font-heading font-bold text-xl">{selectedParticipant.name}</h3>
-                                            <p className="text-sm text-gray-700">{selectedParticipant.register_number}</p>
-                                            <p className="text-sm text-gray-700">{selectedParticipant.email}</p>
-                                        </div>
-                                        <div className="w-full text-left space-y-2 text-sm">
-                                            <div className="flex justify-between">
-                                                <span className="font-semibold">Department</span>
-                                                <span>{DEPARTMENTS.find(d => d.value === selectedParticipant.department)?.label || selectedParticipant.department}</span>
-                                            </div>
-                                            <div className="flex justify-between">
-                                                <span className="font-semibold">Year</span>
-                                                <span>{selectedParticipant.year_of_study}</span>
-                                            </div>
-                                            <div className="flex justify-between">
-                                                <span className="font-semibold">Gender</span>
-                                                <span>{selectedParticipant.gender}</span>
-                                            </div>
-                                            <div className="flex justify-between">
-                                                <span className="font-semibold">Status</span>
-                                                <span>{selectedParticipant.status}</span>
-                                            </div>
-                                            <div className="flex justify-between">
-                                                <span className="font-semibold">Referrals</span>
-                                                <span>{selectedParticipant.referral_count}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="rounded-2xl border-2 border-black bg-white p-5">
-                                    <div className="flex items-center justify-between mb-4">
-                                        <h4 className="font-heading font-bold text-lg">Round Stats</h4>
-                                        <span className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">
-                                            {roundStats.length} rounds
-                                        </span>
-                                    </div>
-                                    {roundStatsLoading ? (
-                                        <div className="text-sm text-gray-600">Loading round stats...</div>
-                                    ) : roundStatsError ? (
-                                        <div className="text-sm text-red-600">{roundStatsError}</div>
-                                    ) : roundStats.length === 0 ? (
-                                        <div className="text-sm text-gray-600">No rounds yet.</div>
-                                    ) : (
-                                        <div className="space-y-3">
-                                            {roundStats.map((round) => (
-                                                <details key={round.round_id} className="rounded-xl border border-black/10 bg-[#fff8e1] px-4 py-3">
-                                                    <summary className="flex cursor-pointer list-none items-center justify-between">
-                                                        <div>
-                                                            <p className="text-xs uppercase tracking-[0.2em] text-gray-500">
-                                                                {round.round_no} · {round.round_state}
-                                                            </p>
-                                                            <p className="font-semibold">{round.round_name}</p>
-                                                        </div>
-                                                        <span className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-700">
-                                                            {round.status}
-                                                        </span>
-                                                    </summary>
-                                                    <div className="mt-3 grid grid-cols-2 gap-2 text-sm text-gray-700">
-                                                        <div>Present: {round.is_present === null ? '—' : round.is_present ? 'Yes' : 'No'}</div>
-                                                        <div>Score: {round.total_score ?? '—'}</div>
-                                                        <div>Normalized: {round.normalized_score ?? '—'}</div>
-                                                        <div></div>
-                                                    </div>
-                                                </details>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        </>
-                    ) : null}
-                </DialogContent>
-            </Dialog>
+            <ParticipantDetailsModal
+                open={Boolean(selectedParticipant)}
+                onOpenChange={() => setSelectedParticipant(null)}
+                participant={selectedParticipant}
+                roundStats={roundStats}
+                roundStatsLoading={roundStatsLoading}
+                roundStatsError={roundStatsError}
+                overallPoints={participantSummary?.overall_points}
+                overallRank={participantSummary?.overall_rank}
+                getProfileImageUrl={getProfileImageUrl}
+                departmentLabel={selectedParticipant ? (DEPARTMENTS.find(d => d.value === selectedParticipant.department)?.label || selectedParticipant.department) : ''}
+            />
         </div>
     );
 }

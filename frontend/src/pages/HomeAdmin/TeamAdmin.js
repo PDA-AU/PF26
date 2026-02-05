@@ -27,6 +27,7 @@ export default function TeamAdmin() {
     const [editingTeamId, setEditingTeamId] = useState(null);
     const [savingTeam, setSavingTeam] = useState(false);
     const [loading, setLoading] = useState(true);
+    const [teamSearch, setTeamSearch] = useState('');
 
     const fetchData = async () => {
         try {
@@ -113,6 +114,12 @@ export default function TeamAdmin() {
             console.error('Failed to delete team member:', error);
         }
     };
+
+    const filteredTeam = teamMembers.filter((member) =>
+        [member.name, member.regno, member.team_designation, member.dept]
+            .filter(Boolean)
+            .some((value) => value.toLowerCase().includes(teamSearch.toLowerCase()))
+    );
 
     return (
         <AdminLayout title="Team Management" subtitle="Manage PDA team members shown on the home page.">
@@ -240,8 +247,17 @@ export default function TeamAdmin() {
                     </div>
                 </form>
 
-                <div className="mt-8 grid gap-4 md:grid-cols-2">
-                    {teamMembers.length ? teamMembers.map((member) => (
+                <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <Label className="text-sm text-slate-600">Team Members</Label>
+                    <Input
+                        value={teamSearch}
+                        onChange={(e) => setTeamSearch(e.target.value)}
+                        placeholder="Search team members..."
+                        className="md:max-w-sm"
+                    />
+                </div>
+                <div className="mt-6 grid gap-4 md:grid-cols-2">
+                    {filteredTeam.length ? filteredTeam.map((member) => (
                         <div key={member.id} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
                             <div className="flex items-start justify-between gap-3">
                                 <div>

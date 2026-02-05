@@ -32,6 +32,8 @@ export default function ItemsAdmin() {
     const [loading, setLoading] = useState(true);
     const [savingProgram, setSavingProgram] = useState(false);
     const [savingEvent, setSavingEvent] = useState(false);
+    const [programSearch, setProgramSearch] = useState('');
+    const [eventSearch, setEventSearch] = useState('');
 
     const fetchData = async () => {
         try {
@@ -176,6 +178,18 @@ export default function ItemsAdmin() {
             console.error('Failed to update program feature status:', error);
         }
     };
+
+    const filteredPrograms = programs.filter((program) =>
+        [program.title, program.tag, program.description]
+            .filter(Boolean)
+            .some((value) => value.toLowerCase().includes(programSearch.toLowerCase()))
+    );
+
+    const filteredEvents = events.filter((event) =>
+        [event.title, event.format, event.description]
+            .filter(Boolean)
+            .some((value) => value.toLowerCase().includes(eventSearch.toLowerCase()))
+    );
 
     return (
         <AdminLayout title="Manage PDA Items" subtitle="Programs and events showcased on the PDA home page.">
@@ -329,8 +343,17 @@ export default function ItemsAdmin() {
                     </div>
                 </form>
 
-                <div className="mt-8 grid gap-4 md:grid-cols-2">
-                    {programs.length ? programs.map((program) => (
+                <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <Label className="text-sm text-slate-600">Programs</Label>
+                    <Input
+                        value={programSearch}
+                        onChange={(e) => setProgramSearch(e.target.value)}
+                        placeholder="Search programs..."
+                        className="md:max-w-sm"
+                    />
+                </div>
+                <div className="mt-6 grid gap-4 md:grid-cols-2">
+                    {filteredPrograms.length ? filteredPrograms.map((program) => (
                         <div key={program.id} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
                             <div className="flex items-start justify-between gap-3">
                                 <div>
@@ -377,9 +400,9 @@ export default function ItemsAdmin() {
                         <div className="mt-4 grid gap-3 md:grid-cols-2">
                             {programs.filter(program => program.is_featured).map((program) => (
                                 <div key={`featured-${program.id}`} className="rounded-2xl border border-black/10 bg-white p-4">
-                                    <h3 className="text-base font-heading font-bold">{program.title}</h3>
+                                    <h3 className="text-base font-heading font-bold line-clamp-2 break-words">{program.title}</h3>
                                     {program.description ? (
-                                        <p className="mt-2 text-sm text-slate-600">{program.description}</p>
+                                        <p className="mt-2 text-sm text-slate-600 line-clamp-3 break-words">{program.description}</p>
                                     ) : null}
                                 </div>
                             ))}
@@ -398,8 +421,17 @@ export default function ItemsAdmin() {
                     </div>
                 </div>
 
-                <div className="mt-8 grid gap-4 md:grid-cols-2">
-                    {events.length ? events.map((event) => (
+                <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <Label className="text-sm text-slate-600">Events</Label>
+                    <Input
+                        value={eventSearch}
+                        onChange={(e) => setEventSearch(e.target.value)}
+                        placeholder="Search events..."
+                        className="md:max-w-sm"
+                    />
+                </div>
+                <div className="mt-6 grid gap-4 md:grid-cols-2">
+                    {filteredEvents.length ? filteredEvents.map((event) => (
                         <div key={event.id} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
                             <div className="flex items-start justify-between gap-3">
                                 <div>
@@ -446,7 +478,7 @@ export default function ItemsAdmin() {
                         <div className="mt-4 grid gap-3 md:grid-cols-2">
                             {events.filter(event => event.is_featured).map((event) => (
                                 <div key={`featured-${event.id}`} className="rounded-2xl border border-black/10 bg-white p-4">
-                                    <h3 className="text-base font-heading font-bold">{event.title}</h3>
+                                    <h3 className="text-base font-heading font-bold line-clamp-2 break-words">{event.title}</h3>
                                     <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
                                         {event.start_date || 'TBA'}{event.end_date ? ` → ${event.end_date}` : ''}
                                     </p>

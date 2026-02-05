@@ -4,7 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { 
-    Users, Calendar, Trophy, LogOut, Sparkles, LayoutDashboard,
+    Users, Calendar, Trophy, LogOut, Sparkles, LayoutDashboard, ListChecks,
     UserCheck, UserX, PauseCircle, PlayCircle, Download, BarChart3, 
     TrendingUp, Settings
 } from 'lucide-react';
@@ -15,6 +15,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 export default function AdminDashboard() {
     const navigate = useNavigate();
     const { user, logout, getAuthHeader } = useAuth();
+    const isSuperAdmin = user?.register_number === '0000000000';
     const [stats, setStats] = useState(null);
     const [loading, setLoading] = useState(true);
 
@@ -138,6 +139,12 @@ export default function AdminDashboard() {
                             <Trophy className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                             <span className="hidden sm:inline">Leaderboard</span>
                         </Link>
+                        {isSuperAdmin && (
+                            <Link to="/admin/logs" aria-label="Logs" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
+                                <ListChecks className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
+                                <span className="hidden sm:inline">Logs</span>
+                            </Link>
+                        )}
                     </div>
                 </div>
             </nav>

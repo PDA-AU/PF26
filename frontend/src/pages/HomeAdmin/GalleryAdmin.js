@@ -23,6 +23,7 @@ export default function GalleryAdmin() {
     const [editingGalleryId, setEditingGalleryId] = useState(null);
     const [savingGallery, setSavingGallery] = useState(false);
     const [loading, setLoading] = useState(true);
+    const [gallerySearch, setGallerySearch] = useState('');
 
     const fetchData = async () => {
         try {
@@ -100,6 +101,12 @@ export default function GalleryAdmin() {
         }
     };
 
+    const filteredGallery = galleryItems.filter((item) =>
+        [item.caption]
+            .filter(Boolean)
+            .some((value) => value.toLowerCase().includes(gallerySearch.toLowerCase()))
+    );
+
     return (
         <AdminLayout title="Gallery Management" subtitle="Manage the photo gallery shown on the PDA home page.">
             <section className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
@@ -176,8 +183,17 @@ export default function GalleryAdmin() {
                     </div>
                 </form>
 
-                <div className="mt-8 grid gap-4 md:grid-cols-2">
-                    {galleryItems.length ? galleryItems.map((item) => (
+                <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <Label className="text-sm text-slate-600">Gallery Photos</Label>
+                    <Input
+                        value={gallerySearch}
+                        onChange={(e) => setGallerySearch(e.target.value)}
+                        placeholder="Search captions..."
+                        className="md:max-w-sm"
+                    />
+                </div>
+                <div className="mt-6 grid gap-4 md:grid-cols-2">
+                    {filteredGallery.length ? filteredGallery.map((item) => (
                         <div key={item.id} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
                             <div className="flex items-start justify-between gap-3">
                                 <div>
