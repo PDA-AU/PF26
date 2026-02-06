@@ -1,7 +1,7 @@
 import os
 import uuid
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict
 from fastapi import HTTPException, status, UploadFile
 from sqlalchemy.orm import Session
 from models import AdminLog, PdaUser
@@ -87,3 +87,44 @@ def _upload_bytes_to_s3(data: bytes, key_prefix: str, filename: str, content_typ
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Upload failed") from exc
 
     return _build_s3_url(key)
+
+
+def _generate_presigned_put_url(
+    key_prefix: str,
+    filename: str,
+    content_type: str,
+    allowed_types: Optional[List[str]] = None,
+    expires_in: int = 600
+) -> Dict[str, str]:
+    if not S3_CLIENT or not S3_BUCKET_NAME or not AWS_REGION:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="S3 not configured")
+    if not filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing filename")
+    if not content_type:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing content type")
+    if allowed_types and content_type not in allowed_types:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file type")
+
+    extension = Path(filename).suffix.lower()
+    unique_name = f"{uuid.uuid4().hex}{extension}"
+    key = f"{key_prefix.rstrip('/')}/{unique_name}"
+
+    try:
+        upload_url = S3_CLIENT.generate_presigned_url(
+            "put_object",
+            Params={
+                "Bucket": S3_BUCKET_NAME,
+                "Key": key,
+                "ContentType": content_type
+            },
+            ExpiresIn=expires_in
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create presigned URL") from exc
+
+    return {
+        "upload_url": upload_url,
+        "public_url": _build_s3_url(key),
+        "key": key,
+        "content_type": content_type
+    }

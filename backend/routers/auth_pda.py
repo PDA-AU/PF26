@@ -5,10 +5,20 @@ import io
 
 from database import get_db
 from models import PdaUser, PdaTeam, PdaAdmin, SystemConfig
-from schemas import PdaUserRegister, PdaUserLogin, PdaTokenResponse, RefreshTokenRequest, PdaUserResponse, PdaUserUpdate
+from schemas import (
+    PdaUserRegister,
+    PdaUserLogin,
+    PdaTokenResponse,
+    RefreshTokenRequest,
+    PdaUserResponse,
+    PdaUserUpdate,
+    PresignRequest,
+    PresignResponse,
+    ImageUrlUpdate
+)
 from auth import verify_password, get_password_hash, create_access_token, create_refresh_token, decode_token
 from security import require_pda_user
-from utils import _upload_to_s3
+from utils import _upload_to_s3, _generate_presigned_put_url
 
 router = APIRouter()
 
@@ -163,6 +173,31 @@ async def update_pda_profile_picture(
 
     s3_url = _upload_to_s3(file, "team", allowed_types=["image/png", "image/jpeg", "image/webp"])
     user.image_url = s3_url
+    db.commit()
+    db.refresh(user)
+    return _build_pda_user_response(db, user)
+
+
+@router.post("/me/profile-picture/presign", response_model=PresignResponse)
+async def presign_pda_profile_picture(
+    payload: PresignRequest,
+    user: PdaUser = Depends(require_pda_user)
+):
+    return _generate_presigned_put_url(
+        "team",
+        payload.filename,
+        payload.content_type,
+        allowed_types=["image/png", "image/jpeg", "image/webp"]
+    )
+
+
+@router.post("/me/profile-picture/confirm", response_model=PdaUserResponse)
+async def confirm_pda_profile_picture(
+    payload: ImageUrlUpdate,
+    user: PdaUser = Depends(require_pda_user),
+    db: Session = Depends(get_db)
+):
+    user.image_url = payload.image_url
     db.commit()
     db.refresh(user)
     return _build_pda_user_response(db, user)

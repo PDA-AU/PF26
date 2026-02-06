@@ -71,12 +71,14 @@ export default function PdaProfile() {
             const response = await axios.put(`${API}/me`, formData, { headers: getAuthHeader() });
             let updatedUser = response.data;
             if (imageFile) {
-                const uploadForm = new FormData();
-                uploadForm.append('file', imageFile);
-                const uploadRes = await axios.post(`${API}/me/profile-picture`, uploadForm, {
-                    headers: { ...getAuthHeader(), 'Content-Type': 'multipart/form-data' }
-                });
-                updatedUser = uploadRes.data;
+                const presignRes = await axios.post(`${API}/me/profile-picture/presign`, {
+                    filename: imageFile.name,
+                    content_type: imageFile.type
+                }, { headers: getAuthHeader() });
+                const { upload_url, public_url, content_type } = presignRes.data || {};
+                await axios.put(upload_url, imageFile, { headers: { 'Content-Type': content_type || imageFile.type } });
+                const confirmRes = await axios.post(`${API}/me/profile-picture/confirm`, { image_url: public_url }, { headers: getAuthHeader() });
+                updatedUser = confirmRes.data;
             }
             updateUser(updatedUser);
             toast.success('Profile updated');

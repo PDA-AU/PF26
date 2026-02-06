@@ -176,11 +176,13 @@ export default function AdminRounds() {
                 toast.success('Round created');
             }
             if (roundPdfFile && savedRound) {
-                const formData = new FormData();
-                formData.append('file', roundPdfFile);
-                await axios.post(`${API}/persofest/admin/rounds/${savedRound.id}/description-pdf`, formData, {
-                    headers: { ...getAuthHeader(), 'Content-Type': 'multipart/form-data' }
-                });
+                const presignRes = await axios.post(`${API}/persofest/admin/rounds/${savedRound.id}/description-pdf/presign`, {
+                    filename: roundPdfFile.name,
+                    content_type: roundPdfFile.type || 'application/pdf'
+                }, { headers: getAuthHeader() });
+                const { upload_url, public_url, content_type } = presignRes.data || {};
+                await axios.put(upload_url, roundPdfFile, { headers: { 'Content-Type': content_type || 'application/pdf' } });
+                await axios.put(`${API}/persofest/admin/rounds/${savedRound.id}`, { description_pdf: public_url }, { headers: getAuthHeader() });
             }
             setDialogOpen(false);
             resetForm();

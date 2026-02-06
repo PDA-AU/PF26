@@ -16,10 +16,11 @@ from schemas import (
     DashboardStats, ParticipantListResponse, ParticipantStatusEnum, AdminParticipantRoundStat,
     ParticipantLeaderboardSummary, RoundCreate, RoundUpdate, RoundResponse,
     RoundStatsResponse, RoundStatsTopEntry, ScoreEntry, ScoreResponse, LeaderboardEntry,
-    AdminLogResponse, DepartmentEnum, YearOfStudyEnum, GenderEnum
+    AdminLogResponse, DepartmentEnum, YearOfStudyEnum, GenderEnum,
+    PresignRequest, PresignResponse
 )
 from security import require_pda_pf_admin, require_superadmin
-from utils import log_admin_action, _upload_to_s3
+from utils import log_admin_action, _upload_to_s3, _generate_presigned_put_url
 from models import AdminLog
 
 router = APIRouter()
@@ -494,6 +495,24 @@ async def upload_round_pdf(round_id: int, file: UploadFile = File(...), admin=De
     db.refresh(round)
     log_admin_action(db, admin, "upload_round_pdf", method="POST", path=f"/persofest/admin/rounds/{round_id}/description-pdf", meta={"round_id": round_id})
     return RoundResponse.model_validate(round)
+
+
+@router.post("/persofest/admin/rounds/{round_id}/description-pdf/presign", response_model=PresignResponse)
+async def presign_round_pdf(
+    round_id: int,
+    payload: PresignRequest,
+    admin=Depends(require_pda_pf_admin),
+    db: Session = Depends(get_db)
+):
+    round = db.query(Round).filter(Round.id == round_id).first()
+    if not round:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
+    return _generate_presigned_put_url(
+        "persofest/round-pdfs",
+        payload.filename,
+        payload.content_type,
+        allowed_types=["application/pdf"]
+    )
 
 
 @router.delete("/persofest/admin/rounds/{round_id}")

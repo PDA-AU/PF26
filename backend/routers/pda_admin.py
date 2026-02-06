@@ -12,10 +12,11 @@ from schemas import (
     ProgramCreate, ProgramUpdate, ProgramResponse,
     EventCreate, EventUpdate, EventResponse,
     PdaTeamCreate, PdaTeamUpdate, PdaTeamResponse,
-    PdaGalleryCreate, PdaGalleryUpdate, PdaGalleryResponse
+    PdaGalleryCreate, PdaGalleryUpdate, PdaGalleryResponse,
+    PresignRequest, PresignResponse
 )
 from security import require_pda_home_admin, require_superadmin
-from utils import log_admin_action, _upload_to_s3
+from utils import log_admin_action, _upload_to_s3, _generate_presigned_put_url
 
 router = APIRouter()
 
@@ -355,6 +356,19 @@ async def upload_pda_poster(
     return {"url": url}
 
 
+@router.post("/pda-admin/posters/presign", response_model=PresignResponse)
+async def presign_pda_poster(
+    payload: PresignRequest,
+    admin: PdaUser = Depends(require_pda_home_admin)
+):
+    return _generate_presigned_put_url(
+        "posters",
+        payload.filename,
+        payload.content_type,
+        allowed_types=["image/png", "image/jpeg", "image/webp"]
+    )
+
+
 @router.post("/pda-admin/gallery-uploads")
 async def upload_pda_gallery_image(
     file: UploadFile = File(...),
@@ -370,6 +384,19 @@ async def upload_pda_gallery_image(
     return {"url": url}
 
 
+@router.post("/pda-admin/gallery-uploads/presign", response_model=PresignResponse)
+async def presign_pda_gallery_image(
+    payload: PresignRequest,
+    admin: PdaUser = Depends(require_pda_home_admin)
+):
+    return _generate_presigned_put_url(
+        "gallery",
+        payload.filename,
+        payload.content_type,
+        allowed_types=["image/png", "image/jpeg", "image/webp"]
+    )
+
+
 @router.post("/pda-admin/team-uploads")
 async def upload_pda_team_image(
     file: UploadFile = File(...),
@@ -383,3 +410,16 @@ async def upload_pda_team_image(
     url = _upload_to_s3(file, "team", allowed_types=allowed_types)
     log_admin_action(db, admin, "Upload team image", request.method if request else None, request.url.path if request else None, {"file": file.filename})
     return {"url": url}
+
+
+@router.post("/pda-admin/team-uploads/presign", response_model=PresignResponse)
+async def presign_pda_team_image(
+    payload: PresignRequest,
+    admin: PdaUser = Depends(require_superadmin)
+):
+    return _generate_presigned_put_url(
+        "team",
+        payload.filename,
+        payload.content_type,
+        allowed_types=["image/png", "image/jpeg", "image/webp"]
+    )

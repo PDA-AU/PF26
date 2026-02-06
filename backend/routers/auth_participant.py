@@ -5,12 +5,22 @@ from sqlalchemy import func
 
 from database import get_db
 from models import Participant, SystemConfig, ParticipantStatus, UserRole, Department, YearOfStudy, Gender, Event
-from schemas import UserRegister, UserLogin, TokenResponse, RefreshTokenRequest, UserResponse, UserUpdate
+from schemas import (
+    UserRegister,
+    UserLogin,
+    TokenResponse,
+    RefreshTokenRequest,
+    UserResponse,
+    UserUpdate,
+    PresignRequest,
+    PresignResponse,
+    ProfilePictureUpdate
+)
 from auth import verify_password, get_password_hash, create_access_token, create_refresh_token, decode_token, generate_referral_code
 from security import require_participant
 from fastapi import UploadFile, File
 import io
-from utils import _upload_to_s3
+from utils import _upload_to_s3, _generate_presigned_put_url
 from models import Round, Score, RoundState
 from schemas import ParticipantRoundStatus
 
@@ -143,6 +153,31 @@ async def update_participant_profile_picture(
     db.commit()
     db.refresh(user)
 
+    return UserResponse.model_validate(user)
+
+
+@router.post("/participant/me/profile-picture/presign", response_model=PresignResponse)
+async def presign_participant_profile_picture(
+    payload: PresignRequest,
+    user: Participant = Depends(require_participant)
+):
+    return _generate_presigned_put_url(
+        "persofest/profiles",
+        payload.filename,
+        payload.content_type,
+        allowed_types=["image/png", "image/jpeg", "image/webp"]
+    )
+
+
+@router.post("/participant/me/profile-picture/confirm", response_model=UserResponse)
+async def confirm_participant_profile_picture(
+    payload: ProfilePictureUpdate,
+    user: Participant = Depends(require_participant),
+    db: Session = Depends(get_db)
+):
+    user.profile_picture = payload.profile_picture
+    db.commit()
+    db.refresh(user)
     return UserResponse.model_validate(user)
 
 

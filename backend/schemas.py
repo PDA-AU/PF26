@@ -178,6 +178,26 @@ class PdaUserResponse(BaseModel):
         from_attributes = True
 
 
+class PresignRequest(BaseModel):
+    filename: str = Field(..., min_length=1)
+    content_type: str = Field(..., min_length=1)
+
+
+class PresignResponse(BaseModel):
+    upload_url: str
+    public_url: str
+    key: str
+    content_type: str
+
+
+class ImageUrlUpdate(BaseModel):
+    image_url: str = Field(..., min_length=5)
+
+
+class ProfilePictureUpdate(BaseModel):
+    profile_picture: str = Field(..., min_length=5)
+
+
 class PdaTokenResponse(BaseModel):
     access_token: str
     refresh_token: str

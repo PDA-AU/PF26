@@ -93,17 +93,15 @@ export default function ParticipantDashboard() {
             return;
         }
 
-        const formData = new FormData();
-        formData.append('file', file);
-
         try {
-            const response = await axios.post(`${API}/participant/me/profile-picture`, formData, {
-                headers: {
-                    ...getAuthHeader(),
-                    'Content-Type': 'multipart/form-data'
-                }
-            });
-            updateUser(response.data);
+            const presignRes = await axios.post(`${API}/participant/me/profile-picture/presign`, {
+                filename: file.name,
+                content_type: file.type
+            }, { headers: getAuthHeader() });
+            const { upload_url, public_url, content_type } = presignRes.data || {};
+            await axios.put(upload_url, file, { headers: { 'Content-Type': content_type || file.type } });
+            const confirmRes = await axios.post(`${API}/participant/me/profile-picture/confirm`, { profile_picture: public_url }, { headers: getAuthHeader() });
+            updateUser(confirmRes.data);
             toast.success('Profile picture updated!');
         } catch (error) {
             toast.error(error.response?.data?.detail || 'Failed to upload picture');
