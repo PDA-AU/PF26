@@ -412,7 +412,8 @@ export default function PdaHome() {
                                                 title: featuredItems[activeFeaturedIndex]?.title,
                                                 meta: `${formatDateRange(featuredItems[activeFeaturedIndex])}${
                                                     featuredItems[activeFeaturedIndex]?.format ? ` · ${featuredItems[activeFeaturedIndex]?.format}` : ''
-                                                }`
+                                                }`,
+                                                description: featuredItems[activeFeaturedIndex]?.description || ''
                                             })
                                         }
                                         className="w-full"
