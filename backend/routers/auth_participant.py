@@ -134,8 +134,8 @@ async def update_participant_profile_picture(
     if not file.filename:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing filename")
     contents = await file.read()
-    if len(contents) > 2 * 1024 * 1024:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File size exceeds 2MB limit")
+    if len(contents) > 12 * 1024 * 1024:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File size exceeds 12MB limit")
     file.file = io.BytesIO(contents)
 
     s3_url = _upload_to_s3(file, "persofest/profiles", allowed_types=["image/png", "image/jpeg", "image/webp"])

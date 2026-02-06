@@ -19,11 +19,17 @@ export default function SuperAdmin() {
     const [saving, setSaving] = useState(false);
     const [snapshotLoading, setSnapshotLoading] = useState(false);
     const [snapshotUrl, setSnapshotUrl] = useState('');
+    const [recruitmentOpen, setRecruitmentOpen] = useState(true);
+    const [recruitmentLoading, setRecruitmentLoading] = useState(false);
 
     const fetchData = useCallback(async () => {
         try {
             const adminsRes = await axios.get(`${API}/pda-admin/superadmin/admins`, { headers: getAuthHeader() });
             setAdmins(adminsRes.data || []);
+            const recruitmentRes = await axios.get(`${API}/pda-admin/superadmin/recruitment-status`, { headers: getAuthHeader() });
+            if (typeof recruitmentRes.data?.recruitment_open === 'boolean') {
+                setRecruitmentOpen(recruitmentRes.data.recruitment_open);
+            }
         } catch (error) {
             console.error('Failed to load superadmin data:', error);
         }
@@ -84,6 +90,20 @@ export default function SuperAdmin() {
             console.error('Failed to take snapshot:', error);
         } finally {
             setSnapshotLoading(false);
+        }
+    };
+
+    const toggleRecruitment = async () => {
+        setRecruitmentLoading(true);
+        try {
+            const response = await axios.post(`${API}/pda-admin/superadmin/recruitment-toggle`, {}, { headers: getAuthHeader() });
+            if (typeof response.data?.recruitment_open === 'boolean') {
+                setRecruitmentOpen(response.data.recruitment_open);
+            }
+        } catch (error) {
+            console.error('Failed to toggle recruitment:', error);
+        } finally {
+            setRecruitmentLoading(false);
         }
     };
 
@@ -162,6 +182,30 @@ export default function SuperAdmin() {
                         Uploaded to: <span className="font-semibold">{snapshotUrl}</span>
                     </p>
                 ) : null}
+            </section>
+
+            <section className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                        <p className="text-xs uppercase tracking-[0.4em] text-slate-400">Recruitment</p>
+                        <h2 className="text-2xl font-heading font-black">Pause or Resume</h2>
+                    </div>
+                    <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs uppercase tracking-[0.2em] ${
+                        recruitmentOpen ? 'border-[#c99612] bg-[#fff3c4] text-[#7a5a00]' : 'border-black/10 bg-[#11131a] text-[#f6c347]'
+                    }`}>
+                        {recruitmentOpen ? 'Open' : 'Paused'}
+                    </span>
+                </div>
+                <div className="mt-6">
+                    <Button
+                        type="button"
+                        onClick={toggleRecruitment}
+                        className="bg-[#f6c347] text-black hover:bg-[#ffd16b]"
+                        disabled={recruitmentLoading}
+                    >
+                        {recruitmentLoading ? 'Updating...' : (recruitmentOpen ? 'Pause Recruitment' : 'Resume Recruitment')}
+                    </Button>
+                </div>
             </section>
 
             <section className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm">

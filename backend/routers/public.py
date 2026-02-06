@@ -28,6 +28,13 @@ async def get_registration_status(db: Session = Depends(get_db)):
     return {"registration_open": registration_open}
 
 
+@router.get("/pda/recruitment-status")
+async def get_pda_recruitment_status(db: Session = Depends(get_db)):
+    reg_config = db.query(SystemConfig).filter(SystemConfig.key == "pda_recruitment_open").first()
+    recruitment_open = reg_config.value == "true" if reg_config else True
+    return {"recruitment_open": recruitment_open}
+
+
 @router.get("/rounds/public", response_model=List[RoundPublicResponse])
 async def get_public_rounds(db: Session = Depends(get_db)):
     rounds = db.query(Round).filter(Round.state != RoundState.DRAFT).order_by(Round.id).all()
@@ -53,6 +60,7 @@ async def list_routes():
             {"method": "GET", "path": "/"},
             {"method": "GET", "path": "/health"},
             {"method": "GET", "path": "/registration-status"},
+            {"method": "GET", "path": "/pda/recruitment-status"},
             {"method": "GET", "path": "/rounds/public"},
             {"method": "GET", "path": "/top-referrers"},
             {"method": "GET", "path": "/routes"},
@@ -98,6 +106,8 @@ async def list_routes():
             {"method": "PUT", "path": "/pda-admin/superadmin/admins/{user_id}/policy"},
             {"method": "GET", "path": "/pda-admin/superadmin/logs"},
             {"method": "POST", "path": "/pda-admin/superadmin/db-snapshot"},
+            {"method": "GET", "path": "/pda-admin/superadmin/recruitment-status"},
+            {"method": "POST", "path": "/pda-admin/superadmin/recruitment-toggle"},
             {"method": "GET", "path": "/pda-admin/recruitments"},
             {"method": "POST", "path": "/pda-admin/recruitments/approve"},
             {"method": "GET", "path": "/persofest/admin/dashboard"},

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
@@ -32,6 +32,8 @@ const TEAMS = [
     'Library'
 ];
 
+const WHATSAPP_CHANNEL_URL = "https://whatsapp.com/channel/your-channel-id";
+
 export default function PdaRecruit() {
     const navigate = useNavigate();
     const { register } = useAuth();
@@ -46,6 +48,22 @@ export default function PdaRecruit() {
         preferred_team: ''
     });
     const [loading, setLoading] = useState(false);
+    const [recruitmentOpen, setRecruitmentOpen] = useState(true);
+
+    useEffect(() => {
+        const fetchRecruitmentStatus = async () => {
+            try {
+                const res = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/pda/recruitment-status`);
+                const data = await res.json();
+                if (typeof data?.recruitment_open === 'boolean') {
+                    setRecruitmentOpen(data.recruitment_open);
+                }
+            } catch (error) {
+                console.error('Failed to load recruitment status:', error);
+            }
+        };
+        fetchRecruitmentStatus();
+    }, []);
 
     const getErrorMessage = (error, fallback) => {
         const detail = error?.response?.data?.detail;
@@ -64,6 +82,10 @@ export default function PdaRecruit() {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        if (!recruitmentOpen) {
+            toast.error('Recruitment is currently paused');
+            return;
+        }
         setLoading(true);
         try {
             await register({
@@ -90,13 +112,18 @@ export default function PdaRecruit() {
 
                 <div className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
                     <div className="flex items-center gap-3">
-                        <div className="h-12 w-12 rounded-2xl bg-[#11131a] text-[#f6c347] flex items-center justify-center">
-                            <Sparkles className="w-6 h-6" />
-                        </div>
+                       
                         <div>
                             <p className="text-xs uppercase tracking-[0.4em] text-slate-400">PDA Recruitment</p>
                             <h1 className="text-3xl font-heading font-black">Join the PDA Team</h1>
                         </div>
+                    </div>
+                    <div className="mt-4 flex flex-wrap items-center gap-3">
+                        {!recruitmentOpen ? (
+                            <span className="inline-flex items-center rounded-full border border-[#c99612] bg-[#fff3c4] px-3 py-1 text-xs uppercase tracking-[0.2em] text-[#7a5a00]">
+                                Recruitment paused
+                            </span>
+                        ) : null}
                     </div>
 
                     <form onSubmit={handleSubmit} className="mt-8 grid gap-4 md:grid-cols-2">
@@ -151,8 +178,16 @@ export default function PdaRecruit() {
                             </Select>
                         </div>
 
-                        <div className="md:col-span-2 flex justify-end">
-                            <Button type="submit" disabled={loading} className="bg-[#f6c347] text-black hover:bg-[#ffd16b]">
+                        <div className="md:col-span-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <a
+                                href={WHATSAPP_CHANNEL_URL}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center justify-center gap-2 rounded-md border border-black/10 bg-[#11131a] px-4 py-2 text-sm font-semibold text-[#f6c347] hover:bg-[#1a1d26]"
+                            >
+                                Join our WhatsApp channel
+                            </a>
+                            <Button type="submit" disabled={loading || !recruitmentOpen} className="bg-[#f6c347] text-black hover:bg-[#ffd16b]">
                                 {loading ? 'Submitting...' : 'Submit Application'}
                             </Button>
                         </div>

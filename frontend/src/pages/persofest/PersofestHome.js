@@ -6,7 +6,7 @@ import { Calendar, MapPin, Users, Trophy, Star, ArrowRight, Menu, X, Sparkles } 
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import pdaLogo from '@/assets/pda-logo.png';
-
+import MrMs from '@/assets/mrms.png';
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function PersofestHome() {
@@ -217,7 +217,7 @@ export default function PersofestHome() {
                     <div className="grid md:grid-cols-2 gap-12 items-center">
                         <div className="relative">
                             <img 
-                                src={pdaLogo}
+                                src={MrMs}
                                 alt="PDA logo"
                                 className="w-full h-[400px] object-cover border-4 border-black shadow-neo-lg"
                             />

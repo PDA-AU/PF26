@@ -4,7 +4,7 @@ from typing import Optional
 import io
 
 from database import get_db
-from models import PdaUser, PdaTeam, PdaAdmin
+from models import PdaUser, PdaTeam, PdaAdmin, SystemConfig
 from schemas import PdaUserRegister, PdaUserLogin, PdaTokenResponse, RefreshTokenRequest, PdaUserResponse, PdaUserUpdate
 from auth import verify_password, get_password_hash, create_access_token, create_refresh_token, decode_token
 from security import require_pda_user
@@ -44,6 +44,10 @@ def _build_pda_user_response(db: Session, user: PdaUser) -> PdaUserResponse:
 
 @router.post("/auth/register", response_model=PdaTokenResponse)
 async def pda_register(user_data: PdaUserRegister, db: Session = Depends(get_db)):
+    reg_config = db.query(SystemConfig).filter(SystemConfig.key == "pda_recruitment_open").first()
+    if reg_config and reg_config.value == "false":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Recruitment is closed")
+
     existing = db.query(PdaUser).filter(
         (PdaUser.regno == user_data.regno) | (PdaUser.email == user_data.email)
     ).first()
@@ -153,8 +157,8 @@ async def update_pda_profile_picture(
     if not file.filename:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing filename")
     contents = await file.read()
-    if len(contents) > 2 * 1024 * 1024:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File size exceeds 2MB limit")
+    if len(contents) > 12 * 1024 * 1024:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File size exceeds 12MB limit")
     file.file = io.BytesIO(contents)
 
     s3_url = _upload_to_s3(file, "team", allowed_types=["image/png", "image/jpeg", "image/webp"])

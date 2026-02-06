@@ -8,7 +8,7 @@ import subprocess
 from datetime import datetime
 
 from database import get_db
-from models import PdaAdmin, PdaUser, PdaTeam, AdminLog
+from models import PdaAdmin, PdaUser, PdaTeam, AdminLog, SystemConfig
 from schemas import PdaAdminCreate, PdaAdminPolicyUpdate, PdaUserResponse, AdminLogResponse
 from security import require_superadmin
 from auth import get_password_hash
@@ -207,6 +207,35 @@ async def upload_db_snapshot(
             os.remove(file_path)
     log_admin_action(db, superadmin, "Upload DB snapshot", request.method if request else None, request.url.path if request else None, {"filename": filename, "url": url})
     return {"url": url, "filename": filename}
+
+
+@router.get("/pda-admin/superadmin/recruitment-status")
+async def get_recruitment_status(
+    _: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db)
+):
+    reg_config = db.query(SystemConfig).filter(SystemConfig.key == "pda_recruitment_open").first()
+    recruitment_open = reg_config.value == "true" if reg_config else True
+    return {"recruitment_open": recruitment_open}
+
+
+@router.post("/pda-admin/superadmin/recruitment-toggle")
+async def toggle_recruitment(
+    superadmin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    reg_config = db.query(SystemConfig).filter(SystemConfig.key == "pda_recruitment_open").first()
+    if not reg_config:
+        reg_config = SystemConfig(key="pda_recruitment_open", value="false")
+        db.add(reg_config)
+        db.commit()
+        db.refresh(reg_config)
+    else:
+        reg_config.value = "false" if reg_config.value == "true" else "true"
+        db.commit()
+    log_admin_action(db, superadmin, "toggle_pda_recruitment", request.method if request else None, request.url.path if request else None, {"recruitment_open": reg_config.value})
+    return {"recruitment_open": reg_config.value == "true"}
 
 
 @router.get("/pda-admin/recruitments", response_model=List[PdaUserResponse])

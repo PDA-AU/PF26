@@ -88,6 +88,10 @@ async def startup_event():
         if not reg_config:
             db.add(SystemConfig(key="registration_open", value="true"))
             db.commit()
+        pda_recruit_config = db.query(SystemConfig).filter(SystemConfig.key == "pda_recruitment_open").first()
+        if not pda_recruit_config:
+            db.add(SystemConfig(key="pda_recruitment_open", value="true"))
+            db.commit()
 
     finally:
         db.close()

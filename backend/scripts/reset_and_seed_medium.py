@@ -74,6 +74,7 @@ def seed() -> None:
         db.flush()
 
         db.add(SystemConfig(key="registration_open", value="true"))
+        db.add(SystemConfig(key="pda_recruitment_open", value="true"))
 
         now = datetime.now(timezone.utc)
         base_date = datetime(2026, 2, 1, tzinfo=timezone.utc)

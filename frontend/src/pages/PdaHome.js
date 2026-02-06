@@ -710,7 +710,7 @@ export default function PdaHome() {
                                             {member.designation ? (
                                                 <div className="mt-2 flex justify-center">
                                                     <div className="inline-flex max-w-full items-center truncate rounded-full border border-[#f6c347]/60 bg-[#fff3c4] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.25em] text-[#7a5a00]">
-                                                        {member.designation}
+                                                        {member.designation === 'JS' ? 'Joint Secretary' : member.designation}
                                                     </div>
                                                 </div>
                                             ) : null}
