@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { compressImageToWebp } from '@/utils/imageCompression';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -94,12 +95,13 @@ export default function ParticipantDashboard() {
         }
 
         try {
+            const processed = await compressImageToWebp(file);
             const presignRes = await axios.post(`${API}/participant/me/profile-picture/presign`, {
-                filename: file.name,
-                content_type: file.type
+                filename: processed.name,
+                content_type: processed.type
             }, { headers: getAuthHeader() });
             const { upload_url, public_url, content_type } = presignRes.data || {};
-            await axios.put(upload_url, file, { headers: { 'Content-Type': content_type || file.type } });
+            await axios.put(upload_url, processed, { headers: { 'Content-Type': content_type || processed.type } });
             const confirmRes = await axios.post(`${API}/participant/me/profile-picture/confirm`, { profile_picture: public_url }, { headers: getAuthHeader() });
             updateUser(confirmRes.data);
             toast.success('Profile picture updated!');

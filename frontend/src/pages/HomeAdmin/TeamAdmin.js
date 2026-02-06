@@ -9,6 +9,7 @@ import { useAuth } from '@/context/AuthContext';
 import AdminLayout from '@/pages/HomeAdmin/AdminLayout';
 import pdaLogo from '@/assets/pda-logo.png';
 import { API, uploadTeamImage } from '@/pages/HomeAdmin/adminApi';
+import { compressImageToWebp } from '@/utils/imageCompression';
 
 const PAGE_SIZE = 12;
 
@@ -95,7 +96,8 @@ export default function TeamAdmin() {
         try {
             let photoUrl = selectedMember.photo_url || '';
             if (photoFile) {
-                photoUrl = await uploadTeamImage(photoFile, getAuthHeader);
+                const processed = await compressImageToWebp(photoFile);
+                photoUrl = await uploadTeamImage(processed, getAuthHeader);
             }
             const payload = {
                 team: editForm.team,

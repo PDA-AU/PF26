@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { useAuth } from '@/context/AuthContext';
 import AdminLayout from '@/pages/HomeAdmin/AdminLayout';
 import { API, uploadGalleryImage } from '@/pages/HomeAdmin/adminApi';
+import { compressImageToWebp } from '@/utils/imageCompression';
 
 const emptyEditItem = {
     id: null,
@@ -20,6 +21,7 @@ export default function GalleryAdmin() {
     const [editForm, setEditForm] = useState(emptyEditItem);
     const [savingUploads, setSavingUploads] = useState(false);
     const [savingEdit, setSavingEdit] = useState(false);
+    const [processingUploads, setProcessingUploads] = useState(false);
     const [loading, setLoading] = useState(true);
     const [gallerySearch, setGallerySearch] = useState('');
 
@@ -40,20 +42,31 @@ export default function GalleryAdmin() {
         }
     }, [canAccessHome]);
 
-    const handleUploadsSelected = (files) => {
-        const next = Array.from(files || []).map((file) => ({
-            id: `${file.name}-${file.size}-${file.lastModified}`,
-            file,
-            caption: '',
-            tag: '',
-            previewUrl: URL.createObjectURL(file)
-        }));
-        uploads.forEach((item) => {
-            if (item.previewUrl) {
-                URL.revokeObjectURL(item.previewUrl);
-            }
-        });
-        setUploads(next);
+    const handleUploadsSelected = async (files) => {
+        const list = Array.from(files || []);
+        if (!list.length) {
+            setUploads([]);
+            return;
+        }
+        setProcessingUploads(true);
+        try {
+            const processed = await Promise.all(list.map((file) => compressImageToWebp(file)));
+            const next = processed.map((file, idx) => ({
+                id: `${file.name}-${file.size}-${file.lastModified}-${idx}`,
+                file,
+                caption: '',
+                tag: '',
+                previewUrl: URL.createObjectURL(file)
+            }));
+            uploads.forEach((item) => {
+                if (item.previewUrl) {
+                    URL.revokeObjectURL(item.previewUrl);
+                }
+            });
+            setUploads(next);
+        } finally {
+            setProcessingUploads(false);
+        }
     };
 
     const updateUploadMeta = (id, field, value) => {
@@ -143,11 +156,13 @@ export default function GalleryAdmin() {
         }
     };
 
-    const filteredGallery = galleryItems.filter((item) =>
-        [item.caption, item.tag]
+    const normalizedSearch = gallerySearch.trim().toLowerCase();
+    const filteredGallery = galleryItems.filter((item) => {
+        if (!normalizedSearch) return true;
+        return [item.caption, item.tag]
             .filter(Boolean)
-            .some((value) => value.toLowerCase().includes(gallerySearch.toLowerCase()))
-    );
+            .some((value) => value.toLowerCase().includes(normalizedSearch));
+    });
 
     return (
         <AdminLayout title="Gallery Management" subtitle="Manage the photo gallery shown on the PDA home page.">
@@ -171,11 +186,11 @@ export default function GalleryAdmin() {
                         />
                     </div>
                     {uploads.length ? (
-                        <div className="grid gap-4 md:grid-cols-2">
+                        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                             {uploads.map((item) => (
-                                <div key={item.id} className="rounded-2xl border border-black/10 bg-white p-4">
+                                <div key={item.id} className="rounded-2xl border border-black/10 bg-white p-4 min-w-0">
                                     <div className="flex items-start justify-between gap-3">
-                                        <div className="flex items-start gap-3">
+                                        <div className="flex items-start gap-3 min-w-0">
                                             {item.previewUrl ? (
                                                 <img
                                                     src={item.previewUrl}
@@ -183,12 +198,12 @@ export default function GalleryAdmin() {
                                                     className="h-16 w-16 rounded-lg object-cover border border-black/10"
                                                 />
                                             ) : null}
-                                            <div>
-                                                <p className="text-sm font-semibold">{item.file.name}</p>
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-semibold break-words">{item.file.name}</p>
                                                 <p className="text-xs text-slate-500">{(item.file.size / 1024).toFixed(1)} KB</p>
                                             </div>
                                         </div>
-                                        <button type="button" onClick={() => removeUpload(item.id)} className="text-xs text-red-600">
+                                        <button type="button" onClick={() => removeUpload(item.id)} className="text-xs text-red-600 flex-shrink-0">
                                             Remove
                                         </button>
                                     </div>
@@ -214,9 +229,9 @@ export default function GalleryAdmin() {
                             ))}
                         </div>
                     ) : null}
-                    <div className="flex justify-end">
-                        <Button type="submit" className="bg-[#f6c347] text-black hover:bg-[#ffd16b]" disabled={savingUploads || !uploads.length}>
-                            {savingUploads ? 'Uploading...' : `Upload ${uploads.length || ''}`.trim()}
+                    <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:justify-end">
+                        <Button type="submit" className="bg-[#f6c347] text-black hover:bg-[#ffd16b]" disabled={savingUploads || processingUploads || !uploads.length}>
+                            {processingUploads ? 'Processing...' : savingUploads ? 'Uploading...' : `Upload ${uploads.length || ''}`.trim()}
                         </Button>
                     </div>
                 </form>
@@ -262,7 +277,7 @@ export default function GalleryAdmin() {
                         className="md:max-w-sm"
                     />
                 </div>
-                <div className="mt-6 grid gap-4 md:grid-cols-2">
+                <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                     {filteredGallery.length ? filteredGallery.map((item) => (
                         <div
                             key={item.id}

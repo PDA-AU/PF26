@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/context/AuthContext';
 import AdminLayout from '@/pages/HomeAdmin/AdminLayout';
 import { API, uploadPoster } from '@/pages/HomeAdmin/adminApi';
+import { compressImageToWebp } from '@/utils/imageCompression';
 
 const emptyItem = {
     type: 'program',
@@ -77,7 +78,8 @@ export default function ItemsAdmin() {
         setSaving(true);
         let posterUrl = itemForm.poster_url.trim() || null;
         if (posterFile) {
-            posterUrl = await uploadPoster(posterFile, getAuthHeader);
+            const processed = await compressImageToWebp(posterFile);
+            posterUrl = await uploadPoster(processed, getAuthHeader);
         }
         const payload = {
             title: itemForm.title.trim(),

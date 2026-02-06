@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import axios from 'axios';
 import { toast } from 'sonner';
 import PdaHeader from '@/components/layout/PdaHeader';
+import { compressImageToWebp } from '@/utils/imageCompression';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -71,12 +72,13 @@ export default function PdaProfile() {
             const response = await axios.put(`${API}/me`, formData, { headers: getAuthHeader() });
             let updatedUser = response.data;
             if (imageFile) {
+                const processed = await compressImageToWebp(imageFile);
                 const presignRes = await axios.post(`${API}/me/profile-picture/presign`, {
-                    filename: imageFile.name,
-                    content_type: imageFile.type
+                    filename: processed.name,
+                    content_type: processed.type
                 }, { headers: getAuthHeader() });
                 const { upload_url, public_url, content_type } = presignRes.data || {};
-                await axios.put(upload_url, imageFile, { headers: { 'Content-Type': content_type || imageFile.type } });
+                await axios.put(upload_url, processed, { headers: { 'Content-Type': content_type || processed.type } });
                 const confirmRes = await axios.post(`${API}/me/profile-picture/confirm`, { image_url: public_url }, { headers: getAuthHeader() });
                 updatedUser = confirmRes.data;
             }
