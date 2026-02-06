@@ -15,6 +15,9 @@ const emptyAdmin = {
 export default function SuperAdmin() {
     const { user, getAuthHeader } = useAuth();
     const [admins, setAdmins] = useState([]);
+    const [policyEdits, setPolicyEdits] = useState({});
+    const [originalPolicies, setOriginalPolicies] = useState({});
+    const [policySaving, setPolicySaving] = useState(false);
     const [adminForm, setAdminForm] = useState(emptyAdmin);
     const [saving, setSaving] = useState(false);
     const [snapshotLoading, setSnapshotLoading] = useState(false);
@@ -26,6 +29,15 @@ export default function SuperAdmin() {
         try {
             const adminsRes = await axios.get(`${API}/pda-admin/superadmin/admins`, { headers: getAuthHeader() });
             setAdmins(adminsRes.data || []);
+            const edits = {};
+            const originals = {};
+            (adminsRes.data || []).forEach((admin) => {
+                const policy = admin.policy || {};
+                edits[admin.id] = policy;
+                originals[admin.id] = policy;
+            });
+            setPolicyEdits(edits);
+            setOriginalPolicies(originals);
             const recruitmentRes = await axios.get(`${API}/pda-admin/superadmin/recruitment-status`, { headers: getAuthHeader() });
             if (typeof recruitmentRes.data?.recruitment_open === 'boolean') {
                 setRecruitmentOpen(recruitmentRes.data.recruitment_open);
@@ -104,6 +116,47 @@ export default function SuperAdmin() {
             console.error('Failed to toggle recruitment:', error);
         } finally {
             setRecruitmentLoading(false);
+        }
+    };
+
+    const updatePolicyEdit = (adminId, key, value) => {
+        setPolicyEdits((prev) => ({
+            ...prev,
+            [adminId]: {
+                ...(prev[adminId] || {}),
+                [key]: value
+            }
+        }));
+    };
+
+    const arePoliciesEqual = (a = {}, b = {}) => {
+        const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+        for (const key of keys) {
+            if (Boolean(a[key]) !== Boolean(b[key])) return false;
+        }
+        return true;
+    };
+
+    const saveAllPolicies = async () => {
+        setPolicySaving(true);
+        try {
+            const updates = admins
+                .filter((admin) => admin.regno !== "0000000000")
+                .filter((admin) => !arePoliciesEqual(policyEdits[admin.id], originalPolicies[admin.id]))
+                .map((admin) => axios.put(
+                    `${API}/pda-admin/superadmin/admins/${admin.id}/policy`,
+                    { policy: policyEdits[admin.id] || {} },
+                    { headers: getAuthHeader() }
+                ));
+
+            if (updates.length) {
+                await Promise.all(updates);
+            }
+            fetchData();
+        } catch (error) {
+            console.error('Failed to save policy changes:', error);
+        } finally {
+            setPolicySaving(false);
         }
     };
 
@@ -214,37 +267,45 @@ export default function SuperAdmin() {
                         <p className="text-xs uppercase tracking-[0.4em] text-slate-400">Admins</p>
                         <h2 className="text-2xl font-heading font-black">Manage Policies</h2>
                     </div>
+                    <Button
+                        type="button"
+                        className="bg-[#f6c347] text-black hover:bg-[#ffd16b]"
+                        onClick={saveAllPolicies}
+                        disabled={policySaving}
+                    >
+                        {policySaving ? 'Saving...' : 'Save all changes'}
+                    </Button>
                 </div>
                 <div className="mt-6 space-y-4">
-                    {admins.length ? admins.map((admin) => (
+                    {admins.filter((admin) => admin.regno !== "0000000000").length ? admins.filter((admin) => admin.regno !== "0000000000").map((admin) => (
                         <div key={admin.id} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
                             <div className="flex flex-wrap items-center justify-between gap-4">
                                 <div>
                                     <h3 className="text-lg font-heading font-bold">{admin.regno}</h3>
                                     <p className="text-xs text-slate-500">Admin access policy</p>
                                 </div>
-                                <div className="flex items-center gap-3">
+                                <div className="flex w-full flex-wrap items-center justify-start gap-4 md:w-auto md:justify-end">
                                     <label className="flex items-center gap-2 text-sm">
                                         <input
                                             type="checkbox"
-                                            checked={admin.policy?.home || false}
-                                        onChange={(e) => updatePolicy(admin.id, { ...admin.policy, home: e.target.checked })}
+                                            checked={policyEdits[admin.id]?.home || false}
+                                            onChange={(e) => updatePolicyEdit(admin.id, "home", e.target.checked)}
                                         />
                                         Home
                                     </label>
                                     <label className="flex items-center gap-2 text-sm">
                                         <input
                                             type="checkbox"
-                                            checked={admin.policy?.pf || false}
-                                            onChange={(e) => updatePolicy(admin.id, { ...admin.policy, pf: e.target.checked })}
+                                            checked={policyEdits[admin.id]?.pf || false}
+                                            onChange={(e) => updatePolicyEdit(admin.id, "pf", e.target.checked)}
                                         />
                                         Persofest
                                     </label>
                                     <label className="flex items-center gap-2 text-sm">
                                         <input
                                             type="checkbox"
-                                            checked={admin.policy?.superAdmin || false}
-                                            onChange={(e) => updatePolicy(admin.id, { ...admin.policy, superAdmin: e.target.checked })}
+                                            checked={policyEdits[admin.id]?.superAdmin || false}
+                                            onChange={(e) => updatePolicyEdit(admin.id, "superAdmin", e.target.checked)}
                                         />
                                         SuperAdmin
                                     </label>
