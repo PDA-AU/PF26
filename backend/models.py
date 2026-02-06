@@ -147,7 +147,7 @@ class AdminLog(Base):
     __tablename__ = "admin_logs"
 
     id = Column(Integer, primary_key=True, index=True)
-    admin_id = Column(Integer, nullable=True)
+    admin_id = Column(Integer, nullable=False)
     admin_register_number = Column(String(10), nullable=False)
     admin_name = Column(String(255), nullable=False)
     action = Column(String(255), nullable=False)
@@ -200,7 +200,7 @@ class PdaTeam(Base):
     __tablename__ = "pda_team"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     team = Column(String(120), nullable=True)
     designation = Column(String(120), nullable=True)
     instagram_url = Column(String(500), nullable=True)
@@ -220,3 +220,4 @@ class PdaGallery(Base):
     is_featured = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
