@@ -369,12 +369,12 @@ export default function PdaHome() {
                 {featuredItems.length > 0 ? (
                     <section className="mx-auto w-full max-w-6xl px-5 pb-8">
                         <div className="grid gap-6 rounded-3xl border border-black/10 bg-gradient-to-r from-[#fff1c7] via-[#fff8e8] to-white p-6 md:grid-cols-2 md:min-h-[320px] lg:grid-cols-[1.2fr_0.8fr]" data-reveal>
-                            <div className={`transition-opacity duration-700 ease-in-out ${isFeaturedFading ? 'opacity-0' : 'opacity-100'}`}>
+                            <div className={`transition-opacity duration-700 ease-in-out ${isFeaturedFading ? 'opacity-0' : 'opacity-100'} flex flex-col min-h-[220px]`}>
                                 <p className="text-xs uppercase tracking-[0.4em] text-[#8b6a00]">Featured</p>
                                 <h2 className="mt-3 text-3xl font-heading font-black text-[#0f1115]">
                                     {featuredItems[activeFeaturedIndex]?.title}
                                 </h2>
-                                <p className="mt-4 text-sm text-slate-700 md:text-base">
+                                <p className="mt-4 text-sm text-slate-700 md:text-base line-clamp-3">
                                     {featuredItems[activeFeaturedIndex]?.hero_caption ||
                                         featuredItems[activeFeaturedIndex]?.description ||
                                         'Event details coming soon.'}
@@ -395,7 +395,7 @@ export default function PdaHome() {
                                         href={featuredItems[activeFeaturedIndex]?.hero_url}
                                         target="_blank"
                                         rel="noreferrer"
-                                        className="mt-6 inline-flex items-center gap-2 rounded-md bg-[#0f1115] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#1f2330]"
+                                        className="mt-6 inline-flex w-fit items-center gap-2 self-start rounded-md bg-[#0f1115] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#1f2330]"
                                     >
                                         Explore
                                         <ArrowRight className="h-4 w-4" />
