@@ -17,7 +17,7 @@ def _build_pda_user_response(db: Session, user: PdaUser) -> PdaUserResponse:
     team = db.query(PdaTeam).filter(PdaTeam.user_id == user.id).first()
     admin_row = db.query(PdaAdmin).filter(PdaAdmin.regno == user.regno).first()
     policy = admin_row.policy if admin_row else None
-    is_superadmin = bool(team and team.designation in {"Chairperson", "Vice Chairperson"})
+    is_superadmin = bool(team and team.designation in {"Root", "Chairperson", "Vice Chairperson"})
     is_admin = bool(admin_row)
     preferred_team = None
     if isinstance(user.json_content, dict):

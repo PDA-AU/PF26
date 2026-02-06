@@ -212,7 +212,7 @@ export default function PdaHome() {
         ? teamMembers
         : teamMembers.filter(member => member.team === teamFilter)
     )
-        .filter(member => !['Member', 'Volunteer'].includes(member.designation))
+        .filter(member => !['Member', 'Volunteer', 'Root'].includes(member.designation))
         .sort((a, b) => {
             const teamA = TEAM_SORT_ORDER.indexOf(a.team || '');
             const teamB = TEAM_SORT_ORDER.indexOf(b.team || '');
@@ -295,7 +295,7 @@ export default function PdaHome() {
                             <div className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1 text-[11px] uppercase tracking-[0.4em] text-[#b8890b]">
                                 Since 1984
                             </div>
-                            <h1 className="mt-4 text-3xl font-heading font-black leading-tight sm:text-4xl md:text-6xl">
+                            <h1 className="mt-4 text-3xl font-heading font-black leading-tight sm:text-4xl md:text-5xl lg:text-6xl">
                               PDA MIT
                             </h1>
                             <p className="mt-4 text-sm text-slate-700 sm:text-base md:text-lg">
@@ -331,10 +331,10 @@ export default function PdaHome() {
                                 </div>
                             </div>
                         </div>
-                        <div className="relative w-full md:max-w-md" data-reveal>
+                        <div className="relative w-full md:max-w-sm lg:max-w-md" data-reveal>
                             <div className="absolute -top-6 left-6 h-24 w-24 rounded-full bg-[#f6c347]/25 blur-2xl" />
                             <div className="rounded-3xl border border-black/10 bg-white p-5 shadow-2xl backdrop-blur sm:p-6">
-                                <img src={heroImageSrc} alt="PDA group" className="h-64 w-full rounded-2xl object-cover sm:h-64" />
+                                <img src={heroImageSrc} alt="PDA group" className="h-56 w-full rounded-2xl object-cover sm:h-64 md:h-56 lg:h-64" />
                                 <div className="mt-5 space-y-3 text-sm text-slate-700">
                                     <div className="flex items-center gap-2">
                                         <Sparkles className="h-4 w-4 text-[#f6c347]" />
@@ -351,7 +351,7 @@ export default function PdaHome() {
 
                 {featuredEvents.length > 0 ? (
                     <section className="mx-auto w-full max-w-6xl px-5 pb-8">
-                        <div className="grid gap-6 rounded-3xl border border-black/10 bg-gradient-to-r from-[#fff1c7] via-[#fff8e8] to-white p-6 md:grid-cols-[1.2fr_0.8fr] md:min-h-[320px]" data-reveal>
+                        <div className="grid gap-6 rounded-3xl border border-black/10 bg-gradient-to-r from-[#fff1c7] via-[#fff8e8] to-white p-6 md:grid-cols-2 md:min-h-[320px] lg:grid-cols-[1.2fr_0.8fr]" data-reveal>
                             <div className={`transition-opacity duration-700 ease-in-out ${isFeaturedFading ? 'opacity-0' : 'opacity-100'}`}>
                                 <p className="text-xs uppercase tracking-[0.4em] text-[#8b6a00]">Featured</p>
                                 <h2 className="mt-3 text-3xl font-heading font-black text-[#0f1115]">
@@ -512,7 +512,7 @@ export default function PdaHome() {
                             </div>
                         ) : null}
                     </div>
-                    <div className="mt-6 hidden auto-rows-fr items-stretch gap-6 md:grid md:grid-cols-3" data-reveal>
+                    <div className="mt-6 hidden auto-rows-fr items-stretch gap-6 md:grid md:grid-cols-2 lg:grid-cols-3" data-reveal>
                         {programs.length > 0 ? (
                             programs
                                 .slice((programPage - 1) * PROGRAMS_PAGE_SIZE, programPage * PROGRAMS_PAGE_SIZE)
@@ -591,7 +591,7 @@ export default function PdaHome() {
                             </div>
                         ) : null}
                     </div>
-                    <div className="mt-6 hidden auto-rows-fr items-stretch gap-6 md:grid md:grid-cols-3" data-reveal>
+                    <div className="mt-6 hidden auto-rows-fr items-stretch gap-6 md:grid md:grid-cols-2 lg:grid-cols-3" data-reveal>
                         {events.length > 0 ? (
                             events
                                 .slice((eventPage - 1) * EVENTS_PAGE_SIZE, eventPage * EVENTS_PAGE_SIZE)
@@ -682,7 +682,7 @@ export default function PdaHome() {
                             ))}
                         </div>
                     </div>
-                    <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 justify-items-center" data-reveal>
+                    <div className="mt-8 grid gap-6 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 justify-items-center" data-reveal>
                         {filteredTeamMembers.length > 0 ? (
                             filteredTeamMembers.map((member) => (
                                 <div key={member.regno} className="flex w-full max-w-sm flex-col rounded-3xl border border-black/10 bg-white p-7 text-center shadow-sm">
@@ -769,7 +769,7 @@ export default function PdaHome() {
                             </div>
                         ) : null}
                     </div>
-                    <div className="mt-6 hidden items-stretch gap-4 md:grid md:grid-cols-3 lg:grid-cols-4" data-reveal>
+                    <div className="mt-6 hidden items-stretch gap-4 md:grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" data-reveal>
                         {galleryItems.length > 0 ? (
                             galleryItems
                                 .slice((galleryPage - 1) * GALLERY_PAGE_SIZE, galleryPage * GALLERY_PAGE_SIZE)

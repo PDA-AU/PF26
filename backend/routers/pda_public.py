@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from typing import List
 
 from database import get_db
@@ -49,7 +50,9 @@ async def get_featured_event(db: Session = Depends(get_db)):
 
 @router.get("/pda/team", response_model=List[PdaTeamResponse])
 async def get_pda_team(db: Session = Depends(get_db)):
-    team = db.query(PdaTeam).order_by(
+    team = db.query(PdaTeam).filter(
+        or_(PdaTeam.designation.is_(None), PdaTeam.designation != "Root")
+    ).order_by(
         PdaTeam.team.asc().nullslast(),
         PdaTeam.designation.asc().nullslast(),
         PdaTeam.name.asc()

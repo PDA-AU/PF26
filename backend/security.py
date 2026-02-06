@@ -6,7 +6,7 @@ from database import get_db
 from auth import get_current_pda_user, get_current_participant
 from models import PdaUser, PdaAdmin, PdaTeam
 
-SUPERADMIN_DESIG = {"Chairperson", "Vice Chairperson"}
+SUPERADMIN_DESIG = {"Root", "Chairperson", "Vice Chairperson"}
 
 
 def _get_team_and_policy(db: Session, user: PdaUser):

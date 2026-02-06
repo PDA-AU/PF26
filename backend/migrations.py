@@ -155,11 +155,16 @@ def ensure_pda_team_constraints(engine):
         designation_constraint = conn.execute(
             text(
                 """
-                SELECT 1 FROM information_schema.table_constraints
-                WHERE table_name = 'pda_team' AND constraint_name = 'pda_team_designation_check'
+                SELECT pg_get_constraintdef(c.oid) AS definition
+                FROM pg_constraint c
+                JOIN pg_class t ON c.conrelid = t.oid
+                WHERE t.relname = 'pda_team' AND c.conname = 'pda_team_designation_check'
                 """
             )
         ).fetchone()
+        if designation_constraint and "Root" not in (designation_constraint[0] or ""):
+            conn.execute(text("ALTER TABLE pda_team DROP CONSTRAINT pda_team_designation_check"))
+            designation_constraint = None
         if not designation_constraint:
             conn.execute(
                 text(
@@ -167,6 +172,7 @@ def ensure_pda_team_constraints(engine):
                     ALTER TABLE pda_team
                     ADD CONSTRAINT pda_team_designation_check
                     CHECK (designation IS NULL OR designation IN (
+                        'Root',
                         'Chairperson',
                         'Vice Chairperson',
                         'Treasurer',
@@ -291,6 +297,7 @@ def normalize_pda_team(db: Session):
         "Library"
     }
     allowed_designations = {
+        "Root",
         "Chairperson",
         "Vice Chairperson",
         "Treasurer",
@@ -309,7 +316,7 @@ def normalize_pda_team(db: Session):
 
 
 def ensure_superadmin_policies(db: Session):
-    superadmins = db.query(PdaTeam).filter(PdaTeam.designation.in_(["Chairperson", "Vice Chairperson"])) .all()
+    superadmins = db.query(PdaTeam).filter(PdaTeam.designation.in_(["Root", "Chairperson", "Vice Chairperson"])) .all()
     for member in superadmins:
         if not member.regno:
             continue
@@ -341,7 +348,7 @@ def ensure_default_superadmin(db: Session):
         db.commit()
         db.refresh(user)
 
-    team = db.query(PdaTeam).filter(PdaTeam.user_id == user.id).first()
+    team = db.query(PdaTeam).filter((PdaTeam.user_id == user.id) | (PdaTeam.regno == regno)).first()
     if not team:
         team = PdaTeam(
             user_id=user.id,
@@ -351,9 +358,18 @@ def ensure_default_superadmin(db: Session):
             phno=user.phno,
             dept=user.dept,
             team="Executive",
-            designation="Chairperson"
+            designation="Root"
         )
         db.add(team)
+        db.commit()
+    else:
+        team.user_id = user.id
+        team.team = "Executive"
+        team.designation = "Root"
+        if not team.name:
+            team.name = user.name
+        if not team.email:
+            team.email = user.email
         db.commit()
 
     admin_row = db.query(PdaAdmin).filter(PdaAdmin.regno == user.regno).first()

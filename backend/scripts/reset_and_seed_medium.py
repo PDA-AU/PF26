@@ -201,7 +201,7 @@ def seed() -> None:
         db.flush()
 
         teams = [
-            ("Executive", "Chairperson", super_user),
+            ("Executive", "Root", super_user),
             ("Executive", "Vice Chairperson", users[0]),
             ("Executive", "General Secretary", users[1]),
             ("Executive", "Treasurer", users[2]),
