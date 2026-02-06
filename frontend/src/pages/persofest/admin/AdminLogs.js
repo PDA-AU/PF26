@@ -28,15 +28,14 @@ export default function AdminLogs() {
     const { user, logout, getAuthHeader } = useAuth();
     const [logs, setLogs] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [offset, setOffset] = useState(0);
-    const [limit] = useState(50);
+    const limit = 50;
 
     const isSuperAdmin = user?.is_superadmin;
 
     const fetchLogs = useCallback(async () => {
         setLoading(true);
         try {
-            const response = await axios.get(`${API}/persofest/admin/logs?limit=${limit}&offset=${offset}`, {
+            const response = await axios.get(`${API}/persofest/admin/logs?limit=${limit}`, {
                 headers: getAuthHeader()
             });
             setLogs(response.data || []);
@@ -45,7 +44,7 @@ export default function AdminLogs() {
         } finally {
             setLoading(false);
         }
-    }, [getAuthHeader, limit, offset]);
+    }, [getAuthHeader, limit]);
 
     useEffect(() => {
         fetchLogs();
@@ -117,23 +116,8 @@ export default function AdminLogs() {
                             <h1 className="font-heading font-bold text-3xl">Admin Logs</h1>
                             <p className="text-gray-600">Audit trail for persofest admin actions.</p>
                         </div>
-                        <div className="flex items-center gap-2">
-                            <Button
-                                variant="outline"
-                                onClick={() => setOffset((prev) => Math.max(prev - limit, 0))}
-                                className="border-2 border-black"
-                                disabled={offset === 0 || loading}
-                            >
-                                Prev
-                            </Button>
-                            <Button
-                                variant="outline"
-                                onClick={() => setOffset((prev) => prev + limit)}
-                                className="border-2 border-black"
-                                disabled={loading || logs.length < limit}
-                            >
-                                Next
-                            </Button>
+                        <div className="text-xs text-gray-600">
+                            Showing latest {limit} logs
                         </div>
                     </div>
                 </div>

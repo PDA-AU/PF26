@@ -17,8 +17,28 @@ from schemas import (
 )
 from security import require_pda_home_admin, require_superadmin
 from utils import log_admin_action, _upload_to_s3, _generate_presigned_put_url
+from auth import get_password_hash
 
 router = APIRouter()
+
+
+def _build_team_response(member: PdaTeam, user: Optional[PdaUser]) -> PdaTeamResponse:
+    return PdaTeamResponse(
+        id=member.id,
+        user_id=member.user_id,
+        name=user.name if user else None,
+        regno=user.regno if user else None,
+        dept=user.dept if user else None,
+        email=user.email if user else None,
+        phno=user.phno if user else None,
+        dob=user.dob if user else None,
+        team=member.team,
+        designation=member.designation,
+        photo_url=user.image_url if user else None,
+        instagram_url=member.instagram_url,
+        linkedin_url=member.linkedin_url,
+        created_at=member.created_at
+    )
 
 
 @router.post("/pda-admin/programs", response_model=ProgramResponse)
@@ -211,8 +231,13 @@ async def list_team_members(
     admin: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db)
 ):
-    members = db.query(PdaTeam).order_by(PdaTeam.team.asc().nullslast(), PdaTeam.name.asc()).all()
-    return [PdaTeamResponse.model_validate(m) for m in members]
+    rows = (
+        db.query(PdaTeam, PdaUser)
+        .join(PdaUser, PdaTeam.user_id == PdaUser.id, isouter=True)
+        .order_by(PdaTeam.team.asc().nullslast(), PdaTeam.designation.asc().nullslast(), PdaUser.name.asc().nullslast())
+        .all()
+    )
+    return [_build_team_response(m, u) for m, u in rows]
 
 
 @router.post("/pda-admin/team", response_model=PdaTeamResponse)
@@ -222,12 +247,52 @@ async def create_team_member(
     db: Session = Depends(get_db),
     request: Request = None
 ):
-    new_member = PdaTeam(**member_data.model_dump())
+    payload = member_data.model_dump()
+    user = None
+    if payload.get("user_id"):
+        user = db.query(PdaUser).filter(PdaUser.id == payload["user_id"]).first()
+        if user:
+            for field in ("name", "email", "phno", "dept"):
+                if payload.get(field):
+                    setattr(user, field, payload[field])
+    if not user and payload.get("regno"):
+        user = db.query(PdaUser).filter(PdaUser.regno == payload["regno"]).first()
+        if not user:
+            user = PdaUser(
+                regno=payload["regno"],
+                email=payload.get("email") or f"{payload['regno']}@pda.local",
+                hashed_password=get_password_hash("password"),
+                name=payload.get("name") or f"PDA Member {payload['regno']}",
+                phno=payload.get("phno"),
+                dept=payload.get("dept"),
+                image_url=payload.get("photo_url"),
+                json_content={},
+                is_member=True
+            )
+            db.add(user)
+            db.flush()
+        else:
+            for field in ("name", "email", "phno", "dept"):
+                if payload.get(field):
+                    setattr(user, field, payload[field])
+
+    if not user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user_id or regno is required")
+
+    new_member = PdaTeam(
+        user_id=user.id,
+        team=payload.get("team"),
+        designation=payload.get("designation"),
+        instagram_url=payload.get("instagram_url"),
+        linkedin_url=payload.get("linkedin_url")
+    )
+    if payload.get("photo_url") and (not user.image_url or user.image_url != payload["photo_url"]):
+        user.image_url = payload["photo_url"]
     db.add(new_member)
     db.commit()
     db.refresh(new_member)
     log_admin_action(db, admin, "Create team member", request.method if request else None, request.url.path if request else None, {"member_id": new_member.id})
-    return PdaTeamResponse.model_validate(new_member)
+    return _build_team_response(new_member, user)
 
 
 @router.put("/pda-admin/team/{member_id}", response_model=PdaTeamResponse)
@@ -242,13 +307,33 @@ async def update_team_member(
     if not member:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team member not found")
 
-    for field, value in member_data.model_dump(exclude_unset=True).items():
-        setattr(member, field, value)
+    updates = member_data.model_dump(exclude_unset=True)
+    for field in ("team", "designation", "instagram_url", "linkedin_url"):
+        if field in updates:
+            setattr(member, field, updates[field])
+
+    user = None
+    if updates.get("user_id"):
+        user = db.query(PdaUser).filter(PdaUser.id == updates["user_id"]).first()
+    if not user and member.user_id:
+        user = db.query(PdaUser).filter(PdaUser.id == member.user_id).first()
+    if not user and updates.get("regno"):
+        user = db.query(PdaUser).filter(PdaUser.regno == updates["regno"]).first()
+    if user:
+        member.user_id = user.id
+        for field in ("name", "email", "phno", "dept", "dob"):
+            if field in updates and updates[field] is not None:
+                setattr(user, field, updates[field])
+        if "photo_url" in updates and updates.get("photo_url"):
+            if user.image_url != updates["photo_url"]:
+                user.image_url = updates["photo_url"]
 
     db.commit()
     db.refresh(member)
+    if not user and member.user_id:
+        user = db.query(PdaUser).filter(PdaUser.id == member.user_id).first()
     log_admin_action(db, admin, "Update team member", request.method if request else None, request.url.path if request else None, {"member_id": member_id})
-    return PdaTeamResponse.model_validate(member)
+    return _build_team_response(member, user)
 
 
 @router.delete("/pda-admin/team/{member_id}")
@@ -273,13 +358,18 @@ async def export_team_members(
     admin: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db)
 ):
-    members = db.query(PdaTeam).order_by(PdaTeam.team.asc().nullslast(), PdaTeam.name.asc()).all()
+    rows = (
+        db.query(PdaTeam, PdaUser)
+        .join(PdaUser, PdaTeam.user_id == PdaUser.id, isouter=True)
+        .order_by(PdaTeam.team.asc().nullslast(), PdaTeam.designation.asc().nullslast(), PdaUser.name.asc().nullslast())
+        .all()
+    )
     if format == "xlsx":
         wb = Workbook()
         ws = wb.active
         ws.append(["Name", "Regno", "Team", "Designation", "Email", "Phone"])
-        for m in members:
-            ws.append([m.name, m.regno, m.team, m.designation, m.email, m.phno])
+        for m, u in rows:
+            ws.append([u.name if u else None, u.regno if u else None, m.team, m.designation, u.email if u else None, u.phno if u else None])
         stream = io.BytesIO()
         wb.save(stream)
         stream.seek(0)
@@ -289,8 +379,8 @@ async def export_team_members(
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["Name", "Regno", "Team", "Designation", "Email", "Phone"])
-    for m in members:
-        writer.writerow([m.name, m.regno, m.team, m.designation, m.email, m.phno])
+    for m, u in rows:
+        writer.writerow([u.name if u else None, u.regno if u else None, m.team, m.designation, u.email if u else None, u.phno if u else None])
     headers = {"Content-Disposition": "attachment; filename=team.csv"}
     return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers=headers)
 

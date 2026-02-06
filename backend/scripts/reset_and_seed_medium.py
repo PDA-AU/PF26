@@ -201,6 +201,27 @@ def seed() -> None:
         db.add_all(users)
         db.flush()
 
+        # Sample pending recruitment applications (is_member = False)
+        pending_apps = []
+        for i in range(5):
+            reg = f"2022509{100+i}"
+            pending_apps.append(
+                PdaUser(
+                    regno=reg,
+                    email=f"applicant{i+1}@example.com",
+                    hashed_password=get_password_hash("pda12345"),
+                    name=f"Applicant {i+1}",
+                    dob=date(2005, ((i % 12) + 1), ((i % 27) + 1)),
+                    gender="Male" if i % 2 == 0 else "Female",
+                    phno=f"9{(i+1):09d}"[-10:],
+                    dept=depts[(i + 3) % len(depts)].value,
+                    image_url=f"https://picsum.photos/seed/applicant{i+1}/300/300",
+                    json_content={"preferred_team": "Design" if i % 2 == 0 else "Event Management"},
+                    is_member=False,
+                )
+            )
+        db.add_all(pending_apps)
+
         teams = [
             ("Executive", "Root", super_user),
             ("Executive", "Vice Chairperson", users[0]),
@@ -225,14 +246,8 @@ def seed() -> None:
             db.add(
                 PdaTeam(
                     user_id=u.id,
-                    name=u.name,
-                    regno=u.regno,
-                    dept=u.dept,
-                    email=u.email,
-                    phno=u.phno,
                     team=team,
                     designation=desig,
-                    photo_url=u.image_url,
                     instagram_url=f"https://instagram.com/mock_{idx+1}",
                     linkedin_url=f"https://linkedin.com/in/mock_{idx+1}",
                 )
@@ -240,9 +255,9 @@ def seed() -> None:
 
         db.add_all(
             [
-                PdaAdmin(regno=super_user.regno, hashed_password=get_password_hash("admin123"), policy={"home": True, "pf": True}),
-                PdaAdmin(regno=pf_admin_user.regno, hashed_password=get_password_hash("admin123"), policy={"home": False, "pf": True}),
-                PdaAdmin(regno=users[0].regno, hashed_password=get_password_hash("admin123"), policy={"home": True, "pf": False}),
+                PdaAdmin(user_id=super_user.id, hashed_password=get_password_hash("admin123"), policy={"home": True, "pf": True}),
+                PdaAdmin(user_id=pf_admin_user.id, hashed_password=get_password_hash("admin123"), policy={"home": False, "pf": True}),
+                PdaAdmin(user_id=users[0].id, hashed_password=get_password_hash("admin123"), policy={"home": True, "pf": False}),
             ]
         )
 

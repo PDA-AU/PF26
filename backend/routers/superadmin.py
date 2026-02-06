@@ -6,6 +6,9 @@ import os
 import tempfile
 import subprocess
 from datetime import datetime
+import io
+from fastapi.responses import StreamingResponse
+from openpyxl import Workbook
 
 from database import get_db
 from models import PdaAdmin, PdaUser, PdaTeam, AdminLog, SystemConfig
@@ -20,7 +23,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 
 def _build_admin_response(db: Session, user: PdaUser) -> PdaUserResponse:
     team = db.query(PdaTeam).filter(PdaTeam.user_id == user.id).first()
-    admin_row = db.query(PdaAdmin).filter(PdaAdmin.regno == user.regno).first()
+    admin_row = db.query(PdaAdmin).filter(PdaAdmin.user_id == user.id).first()
     policy = admin_row.policy if admin_row else None
     is_superadmin = bool(admin_row and policy and policy.get("superAdmin"))
     return PdaUserResponse(
@@ -88,7 +91,7 @@ async def list_pda_admins(
 ):
     admin_users = (
         db.query(PdaUser)
-        .join(PdaAdmin, PdaAdmin.regno == PdaUser.regno)
+        .join(PdaAdmin, PdaAdmin.user_id == PdaUser.id)
         .order_by(PdaAdmin.created_at.desc())
         .all()
     )
@@ -120,12 +123,12 @@ async def create_pda_admin(
         user.hashed_password = get_password_hash(admin_data.password)
         db.commit()
 
-    existing_admin = db.query(PdaAdmin).filter(PdaAdmin.regno == user.regno).first()
+    existing_admin = db.query(PdaAdmin).filter(PdaAdmin.user_id == user.id).first()
     if existing_admin:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Admin already exists")
 
     admin_row = PdaAdmin(
-        regno=user.regno,
+        user_id=user.id,
         hashed_password=get_password_hash(admin_data.password),
         policy={"home": True, "pf": False, "superAdmin": False}
     )
@@ -146,7 +149,7 @@ async def delete_pda_admin(
     user = db.query(PdaUser).filter(PdaUser.id == user_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    admin_row = db.query(PdaAdmin).filter(PdaAdmin.regno == user.regno).first()
+    admin_row = db.query(PdaAdmin).filter(PdaAdmin.user_id == user.id).first()
     if not admin_row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Admin not found")
     db.delete(admin_row)
@@ -166,7 +169,7 @@ async def update_admin_policy(
     user = db.query(PdaUser).filter(PdaUser.id == user_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    admin_row = db.query(PdaAdmin).filter(PdaAdmin.regno == user.regno).first()
+    admin_row = db.query(PdaAdmin).filter(PdaAdmin.user_id == user.id).first()
     if not admin_row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Admin not found")
     admin_row.policy = policy_data.policy
@@ -183,7 +186,7 @@ async def update_admin_policy(
 async def get_homeadmin_logs(
     _: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db),
-    limit: int = 200
+    limit: int = 50
 ):
     logs = (
         db.query(AdminLog)
@@ -251,6 +254,47 @@ async def list_recruitments(
     return [_build_admin_response(db, u) for u in pending]
 
 
+@router.get("/pda-admin/recruitments/export")
+async def export_recruitments(
+    superadmin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    pending = db.query(PdaUser).filter(PdaUser.is_member == False).order_by(PdaUser.created_at.desc()).all()
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Recruitments"
+    ws.append([
+        "Name", "Register Number", "Email", "Phone", "DOB", "Gender",
+        "Department", "Preferred Team", "Created At"
+    ])
+    for user in pending:
+        preferred_team = None
+        if isinstance(user.json_content, dict):
+            preferred_team = user.json_content.get("preferred_team")
+        ws.append([
+            user.name,
+            user.regno,
+            user.email,
+            user.phno or "",
+            user.dob.isoformat() if user.dob else "",
+            user.gender or "",
+            user.dept or "",
+            preferred_team or "",
+            user.created_at.isoformat() if user.created_at else ""
+        ])
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    filename = f"recruitments_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    log_admin_action(db, superadmin, "Export recruitments", request.method if request else None, request.url.path if request else None, {"count": len(pending)})
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
 @router.post("/pda-admin/recruitments/approve")
 async def approve_recruitments(
     payload: List[object],
@@ -286,13 +330,10 @@ async def approve_recruitments(
             continue
         new_team = PdaTeam(
             user_id=user.id,
-            name=user.name,
-            regno=user.regno,
-            email=user.email,
-            phno=user.phno,
-            dept=user.dept,
             team=team_to_assign,
-            designation=assigned_designation or "Member"
+            designation=assigned_designation or "Member",
+            instagram_url=None,
+            linkedin_url=None
         )
         db.add(new_team)
         user.is_member = True

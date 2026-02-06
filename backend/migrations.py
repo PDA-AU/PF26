@@ -90,6 +90,7 @@ def ensure_pda_users_table(engine):
                     hashed_password VARCHAR(255) NOT NULL,
                     name VARCHAR(255) NOT NULL,
                     dob DATE,
+                    gender VARCHAR(10),
                     phno VARCHAR(20),
                     dept VARCHAR(150),
                     image_url VARCHAR(500),
@@ -109,6 +110,12 @@ def ensure_pda_users_dob_column(engine):
             conn.execute(text("ALTER TABLE users ADD COLUMN dob DATE"))
 
 
+def ensure_pda_users_gender_column(engine):
+    with engine.begin() as conn:
+        if _table_exists(conn, "users") and not _column_exists(conn, "users", "gender"):
+            conn.execute(text("ALTER TABLE users ADD COLUMN gender VARCHAR(10)"))
+
+
 def ensure_pda_team_columns(engine):
     with engine.begin() as conn:
         if not _column_exists(conn, "pda_team", "user_id"):
@@ -117,6 +124,10 @@ def ensure_pda_team_columns(engine):
             conn.execute(text("ALTER TABLE pda_team ADD COLUMN team VARCHAR(120)"))
         if not _column_exists(conn, "pda_team", "designation"):
             conn.execute(text("ALTER TABLE pda_team ADD COLUMN designation VARCHAR(120)"))
+        if not _column_exists(conn, "pda_team", "instagram_url"):
+            conn.execute(text("ALTER TABLE pda_team ADD COLUMN instagram_url VARCHAR(500)"))
+        if not _column_exists(conn, "pda_team", "linkedin_url"):
+            conn.execute(text("ALTER TABLE pda_team ADD COLUMN linkedin_url VARCHAR(500)"))
         if _column_exists(conn, "pda_team", "team_designation"):
             conn.execute(text("ALTER TABLE pda_team DROP COLUMN team_designation"))
 
@@ -206,7 +217,7 @@ def ensure_pda_admins_table(engine):
                 """
                 CREATE TABLE IF NOT EXISTS pda_admins (
                     id SERIAL PRIMARY KEY,
-                    regno VARCHAR(20) UNIQUE NOT NULL,
+                    user_id INTEGER UNIQUE NOT NULL,
                     hashed_password VARCHAR(255) NOT NULL,
                     policy JSON,
                     created_at TIMESTAMPTZ DEFAULT now()
@@ -214,14 +225,100 @@ def ensure_pda_admins_table(engine):
                 """
             )
         )
-        if not _column_exists(conn, "pda_admins", "regno"):
-            conn.execute(text("ALTER TABLE pda_admins ADD COLUMN regno VARCHAR(20)"))
+        if not _column_exists(conn, "pda_admins", "user_id"):
+            conn.execute(text("ALTER TABLE pda_admins ADD COLUMN user_id INTEGER"))
         if not _column_exists(conn, "pda_admins", "hashed_password"):
             conn.execute(text("ALTER TABLE pda_admins ADD COLUMN hashed_password VARCHAR(255)"))
         if not _column_exists(conn, "pda_admins", "policy"):
             conn.execute(text("ALTER TABLE pda_admins ADD COLUMN policy JSON"))
         if not _column_exists(conn, "pda_admins", "created_at"):
             conn.execute(text("ALTER TABLE pda_admins ADD COLUMN created_at TIMESTAMPTZ DEFAULT now()"))
+        fk_exists = conn.execute(
+            text(
+                """
+                SELECT 1
+                FROM information_schema.table_constraints
+                WHERE table_name = 'pda_admins'
+                  AND constraint_type = 'FOREIGN KEY'
+                  AND constraint_name = 'pda_admins_user_id_fkey'
+                """
+            )
+        ).fetchone()
+        if not fk_exists:
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE pda_admins
+                    ADD CONSTRAINT pda_admins_user_id_fkey
+                    FOREIGN KEY (user_id)
+                    REFERENCES users(id)
+                    ON DELETE RESTRICT
+                    """
+                )
+            )
+
+
+def normalize_pda_admins_schema(db: Session):
+    conn = db.connection()
+    if not _table_exists(conn, "pda_admins"):
+        return
+
+    has_regno = _column_exists(conn, "pda_admins", "regno")
+    has_user_id = _column_exists(conn, "pda_admins", "user_id")
+
+    if has_regno and not has_user_id:
+        db.execute(text("ALTER TABLE pda_admins ADD COLUMN user_id INTEGER"))
+        db.commit()
+        has_user_id = True
+
+    if has_regno and has_user_id:
+        db.execute(text("ALTER TABLE pda_admins DROP CONSTRAINT IF EXISTS pda_admins_regno_fkey"))
+        rows = db.execute(text("SELECT id, regno FROM pda_admins WHERE user_id IS NULL")).fetchall()
+        for row in rows:
+            user = db.query(PdaUser).filter(PdaUser.regno == row.regno).first()
+            if user:
+                db.execute(
+                    text("UPDATE pda_admins SET user_id = :user_id WHERE id = :id"),
+                    {"user_id": user.id, "id": row.id}
+                )
+        db.commit()
+
+        nulls = db.execute(text("SELECT id FROM pda_admins WHERE user_id IS NULL")).fetchall()
+        if nulls:
+            ids = ", ".join(str(r[0]) for r in nulls[:20])
+            raise RuntimeError(f"Cannot enforce pda_admins.user_id NOT NULL; missing user_id for admin ids: {ids}")
+
+        db.execute(text("ALTER TABLE pda_admins ALTER COLUMN user_id SET NOT NULL"))
+        db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS pda_admins_user_id_key ON pda_admins (user_id)"))
+        db.commit()
+
+        db.execute(text("ALTER TABLE pda_admins DROP COLUMN IF EXISTS regno"))
+        db.commit()
+
+    fk_exists = db.execute(
+        text(
+            """
+            SELECT 1
+            FROM information_schema.table_constraints
+            WHERE table_name = 'pda_admins'
+              AND constraint_type = 'FOREIGN KEY'
+              AND constraint_name = 'pda_admins_user_id_fkey'
+            """
+        )
+    ).fetchone()
+    if not fk_exists:
+        db.execute(
+            text(
+                """
+                ALTER TABLE pda_admins
+                ADD CONSTRAINT pda_admins_user_id_fkey
+                FOREIGN KEY (user_id)
+                REFERENCES users(id)
+                ON DELETE RESTRICT
+                """
+            )
+        )
+        db.commit()
 
 
 # Backward-compatible alias used by existing imports/calls.
@@ -264,35 +361,66 @@ def assign_participants_event(engine):
         )
 
 
-def seed_pda_users_from_team(db: Session):
-    team_members = db.query(PdaTeam).all()
-    for member in team_members:
-        existing = db.query(PdaUser).filter(PdaUser.regno == member.regno).first()
-        if existing:
-            continue
-        user = PdaUser(
-            regno=member.regno,
-            email=member.email or f"{member.regno}@pda.local",
-            hashed_password=get_password_hash("password"),
-            name=member.name,
-            phno=member.phno,
-            dept=member.dept,
-            image_url=member.photo_url,
-            json_content={},
-            is_member=True
-        )
-        db.add(user)
-    db.commit()
+def normalize_pda_team_schema(db: Session):
+    conn = db.connection()
+    if not _table_exists(conn, "pda_team"):
+        return
 
+    has_regno = _column_exists(conn, "pda_team", "regno")
+    if has_regno:
+        rows = db.execute(
+            text(
+                """
+                SELECT id, regno, name, email, phno, dept, photo_url, user_id
+                FROM pda_team
+                """
+            )
+        ).fetchall()
+        for row in rows:
+            regno = row.regno
+            if not regno:
+                continue
+            user = db.query(PdaUser).filter(PdaUser.regno == regno).first()
+            if not user:
+                user = PdaUser(
+                    regno=regno,
+                    email=row.email or f"{regno}@pda.local",
+                    hashed_password=get_password_hash("password"),
+                    name=row.name or f"PDA Member {regno}",
+                    phno=row.phno,
+                    dept=row.dept,
+                    image_url=row.photo_url,
+                    json_content={},
+                    is_member=True
+                )
+                db.add(user)
+                db.flush()
+            else:
+                if row.photo_url and not user.image_url:
+                    user.image_url = row.photo_url
+                if row.name and not user.name:
+                    user.name = row.name
+                if row.email and not user.email:
+                    user.email = row.email
+                if row.phno and not user.phno:
+                    user.phno = row.phno
+                if row.dept and not user.dept:
+                    user.dept = row.dept
 
-def link_pda_team_users(db: Session):
-    team_members = db.query(PdaTeam).all()
-    for member in team_members:
-        if member.user_id:
-            continue
-        user = db.query(PdaUser).filter(PdaUser.regno == member.regno).first()
-        if user:
-            member.user_id = user.id
+            if not row.user_id:
+                db.execute(
+                    text("UPDATE pda_team SET user_id = :user_id WHERE id = :id"),
+                    {"user_id": user.id, "id": row.id}
+                )
+
+        db.commit()
+
+        for col in ("name", "regno", "dept", "email", "phno", "photo_url"):
+            if _column_exists(conn, "pda_team", col):
+                db.execute(text(f"ALTER TABLE pda_team DROP COLUMN IF EXISTS {col}"))
+        db.commit()
+
+    db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS pda_team_user_id_key ON pda_team (user_id)"))
     db.commit()
 
 
@@ -328,13 +456,16 @@ def normalize_pda_team(db: Session):
 
 
 def ensure_superadmin_policies(db: Session):
-    superadmins = db.query(PdaTeam).filter(PdaTeam.designation.in_(["Root", "Chairperson", "Vice Chairperson"])) .all()
-    for member in superadmins:
-        if not member.regno:
-            continue
-        admin_row = db.query(PdaAdmin).filter(PdaAdmin.regno == member.regno).first()
+    superadmins = (
+        db.query(PdaTeam, PdaUser)
+        .join(PdaUser, PdaTeam.user_id == PdaUser.id)
+        .filter(PdaTeam.designation.in_(["Root", "Chairperson", "Vice Chairperson"]))
+        .all()
+    )
+    for member, user in superadmins:
+        admin_row = db.query(PdaAdmin).filter(PdaAdmin.user_id == user.id).first()
         if not admin_row:
-            admin_row = PdaAdmin(regno=member.regno, hashed_password=get_password_hash("admin123"), policy={"home": True, "pf": True})
+            admin_row = PdaAdmin(user_id=user.id, hashed_password=get_password_hash("admin123"), policy={"home": True, "pf": True})
             db.add(admin_row)
         elif not admin_row.policy:
             admin_row.policy = {"home": True, "pf": True}
@@ -360,15 +491,10 @@ def ensure_default_superadmin(db: Session):
         db.commit()
         db.refresh(user)
 
-    team = db.query(PdaTeam).filter((PdaTeam.user_id == user.id) | (PdaTeam.regno == regno)).first()
+    team = db.query(PdaTeam).filter(PdaTeam.user_id == user.id).first()
     if not team:
         team = PdaTeam(
             user_id=user.id,
-            name=user.name,
-            regno=user.regno,
-            email=user.email,
-            phno=user.phno,
-            dept=user.dept,
             team="Executive",
             designation="Root"
         )
@@ -378,14 +504,10 @@ def ensure_default_superadmin(db: Session):
         team.user_id = user.id
         team.team = "Executive"
         team.designation = "Root"
-        if not team.name:
-            team.name = user.name
-        if not team.email:
-            team.email = user.email
         db.commit()
 
-    admin_row = db.query(PdaAdmin).filter(PdaAdmin.regno == user.regno).first()
+    admin_row = db.query(PdaAdmin).filter(PdaAdmin.user_id == user.id).first()
     if not admin_row:
-        admin_row = PdaAdmin(regno=user.regno, hashed_password=get_password_hash("admin123"), policy={"home": True, "pf": True})
+        admin_row = PdaAdmin(user_id=user.id, hashed_password=get_password_hash("admin123"), policy={"home": True, "pf": True})
         db.add(admin_row)
         db.commit()

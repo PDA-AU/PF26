@@ -32,6 +32,11 @@ const TEAMS = [
     'Library'
 ];
 
+const GENDERS = [
+    { value: 'Male', label: 'Male' },
+    { value: 'Female', label: 'Female' }
+];
+
 const WHATSAPP_CHANNEL_URL = "https://whatsapp.com/channel/your-channel-id";
 
 export default function PdaRecruit() {
@@ -42,6 +47,7 @@ export default function PdaRecruit() {
         regno: '',
         email: '',
         dob: '',
+        gender: '',
         phno: '',
         dept: '',
         password: '',
@@ -49,6 +55,7 @@ export default function PdaRecruit() {
     });
     const [loading, setLoading] = useState(false);
     const [recruitmentOpen, setRecruitmentOpen] = useState(true);
+    const [whatsappJoined, setWhatsappJoined] = useState(false);
 
     useEffect(() => {
         const fetchRecruitmentStatus = async () => {
@@ -84,6 +91,10 @@ export default function PdaRecruit() {
         e.preventDefault();
         if (!recruitmentOpen) {
             toast.error('Recruitment is currently paused');
+            return;
+        }
+        if (!formData.gender) {
+            toast.error('Please select gender');
             return;
         }
         setLoading(true);
@@ -144,6 +155,19 @@ export default function PdaRecruit() {
                             <Input id="dob" name="dob" type="date" value={formData.dob} onChange={handleChange} required />
                         </div>
                         <div>
+                            <Label htmlFor="gender">Gender</Label>
+                            <Select value={formData.gender} onValueChange={(value) => setFormData(prev => ({ ...prev, gender: value }))}>
+                                <SelectTrigger className="w-full">
+                                    <SelectValue placeholder="Select gender" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {GENDERS.map(gender => (
+                                        <SelectItem key={gender.value} value={gender.value}>{gender.label}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div>
                             <Label htmlFor="phno">Phone</Label>
                             <Input id="phno" name="phno" value={formData.phno} onChange={handleChange} required />
                         </div>
@@ -178,18 +202,35 @@ export default function PdaRecruit() {
                             </Select>
                         </div>
 
-                        <div className="md:col-span-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                            <a
-                                href={WHATSAPP_CHANNEL_URL}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center justify-center gap-2 rounded-md border border-black/10 bg-[#11131a] px-4 py-2 text-sm font-semibold text-[#f6c347] hover:bg-[#1a1d26]"
-                            >
-                                Join our WhatsApp channel
-                            </a>
-                            <Button type="submit" disabled={loading || !recruitmentOpen} className="bg-[#f6c347] text-black hover:bg-[#ffd16b]">
-                                {loading ? 'Submitting...' : 'Submit Application'}
-                            </Button>
+                        <div className="md:col-span-2 flex flex-col gap-4">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                <a
+                                    href={WHATSAPP_CHANNEL_URL}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex items-center justify-center gap-2 rounded-md border border-black/10 bg-[#11131a] px-4 py-2 text-sm font-semibold text-[#f6c347] transition-colors hover:bg-[#f6c347] hover:text-[#11131a]"
+                                >
+                                    Join our WhatsApp channel
+                                </a>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        id="whatsapp_joined"
+                                        type="checkbox"
+                                        checked={whatsappJoined}
+                                        onChange={(e) => setWhatsappJoined(e.target.checked)}
+                                        className="h-4 w-4"
+                                        required
+                                    />
+                                    <Label htmlFor="whatsapp_joined" className="text-sm text-slate-700">
+                                        I have joined the WhatsApp channel
+                                    </Label>
+                                </div>
+                            </div>
+                            <div className="flex justify-end">
+                                <Button type="submit" disabled={loading || !recruitmentOpen || !whatsappJoined} className="bg-[#f6c347] text-black hover:bg-[#ffd16b]">
+                                    {loading ? 'Submitting...' : 'Submit Application'}
+                                </Button>
+                            </div>
                         </div>
                     </form>
                 </div>

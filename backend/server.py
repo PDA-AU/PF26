@@ -14,16 +14,17 @@ from migrations import (
     ensure_participants_event_column,
     ensure_pda_users_table,
     ensure_pda_users_dob_column,
+    ensure_pda_users_gender_column,
     ensure_pda_team_columns,
     ensure_pda_items_columns,
     ensure_pda_team_constraints,
     ensure_pda_gallery_tag_column,
     ensure_pda_admins_table,
+    normalize_pda_admins_schema,
     drop_admin_logs_fk,
     seed_persofest_event,
     assign_participants_event,
-    seed_pda_users_from_team,
-    link_pda_team_users,
+    normalize_pda_team_schema,
     normalize_pda_team,
     ensure_superadmin_policies,
     ensure_default_superadmin
@@ -65,6 +66,7 @@ async def startup_event():
     ensure_participants_event_column(engine)
     ensure_pda_users_table(engine)
     ensure_pda_users_dob_column(engine)
+    ensure_pda_users_gender_column(engine)
     ensure_pda_team_columns(engine)
     ensure_pda_items_columns(engine)
     ensure_pda_team_constraints(engine)
@@ -82,8 +84,8 @@ async def startup_event():
     db = next(get_db())
     try:
         normalize_pda_team(db)
-        seed_pda_users_from_team(db)
-        link_pda_team_users(db)
+        normalize_pda_team_schema(db)
+        normalize_pda_admins_schema(db)
         ensure_default_superadmin(db)
         ensure_superadmin_policies(db)
 

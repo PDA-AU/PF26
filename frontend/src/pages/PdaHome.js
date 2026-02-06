@@ -263,7 +263,8 @@ export default function PdaHome() {
                     openPoster({
                         src: item.poster_url,
                         title: item.title,
-                        meta
+                        meta,
+                        description
                     })
                 }
                 className={`flex h-full min-h-[360px] w-full flex-col rounded-2xl border border-black/10 bg-white p-5 text-left transition hover:-translate-y-1 hover:border-black/25 hover:shadow-md ${
@@ -678,7 +679,7 @@ export default function PdaHome() {
                                 The people carrying PDA forward through mentorship, leadership, and service.
                             </p>
                         </div>
-                        <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+                        <div className="flex flex-wrap gap-2">
                             {teamLabels.map((label) => (
                                 <button
                                     key={label}
@@ -703,14 +704,14 @@ export default function PdaHome() {
                                     className="flex gap-6 overflow-x-auto pb-4 no-scrollbar snap-x snap-mandatory"
                                 >
                                     {filteredTeamMembers.map((member) => (
-                                        <div key={member.regno} className="min-w-[260px] max-w-[280px] snap-start">
-                                            <div className="flex min-h-[420px] w-full flex-col rounded-3xl border border-black/10 bg-white p-7 text-center shadow-sm">
+                                        <div key={member.regno} className="min-w-[250px] max-w-[260px] snap-start">
+                                            <div className="flex h-[320px] w-full flex-col rounded-3xl border border-black/10 bg-white p-5 text-center shadow-sm">
                                             <img
                                                 src={member.photo_url || pdaLogo}
                                                 alt={member.name}
-                                                className="mx-auto h-32 w-32 rounded-3xl border border-black/10 object-cover"
+                                                className="mx-auto h-36 w-36 rounded-3xl border border-black/10 object-cover"
                                             />
-                                            <p className="mt-4 text-[11px] uppercase tracking-[0.3em] text-slate-500">
+                                            <p className="mt-3 line-clamp-1 text-[10px] uppercase tracking-[0.28em] text-slate-500">
                                                 {member.team}
                                             </p>
                                             {member.designation ? (
@@ -720,41 +721,40 @@ export default function PdaHome() {
                                                     </div>
                                                 </div>
                                             ) : null}
-                                            <h3 className="mt-2 text-xl font-heading font-bold">{member.name}</h3>
-                                            <p className="text-sm text-slate-600">{member.regno}</p>
+                                            <h3 className="mt-2 line-clamp-1 text-lg font-heading font-bold">{member.name}</h3>
+                                            <p className="line-clamp-1 text-xs text-slate-600">{member.regno}</p>
                                             {member.dept ? (
-                                                <p className="mt-2 text-xs uppercase tracking-[0.2em] text-slate-500">
+                                                <p className="mt-2 line-clamp-1 text-[11px] uppercase tracking-[0.2em] text-slate-500">
                                                     {member.dept}
                                                 </p>
                                             ) : null}
-                                            <div className="mt-4 flex items-center justify-center gap-4 text-sm text-slate-600">
+                                            <div className="mt-3 flex items-center justify-center gap-4 text-xs text-slate-600">
                                                 {member.instagram_url ? (
                                                     <a
                                                         href={member.instagram_url}
                                                         target="_blank"
                                                         rel="noreferrer"
-                                                        className="inline-flex items-center gap-2 text-[#b8890b] hover:text-[#0f1115]"
+                                                        className="inline-flex max-w-[110px] items-center gap-2 truncate text-[#b8890b] hover:text-[#0f1115]"
                                                     >
                                                         <Instagram className="h-4 w-4 text-[#f6c347]" />
                                                         Instagram
                                                     </a>
                                                 ) : null}
-                                                {member.linkedin_url ? (
-                                                    <a
-                                                        href={member.linkedin_url}
-                                                        target="_blank"
-                                                        rel="noreferrer"
-                                                        className="inline-flex items-center gap-2 text-[#b8890b] hover:text-[#0f1115]"
-                                                    >
-                                                        <Linkedin className="h-4 w-4 text-[#f6c347]" />
-                                                        LinkedIn
-                                                    </a>
-                                                ) : null}
-                                            </div>
-                                            <span className="mt-auto" />
+                                            {member.linkedin_url ? (
+                                                <a
+                                                    href={member.linkedin_url}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="inline-flex max-w-[110px] items-center gap-2 truncate text-[#b8890b] hover:text-[#0f1115]"
+                                                >
+                                                    <Linkedin className="h-4 w-4 text-[#f6c347]" />
+                                                    LinkedIn
+                                                </a>
+                                            ) : null}
                                         </div>
                                     </div>
-                                ))}
+                                </div>
+                            ))}
                                 </div>
                                 <div className="flex items-center justify-center gap-3">
                                     <button
@@ -889,25 +889,32 @@ export default function PdaHome() {
 
             <PdaFooter />
 
-	            <Dialog open={posterDialogOpen} onOpenChange={setPosterDialogOpen}>
-	                <DialogContent className="max-w-3xl bg-white p-0">
-	                    <DialogHeader className="px-6 pb-4 pt-6">
-	                        <DialogTitle className="text-xl font-heading font-black">{selectedPoster?.title}</DialogTitle>
-	                        {selectedPoster?.meta ? (
-	                            <p className="mt-1 text-xs uppercase tracking-[0.2em] text-slate-500">{selectedPoster.meta}</p>
-	                        ) : null}
-	                    </DialogHeader>
-	                    {selectedPoster?.src ? (
-	                        <div className="px-6 pb-6">
-	                            <img
-	                                src={selectedPoster.src}
-	                                alt={selectedPoster.title || 'Poster'}
-	                                className="max-h-[70vh] w-full rounded-2xl object-contain"
-	                            />
-	                        </div>
-	                    ) : null}
-	                </DialogContent>
-	            </Dialog>
-	        </div>
-	    );
+            <Dialog open={posterDialogOpen} onOpenChange={setPosterDialogOpen}>
+                <DialogContent className="max-w-4xl bg-white p-0">
+                    <DialogHeader className="px-6 pb-4 pt-6">
+                        <DialogTitle className="text-xl font-heading font-black">{selectedPoster?.title}</DialogTitle>
+                        {selectedPoster?.meta ? (
+                            <p className="mt-1 text-xs uppercase tracking-[0.2em] text-slate-500">{selectedPoster.meta}</p>
+                        ) : null}
+                    </DialogHeader>
+                    <div className="flex flex-col gap-6 px-6 pb-6 md:flex-row">
+                        {selectedPoster?.src ? (
+                            <div className="w-full md:w-1/2">
+                                <img
+                                    src={selectedPoster.src}
+                                    alt={selectedPoster.title || 'Poster'}
+                                    className="max-h-[70vh] w-full rounded-2xl object-contain"
+                                />
+                            </div>
+                        ) : null}
+                        <div className="w-full md:w-1/2">
+                            <p className="text-sm leading-relaxed text-slate-700">
+                                {selectedPoster?.description || 'No description available.'}
+                            </p>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+        </div>
+    );
 }

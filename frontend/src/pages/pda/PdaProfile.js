@@ -24,16 +24,28 @@ const DEPARTMENTS = [
     { value: "Information Technology", label: "Information Technology" }
 ];
 
+const GENDERS = [
+    { value: 'Male', label: 'Male' },
+    { value: 'Female', label: 'Female' }
+];
+
 export default function PdaProfile() {
     const { user, getAuthHeader, updateUser } = useAuth();
     const [formData, setFormData] = useState({
         name: '',
         email: '',
         dob: '',
+        gender: '',
         phno: '',
         dept: ''
     });
+    const [passwordData, setPasswordData] = useState({
+        oldPassword: '',
+        newPassword: '',
+        confirmPassword: ''
+    });
     const [saving, setSaving] = useState(false);
+    const [changingPassword, setChangingPassword] = useState(false);
     const [imageFile, setImageFile] = useState(null);
     const [isEditing, setIsEditing] = useState(false);
 
@@ -54,6 +66,7 @@ export default function PdaProfile() {
                 name: user.name || '',
                 email: user.email || '',
                 dob: user.dob || '',
+                gender: user.gender || '',
                 phno: user.phno || '',
                 dept: user.dept || ''
             });
@@ -63,6 +76,11 @@ export default function PdaProfile() {
     const handleChange = (e) => {
         const { name, value } = e.target;
         setFormData(prev => ({ ...prev, [name]: value }));
+    };
+
+    const handlePasswordChange = (e) => {
+        const { name, value } = e.target;
+        setPasswordData(prev => ({ ...prev, [name]: value }));
     };
 
     const handleSubmit = async (e) => {
@@ -84,10 +102,38 @@ export default function PdaProfile() {
             }
             updateUser(updatedUser);
             toast.success('Profile updated');
+            setIsEditing(false);
+            setImageFile(null);
         } catch (error) {
             toast.error(getErrorMessage(error, 'Failed to update profile'));
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleChangePassword = async (e) => {
+        e.preventDefault();
+        if (!passwordData.oldPassword || !passwordData.newPassword || !passwordData.confirmPassword) {
+            toast.error('Please fill in all password fields');
+            return;
+        }
+        if (passwordData.newPassword !== passwordData.confirmPassword) {
+            toast.error('New password and confirm password do not match');
+            return;
+        }
+        setChangingPassword(true);
+        try {
+            await axios.post(`${API}/me/change-password`, {
+                old_password: passwordData.oldPassword,
+                new_password: passwordData.newPassword,
+                confirm_password: passwordData.confirmPassword
+            }, { headers: getAuthHeader() });
+            toast.success('Password updated');
+            setPasswordData({ oldPassword: '', newPassword: '', confirmPassword: '' });
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to change password'));
+        } finally {
+            setChangingPassword(false);
         }
     };
 
@@ -108,10 +154,10 @@ export default function PdaProfile() {
                                 <img
                                     src={user.image_url}
                                     alt={user.name}
-                                    className="h-16 w-16 rounded-2xl border border-black/10 object-cover"
+                                    className="h-24 w-24 rounded-3xl border border-black/10 object-cover"
                                 />
                             ) : (
-                                <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-black/10 bg-slate-50 text-sm font-semibold text-slate-600">
+                                <div className="flex h-24 w-24 items-center justify-center rounded-3xl border border-black/10 bg-slate-50 text-lg font-semibold text-slate-600">
                                     {user.name ? user.name.split(' ').map(part => part[0]).join('').slice(0, 2).toUpperCase() : 'PD'}
                                 </div>
                             )}
@@ -138,6 +184,19 @@ export default function PdaProfile() {
                         <div>
                             <Label>Date of Birth</Label>
                             <Input name="dob" type="date" value={formData.dob} onChange={handleChange} disabled={!isEditing} />
+                        </div>
+                        <div>
+                            <Label>Gender</Label>
+                            <Select value={formData.gender} onValueChange={(value) => setFormData(prev => ({ ...prev, gender: value }))} disabled={!isEditing}>
+                                <SelectTrigger className="w-full">
+                                    <SelectValue placeholder="Select gender" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {GENDERS.map(gender => (
+                                        <SelectItem key={gender.value} value={gender.value}>{gender.label}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
                         </div>
                         <div>
                             <Label>Phone</Label>
@@ -169,18 +228,9 @@ export default function PdaProfile() {
                             <Input value={user.designation || 'Not assigned'} readOnly className="bg-slate-50" />
                         </div>
                         <div className="md:col-span-2">
-                            <Label>Profile Image</Label>
+                            <Label>Change Profile Picture</Label>
                             <Input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setImageFile(e.target.files?.[0] || null)} disabled={!isEditing} />
-                            {user.image_url ? (
-                                <div className="mt-3 flex items-center gap-3">
-                                    <img
-                                        src={user.image_url}
-                                        alt={user.name}
-                                        className="h-16 w-16 rounded-xl border border-black/10 object-cover"
-                                    />
-                                    <p className="text-xs text-slate-500">Current image is already set.</p>
-                                </div>
-                            ) : null}
+                            <p className="mt-2 text-xs text-slate-500">Upload a new image to replace the current one.</p>
                         </div>
                         <div className="md:col-span-2 flex justify-end gap-3">
                             {isEditing ? (
@@ -221,6 +271,47 @@ export default function PdaProfile() {
                         <div className="mt-6 rounded-2xl border border-black/10 bg-white p-4 text-sm text-slate-600">
                             Preferred Team: <span className="font-semibold">{user.preferred_team}</span>
                         </div>
+                    ) : null}
+
+                    {isEditing ? (
+                        <form onSubmit={handleChangePassword} className="mt-6 rounded-2xl border border-black/10 bg-white p-4">
+                            <h2 className="text-lg font-semibold text-slate-900">Change Password</h2>
+                            <p className="mt-1 text-xs text-slate-500">Use your old password to set a new one.</p>
+                            <div className="mt-4 grid gap-4 md:grid-cols-3">
+                                <div>
+                                    <Label>Old Password</Label>
+                                    <Input
+                                        name="oldPassword"
+                                        type="password"
+                                        value={passwordData.oldPassword}
+                                        onChange={handlePasswordChange}
+                                    />
+                                </div>
+                                <div>
+                                    <Label>New Password</Label>
+                                    <Input
+                                        name="newPassword"
+                                        type="password"
+                                        value={passwordData.newPassword}
+                                        onChange={handlePasswordChange}
+                                    />
+                                </div>
+                                <div>
+                                    <Label>Confirm Password</Label>
+                                    <Input
+                                        name="confirmPassword"
+                                        type="password"
+                                        value={passwordData.confirmPassword}
+                                        onChange={handlePasswordChange}
+                                    />
+                                </div>
+                            </div>
+                            <div className="mt-4 flex justify-end">
+                                <Button type="submit" disabled={changingPassword} className="bg-[#11131a] text-white hover:bg-[#1f2330]">
+                                    {changingPassword ? 'Updating...' : 'Update Password'}
+                                </Button>
+                            </div>
+                        </form>
                     ) : null}
                 </div>
             </div>

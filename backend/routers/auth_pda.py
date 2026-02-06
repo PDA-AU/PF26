@@ -12,6 +12,8 @@ from schemas import (
     RefreshTokenRequest,
     PdaUserResponse,
     PdaUserUpdate,
+    PdaPasswordChangeRequest,
+    PdaPasswordChangeResponse,
     PresignRequest,
     PresignResponse,
     ImageUrlUpdate
@@ -25,7 +27,7 @@ router = APIRouter()
 
 def _build_pda_user_response(db: Session, user: PdaUser) -> PdaUserResponse:
     team = db.query(PdaTeam).filter(PdaTeam.user_id == user.id).first()
-    admin_row = db.query(PdaAdmin).filter(PdaAdmin.regno == user.regno).first()
+    admin_row = db.query(PdaAdmin).filter(PdaAdmin.user_id == user.id).first()
     policy = admin_row.policy if admin_row else None
     is_superadmin = bool(admin_row and policy and policy.get("superAdmin"))
     is_admin = bool(admin_row)
@@ -38,6 +40,7 @@ def _build_pda_user_response(db: Session, user: PdaUser) -> PdaUserResponse:
         email=user.email,
         name=user.name,
         dob=user.dob,
+        gender=user.gender,
         phno=user.phno,
         dept=user.dept,
         image_url=user.image_url,
@@ -76,6 +79,7 @@ async def pda_register(user_data: PdaUserRegister, db: Session = Depends(get_db)
         hashed_password=get_password_hash(user_data.password),
         name=user_data.name,
         dob=user_data.dob,
+        gender=user_data.gender,
         phno=user_data.phno,
         dept=user_data.dept,
         image_url=user_data.image_url,
@@ -146,6 +150,8 @@ async def update_pda_me(
         user.email = update_data.email
     if update_data.dob is not None:
         user.dob = update_data.dob
+    if update_data.gender is not None:
+        user.gender = update_data.gender
     if update_data.phno is not None:
         user.phno = update_data.phno
     if update_data.dept is not None:
@@ -156,6 +162,22 @@ async def update_pda_me(
     db.commit()
     db.refresh(user)
     return _build_pda_user_response(db, user)
+
+
+@router.post("/me/change-password", response_model=PdaPasswordChangeResponse)
+async def change_pda_password(
+    payload: PdaPasswordChangeRequest,
+    user: PdaUser = Depends(require_pda_user),
+    db: Session = Depends(get_db)
+):
+    if not verify_password(payload.old_password, user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Old password is incorrect")
+    if payload.new_password != payload.confirm_password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New password and confirm password do not match")
+
+    user.hashed_password = get_password_hash(payload.new_password)
+    db.commit()
+    return PdaPasswordChangeResponse(status="ok")
 
 
 @router.post("/me/profile-picture", response_model=PdaUserResponse)

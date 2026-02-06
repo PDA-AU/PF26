@@ -93,6 +93,7 @@ class PdaUser(Base):
     hashed_password = Column(String(255), nullable=False)
     name = Column(String(255), nullable=False)
     dob = Column(Date, nullable=True)
+    gender = Column(String(10), nullable=True)
     phno = Column(String(20), nullable=True)
     dept = Column(String(150), nullable=True)
     image_url = Column(String(500), nullable=True)
@@ -160,7 +161,7 @@ class PdaAdmin(Base):
     __tablename__ = "pda_admins"
 
     id = Column(Integer, primary_key=True, index=True)
-    regno = Column(String(20), unique=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
     hashed_password = Column(String(255), nullable=False)
     policy = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -200,14 +201,8 @@ class PdaTeam(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    name = Column(String(255), nullable=False)
-    regno = Column(String(20), unique=True, nullable=False)
-    dept = Column(String(150), nullable=True)
-    email = Column(String(255), nullable=True)
-    phno = Column(String(20), nullable=True)
     team = Column(String(120), nullable=True)
     designation = Column(String(120), nullable=True)
-    photo_url = Column(String(500), nullable=True)
     instagram_url = Column(String(500), nullable=True)
     linkedin_url = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

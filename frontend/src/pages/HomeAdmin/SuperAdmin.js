@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { useAuth } from '@/context/AuthContext';
 import AdminLayout from '@/pages/HomeAdmin/AdminLayout';
 import { API } from '@/pages/HomeAdmin/adminApi';
+import { toast } from 'sonner';
 
 const emptyAdmin = {
     regno: '',
@@ -137,6 +138,10 @@ export default function SuperAdmin() {
         return true;
     };
 
+    const hasPolicyChanges = admins
+        .filter((admin) => admin.regno !== "0000000000")
+        .some((admin) => !arePoliciesEqual(policyEdits[admin.id], originalPolicies[admin.id]));
+
     const saveAllPolicies = async () => {
         setPolicySaving(true);
         try {
@@ -153,8 +158,10 @@ export default function SuperAdmin() {
                 await Promise.all(updates);
             }
             fetchData();
+            toast.success(updates.length ? 'Policy changes saved.' : 'No policy changes to save.');
         } catch (error) {
             console.error('Failed to save policy changes:', error);
+            toast.error('Failed to save policy changes.');
         } finally {
             setPolicySaving(false);
         }
@@ -271,9 +278,9 @@ export default function SuperAdmin() {
                         type="button"
                         className="bg-[#f6c347] text-black hover:bg-[#ffd16b]"
                         onClick={saveAllPolicies}
-                        disabled={policySaving}
+                        disabled={policySaving || !hasPolicyChanges}
                     >
-                        {policySaving ? 'Saving...' : 'Save all changes'}
+                        {policySaving ? 'Saving...' : (hasPolicyChanges ? 'Save changes' : 'No changes')}
                     </Button>
                 </div>
                 <div className="mt-6 space-y-4">
@@ -281,7 +288,7 @@ export default function SuperAdmin() {
                         <div key={admin.id} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
                             <div className="flex flex-wrap items-center justify-between gap-4">
                                 <div>
-                                    <h3 className="text-lg font-heading font-bold">{admin.regno}</h3>
+                                    <h3 className="text-lg font-heading font-bold">{admin.name || 'Admin'} <span className="text-sm text-slate-500">({admin.regno})</span></h3>
                                     <p className="text-xs text-slate-500">Admin access policy</p>
                                 </div>
                                 <div className="flex w-full flex-wrap items-center justify-start gap-4 md:w-auto md:justify-end">

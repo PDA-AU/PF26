@@ -9,7 +9,7 @@ from models import PdaUser, PdaAdmin, PdaTeam
 
 def _get_team_and_policy(db: Session, user: PdaUser):
     team = db.query(PdaTeam).filter(PdaTeam.user_id == user.id).first()
-    admin_row = db.query(PdaAdmin).filter(PdaAdmin.regno == user.regno).first()
+    admin_row = db.query(PdaAdmin).filter(PdaAdmin.user_id == user.id).first()
     policy: Optional[Dict[str, bool]] = admin_row.policy if admin_row else None
     is_superadmin = bool(admin_row and policy and policy.get("superAdmin"))
     return team, admin_row, policy, is_superadmin

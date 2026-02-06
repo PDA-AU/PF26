@@ -1,13 +1,32 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
-from typing import List
+from typing import List, Optional
 
 from database import get_db
-from models import PdaItem, PdaTeam, PdaGallery
+from models import PdaItem, PdaTeam, PdaGallery, PdaUser
 from schemas import ProgramResponse, EventResponse, PdaTeamResponse, PdaGalleryResponse
 
 router = APIRouter()
+
+
+def _build_team_response(member: PdaTeam, user: Optional[PdaUser]) -> PdaTeamResponse:
+    return PdaTeamResponse(
+        id=member.id,
+        user_id=member.user_id,
+        name=user.name if user else None,
+        regno=user.regno if user else None,
+        dept=user.dept if user else None,
+        email=user.email if user else None,
+        phno=user.phno if user else None,
+        dob=user.dob if user else None,
+        team=member.team,
+        designation=member.designation,
+        photo_url=user.image_url if user else None,
+        instagram_url=member.instagram_url,
+        linkedin_url=member.linkedin_url,
+        created_at=member.created_at
+    )
 
 
 @router.get("/pda/programs", response_model=List[ProgramResponse])
@@ -50,14 +69,18 @@ async def get_featured_event(db: Session = Depends(get_db)):
 
 @router.get("/pda/team", response_model=List[PdaTeamResponse])
 async def get_pda_team(db: Session = Depends(get_db)):
-    team = db.query(PdaTeam).filter(
-        or_(PdaTeam.designation.is_(None), PdaTeam.designation != "Root")
-    ).order_by(
-        PdaTeam.team.asc().nullslast(),
-        PdaTeam.designation.asc().nullslast(),
-        PdaTeam.name.asc()
-    ).all()
-    return [PdaTeamResponse.model_validate(member) for member in team]
+    rows = (
+        db.query(PdaTeam, PdaUser)
+        .join(PdaUser, PdaTeam.user_id == PdaUser.id, isouter=True)
+        .filter(or_(PdaTeam.designation.is_(None), PdaTeam.designation != "Root"))
+        .order_by(
+            PdaTeam.team.asc().nullslast(),
+            PdaTeam.designation.asc().nullslast(),
+            PdaUser.name.asc().nullslast()
+        )
+        .all()
+    )
+    return [_build_team_response(member, user) for member, user in rows]
 
 
 @router.get("/pda/gallery", response_model=List[PdaGalleryResponse])

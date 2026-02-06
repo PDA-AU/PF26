@@ -13,7 +13,7 @@ export default function LogsAdmin() {
 
     const fetchLogs = useCallback(async () => {
         try {
-            const res = await axios.get(`${API}/pda-admin/superadmin/logs`, { headers: getAuthHeader() });
+            const res = await axios.get(`${API}/pda-admin/superadmin/logs?limit=50`, { headers: getAuthHeader() });
             setLogs(res.data || []);
         } catch (error) {
             console.error('Failed to load logs:', error);

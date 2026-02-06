@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import axios from 'axios';
+import { Flag, Loader2, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -31,12 +32,17 @@ export default function ItemsAdmin() {
     const [itemForm, setItemForm] = useState(emptyItem);
     const [posterFile, setPosterFile] = useState(null);
     const [featuredPosterFile, setFeaturedPosterFile] = useState(null);
+    const [posterPreview, setPosterPreview] = useState('');
+    const [featuredPosterPreview, setFeaturedPosterPreview] = useState('');
+    const [clearPoster, setClearPoster] = useState(false);
+    const [clearFeaturedPoster, setClearFeaturedPoster] = useState(false);
     const [editingItem, setEditingItem] = useState(null);
     const [loading, setLoading] = useState(true);
     const [savingProgram, setSavingProgram] = useState(false);
     const [savingEvent, setSavingEvent] = useState(false);
     const [programSearch, setProgramSearch] = useState('');
     const [eventSearch, setEventSearch] = useState('');
+    const formRef = useRef(null);
 
     const fetchData = async () => {
         try {
@@ -59,6 +65,26 @@ export default function ItemsAdmin() {
         }
     }, [canAccessHome]);
 
+    useEffect(() => {
+        if (!posterFile) {
+            setPosterPreview('');
+            return;
+        }
+        const url = URL.createObjectURL(posterFile);
+        setPosterPreview(url);
+        return () => URL.revokeObjectURL(url);
+    }, [posterFile]);
+
+    useEffect(() => {
+        if (!featuredPosterFile) {
+            setFeaturedPosterPreview('');
+            return;
+        }
+        const url = URL.createObjectURL(featuredPosterFile);
+        setFeaturedPosterPreview(url);
+        return () => URL.revokeObjectURL(url);
+    }, [featuredPosterFile]);
+
     const handleItemChange = (e) => {
         const { name, value, type, checked } = e.target;
         setItemForm(prev => ({
@@ -72,6 +98,10 @@ export default function ItemsAdmin() {
         setEditingItem(null);
         setPosterFile(null);
         setFeaturedPosterFile(null);
+        setPosterPreview('');
+        setFeaturedPosterPreview('');
+        setClearPoster(false);
+        setClearFeaturedPoster(false);
     };
 
     const submitItem = async (e) => {
@@ -84,10 +114,16 @@ export default function ItemsAdmin() {
             const processed = await compressImageToWebp(posterFile);
             posterUrl = await uploadPoster(processed, getAuthHeader);
         }
+        if (clearPoster && !posterFile) {
+            posterUrl = null;
+        }
         let featuredPosterUrl = itemForm.featured_poster_url.trim() || null;
         if (featuredPosterFile) {
             const processedFeatured = await compressImageToWebp(featuredPosterFile);
             featuredPosterUrl = await uploadPoster(processedFeatured, getAuthHeader);
+        }
+        if (clearFeaturedPoster && !featuredPosterFile) {
+            featuredPosterUrl = null;
         }
         const payload = {
             title: itemForm.title.trim(),
@@ -136,6 +172,11 @@ export default function ItemsAdmin() {
         setEditingItem({ id: program.id, type: 'program' });
         setPosterFile(null);
         setFeaturedPosterFile(null);
+        setPosterPreview('');
+        setFeaturedPosterPreview('');
+        setClearPoster(false);
+        setClearFeaturedPoster(false);
+        formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
 
     const editEvent = (event) => {
@@ -156,6 +197,11 @@ export default function ItemsAdmin() {
         setEditingItem({ id: event.id, type: 'event' });
         setPosterFile(null);
         setFeaturedPosterFile(null);
+        setPosterPreview('');
+        setFeaturedPosterPreview('');
+        setClearPoster(false);
+        setClearFeaturedPoster(false);
+        formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
 
     const deleteProgram = async (programId) => {
@@ -208,7 +254,7 @@ export default function ItemsAdmin() {
 
     return (
         <AdminLayout title="Manage PDA Items" subtitle="Programs and events showcased on the PDA home page.">
-            <section className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
+            <section ref={formRef} className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                         <p className="text-xs uppercase tracking-[0.4em] text-slate-400">PDA Items</p>
@@ -287,33 +333,16 @@ export default function ItemsAdmin() {
                         />
                     </div>
                     <div className="md:col-span-2">
-                        <Label htmlFor="item-poster">Poster URL</Label>
-                        <Input
-                            id="item-poster"
-                            name="poster_url"
-                            value={itemForm.poster_url}
-                            onChange={handleItemChange}
-                            placeholder="https://..."
-                        />
-                    </div>
-                    <div className="md:col-span-2">
-                        <Label htmlFor="item-featured-poster-url">Featured Poster URL (2:1)</Label>
-                        <Input
-                            id="item-featured-poster-url"
-                            name="featured_poster_url"
-                            value={itemForm.featured_poster_url}
-                            onChange={handleItemChange}
-                            placeholder="https://..."
-                        />
-                    </div>
-                    <div className="md:col-span-2">
                         <Label htmlFor="item-poster-file">Or Upload Poster</Label>
                         <Input
                             id="item-poster-file"
                             name="poster_file"
                             type="file"
                             accept="image/png,image/jpeg,image/webp"
-                            onChange={(e) => setPosterFile(e.target.files?.[0] || null)}
+                            onChange={(e) => {
+                                setPosterFile(e.target.files?.[0] || null);
+                                setClearPoster(false);
+                            }}
                         />
                     </div>
                     <div className="md:col-span-2">
@@ -323,9 +352,70 @@ export default function ItemsAdmin() {
                             name="featured_poster_file"
                             type="file"
                             accept="image/png,image/jpeg,image/webp"
-                            onChange={(e) => setFeaturedPosterFile(e.target.files?.[0] || null)}
+                            onChange={(e) => {
+                                setFeaturedPosterFile(e.target.files?.[0] || null);
+                                setClearFeaturedPoster(false);
+                            }}
                         />
                     </div>
+                    {editingItem ? (
+                        <div className="md:col-span-2 grid gap-3 sm:grid-cols-2">
+                            <div className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
+                                <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Poster Preview</p>
+                                {posterPreview || itemForm.poster_url ? (
+                                    <img
+                                        src={posterPreview || itemForm.poster_url}
+                                        alt="Poster preview"
+                                        className="mt-3 h-40 w-full rounded-xl object-cover"
+                                    />
+                                ) : (
+                                    <p className="mt-3 text-sm text-slate-500">No poster uploaded yet.</p>
+                                )}
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="border-black/10 text-xs"
+                                        onClick={() => {
+                                            setPosterFile(null);
+                                            setPosterPreview('');
+                                            setItemForm((prev) => ({ ...prev, poster_url: '' }));
+                                            setClearPoster(true);
+                                        }}
+                                    >
+                                        Clear Poster
+                                    </Button>
+                                </div>
+                            </div>
+                            <div className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
+                                <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Featured Poster Preview</p>
+                                {featuredPosterPreview || itemForm.featured_poster_url ? (
+                                    <img
+                                        src={featuredPosterPreview || itemForm.featured_poster_url}
+                                        alt="Featured poster preview"
+                                        className="mt-3 h-40 w-full rounded-xl object-cover"
+                                    />
+                                ) : (
+                                    <p className="mt-3 text-sm text-slate-500">No featured poster uploaded yet.</p>
+                                )}
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="border-black/10 text-xs"
+                                        onClick={() => {
+                                            setFeaturedPosterFile(null);
+                                            setFeaturedPosterPreview('');
+                                            setItemForm((prev) => ({ ...prev, featured_poster_url: '' }));
+                                            setClearFeaturedPoster(true);
+                                        }}
+                                    >
+                                        Clear Featured Poster
+                                    </Button>
+                                </div>
+                            </div>
+                        </div>
+                    ) : null}
                     <div className="md:col-span-2">
                         <Label htmlFor="item-description">Description</Label>
                         <Textarea
@@ -371,12 +461,22 @@ export default function ItemsAdmin() {
                     </div>
                     <div className="md:col-span-2 flex justify-end">
                         <Button type="submit" className="bg-[#f6c347] text-black hover:bg-[#ffd16b]" disabled={itemForm.type === 'program' ? savingProgram : savingEvent}>
+                            {itemForm.type === 'program' ? (savingProgram && <Loader2 className="mr-2 h-4 w-4 animate-spin" />) : (savingEvent && <Loader2 className="mr-2 h-4 w-4 animate-spin" />)}
                             {itemForm.type === 'program'
                                 ? (savingProgram ? 'Saving...' : editingItem ? 'Update Program' : 'Create Program')
                                 : (savingEvent ? 'Saving...' : editingItem ? 'Update Event' : 'Create Event')}
                         </Button>
                     </div>
                 </form>
+            </section>
+
+            <section className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                        <p className="text-xs uppercase tracking-[0.4em] text-slate-400">Programs</p>
+                        <h2 className="text-2xl font-heading font-black">Programs</h2>
+                    </div>
+                </div>
 
                 <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <Label className="text-sm text-slate-600">Programs</Label>
@@ -384,17 +484,17 @@ export default function ItemsAdmin() {
                         value={programSearch}
                         onChange={(e) => setProgramSearch(e.target.value)}
                         placeholder="Search programs..."
-                        className="md:max-w-sm"
+                        className="w-full md:max-w-sm"
                     />
                 </div>
                 <div className="mt-6 grid gap-4 md:grid-cols-2">
                     {filteredPrograms.length ? filteredPrograms.map((program) => (
-                        <div key={program.id} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
-                            <div className="flex items-start justify-between gap-3">
-                                <div>
-                                    <h3 className="text-lg font-heading font-bold">{program.title}</h3>
+                        <div key={program.id} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4 min-w-0">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                <div className="min-w-0">
+                                    <h3 className="text-lg font-heading font-bold break-words">{program.title}</h3>
                                     {program.tag ? (
-                                        <p className="text-xs uppercase tracking-[0.3em] text-[#b48900]">{program.tag}</p>
+                                        <p className="text-xs uppercase tracking-[0.3em] text-[#b48900] break-words">{program.tag}</p>
                                     ) : null}
                                     {program.is_featured ? (
                                         <p className="mt-1 text-xs font-semibold uppercase tracking-[0.3em] text-[#b48900]">
@@ -402,24 +502,28 @@ export default function ItemsAdmin() {
                                         </p>
                                     ) : null}
                                 </div>
-                                <div className="flex gap-2">
-                                    <Button variant="outline" onClick={() => editProgram(program)} className="border-black/10 text-xs">
-                                        Edit
+                                <div className="flex flex-wrap gap-2 sm:justify-end">
+                                    <Button variant="outline" onClick={() => editProgram(program)} className="border-black/10 text-xs" aria-label="Edit program">
+                                        <Pencil className="h-4 w-4 sm:mr-1" />
+                                        <span className="hidden sm:inline">Edit</span>
                                     </Button>
-                                    <Button variant="outline" onClick={() => deleteProgram(program.id)} className="border-black/10 text-xs">
-                                        Delete
+                                    <Button variant="outline" onClick={() => deleteProgram(program.id)} className="border-black/10 text-xs" aria-label="Delete program">
+                                        <Trash2 className="h-4 w-4 sm:mr-1" />
+                                        <span className="hidden sm:inline">Delete</span>
                                     </Button>
                                     <Button
                                         variant="outline"
                                         onClick={() => toggleProgramFeatured(program.id, !program.is_featured)}
                                         className="border-black/10 text-xs"
+                                        aria-label={program.is_featured ? 'Unfeature program' : 'Feature program'}
                                     >
-                                        {program.is_featured ? 'Unfeature' : 'Feature'}
+                                        <Flag className="h-4 w-4 sm:mr-1" />
+                                        <span className="hidden sm:inline">{program.is_featured ? 'Unfeature' : 'Feature'}</span>
                                     </Button>
                                 </div>
                             </div>
                             {program.description ? (
-                                <p className="mt-2 text-sm text-slate-600">{program.description}</p>
+                                <p className="mt-2 text-sm text-slate-600 break-words">{program.description}</p>
                             ) : null}
                         </div>
                     )) : (
@@ -462,15 +566,15 @@ export default function ItemsAdmin() {
                         value={eventSearch}
                         onChange={(e) => setEventSearch(e.target.value)}
                         placeholder="Search events..."
-                        className="md:max-w-sm"
+                        className="w-full md:max-w-sm"
                     />
                 </div>
                 <div className="mt-6 grid gap-4 md:grid-cols-2">
                     {filteredEvents.length ? filteredEvents.map((event) => (
-                        <div key={event.id} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
-                            <div className="flex items-start justify-between gap-3">
-                                <div>
-                                    <h3 className="text-lg font-heading font-bold">{event.title}</h3>
+                        <div key={event.id} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4 min-w-0">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                <div className="min-w-0">
+                                    <h3 className="text-lg font-heading font-bold break-words">{event.title}</h3>
                                     <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
                                         {event.start_date || 'TBA'}{event.end_date ? ` → ${event.end_date}` : ''}
                                     </p>
@@ -480,24 +584,28 @@ export default function ItemsAdmin() {
                                         </p>
                                     ) : null}
                                 </div>
-                                <div className="flex flex-wrap gap-2">
-                                    <Button variant="outline" onClick={() => editEvent(event)} className="border-black/10 text-xs">
-                                        Edit
+                                <div className="flex flex-wrap gap-2 sm:justify-end">
+                                    <Button variant="outline" onClick={() => editEvent(event)} className="border-black/10 text-xs" aria-label="Edit event">
+                                        <Pencil className="h-4 w-4 sm:mr-1" />
+                                        <span className="hidden sm:inline">Edit</span>
                                     </Button>
-                                    <Button variant="outline" onClick={() => deleteEvent(event.id)} className="border-black/10 text-xs">
-                                        Delete
+                                    <Button variant="outline" onClick={() => deleteEvent(event.id)} className="border-black/10 text-xs" aria-label="Delete event">
+                                        <Trash2 className="h-4 w-4 sm:mr-1" />
+                                        <span className="hidden sm:inline">Delete</span>
                                     </Button>
                                     <Button
                                         variant="outline"
                                         onClick={() => toggleEventFeatured(event.id, !event.is_featured)}
                                         className="border-black/10 text-xs"
+                                        aria-label={event.is_featured ? 'Unfeature event' : 'Feature event'}
                                     >
-                                        {event.is_featured ? 'Unfeature' : 'Feature'}
+                                        <Flag className="h-4 w-4 sm:mr-1" />
+                                        <span className="hidden sm:inline">{event.is_featured ? 'Unfeature' : 'Feature'}</span>
                                     </Button>
                                 </div>
                             </div>
                             {event.description ? (
-                                <p className="mt-2 text-sm text-slate-600">{event.description}</p>
+                                <p className="mt-2 text-sm text-slate-600 break-words">{event.description}</p>
                             ) : null}
                         </div>
                     )) : (

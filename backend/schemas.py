@@ -128,6 +128,7 @@ class PdaUserRegister(BaseModel):
     regno: str = Field(..., min_length=6, max_length=20)
     email: EmailStr
     dob: date
+    gender: Optional[str] = None
     phno: Optional[str] = None
     dept: Optional[str] = None
     password: str = Field(..., min_length=6)
@@ -151,6 +152,7 @@ class PdaUserUpdate(BaseModel):
     name: Optional[str] = None
     email: Optional[EmailStr] = None
     dob: Optional[date] = None
+    gender: Optional[str] = None
     phno: Optional[str] = None
     dept: Optional[str] = None
     image_url: Optional[str] = None
@@ -162,6 +164,7 @@ class PdaUserResponse(BaseModel):
     email: str
     name: str
     dob: Optional[date] = None
+    gender: Optional[str] = None
     phno: Optional[str] = None
     dept: Optional[str] = None
     image_url: Optional[str] = None
@@ -176,6 +179,16 @@ class PdaUserResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class PdaPasswordChangeRequest(BaseModel):
+    old_password: str = Field(..., min_length=6)
+    new_password: str = Field(..., min_length=6)
+    confirm_password: str = Field(..., min_length=6)
+
+
+class PdaPasswordChangeResponse(BaseModel):
+    status: str
 
 
 class PresignRequest(BaseModel):
@@ -534,8 +547,9 @@ class PdaTeamDesignation(str, Enum):
 
 
 class PdaTeamCreate(BaseModel):
-    name: str = Field(..., min_length=2)
-    regno: str = Field(..., min_length=6)
+    user_id: Optional[int] = None
+    regno: Optional[str] = None
+    name: Optional[str] = None
     dept: Optional[str] = None
     email: Optional[str] = None
     phno: Optional[str] = None
@@ -547,11 +561,13 @@ class PdaTeamCreate(BaseModel):
 
 
 class PdaTeamUpdate(BaseModel):
-    name: Optional[str] = None
+    user_id: Optional[int] = None
     regno: Optional[str] = None
+    name: Optional[str] = None
     dept: Optional[str] = None
     email: Optional[str] = None
     phno: Optional[str] = None
+    dob: Optional[date] = None
     team: Optional["PdaTeamName"] = None
     designation: Optional["PdaTeamDesignation"] = None
     photo_url: Optional[str] = None
@@ -562,16 +578,17 @@ class PdaTeamUpdate(BaseModel):
 class PdaTeamResponse(BaseModel):
     id: int
     user_id: Optional[int] = None
-    name: str
-    regno: str
-    dept: Optional[str]
-    email: Optional[str]
-    phno: Optional[str]
+    name: Optional[str] = None
+    regno: Optional[str] = None
+    dept: Optional[str] = None
+    email: Optional[str] = None
+    phno: Optional[str] = None
+    dob: Optional[date] = None
     team: Optional["PdaTeamName"] = None
     designation: Optional["PdaTeamDesignation"] = None
-    photo_url: Optional[str]
-    instagram_url: Optional[str]
-    linkedin_url: Optional[str]
+    photo_url: Optional[str] = None
+    instagram_url: Optional[str] = None
+    linkedin_url: Optional[str] = None
     created_at: datetime
 
     class Config:

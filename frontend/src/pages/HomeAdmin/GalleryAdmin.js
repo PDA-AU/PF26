@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
+import { ArrowDown, ArrowUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -24,6 +25,7 @@ export default function GalleryAdmin() {
     const [processingUploads, setProcessingUploads] = useState(false);
     const [loading, setLoading] = useState(true);
     const [gallerySearch, setGallerySearch] = useState('');
+    const [draggingId, setDraggingId] = useState(null);
 
     const fetchData = async () => {
         try {
@@ -163,6 +165,75 @@ export default function GalleryAdmin() {
             .filter(Boolean)
             .some((value) => value.toLowerCase().includes(normalizedSearch));
     });
+    const sortedGallery = [...filteredGallery].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+    const handleDragStart = (itemId) => {
+        setDraggingId(itemId);
+    };
+
+    const handleDragOver = (e) => {
+        e.preventDefault();
+    };
+
+    const persistOrder = async (items) => {
+        const updates = items.map((item) =>
+            axios.put(`${API}/pda-admin/gallery/${item.id}`, { order: item.order ?? 0 }, { headers: getAuthHeader() })
+        );
+        await Promise.all(updates);
+    };
+
+    const moveItem = async (itemId, direction) => {
+        const current = sortedGallery;
+        const fromIndex = current.findIndex((item) => item.id === itemId);
+        if (fromIndex < 0) return;
+        const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1;
+        if (toIndex < 0 || toIndex >= current.length) return;
+        const next = [...current];
+        const [moved] = next.splice(fromIndex, 1);
+        next.splice(toIndex, 0, moved);
+        const reOrdered = next.map((item, index) => ({ ...item, order: index }));
+        setGalleryItems((prev) =>
+            prev.map((item) => {
+                const updated = reOrdered.find((x) => x.id === item.id);
+                return updated ? updated : item;
+            })
+        );
+        try {
+            await persistOrder(reOrdered);
+        } catch (error) {
+            console.error('Failed to update gallery order:', error);
+        }
+    };
+
+    const handleDrop = async (targetId) => {
+        if (!draggingId || draggingId === targetId) {
+            setDraggingId(null);
+            return;
+        }
+        const current = sortedGallery;
+        const fromIndex = current.findIndex((item) => item.id === draggingId);
+        const toIndex = current.findIndex((item) => item.id === targetId);
+        if (fromIndex < 0 || toIndex < 0) {
+            setDraggingId(null);
+            return;
+        }
+        const next = [...current];
+        const [moved] = next.splice(fromIndex, 1);
+        next.splice(toIndex, 0, moved);
+        const reOrdered = next.map((item, index) => ({ ...item, order: index }));
+        setGalleryItems((prev) =>
+            prev.map((item) => {
+                const updated = reOrdered.find((x) => x.id === item.id);
+                return updated ? updated : item;
+            })
+        );
+        setDraggingId(null);
+        try {
+            await persistOrder(reOrdered);
+        } catch (error) {
+            console.error('Failed to update gallery order:', error);
+        }
+    };
 
     return (
         <AdminLayout title="Gallery Management" subtitle="Manage the photo gallery shown on the PDA home page.">
@@ -278,10 +349,15 @@ export default function GalleryAdmin() {
                     />
                 </div>
                 <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                    {filteredGallery.length ? filteredGallery.map((item) => (
+                    {sortedGallery.length ? sortedGallery.map((item, index) => (
                         <div
                             key={item.id}
-                            className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4"
+                            draggable
+                            onDragStart={() => handleDragStart(item.id)}
+                            onDragOver={handleDragOver}
+                            onDrop={() => handleDrop(item.id)}
+                            className={`rounded-2xl border border-black/10 bg-[#fffdf7] p-4 ${draggingId === item.id ? 'opacity-60' : ''}`}
+                            title="Drag to reorder"
                         >
                             <div className="flex items-start justify-between gap-3">
                                 <div className="flex items-start gap-3">
@@ -301,13 +377,37 @@ export default function GalleryAdmin() {
                                         ) : null}
                                     </div>
                                 </div>
-                                <div className="flex gap-2">
-                                    <Button variant="outline" onClick={() => startEdit(item)} className="border-black/10 text-xs">
-                                        Edit
-                                    </Button>
-                                    <Button variant="outline" onClick={() => deleteGalleryItem(item.id)} className="border-black/10 text-xs">
-                                        Delete
-                                    </Button>
+                                <div className="flex flex-col items-end gap-2">
+                                    <div className="flex gap-2">
+                                        <Button variant="outline" onClick={() => startEdit(item)} className="border-black/10 text-xs">
+                                            Edit
+                                        </Button>
+                                        <Button variant="outline" onClick={() => deleteGalleryItem(item.id)} className="border-black/10 text-xs">
+                                            Delete
+                                        </Button>
+                                    </div>
+                                    <div className="flex gap-1 sm:hidden">
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            className="border-black/10 text-xs"
+                                            onClick={() => moveItem(item.id, 'up')}
+                                            disabled={index === 0}
+                                            aria-label="Move up"
+                                        >
+                                            <ArrowUp className="h-4 w-4" />
+                                        </Button>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            className="border-black/10 text-xs"
+                                            onClick={() => moveItem(item.id, 'down')}
+                                            disabled={index === sortedGallery.length - 1}
+                                            aria-label="Move down"
+                                        >
+                                            <ArrowDown className="h-4 w-4" />
+                                        </Button>
+                                    </div>
                                 </div>
                             </div>
                         </div>

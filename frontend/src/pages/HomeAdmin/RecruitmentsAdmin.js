@@ -57,6 +57,7 @@ export default function RecruitmentsAdmin() {
     const [memberForm, setMemberForm] = useState(emptyMemberForm);
     const [memberPhoto, setMemberPhoto] = useState(null);
     const [savingMember, setSavingMember] = useState(false);
+    const [exporting, setExporting] = useState(false);
 
     const fetchRecruitments = useCallback(async () => {
         try {
@@ -124,7 +125,7 @@ export default function RecruitmentsAdmin() {
         e.preventDefault();
         setSavingMember(true);
         try {
-            let photoUrl = memberForm.photo_url.trim() || null;
+            let photoUrl = null;
             if (memberPhoto) {
                 const processed = await compressImageToWebp(memberPhoto);
                 photoUrl = await uploadTeamImage(processed, getAuthHeader);
@@ -147,6 +148,28 @@ export default function RecruitmentsAdmin() {
             console.error('Failed to add team member:', error);
         } finally {
             setSavingMember(false);
+        }
+    };
+
+    const exportRecruitments = async () => {
+        setExporting(true);
+        try {
+            const response = await axios.get(`${API}/pda-admin/recruitments/export`, {
+                headers: getAuthHeader(),
+                responseType: 'blob'
+            });
+            const url = window.URL.createObjectURL(response.data);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'recruitments.xlsx';
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error('Failed to export recruitments:', error);
+        } finally {
+            setExporting(false);
         }
     };
 
@@ -229,10 +252,6 @@ export default function RecruitmentsAdmin() {
                         </Select>
                     </div>
                     <div>
-                        <Label>Photo URL (optional)</Label>
-                        <Input name="photo_url" value={memberForm.photo_url} onChange={handleMemberChange} placeholder="https://..." />
-                    </div>
-                    <div>
                         <Label>Or Upload Photo</Label>
                         <Input type="file" accept="image/*" onChange={(e) => setMemberPhoto(e.target.files?.[0] || null)} />
                     </div>
@@ -249,9 +268,14 @@ export default function RecruitmentsAdmin() {
                         <p className="text-xs uppercase tracking-[0.4em] text-slate-400">Recruitments</p>
                         <h2 className="text-2xl font-heading font-black">Pending Applications</h2>
                     </div>
-                    <Button onClick={approveRecruitments} className="bg-[#f6c347] text-black hover:bg-[#ffd16b]">
-                        Approve Selected
-                    </Button>
+                    <div className="flex flex-wrap gap-2">
+                        <Button onClick={exportRecruitments} variant="outline" className="border-black/10 text-sm" disabled={exporting}>
+                            {exporting ? 'Exporting...' : 'Export Excel'}
+                        </Button>
+                        <Button onClick={approveRecruitments} className="bg-[#f6c347] text-black hover:bg-[#ffd16b]">
+                            Approve Selected
+                        </Button>
+                    </div>
                 </div>
                 <div className="mt-6 space-y-3">
                     {recruitments.map((recruit) => (

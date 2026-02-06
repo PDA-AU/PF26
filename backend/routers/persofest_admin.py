@@ -1030,7 +1030,7 @@ async def get_leaderboard(
 async def get_admin_logs(
     admin=Depends(require_superadmin),
     db: Session = Depends(get_db),
-    limit: int = 200,
+    limit: int = 50,
     offset: int = 0
 ):
     logs = db.query(AdminLog).filter(
