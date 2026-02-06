@@ -75,6 +75,7 @@ export default function PdaHome() {
     const programScrollRef = useRef(null);
     const eventScrollRef = useRef(null);
     const galleryScrollRef = useRef(null);
+    const teamScrollRef = useRef(null);
     const [posterDialogOpen, setPosterDialogOpen] = useState(false);
     const [selectedPoster, setSelectedPoster] = useState(null);
     const [programs, setPrograms] = useState([]);
@@ -197,8 +198,12 @@ export default function PdaHome() {
         'Library'
     ];
 
-    const getDesignationPriority = (designation) => {
+    const getDesignationPriority = (designation, team) => {
         const value = (designation || '').toLowerCase().trim();
+        if ((team || '').toLowerCase() === 'executive') {
+            if (value.includes('general secretary')) return 1;
+            if (value.includes('treasurer')) return 2;
+        }
         if (value === 'head' || value.startsWith('head')) return 1;
         if (value === 'js' || value.includes('junior secretary')) return 2;
         if (value.includes('chair')) return 3;
@@ -219,8 +224,8 @@ export default function PdaHome() {
             if (teamA !== teamB) {
                 return (teamA === -1 ? 999 : teamA) - (teamB === -1 ? 999 : teamB);
             }
-            const designationA = getDesignationPriority(a.designation);
-            const designationB = getDesignationPriority(b.designation);
+            const designationA = getDesignationPriority(a.designation, a.team);
+            const designationB = getDesignationPriority(b.designation, b.team);
             if (designationA !== designationB) {
                 return designationA - designationB;
             }
@@ -682,55 +687,88 @@ export default function PdaHome() {
                             ))}
                         </div>
                     </div>
-                    <div className="mt-8 grid gap-6 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 justify-items-center" data-reveal>
+                    <div className="mt-8" data-reveal>
                         {filteredTeamMembers.length > 0 ? (
-                            filteredTeamMembers.map((member) => (
-                                <div key={member.regno} className="flex w-full max-w-sm flex-col rounded-3xl border border-black/10 bg-white p-7 text-center shadow-sm">
-                                    <img
-                                        src={member.photo_url || pdaLogo}
-                                        alt={member.name}
-                                        className="mx-auto h-32 w-32 rounded-3xl border border-black/10 object-cover"
-                                    />
-                                    <p className="mt-4 text-[11px] uppercase tracking-[0.3em] text-slate-500">
-                                        {member.team}
-                                    </p>
-                                    {member.designation ? (
-                                        <div className="mt-2 flex justify-center">
-                                            <div className="inline-flex max-w-full items-center truncate rounded-full border border-[#f6c347]/60 bg-[#fff3c4] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.25em] text-[#7a5a00]">
-                                                {member.designation}
+                            <>
+                                <div
+                                    ref={teamScrollRef}
+                                    className="flex gap-6 overflow-x-auto pb-4 no-scrollbar snap-x snap-mandatory"
+                                >
+                                    {filteredTeamMembers.map((member) => (
+                                        <div key={member.regno} className="min-w-[260px] max-w-[280px] snap-start">
+                                            <div className="flex min-h-[420px] w-full flex-col rounded-3xl border border-black/10 bg-white p-7 text-center shadow-sm">
+                                            <img
+                                                src={member.photo_url || pdaLogo}
+                                                alt={member.name}
+                                                className="mx-auto h-32 w-32 rounded-3xl border border-black/10 object-cover"
+                                            />
+                                            <p className="mt-4 text-[11px] uppercase tracking-[0.3em] text-slate-500">
+                                                {member.team}
+                                            </p>
+                                            {member.designation ? (
+                                                <div className="mt-2 flex justify-center">
+                                                    <div className="inline-flex max-w-full items-center truncate rounded-full border border-[#f6c347]/60 bg-[#fff3c4] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.25em] text-[#7a5a00]">
+                                                        {member.designation}
+                                                    </div>
+                                                </div>
+                                            ) : null}
+                                            <h3 className="mt-2 text-xl font-heading font-bold">{member.name}</h3>
+                                            <p className="text-sm text-slate-600">{member.regno}</p>
+                                            {member.dept ? (
+                                                <p className="mt-2 text-xs uppercase tracking-[0.2em] text-slate-500">
+                                                    {member.dept}
+                                                </p>
+                                            ) : null}
+                                            <div className="mt-4 flex items-center justify-center gap-4 text-sm text-slate-600">
+                                                {member.instagram_url ? (
+                                                    <a
+                                                        href={member.instagram_url}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className="inline-flex items-center gap-2 text-[#b8890b] hover:text-[#0f1115]"
+                                                    >
+                                                        <Instagram className="h-4 w-4 text-[#f6c347]" />
+                                                        Instagram
+                                                    </a>
+                                                ) : null}
+                                                {member.linkedin_url ? (
+                                                    <a
+                                                        href={member.linkedin_url}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className="inline-flex items-center gap-2 text-[#b8890b] hover:text-[#0f1115]"
+                                                    >
+                                                        <Linkedin className="h-4 w-4 text-[#f6c347]" />
+                                                        LinkedIn
+                                                    </a>
+                                                ) : null}
                                             </div>
+                                            <span className="mt-auto" />
                                         </div>
-                                    ) : null}
-                                    <h3 className="mt-2 text-xl font-heading font-bold">{member.name}</h3>
-                                    <p className="text-sm text-slate-600">{member.regno}</p>
-                                    <div className="mt-4 flex items-center justify-center gap-4 text-sm text-slate-600">
-                                        {member.instagram_url ? (
-                                            <a
-                                                href={member.instagram_url}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                className="inline-flex items-center gap-2 text-[#b8890b] hover:text-[#0f1115]"
-                                            >
-                                                <Instagram className="h-4 w-4 text-[#f6c347]" />
-                                                Instagram
-                                            </a>
-                                        ) : null}
-                                        {member.linkedin_url ? (
-                                            <a
-                                                href={member.linkedin_url}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                className="inline-flex items-center gap-2 text-[#b8890b] hover:text-[#0f1115]"
-                                            >
-                                                <Linkedin className="h-4 w-4 text-[#f6c347]" />
-                                                LinkedIn
-                                            </a>
-                                        ) : null}
                                     </div>
+                                ))}
                                 </div>
-                            ))
+                                <div className="flex items-center justify-center gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => scrollByOffset(teamScrollRef, -280)}
+                                        className="rounded-full border border-[#c99612] bg-[#f6c347] p-2 text-[#11131a] hover:bg-[#ffd16b]"
+                                        aria-label="Previous team members"
+                                    >
+                                        <ChevronLeft className="h-4 w-4" />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => scrollByOffset(teamScrollRef, 280)}
+                                        className="rounded-full border border-[#c99612] bg-[#f6c347] p-2 text-[#11131a] hover:bg-[#ffd16b]"
+                                        aria-label="Next team members"
+                                    >
+                                        <ChevronRight className="h-4 w-4" />
+                                    </button>
+                                </div>
+                            </>
                         ) : (
-                            <div className="col-span-full rounded-2xl border border-black/10 bg-white p-6 text-center text-sm text-slate-600">
+                            <div className="rounded-2xl border border-black/10 bg-white p-6 text-center text-sm text-slate-600">
                                 Team updates are coming soon.
                             </div>
                         )}
