@@ -9,7 +9,7 @@ from datetime import datetime
 
 from database import get_db
 from models import PdaAdmin, PdaUser, PdaTeam, AdminLog, SystemConfig
-from schemas import PdaAdminCreate, PdaAdminPolicyUpdate, PdaUserResponse, AdminLogResponse
+from schemas import PdaAdminCreate, PdaAdminPolicyUpdate, PdaUserResponse, AdminLogResponse, RecruitmentApprovalItem
 from security import require_superadmin
 from auth import get_password_hash
 from utils import log_admin_action, _upload_bytes_to_s3
@@ -22,7 +22,7 @@ def _build_admin_response(db: Session, user: PdaUser) -> PdaUserResponse:
     team = db.query(PdaTeam).filter(PdaTeam.user_id == user.id).first()
     admin_row = db.query(PdaAdmin).filter(PdaAdmin.regno == user.regno).first()
     policy = admin_row.policy if admin_row else None
-    is_superadmin = bool(team and team.designation in {"Root", "Chairperson", "Vice Chairperson"})
+    is_superadmin = bool(admin_row and policy and policy.get("superAdmin"))
     return PdaUserResponse(
         id=user.id,
         regno=user.regno,
@@ -124,7 +124,11 @@ async def create_pda_admin(
     if existing_admin:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Admin already exists")
 
-    admin_row = PdaAdmin(regno=user.regno, hashed_password=get_password_hash(admin_data.password), policy={"home": True, "pf": False})
+    admin_row = PdaAdmin(
+        regno=user.regno,
+        hashed_password=get_password_hash(admin_data.password),
+        policy={"home": True, "pf": False, "superAdmin": False}
+    )
     db.add(admin_row)
     db.commit()
 
@@ -249,22 +253,36 @@ async def list_recruitments(
 
 @router.post("/pda-admin/recruitments/approve")
 async def approve_recruitments(
-    user_ids: List[int],
+    payload: List[object],
     superadmin: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db),
     request: Request = None
 ):
     approved = []
-    for user_id in user_ids:
+    for item in payload:
+        if isinstance(item, int):
+            user_id = item
+            assigned_team = None
+            assigned_designation = None
+        else:
+            try:
+                parsed = RecruitmentApprovalItem.model_validate(item)
+            except Exception:
+                continue
+            user_id = parsed.id
+            assigned_team = parsed.team
+            assigned_designation = parsed.designation
+
         user = db.query(PdaUser).filter(PdaUser.id == user_id).first()
         if not user or user.is_member:
             continue
         preferred_team = None
         if isinstance(user.json_content, dict):
             preferred_team = user.json_content.get("preferred_team")
-        if not preferred_team:
+        team_to_assign = assigned_team or preferred_team
+        if not team_to_assign:
             continue
-        if preferred_team == "Executive":
+        if team_to_assign == "Executive" and assigned_designation not in {"Chairperson", "Vice Chairperson", "General Secretary", "Treasurer"}:
             continue
         new_team = PdaTeam(
             user_id=user.id,
@@ -273,8 +291,8 @@ async def approve_recruitments(
             email=user.email,
             phno=user.phno,
             dept=user.dept,
-            team=preferred_team,
-            designation="Member"
+            team=team_to_assign,
+            designation=assigned_designation or "Member"
         )
         db.add(new_team)
         user.is_member = True

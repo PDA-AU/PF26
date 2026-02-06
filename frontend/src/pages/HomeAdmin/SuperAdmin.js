@@ -240,6 +240,14 @@ export default function SuperAdmin() {
                                         />
                                         Persofest
                                     </label>
+                                    <label className="flex items-center gap-2 text-sm">
+                                        <input
+                                            type="checkbox"
+                                            checked={admin.policy?.superAdmin || false}
+                                            onChange={(e) => updatePolicy(admin.id, { ...admin.policy, superAdmin: e.target.checked })}
+                                        />
+                                        SuperAdmin
+                                    </label>
                                     <Button variant="outline" className="border-black/10" onClick={() => deleteAdmin(admin.id)}>
                                         Remove
                                     </Button>

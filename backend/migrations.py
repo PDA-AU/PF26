@@ -121,6 +121,12 @@ def ensure_pda_team_columns(engine):
             conn.execute(text("ALTER TABLE pda_team DROP COLUMN team_designation"))
 
 
+def ensure_pda_items_columns(engine):
+    with engine.begin() as conn:
+        if _table_exists(conn, "pda_items") and not _column_exists(conn, "pda_items", "featured_poster_url"):
+            conn.execute(text("ALTER TABLE pda_items ADD COLUMN featured_poster_url VARCHAR(500)"))
+
+
 def ensure_pda_team_constraints(engine):
     with engine.begin() as conn:
         if not _table_exists(conn, "pda_team"):

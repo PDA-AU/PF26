@@ -49,7 +49,7 @@ const ProtectedParticipantRoute = ({ children }) => {
     return children;
 };
 
-const ProtectedPdaRoute = ({ children, requirePf = false, requireHome = false }) => {
+const ProtectedPdaRoute = ({ children, requirePf = false, requireHome = false, requireSuperAdmin = false }) => {
     const { user, loading } = useAuth();
 
     if (loading) {
@@ -67,6 +67,9 @@ const ProtectedPdaRoute = ({ children, requirePf = false, requireHome = false })
             return <Navigate to="/persofest/admin" replace />;
         }
         return <Navigate to="/login" replace />;
+    }
+    if (requireSuperAdmin && !user.is_superadmin) {
+        return <Navigate to="/admin" replace />;
     }
     if (requirePf && !user.is_superadmin && !user.policy?.pf) {
         return <Navigate to="/persofest/admin" replace />;
@@ -131,7 +134,11 @@ function AppRoutes() {
             <Route path="/admin/items" element={<ItemsAdmin />} />
             <Route path="/admin/team" element={<TeamAdmin />} />
             <Route path="/admin/gallery" element={<GalleryAdmin />} />
-            <Route path="/admin/recruitments" element={<RecruitmentsAdmin />} />
+            <Route path="/admin/recruitments" element={
+                <ProtectedPdaRoute requireSuperAdmin>
+                    <RecruitmentsAdmin />
+                </ProtectedPdaRoute>
+            } />
             <Route path="/admin/logs" element={<LogsAdmin />} />
             <Route path="/admin/superadmin" element={<SuperAdmin />} />
             <Route path="/persofest" element={<PersofestHome />} />

@@ -15,6 +15,7 @@ from migrations import (
     ensure_pda_users_table,
     ensure_pda_users_dob_column,
     ensure_pda_team_columns,
+    ensure_pda_items_columns,
     ensure_pda_team_constraints,
     ensure_pda_gallery_tag_column,
     ensure_pda_admins_table,
@@ -65,6 +66,7 @@ async def startup_event():
     ensure_pda_users_table(engine)
     ensure_pda_users_dob_column(engine)
     ensure_pda_team_columns(engine)
+    ensure_pda_items_columns(engine)
     ensure_pda_team_constraints(engine)
     ensure_pda_gallery_tag_column(engine)
     drop_admin_logs_fk(engine)

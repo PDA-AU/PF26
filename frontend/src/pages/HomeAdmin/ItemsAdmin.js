@@ -15,6 +15,7 @@ const emptyItem = {
     description: '',
     tag: '',
     poster_url: '',
+    featured_poster_url: '',
     start_date: '',
     end_date: '',
     format: '',
@@ -29,6 +30,7 @@ export default function ItemsAdmin() {
     const [events, setEvents] = useState([]);
     const [itemForm, setItemForm] = useState(emptyItem);
     const [posterFile, setPosterFile] = useState(null);
+    const [featuredPosterFile, setFeaturedPosterFile] = useState(null);
     const [editingItem, setEditingItem] = useState(null);
     const [loading, setLoading] = useState(true);
     const [savingProgram, setSavingProgram] = useState(false);
@@ -69,6 +71,7 @@ export default function ItemsAdmin() {
         setItemForm(emptyItem);
         setEditingItem(null);
         setPosterFile(null);
+        setFeaturedPosterFile(null);
     };
 
     const submitItem = async (e) => {
@@ -81,10 +84,16 @@ export default function ItemsAdmin() {
             const processed = await compressImageToWebp(posterFile);
             posterUrl = await uploadPoster(processed, getAuthHeader);
         }
+        let featuredPosterUrl = itemForm.featured_poster_url.trim() || null;
+        if (featuredPosterFile) {
+            const processedFeatured = await compressImageToWebp(featuredPosterFile);
+            featuredPosterUrl = await uploadPoster(processedFeatured, getAuthHeader);
+        }
         const payload = {
             title: itemForm.title.trim(),
             description: itemForm.description.trim() || null,
             poster_url: posterUrl,
+            featured_poster_url: featuredPosterUrl,
             start_date: itemForm.start_date || null,
             end_date: itemForm.end_date || null,
             is_featured: itemForm.is_featured,
@@ -116,6 +125,7 @@ export default function ItemsAdmin() {
             description: program.description || '',
             tag: program.tag || '',
             poster_url: program.poster_url || '',
+            featured_poster_url: program.featured_poster_url || '',
             start_date: program.start_date || '',
             end_date: program.end_date || '',
             format: program.format || '',
@@ -125,6 +135,7 @@ export default function ItemsAdmin() {
         });
         setEditingItem({ id: program.id, type: 'program' });
         setPosterFile(null);
+        setFeaturedPosterFile(null);
     };
 
     const editEvent = (event) => {
@@ -136,6 +147,7 @@ export default function ItemsAdmin() {
             format: event.format || '',
             description: event.description || '',
             poster_url: event.poster_url || '',
+            featured_poster_url: event.featured_poster_url || '',
             hero_caption: event.hero_caption || '',
             hero_url: event.hero_url || '',
             tag: event.tag || '',
@@ -143,6 +155,7 @@ export default function ItemsAdmin() {
         });
         setEditingItem({ id: event.id, type: 'event' });
         setPosterFile(null);
+        setFeaturedPosterFile(null);
     };
 
     const deleteProgram = async (programId) => {
@@ -284,6 +297,16 @@ export default function ItemsAdmin() {
                         />
                     </div>
                     <div className="md:col-span-2">
+                        <Label htmlFor="item-featured-poster-url">Featured Poster URL (2:1)</Label>
+                        <Input
+                            id="item-featured-poster-url"
+                            name="featured_poster_url"
+                            value={itemForm.featured_poster_url}
+                            onChange={handleItemChange}
+                            placeholder="https://..."
+                        />
+                    </div>
+                    <div className="md:col-span-2">
                         <Label htmlFor="item-poster-file">Or Upload Poster</Label>
                         <Input
                             id="item-poster-file"
@@ -291,6 +314,16 @@ export default function ItemsAdmin() {
                             type="file"
                             accept="image/png,image/jpeg,image/webp"
                             onChange={(e) => setPosterFile(e.target.files?.[0] || null)}
+                        />
+                    </div>
+                    <div className="md:col-span-2">
+                        <Label htmlFor="item-featured-poster-file">Or Upload Featured Poster (2:1)</Label>
+                        <Input
+                            id="item-featured-poster-file"
+                            name="featured_poster_file"
+                            type="file"
+                            accept="image/png,image/jpeg,image/webp"
+                            onChange={(e) => setFeaturedPosterFile(e.target.files?.[0] || null)}
                         />
                     </div>
                     <div className="md:col-span-2">

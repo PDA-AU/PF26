@@ -253,9 +253,11 @@ export default function PdaHome() {
 
     const renderCard = (item, type) => {
         const meta = buildCardMeta(item);
+        const cardKey = `${type}-${item.id || item.title}`;
+        const description = item.description || '';
         return (
             <button
-                key={`${type}-${item.id || item.title}`}
+                key={cardKey}
                 type="button"
                 onClick={() =>
                     openPoster({
@@ -273,7 +275,7 @@ export default function PdaHome() {
                         src={item.poster_url}
                         alt={item.title}
                         loading="lazy"
-                        className="mb-4 h-40 w-full rounded-xl object-cover"
+                        className="mb-4 aspect-[4/5] w-full rounded-xl object-cover"
                     />
                 ) : null}
                 {meta ? (
@@ -283,7 +285,11 @@ export default function PdaHome() {
                     </div>
                 ) : null}
                 <h3 className="mt-4 text-xl font-heading font-bold line-clamp-2">{item.title}</h3>
-                <p className="mt-2 text-sm text-slate-700 line-clamp-3">{item.description}</p>
+                {description ? (
+                    <div className="mt-2 max-h-24 overflow-y-auto pr-2 text-sm text-slate-700">
+                        {description}
+                    </div>
+                ) : null}
                 <span className="mt-auto" />
             </button>
         );
@@ -393,12 +399,12 @@ export default function PdaHome() {
                                 ) : null}
                             </div>
                             <div className={`flex items-center justify-center transition-opacity duration-700 ease-in-out ${isFeaturedFading ? 'opacity-0' : 'opacity-100'}`}>
-                                {featuredEvents[activeFeaturedIndex]?.poster_url ? (
+                                {featuredEvents[activeFeaturedIndex]?.featured_poster_url || featuredEvents[activeFeaturedIndex]?.poster_url ? (
                                     <button
                                         type="button"
                                         onClick={() =>
                                             openPoster({
-                                                src: featuredEvents[activeFeaturedIndex]?.poster_url,
+                                                src: featuredEvents[activeFeaturedIndex]?.featured_poster_url || featuredEvents[activeFeaturedIndex]?.poster_url,
                                                 title: featuredEvents[activeFeaturedIndex]?.title,
                                                 meta: `${formatDateRange(featuredEvents[activeFeaturedIndex])}${
                                                     featuredEvents[activeFeaturedIndex]?.format ? ` · ${featuredEvents[activeFeaturedIndex]?.format}` : ''
@@ -408,13 +414,13 @@ export default function PdaHome() {
                                         className="w-full"
                                     >
                                         <img
-                                            src={featuredEvents[activeFeaturedIndex]?.poster_url}
+                                            src={featuredEvents[activeFeaturedIndex]?.featured_poster_url || featuredEvents[activeFeaturedIndex]?.poster_url}
                                             alt={featuredEvents[activeFeaturedIndex]?.title}
-                                            className="h-56 w-full rounded-2xl border border-black/10 object-cover md:h-[260px]"
+                                            className="aspect-[2/1] w-full rounded-2xl border border-black/10 object-cover"
                                         />
                                     </button>
                                 ) : (
-                                    <div className="flex h-56 w-full items-center justify-center rounded-2xl border border-dashed border-black/20 bg-white text-sm text-slate-500 md:h-[260px]">
+                                    <div className="flex aspect-[2/1] w-full items-center justify-center rounded-2xl border border-dashed border-black/20 bg-white text-sm text-slate-500">
                                         Poster coming soon
                                     </div>
                                 )}

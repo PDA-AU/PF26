@@ -6,14 +6,12 @@ from database import get_db
 from auth import get_current_pda_user, get_current_participant
 from models import PdaUser, PdaAdmin, PdaTeam
 
-SUPERADMIN_DESIG = {"Root", "Chairperson", "Vice Chairperson"}
-
 
 def _get_team_and_policy(db: Session, user: PdaUser):
     team = db.query(PdaTeam).filter(PdaTeam.user_id == user.id).first()
-    is_superadmin = bool(team and team.designation in SUPERADMIN_DESIG)
     admin_row = db.query(PdaAdmin).filter(PdaAdmin.regno == user.regno).first()
     policy: Optional[Dict[str, bool]] = admin_row.policy if admin_row else None
+    is_superadmin = bool(admin_row and policy and policy.get("superAdmin"))
     return team, admin_row, policy, is_superadmin
 
 
@@ -52,8 +50,8 @@ def require_superadmin(
     user: PdaUser = Depends(get_current_pda_user),
     db: Session = Depends(get_db)
 ) -> PdaUser:
-    team = db.query(PdaTeam).filter(PdaTeam.user_id == user.id).first()
-    if not team or team.designation not in SUPERADMIN_DESIG:
+    _, admin_row, policy, is_superadmin = _get_team_and_policy(db, user)
+    if not admin_row or not policy or not is_superadmin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superadmin access required")
     return user
 

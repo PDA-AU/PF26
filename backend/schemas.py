@@ -427,6 +427,7 @@ class ProgramCreate(BaseModel):
     format: Optional[str] = None
     hero_caption: Optional[str] = None
     hero_url: Optional[str] = None
+    featured_poster_url: Optional[str] = None
     is_featured: bool = False
 
 
@@ -440,6 +441,7 @@ class ProgramUpdate(BaseModel):
     format: Optional[str] = None
     hero_caption: Optional[str] = None
     hero_url: Optional[str] = None
+    featured_poster_url: Optional[str] = None
     is_featured: Optional[bool] = None
 
 
@@ -455,6 +457,7 @@ class ProgramResponse(BaseModel):
     format: Optional[str] = None
     hero_caption: Optional[str] = None
     hero_url: Optional[str] = None
+    featured_poster_url: Optional[str] = None
     is_featured: bool
     created_at: datetime
 
@@ -471,6 +474,7 @@ class EventCreate(BaseModel):
     poster_url: Optional[str] = None
     hero_caption: Optional[str] = None
     hero_url: Optional[str] = None
+    featured_poster_url: Optional[str] = None
     is_featured: bool = False
 
 
@@ -483,6 +487,7 @@ class EventUpdate(BaseModel):
     poster_url: Optional[str] = None
     hero_caption: Optional[str] = None
     hero_url: Optional[str] = None
+    featured_poster_url: Optional[str] = None
     is_featured: Optional[bool] = None
 
 
@@ -497,6 +502,7 @@ class EventResponse(BaseModel):
     poster_url: Optional[str]
     hero_caption: Optional[str]
     hero_url: Optional[str]
+    featured_poster_url: Optional[str]
     is_featured: bool
     created_at: datetime
 
@@ -599,6 +605,12 @@ class PdaGalleryResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class RecruitmentApprovalItem(BaseModel):
+    id: int
+    team: Optional["PdaTeamName"] = None
+    designation: Optional["PdaTeamDesignation"] = None
 
 
 # Top Referrers

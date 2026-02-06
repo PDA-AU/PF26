@@ -189,6 +189,7 @@ class PdaItem(Base):
     format = Column(String(150), nullable=True)
     hero_caption = Column(Text, nullable=True)
     hero_url = Column(String(500), nullable=True)
+    featured_poster_url = Column(String(500), nullable=True)
     is_featured = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
