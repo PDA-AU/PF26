@@ -5,7 +5,7 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import { 
     Users, Calendar, Trophy, LogOut, Sparkles, LayoutDashboard, ListChecks,
-    UserCheck, UserX, PauseCircle, PlayCircle, Download, BarChart3, 
+    PauseCircle, PlayCircle, Download, BarChart3, 
     TrendingUp, Settings
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -15,13 +15,15 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 export default function AdminDashboard() {
     const navigate = useNavigate();
     const { user, logout, getAuthHeader } = useAuth();
-    const isSuperAdmin = user?.register_number === '0000000000';
+    const isSuperAdmin = user?.is_superadmin;
     const [stats, setStats] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [topMales, setTopMales] = useState([]);
+    const [topFemales, setTopFemales] = useState([]);
 
     const fetchDashboardStats = useCallback(async () => {
         try {
-            const response = await axios.get(`${API}/admin/dashboard`, {
+            const response = await axios.get(`${API}/persofest/admin/dashboard`, {
                 headers: getAuthHeader()
             });
             setStats(response.data);
@@ -37,9 +39,29 @@ export default function AdminDashboard() {
         fetchDashboardStats();
     }, [fetchDashboardStats]);
 
+    const fetchTopByGender = useCallback(async (genderValue, setter) => {
+        try {
+            const params = new URLSearchParams();
+            params.append('page', '1');
+            params.append('page_size', '3');
+            params.append('gender', genderValue);
+            const response = await axios.get(`${API}/persofest/admin/leaderboard?${params.toString()}`, {
+                headers: getAuthHeader()
+            });
+            setter(response.data || []);
+        } catch (error) {
+            toast.error(`Failed to load top ${genderValue.toLowerCase()} leaderboard`);
+        }
+    }, [getAuthHeader]);
+
+    useEffect(() => {
+        fetchTopByGender('Male', setTopMales);
+        fetchTopByGender('Female', setTopFemales);
+    }, [fetchTopByGender]);
+
     const toggleRegistration = async () => {
         try {
-            const response = await axios.post(`${API}/admin/toggle-registration`, {}, {
+            const response = await axios.post(`${API}/persofest/admin/toggle-registration`, {}, {
                 headers: getAuthHeader()
             });
             setStats(prev => ({ ...prev, registration_open: response.data.registration_open }));
@@ -57,7 +79,7 @@ export default function AdminDashboard() {
 
     const handleExport = async (type, format) => {
         try {
-            const response = await axios.get(`${API}/admin/export/${type}?format=${format}`, {
+            const response = await axios.get(`${API}/persofest/admin/export/${type}?format=${format}`, {
                 headers: getAuthHeader(),
                 responseType: 'blob'
             });
@@ -123,24 +145,24 @@ export default function AdminDashboard() {
             <nav className="bg-white border-b-2 border-black">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="flex gap-1 sm:gap-1">
-                        <Link to="/admin" aria-label="Dashboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm border-b-4 border-primary bg-secondary">
+                        <Link to="/persofest/admin" aria-label="Dashboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm border-b-4 border-primary bg-secondary">
                             <LayoutDashboard className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                             <span className="hidden sm:inline">Dashboard</span>
                         </Link>
-                        <Link to="/admin/rounds" aria-label="Rounds" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
+                        <Link to="/persofest/admin/rounds" aria-label="Rounds" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
                             <Calendar className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                             <span className="hidden sm:inline">Rounds</span>
                         </Link>
-                        <Link to="/admin/participants" aria-label="Participants" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
+                        <Link to="/persofest/admin/participants" aria-label="Participants" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
                             <Users className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                             <span className="hidden sm:inline">Participants</span>
                         </Link>
-                        <Link to="/admin/leaderboard" aria-label="Leaderboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
+                        <Link to="/persofest/admin/leaderboard" aria-label="Leaderboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
                             <Trophy className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                             <span className="hidden sm:inline">Leaderboard</span>
                         </Link>
                         {isSuperAdmin && (
-                            <Link to="/admin/logs" aria-label="Logs" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
+                            <Link to="/persofest/admin/logs" aria-label="Logs" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
                                 <ListChecks className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                                 <span className="hidden sm:inline">Logs</span>
                             </Link>
@@ -300,6 +322,75 @@ export default function AdminDashboard() {
                         ))}
                     </div>
                 </div>
+
+                {/* Top 3 by Gender */}
+                <div className="grid md:grid-cols-2 gap-6 mt-8">
+                    <div className="neo-card">
+                        <h3 className="font-heading font-bold text-base sm:text-lg mb-4 flex items-center gap-2">
+                            <Trophy className="w-4 h-4 sm:w-5 sm:h-5" /> Top 3 Mr. Persofest
+                        </h3>
+                        <div className="flex gap-3 overflow-x-auto pb-2">
+                            {topMales.length === 0 ? (
+                                <div className="text-sm text-gray-500">No data</div>
+                            ) : (
+                                topMales.map((entry, idx) => (
+                                    <div key={entry.participant_id} className="min-w-[180px] bg-muted border-2 border-black px-3 py-3">
+                                        <div className="text-xs text-gray-500 font-bold">#{idx + 1}</div>
+                                        <div className="font-bold text-sm truncate">{entry.name}</div>
+                                        <div className="text-xs text-gray-600">{entry.register_number}</div>
+                                        <div className="mt-2 inline-block bg-primary text-white px-2 py-1 border-2 border-black text-xs font-bold">
+                                            {entry.cumulative_score?.toFixed(2)}
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                    <div className="neo-card">
+                        <h3 className="font-heading font-bold text-base sm:text-lg mb-4 flex items-center gap-2">
+                            <Trophy className="w-4 h-4 sm:w-5 sm:h-5" /> Top 3 Ms. Persofest
+                        </h3>
+                        <div className="flex gap-3 overflow-x-auto pb-2">
+                            {topFemales.length === 0 ? (
+                                <div className="text-sm text-gray-500">No data</div>
+                            ) : (
+                                topFemales.map((entry, idx) => (
+                                    <div key={entry.participant_id} className="min-w-[180px] bg-muted border-2 border-black px-3 py-3">
+                                        <div className="text-xs text-gray-500 font-bold">#{idx + 1}</div>
+                                        <div className="font-bold text-sm truncate">{entry.name}</div>
+                                        <div className="text-xs text-gray-600">{entry.register_number}</div>
+                                        <div className="mt-2 inline-block bg-primary text-white px-2 py-1 border-2 border-black text-xs font-bold">
+                                            {entry.cumulative_score?.toFixed(2)}
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Active Leaderboard Stats */}
+                <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mt-8">
+                    <div className="stat-card">
+                        <div className="stat-value text-primary">
+                            {stats?.leaderboard_min_score != null ? stats.leaderboard_min_score.toFixed(2) : '—'}
+                        </div>
+                        <div className="stat-label">Active Min Score</div>
+                    </div>
+                    <div className="stat-card">
+                        <div className="stat-value text-primary">
+                            {stats?.leaderboard_max_score != null ? stats.leaderboard_max_score.toFixed(2) : '—'}
+                        </div>
+                        <div className="stat-label">Active Max Score</div>
+                    </div>
+                    <div className="stat-card">
+                        <div className="stat-value text-primary">
+                            {stats?.leaderboard_avg_score != null ? stats.leaderboard_avg_score.toFixed(2) : '—'}
+                        </div>
+                        <div className="stat-label">Active Avg Score</div>
+                    </div>
+                </div>
+
             </main>
         </div>
     );

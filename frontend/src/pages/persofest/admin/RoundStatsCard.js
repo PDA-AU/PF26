@@ -81,10 +81,7 @@ export default function RoundStatsCard({ statsState }) {
                             <div className="text-[11px] text-gray-500 uppercase">Absent</div>
                             <div className="font-bold text-sm">{absentCount}</div>
                         </div>
-                        <div className="border-2 border-black bg-muted px-2 py-2">
-                            <div className="text-[11px] text-gray-500 uppercase">Top 10</div>
-                            <div className="font-bold text-sm">{top10Count}</div>
-                        </div>
+                        
                     </div>
                     <div className="border-2 border-black">
                         <div className="bg-secondary border-b-2 border-black px-2 py-1 text-xs font-bold uppercase">Top 10</div>

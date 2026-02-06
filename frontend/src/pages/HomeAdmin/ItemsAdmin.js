@@ -23,7 +23,7 @@ const emptyItem = {
 };
 
 export default function ItemsAdmin() {
-    const { isAdmin, getAuthHeader } = useAuth();
+    const { canAccessHome, getAuthHeader } = useAuth();
     const [programs, setPrograms] = useState([]);
     const [events, setEvents] = useState([]);
     const [itemForm, setItemForm] = useState(emptyItem);
@@ -51,10 +51,10 @@ export default function ItemsAdmin() {
     };
 
     useEffect(() => {
-        if (isAdmin) {
+        if (canAccessHome) {
             fetchData();
         }
-    }, [isAdmin]);
+    }, [canAccessHome]);
 
     const handleItemChange = (e) => {
         const { name, value, type, checked } = e.target;

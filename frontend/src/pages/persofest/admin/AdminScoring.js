@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import axios from 'axios';
@@ -6,7 +6,6 @@ import { toast } from 'sonner';
 import { Save, Lock, ArrowLeft, Search, LogOut, Sparkles, LayoutDashboard, Calendar, Users, Trophy, AlertTriangle, Upload, Download, FileSpreadsheet, ListChecks } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -23,10 +22,12 @@ export default function AdminScoring() {
     const [saving, setSaving] = useState(false);
     const [importing, setImporting] = useState(false);
     const [search, setSearch] = useState('');
+    const [statusFilter, setStatusFilter] = useState('all');
+    const [presenceFilter, setPresenceFilter] = useState('all');
+    const [sortBy, setSortBy] = useState('register_asc');
     const [freezeDialogOpen, setFreezeDialogOpen] = useState(false);
-    const [eliminationConfig, setEliminationConfig] = useState({ type: 'top_k', value: 10 });
     const fileInputRef = useRef(null);
-    const isSuperAdmin = user?.register_number === '0000000000';
+    const isSuperAdmin = user?.is_superadmin;
 
     const roundRankMap = (() => {
         const map = {};
@@ -36,23 +37,73 @@ export default function AdminScoring() {
             .slice()
             .sort((a, b) => (Number(b.normalized_score || 0) - Number(a.normalized_score || 0)));
         scored.forEach((p, idx) => {
-            map[p.id] = idx + 1;
+            const pid = p.participant_id ?? p.id;
+            if (pid != null) map[pid] = idx + 1;
         });
         return map;
     })();
 
+    const getTotalScore = useCallback((participant) => {
+        return (round?.evaluation_criteria || []).reduce((sum, c) => {
+            const parsed = Number.parseFloat(participant?.criteria_scores?.[c.name]);
+            return sum + (Number.isNaN(parsed) ? 0 : parsed);
+        }, 0);
+    }, [round]);
+
+    const displayedParticipants = useMemo(() => {
+        const filtered = participants.filter((p) => {
+            if (statusFilter !== 'all') {
+                if (statusFilter === 'active' && p.participant_status !== 'Active') return false;
+                if (statusFilter === 'eliminated' && p.participant_status !== 'Eliminated') return false;
+            }
+            if (presenceFilter !== 'all') {
+                if (presenceFilter === 'present' && !p.is_present) return false;
+                if (presenceFilter === 'absent' && p.is_present) return false;
+            }
+            return true;
+        });
+
+        const sorted = filtered.slice().sort((a, b) => {
+            const regA = String(a.participant_register_number || a.register_number || '');
+            const regB = String(b.participant_register_number || b.register_number || '');
+            const nameA = String(a.participant_name || a.name || '');
+            const nameB = String(b.participant_name || b.name || '');
+            const scoreA = getTotalScore(a);
+            const scoreB = getTotalScore(b);
+            const rankA = Number(roundRankMap[a.participant_id ?? a.id] || Number.MAX_SAFE_INTEGER);
+            const rankB = Number(roundRankMap[b.participant_id ?? b.id] || Number.MAX_SAFE_INTEGER);
+
+            switch (sortBy) {
+                case 'register_desc':
+                    return regB.localeCompare(regA, undefined, { numeric: true, sensitivity: 'base' });
+                case 'name_asc':
+                    return nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
+                case 'name_desc':
+                    return nameB.localeCompare(nameA, undefined, { sensitivity: 'base' });
+                case 'score_desc':
+                    return scoreB - scoreA;
+                case 'score_asc':
+                    return scoreA - scoreB;
+                case 'rank_asc':
+                    return rankA - rankB;
+                case 'register_asc':
+                default:
+                    return regA.localeCompare(regB, undefined, { numeric: true, sensitivity: 'base' });
+            }
+        });
+
+        return sorted;
+    }, [participants, statusFilter, presenceFilter, sortBy, getTotalScore, roundRankMap]);
+
     const fetchRoundData = useCallback(async () => {
         try {
             const [roundRes, participantsRes] = await Promise.all([
-                axios.get(`${API}/admin/rounds`, { headers: getAuthHeader() }),
-                axios.get(`${API}/admin/rounds/${roundId}/participants${search ? `?search=${search}` : ''}`, { headers: getAuthHeader() })
+                axios.get(`${API}/persofest/admin/rounds`, { headers: getAuthHeader() }),
+                axios.get(`${API}/persofest/admin/rounds/${roundId}/participants${search ? `?search=${search}` : ''}`, { headers: getAuthHeader() })
             ]);
             const currentRound = roundRes.data.find(r => r.id === parseInt(roundId));
             setRound(currentRound);
             setParticipants(participantsRes.data);
-            if (currentRound?.elimination_type) {
-                setEliminationConfig({ type: currentRound.elimination_type, value: currentRound.elimination_value || 10 });
-            }
         } catch (error) {
             toast.error('Failed to load round data');
         } finally {
@@ -64,7 +115,7 @@ export default function AdminScoring() {
 
     const handleSearch = async () => {
         try {
-            const response = await axios.get(`${API}/admin/rounds/${roundId}/participants?search=${search}`, { headers: getAuthHeader() });
+            const response = await axios.get(`${API}/persofest/admin/rounds/${roundId}/participants?search=${search}`, { headers: getAuthHeader() });
             setParticipants(response.data);
         } catch (error) {
             toast.error('Search failed');
@@ -72,28 +123,68 @@ export default function AdminScoring() {
     };
 
     const handlePresenceChange = (participantId, isPresent) => {
-        setParticipants(prev => prev.map(p => p.id === participantId ? { ...p, is_present: isPresent } : p));
+        const present = isPresent === true;
+        setParticipants(prev => prev.map((p) => {
+            const pid = p.participant_id ?? p.id;
+            if (pid !== participantId) return p;
+
+            // When marked absent, wipe all criteria scores immediately in UI.
+            if (!present) {
+                const zeroed = Object.fromEntries(
+                    (round?.evaluation_criteria || []).map((c) => [c.name, 0])
+                );
+                return { ...p, is_present: false, criteria_scores: zeroed };
+            }
+
+            return { ...p, is_present: true };
+        }));
     };
 
     const handleScoreChange = (participantId, criteriaName, value) => {
-        setParticipants(prev => prev.map(p => {
-            if (p.id === participantId) {
-                const criteria_scores = { ...p.criteria_scores, [criteriaName]: parseFloat(value) || 0 };
+        if (!/^$|^\d*\.?\d*$/.test(value)) return;
+        setParticipants(prev => prev.map((p) => {
+            const pid = p.participant_id ?? p.id;
+            if (pid === participantId) {
+                const criteria_scores = { ...p.criteria_scores, [criteriaName]: value };
                 return { ...p, criteria_scores };
             }
             return p;
         }));
     };
 
+    const handleScoreBlur = (participantId, criteriaName) => {
+        const maxMarks = Number((round?.evaluation_criteria || []).find((c) => c.name === criteriaName)?.max_marks ?? 100);
+        setParticipants((prev) => prev.map((p) => {
+            const pid = p.participant_id ?? p.id;
+            if (pid !== participantId) return p;
+            const raw = p.criteria_scores?.[criteriaName];
+            const parsed = Number.parseFloat(raw);
+            const clamped = Number.isNaN(parsed) ? 0 : Math.min(Math.max(parsed, 0), maxMarks);
+            return {
+                ...p,
+                criteria_scores: { ...p.criteria_scores, [criteriaName]: clamped }
+            };
+        }));
+    };
+
     const saveScores = async () => {
         setSaving(true);
         try {
-            const scores = participants.map(p => ({
-                participant_id: p.id,
-                criteria_scores: p.criteria_scores || {},
-                is_present: p.is_present
-            }));
-            await axios.post(`${API}/admin/rounds/${roundId}/scores`, scores, { headers: getAuthHeader() });
+            const maxByCriteria = Object.fromEntries((criteria || []).map((c) => [c.name, Number(c.max_marks || 0)]));
+            const scores = participants
+                .map(p => ({
+                participant_id: p.participant_id ?? p.id,
+                criteria_scores: Object.keys(maxByCriteria).reduce((acc, cname) => {
+                    const max = maxByCriteria[cname];
+                    const parsed = Number.parseFloat(p.criteria_scores?.[cname]);
+                    const safe = Number.isNaN(parsed) ? 0 : Math.min(Math.max(parsed, 0), max);
+                    acc[cname] = safe;
+                    return acc;
+                }, {}),
+                is_present: Boolean(p.is_present)
+            }))
+                .filter((row) => row.participant_id != null);
+            await axios.post(`${API}/persofest/admin/rounds/${roundId}/scores`, scores, { headers: getAuthHeader() });
             toast.success('Scores saved successfully');
             fetchRoundData();
         } catch (error) {
@@ -105,7 +196,7 @@ export default function AdminScoring() {
 
     const downloadTemplate = async () => {
         try {
-            const response = await axios.get(`${API}/admin/rounds/${roundId}/score-template`, {
+            const response = await axios.get(`${API}/persofest/admin/rounds/${roundId}/score-template`, {
                 headers: getAuthHeader(),
                 responseType: 'blob'
             });
@@ -131,7 +222,7 @@ export default function AdminScoring() {
         formData.append('file', file);
 
         try {
-            const response = await axios.post(`${API}/admin/rounds/${roundId}/import-scores`, formData, {
+            const response = await axios.post(`${API}/persofest/admin/rounds/${roundId}/import-scores`, formData, {
                 headers: { ...getAuthHeader(), 'Content-Type': 'multipart/form-data' }
             });
             toast.success(response.data.message);
@@ -147,14 +238,30 @@ export default function AdminScoring() {
         }
     };
 
+    const exportRoundEvaluation = async () => {
+        try {
+            const response = await axios.get(`${API}/persofest/admin/export/round/${roundId}?format=xlsx`, {
+                headers: getAuthHeader(),
+                responseType: 'blob'
+            });
+            const url = window.URL.createObjectURL(new Blob([response.data]));
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `${round?.round_no || 'round'}_evaluation.xlsx`);
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(url);
+            toast.success('Round evaluation exported');
+        } catch (error) {
+            toast.error('Failed to export round evaluation');
+        }
+    };
+
     const freezeRound = async () => {
         try {
-            await axios.put(`${API}/admin/rounds/${roundId}`, {
-                elimination_type: eliminationConfig.type,
-                elimination_value: eliminationConfig.value
-            }, { headers: getAuthHeader() });
-            await axios.post(`${API}/admin/rounds/${roundId}/freeze`, {}, { headers: getAuthHeader() });
-            toast.success('Round frozen and eliminations applied');
+            await axios.post(`${API}/persofest/admin/rounds/${roundId}/freeze`, {}, { headers: getAuthHeader() });
+            toast.success('Round frozen');
             setFreezeDialogOpen(false);
             fetchRoundData();
         } catch (error) {
@@ -164,7 +271,7 @@ export default function AdminScoring() {
 
     const unfreezeRound = async () => {
         try {
-            await axios.post(`${API}/admin/rounds/${roundId}/unfreeze`, {}, { headers: getAuthHeader() });
+            await axios.post(`${API}/persofest/admin/rounds/${roundId}/unfreeze`, {}, { headers: getAuthHeader() });
             toast.success('Round unfrozen');
             fetchRoundData();
         } catch (error) {
@@ -188,7 +295,7 @@ export default function AdminScoring() {
                 <div className="neo-card text-center">
                     <AlertTriangle className="w-16 h-16 mx-auto mb-4 text-red-500" />
                     <h2 className="font-heading font-bold text-xl mb-4">Round Not Found</h2>
-                    <Link to="/admin/rounds"><Button className="bg-primary text-white border-2 border-black shadow-neo"><ArrowLeft className="w-4 h-4 mr-2" /> Back</Button></Link>
+                    <Link to="/persofest/admin/rounds"><Button className="bg-primary text-white border-2 border-black shadow-neo"><ArrowLeft className="w-4 h-4 mr-2" /> Back</Button></Link>
                 </div>
             </div>
         );
@@ -220,24 +327,24 @@ export default function AdminScoring() {
             <nav className="bg-white border-b-2 border-black">
                 <div className="max-w-7xl mx-auto px-4">
                     <div className="flex gap-1 sm:gap-1">
-                        <Link to="/admin" aria-label="Dashboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm">
+                        <Link to="/persofest/admin" aria-label="Dashboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm">
                             <LayoutDashboard className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                             <span className="hidden sm:inline">Dashboard</span>
                         </Link>
-                        <Link to="/admin/rounds" aria-label="Rounds" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm border-b-4 border-primary bg-secondary">
+                        <Link to="/persofest/admin/rounds" aria-label="Rounds" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm border-b-4 border-primary bg-secondary">
                             <Calendar className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                             <span className="hidden sm:inline">Rounds</span>
                         </Link>
-                        <Link to="/admin/participants" aria-label="Participants" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm">
+                        <Link to="/persofest/admin/participants" aria-label="Participants" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm">
                             <Users className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                             <span className="hidden sm:inline">Participants</span>
                         </Link>
-                        <Link to="/admin/leaderboard" aria-label="Leaderboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm">
+                        <Link to="/persofest/admin/leaderboard" aria-label="Leaderboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm">
                             <Trophy className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                             <span className="hidden sm:inline">Leaderboard</span>
                         </Link>
                         {isSuperAdmin && (
-                            <Link to="/admin/logs" aria-label="Logs" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm">
+                            <Link to="/persofest/admin/logs" aria-label="Logs" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm">
                                 <ListChecks className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                                 <span className="hidden sm:inline">Logs</span>
                             </Link>
@@ -251,7 +358,7 @@ export default function AdminScoring() {
                 <div className="neo-card mb-6">
                     <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                         <div className="flex items-center gap-4">
-                            <Link to="/admin/rounds"><Button variant="outline" className="border-2 border-black"><ArrowLeft className="w-4 h-4" /></Button></Link>
+                            <Link to="/persofest/admin/rounds"><Button variant="outline" className="border-2 border-black"><ArrowLeft className="w-4 h-4" /></Button></Link>
                             <div>
                                 <div className="flex items-center gap-2">
                                     <span className="bg-primary text-white px-2 py-1 border-2 border-black font-bold text-sm">{round.round_no}</span>
@@ -287,24 +394,8 @@ export default function AdminScoring() {
                                         </DialogHeader>
                                         <div className="space-y-4">
                                             <p className="text-gray-600">
-                                                This action completes the round. You can unfreeze later, but eliminations are not reverted.
+                                                This action freezes scores for this round. Shortlisting is handled from the leaderboard.
                                             </p>
-                                            <div className="space-y-4 p-4 bg-muted border-2 border-black">
-                                                <div className="space-y-2">
-                                                    <Label className="font-bold">Elimination Rule</Label>
-                                                    <Select value={eliminationConfig.type} onValueChange={(v) => setEliminationConfig(prev => ({ ...prev, type: v }))}>
-                                                        <SelectTrigger className="neo-input"><SelectValue /></SelectTrigger>
-                                                        <SelectContent>
-                                                            <SelectItem value="top_k">Keep Top K</SelectItem>
-                                                            <SelectItem value="min_score">Minimum Score</SelectItem>
-                                                        </SelectContent>
-                                                    </Select>
-                                                </div>
-                                                <div className="space-y-2">
-                                                    <Label className="font-bold">{eliminationConfig.type === 'top_k' ? 'Keep top:' : 'Min score:'}</Label>
-                                                    <Input type="number" value={eliminationConfig.value} onChange={(e) => setEliminationConfig(prev => ({ ...prev, value: parseFloat(e.target.value) || 0 }))} className="neo-input" />
-                                                </div>
-                                            </div>
                                             <div className="flex gap-2">
                                                 <Button onClick={() => setFreezeDialogOpen(false)} variant="outline" className="flex-1 border-2 border-black">Cancel</Button>
                                                 <Button onClick={freezeRound} className="flex-1 bg-orange-500 text-white border-2 border-black"><Lock className="w-4 h-4 mr-2" /> Confirm</Button>
@@ -315,9 +406,14 @@ export default function AdminScoring() {
                             </div>
                         ) : (
                             <div className="flex flex-wrap gap-2">
-                                <Button onClick={unfreezeRound} className="bg-orange-500 text-white border-2 border-black shadow-neo">
-                                    <Lock className="w-4 h-4 mr-2" /> Unfreeze
+                                <Button onClick={exportRoundEvaluation} variant="outline" className="border-2 border-black shadow-neo">
+                                    <Download className="w-4 h-4 mr-2" /> Export Excel
                                 </Button>
+                                {isSuperAdmin && (
+                                    <Button onClick={unfreezeRound} className="bg-orange-500 text-white border-2 border-black shadow-neo">
+                                        <Lock className="w-4 h-4 mr-2" /> Unfreeze
+                                    </Button>
+                                )}
                             </div>
                         )}
                     </div>
@@ -338,20 +434,56 @@ export default function AdminScoring() {
 
                 {/* Search */}
                 <div className="neo-card mb-6">
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 mb-4">
                         <div className="relative flex-1">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                             <Input placeholder="Search..." value={search} onChange={(e) => setSearch(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSearch()} className="neo-input pl-10" />
                         </div>
                         <Button onClick={handleSearch} className="bg-primary text-white border-2 border-black shadow-neo">Search</Button>
                     </div>
+                    <div className="grid gap-3 sm:grid-cols-3">
+                        <Select value={statusFilter} onValueChange={setStatusFilter}>
+                            <SelectTrigger className="neo-input">
+                                <SelectValue placeholder="Filter by status" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All Status</SelectItem>
+                                <SelectItem value="active">Active</SelectItem>
+                                <SelectItem value="eliminated">Eliminated</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <Select value={presenceFilter} onValueChange={setPresenceFilter}>
+                            <SelectTrigger className="neo-input">
+                                <SelectValue placeholder="Filter by presence" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All Presence</SelectItem>
+                                <SelectItem value="present">Present</SelectItem>
+                                <SelectItem value="absent">Absent</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <Select value={sortBy} onValueChange={setSortBy}>
+                            <SelectTrigger className="neo-input">
+                                <SelectValue placeholder="Sort candidates" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="register_asc">Reg No (Asc)</SelectItem>
+                                <SelectItem value="register_desc">Reg No (Desc)</SelectItem>
+                                <SelectItem value="name_asc">Name (A-Z)</SelectItem>
+                                <SelectItem value="name_desc">Name (Z-A)</SelectItem>
+                                <SelectItem value="score_desc">Score (High-Low)</SelectItem>
+                                <SelectItem value="score_asc">Score (Low-High)</SelectItem>
+                                {round?.is_frozen ? <SelectItem value="rank_asc">Rank (Top-Down)</SelectItem> : null}
+                            </SelectContent>
+                        </Select>
+                    </div>
                 </div>
 
                 {/* Scoring Table */}
-                {participants.length === 0 ? (
+                {displayedParticipants.length === 0 ? (
                     <div className="neo-card text-center py-12">
                         <Users className="w-16 h-16 mx-auto mb-4 text-gray-400" />
-                        <h3 className="font-heading font-bold text-xl">No Participants</h3>
+                        <h3 className="font-heading font-bold text-xl">No Candidates Match Current Filters</h3>
                     </div>
                 ) : (
                     <div className="overflow-x-auto">
@@ -360,29 +492,46 @@ export default function AdminScoring() {
                                 <tr>
                                     <th>Register No</th>
                                     <th>Name</th>
+                                    <th>Round Status</th>
                                     <th>Present</th>
-                                    {criteria.map(c => <th key={c.name}>{c.name} (/{c.max_marks})</th>)}
+                                    {criteria.map((c, idx) => <th key={`${c.name}-${idx}`}>{c.name} (/{c.max_marks})</th>)}
                                     <th>Total</th>
                                     <th>Round Score</th>
                                     {round?.is_frozen && <th>Round Rank</th>}
                                 </tr>
                             </thead>
                             <tbody>
-                                {participants.map(p => {
-                                    const totalScore = criteria.reduce((sum, c) => sum + (p.criteria_scores?.[c.name] || 0), 0);
+                                {displayedParticipants.map(p => {
+                                    const rowKey = p.participant_id ?? p.id ?? p.participant_register_number;
+                                    const totalScore = getTotalScore(p);
                                     const maxScore = criteria.reduce((sum, c) => sum + c.max_marks, 0);
                                     const normalized = maxScore > 0 ? (totalScore / maxScore * 100).toFixed(2) : 0;
-                                    const roundRank = round?.is_frozen ? (roundRankMap[p.id] || '—') : null;
+                                    const roundRank = round?.is_frozen ? (roundRankMap[rowKey] || '—') : null;
+                                    const registerNumber = p.participant_register_number || p.register_number || '—';
+                                    const participantName = p.participant_name || p.name || '—';
+                                    const roundStatus = !p.is_present
+                                        ? 'Absent'
+                                        : (p.participant_status === 'Eliminated' ? 'Eliminated' : 'Active');
+                                    const roundStatusClass = roundStatus === 'Active'
+                                        ? 'bg-green-100 text-green-800 border-green-500'
+                                        : (roundStatus === 'Eliminated'
+                                            ? 'bg-red-100 text-red-800 border-red-500'
+                                            : 'bg-orange-100 text-orange-800 border-orange-500');
                                     return (
-                                        <tr key={p.id}>
-                                            <td className="font-mono font-bold">{p.register_number}</td>
-                                            <td className="font-medium">{p.name}</td>
+                                        <tr key={`${rowKey}-${registerNumber}`}>
+                                            <td className="font-mono font-bold">{registerNumber}</td>
+                                            <td className="font-medium">{participantName}</td>
                                             <td>
-                                                <Checkbox checked={p.is_present} onCheckedChange={(c) => handlePresenceChange(p.id, c)} disabled={round.is_frozen} className="border-2 border-black data-[state=checked]:bg-primary" />
+                                                <span className={`tag border-2 ${roundStatusClass}`}>
+                                                    {roundStatus}
+                                                </span>
                                             </td>
-                                            {criteria.map(c => (
-                                                <td key={c.name}>
-                                                    <Input type="number" value={p.criteria_scores?.[c.name] || ''} onChange={(e) => handleScoreChange(p.id, c.name, e.target.value)} disabled={round.is_frozen || !p.is_present} className="neo-input w-20" min={0} max={c.max_marks} />
+                                            <td>
+                                                <Checkbox checked={Boolean(p.is_present)} onCheckedChange={(c) => handlePresenceChange(rowKey, c)} disabled={round.is_frozen} className="border-2 border-black data-[state=checked]:bg-primary" />
+                                            </td>
+                                            {criteria.map((c, idx) => (
+                                                <td key={`${c.name}-${idx}`}>
+                                                    <Input type="number" value={p.criteria_scores?.[c.name] ?? ''} onChange={(e) => handleScoreChange(rowKey, c.name, e.target.value)} onBlur={() => handleScoreBlur(rowKey, c.name)} disabled={round.is_frozen || !p.is_present} className="neo-input w-20" min={0} max={c.max_marks} />
                                                 </td>
                                             ))}
                                             <td className="font-bold">{totalScore}</td>

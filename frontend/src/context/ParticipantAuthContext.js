@@ -1,22 +1,21 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 
-const AuthContext = createContext(null);
-
+const ParticipantAuthContext = createContext(null);
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-export const AuthProvider = ({ children }) => {
+export const ParticipantAuthProvider = ({ children }) => {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [accessToken, setAccessToken] = useState(localStorage.getItem('pdaAccessToken'));
-    const [refreshToken, setRefreshToken] = useState(localStorage.getItem('pdaRefreshToken'));
+    const [accessToken, setAccessToken] = useState(localStorage.getItem('participantAccessToken'));
+    const [refreshToken, setRefreshToken] = useState(localStorage.getItem('participantRefreshToken'));
 
     const logout = useCallback(() => {
         setUser(null);
         setAccessToken(null);
         setRefreshToken(null);
-        localStorage.removeItem('pdaAccessToken');
-        localStorage.removeItem('pdaRefreshToken');
+        localStorage.removeItem('participantAccessToken');
+        localStorage.removeItem('participantRefreshToken');
     }, []);
 
     const tryRefreshToken = useCallback(async () => {
@@ -25,14 +24,14 @@ export const AuthProvider = ({ children }) => {
             return;
         }
         try {
-            const response = await axios.post(`${API}/auth/refresh`, {
+            const response = await axios.post(`${API}/participant-auth/refresh`, {
                 refresh_token: refreshToken
             });
             const { access_token, refresh_token: newRefresh, user: userData } = response.data;
             setAccessToken(access_token);
             setRefreshToken(newRefresh);
-            localStorage.setItem('pdaAccessToken', access_token);
-            localStorage.setItem('pdaRefreshToken', newRefresh);
+            localStorage.setItem('participantAccessToken', access_token);
+            localStorage.setItem('participantRefreshToken', newRefresh);
             setUser(userData);
         } catch (error) {
             console.error('Token refresh failed:', error);
@@ -42,12 +41,12 @@ export const AuthProvider = ({ children }) => {
 
     const fetchUser = useCallback(async () => {
         try {
-            const response = await axios.get(`${API}/me`, {
+            const response = await axios.get(`${API}/participant/me`, {
                 headers: { Authorization: `Bearer ${accessToken}` }
             });
             setUser(response.data);
         } catch (error) {
-            console.error('Failed to fetch user:', error);
+            console.error('Failed to fetch participant:', error);
             if (error.response?.status === 401) {
                 await tryRefreshToken();
             }
@@ -65,26 +64,26 @@ export const AuthProvider = ({ children }) => {
     }, [accessToken, fetchUser]);
 
     const login = async (registerNumber, password) => {
-        const response = await axios.post(`${API}/auth/login`, {
-            regno: registerNumber,
+        const response = await axios.post(`${API}/participant-auth/login`, {
+            register_number: registerNumber,
             password: password
         });
         const { access_token, refresh_token, user: userData } = response.data;
         setAccessToken(access_token);
         setRefreshToken(refresh_token);
-            localStorage.setItem('pdaAccessToken', access_token);
-            localStorage.setItem('pdaRefreshToken', refresh_token);
+        localStorage.setItem('participantAccessToken', access_token);
+        localStorage.setItem('participantRefreshToken', refresh_token);
         setUser(userData);
         return userData;
     };
 
     const register = async (userData) => {
-        const response = await axios.post(`${API}/auth/register`, userData);
+        const response = await axios.post(`${API}/participant-auth/register`, userData);
         const { access_token, refresh_token, user: newUser } = response.data;
         setAccessToken(access_token);
         setRefreshToken(refresh_token);
-            localStorage.setItem('pdaAccessToken', access_token);
-            localStorage.setItem('pdaRefreshToken', refresh_token);
+        localStorage.setItem('participantAccessToken', access_token);
+        localStorage.setItem('participantRefreshToken', refresh_token);
         setUser(newUser);
         return newUser;
     };
@@ -97,14 +96,8 @@ export const AuthProvider = ({ children }) => {
         return accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
     };
 
-    const isSuperAdmin = user?.is_superadmin;
-    const isAdmin = user?.is_admin || isSuperAdmin;
-    const canAccessHome = isSuperAdmin || user?.policy?.home;
-    const canAccessPf = isSuperAdmin || user?.policy?.pf;
-    const isParticipant = false;
-
     return (
-        <AuthContext.Provider value={{
+        <ParticipantAuthContext.Provider value={{
             user,
             loading,
             login,
@@ -112,22 +105,17 @@ export const AuthProvider = ({ children }) => {
             logout,
             updateUser,
             getAuthHeader,
-            isAdmin,
-            isSuperAdmin,
-            canAccessHome,
-            canAccessPf,
-            isParticipant,
             accessToken
         }}>
             {children}
-        </AuthContext.Provider>
+        </ParticipantAuthContext.Provider>
     );
 };
 
-export const useAuth = () => {
-    const context = useContext(AuthContext);
+export const useParticipantAuth = () => {
+    const context = useContext(ParticipantAuthContext);
     if (!context) {
-        throw new Error('useAuth must be used within an AuthProvider');
+        throw new Error('useParticipantAuth must be used within a ParticipantAuthProvider');
     }
     return context;
 };

@@ -51,8 +51,16 @@ class RoundMode(enum.Enum):
     OFFLINE = "Offline"
 
 
-class User(Base):
-    __tablename__ = "users"
+class Event(Base):
+    __tablename__ = "pf_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), unique=True, nullable=False)
+    is_active = Column(Boolean, default=True)
+
+
+class Participant(Base):
+    __tablename__ = "participants"
     
     id = Column(Integer, primary_key=True, index=True)
     register_number = Column(String(10), unique=True, index=True, nullable=False)
@@ -69,10 +77,29 @@ class User(Base):
     referral_count = Column(Integer, default=0)
     profile_picture = Column(String(500), nullable=True)
     status = Column(SQLEnum(ParticipantStatus), default=ParticipantStatus.ACTIVE, nullable=False)
+    event_id = Column(Integer, ForeignKey("pf_events.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     scores = relationship("Score", back_populates="participant")
+
+
+class PdaUser(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    regno = Column(String(20), unique=True, index=True, nullable=False)
+    email = Column(String(255), unique=True, index=True, nullable=False)
+    hashed_password = Column(String(255), nullable=False)
+    name = Column(String(255), nullable=False)
+    dob = Column(Date, nullable=True)
+    phno = Column(String(20), nullable=True)
+    dept = Column(String(150), nullable=True)
+    image_url = Column(String(500), nullable=True)
+    json_content = Column(JSON, nullable=True)
+    is_member = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
 class Round(Base):
@@ -102,7 +129,7 @@ class Score(Base):
     __tablename__ = "scores"
     
     id = Column(Integer, primary_key=True, index=True)
-    participant_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    participant_id = Column(Integer, ForeignKey("participants.id"), nullable=False)
     round_id = Column(Integer, ForeignKey("rounds.id"), nullable=False)
     criteria_scores = Column(JSON, nullable=True)  # {"Creativity": 20, "Aptitude": 25, ...}
     total_score = Column(Float, default=0)
@@ -111,7 +138,7 @@ class Score(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
-    participant = relationship("User", back_populates="scores")
+    participant = relationship("Participant", back_populates="scores")
     round = relationship("Round", back_populates="scores")
 
 
@@ -119,7 +146,7 @@ class AdminLog(Base):
     __tablename__ = "admin_logs"
 
     id = Column(Integer, primary_key=True, index=True)
-    admin_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    admin_id = Column(Integer, nullable=True)
     admin_register_number = Column(String(10), nullable=False)
     admin_name = Column(String(255), nullable=False)
     action = Column(String(255), nullable=False)
@@ -133,8 +160,9 @@ class PdaAdmin(Base):
     __tablename__ = "pda_admins"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
-    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    regno = Column(String(20), unique=True, nullable=False)
+    hashed_password = Column(String(255), nullable=False)
+    policy = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -170,12 +198,14 @@ class PdaTeam(Base):
     __tablename__ = "pda_team"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     name = Column(String(255), nullable=False)
     regno = Column(String(20), unique=True, nullable=False)
     dept = Column(String(150), nullable=True)
     email = Column(String(255), nullable=True)
     phno = Column(String(20), nullable=True)
-    team_designation = Column(String(150), nullable=False)
+    team = Column(String(120), nullable=True)
+    designation = Column(String(120), nullable=True)
     photo_url = Column(String(500), nullable=True)
     instagram_url = Column(String(500), nullable=True)
     linkedin_url = Column(String(500), nullable=True)

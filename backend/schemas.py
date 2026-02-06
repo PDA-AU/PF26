@@ -1,5 +1,6 @@
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional, List, Dict, Any
+from enum import Enum
 from datetime import datetime, date
 from enum import Enum
 import re
@@ -122,6 +123,68 @@ class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
 
 
+class PdaUserRegister(BaseModel):
+    name: str = Field(..., min_length=2, max_length=255)
+    regno: str = Field(..., min_length=6, max_length=20)
+    email: EmailStr
+    dob: date
+    phno: Optional[str] = None
+    dept: Optional[str] = None
+    password: str = Field(..., min_length=6)
+    image_url: Optional[str] = None
+    preferred_team: Optional[str] = None
+
+    @field_validator('regno')
+    @classmethod
+    def validate_regno(cls, v):
+        if not str(v).strip():
+            raise ValueError('Register number is required')
+        return v
+
+
+class PdaUserLogin(BaseModel):
+    regno: str
+    password: str
+
+
+class PdaUserUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    dob: Optional[date] = None
+    phno: Optional[str] = None
+    dept: Optional[str] = None
+    image_url: Optional[str] = None
+
+
+class PdaUserResponse(BaseModel):
+    id: int
+    regno: str
+    email: str
+    name: str
+    dob: Optional[date] = None
+    phno: Optional[str] = None
+    dept: Optional[str] = None
+    image_url: Optional[str] = None
+    is_member: bool
+    preferred_team: Optional[str] = None
+    team: Optional[str] = None
+    designation: Optional[str] = None
+    is_admin: bool = False
+    is_superadmin: bool = False
+    policy: Optional[Dict[str, bool]] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PdaTokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    user: PdaUserResponse
+
+
 class ParticipantListResponse(BaseModel):
     id: int
     register_number: str
@@ -165,6 +228,7 @@ class RoundUpdate(BaseModel):
     evaluation_criteria: Optional[List[EvaluationCriteria]] = None
     elimination_type: Optional[str] = None
     elimination_value: Optional[float] = None
+    eliminate_absent: Optional[bool] = None
 
 
 class RoundResponse(BaseModel):
@@ -241,6 +305,7 @@ class ScoreResponse(BaseModel):
     is_present: bool
     participant_name: Optional[str] = None
     participant_register_number: Optional[str] = None
+    participant_status: Optional[ParticipantStatusEnum] = None
     
     class Config:
         from_attributes = True
@@ -273,7 +338,7 @@ class ParticipantLeaderboardSummary(BaseModel):
 
 # Leaderboard
 class LeaderboardEntry(BaseModel):
-    rank: int
+    rank: Optional[int] = None
     participant_id: int
     register_number: str
     name: str
@@ -304,14 +369,12 @@ class AdminLogResponse(BaseModel):
 
 
 class PdaAdminCreate(BaseModel):
-    register_number: str = Field(..., min_length=10, max_length=10)
-    email: EmailStr
+    regno: str = Field(..., min_length=6)
     password: str = Field(..., min_length=6)
-    name: str = Field(..., min_length=2)
-    phone: Optional[str] = None
-    gender: Optional[GenderEnum] = None
-    department: Optional[DepartmentEnum] = None
-    year_of_study: Optional[YearOfStudyEnum] = None
+
+
+class PdaAdminPolicyUpdate(BaseModel):
+    policy: Dict[str, bool]
 
 
 # Dashboard Stats
@@ -325,6 +388,12 @@ class DashboardStats(BaseModel):
     gender_distribution: Dict[str, int]
     department_distribution: Dict[str, int]
     year_distribution: Dict[str, int]
+    leaderboard_min_score: Optional[float] = None
+    leaderboard_max_score: Optional[float] = None
+    leaderboard_avg_score: Optional[float] = None
+    round_min_score: Optional[float] = None
+    round_max_score: Optional[float] = None
+    round_avg_score: Optional[float] = None
 
 
 # PDA Home Content
@@ -415,13 +484,36 @@ class EventResponse(BaseModel):
         from_attributes = True
 
 
+class PdaTeamName(str, Enum):
+    EXECUTIVE = "Executive"
+    CONTENT_CREATION = "Content Creation"
+    EVENT_MANAGEMENT = "Event Management"
+    DESIGN = "Design"
+    WEBSITE_DESIGN = "Website Design"
+    PUBLIC_RELATIONS = "Public Relations"
+    PODCAST = "Podcast"
+    LIBRARY = "Library"
+
+
+class PdaTeamDesignation(str, Enum):
+    CHAIRPERSON = "Chairperson"
+    VICE_CHAIRPERSON = "Vice Chairperson"
+    TREASURER = "Treasurer"
+    GENERAL_SECRETARY = "General Secretary"
+    HEAD = "Head"
+    JS = "JS"
+    MEMBER = "Member"
+    VOLUNTEER = "Volunteer"
+
+
 class PdaTeamCreate(BaseModel):
     name: str = Field(..., min_length=2)
     regno: str = Field(..., min_length=6)
     dept: Optional[str] = None
     email: Optional[str] = None
     phno: Optional[str] = None
-    team_designation: str = Field(..., min_length=2)
+    team: Optional["PdaTeamName"] = None
+    designation: Optional["PdaTeamDesignation"] = None
     photo_url: Optional[str] = None
     instagram_url: Optional[str] = None
     linkedin_url: Optional[str] = None
@@ -433,7 +525,8 @@ class PdaTeamUpdate(BaseModel):
     dept: Optional[str] = None
     email: Optional[str] = None
     phno: Optional[str] = None
-    team_designation: Optional[str] = None
+    team: Optional["PdaTeamName"] = None
+    designation: Optional["PdaTeamDesignation"] = None
     photo_url: Optional[str] = None
     instagram_url: Optional[str] = None
     linkedin_url: Optional[str] = None
@@ -441,12 +534,14 @@ class PdaTeamUpdate(BaseModel):
 
 class PdaTeamResponse(BaseModel):
     id: int
+    user_id: Optional[int] = None
     name: str
     regno: str
     dept: Optional[str]
     email: Optional[str]
     phno: Optional[str]
-    team_designation: str
+    team: Optional["PdaTeamName"] = None
+    designation: Optional["PdaTeamDesignation"] = None
     photo_url: Optional[str]
     instagram_url: Optional[str]
     linkedin_url: Optional[str]
@@ -485,7 +580,8 @@ class PdaGalleryResponse(BaseModel):
 # Top Referrers
 class TopReferrer(BaseModel):
     name: str
-    department: DepartmentEnum
+    register_number: Optional[str] = None
+    department: Optional[DepartmentEnum] = None
     referral_count: int
 
 

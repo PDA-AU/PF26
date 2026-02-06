@@ -11,12 +11,30 @@ import os
 from dotenv import load_dotenv
 from pathlib import Path
 from database import get_db
-from models import User, UserRole, PdaAdmin
+from models import Participant, PdaUser
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'default_secret_key')
+def _load_jwt_secret() -> str:
+    secret = os.environ.get('JWT_SECRET_KEY')
+    if not secret:
+        raise RuntimeError('JWT_SECRET_KEY is required and must be set in environment')
+    weak_values = {
+        'default_secret_key',
+        'changeme',
+        'change_me',
+        'secret',
+        'jwt_secret',
+        'password',
+        'admin123',
+    }
+    if len(secret) < 32 or secret.strip().lower() in weak_values:
+        raise RuntimeError('JWT_SECRET_KEY is too weak; use a random secret with at least 32 characters')
+    return secret
+
+
+SECRET_KEY = _load_jwt_secret()
 ALGORITHM = os.environ.get('JWT_ALGORITHM', 'HS256')
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get('ACCESS_TOKEN_EXPIRE_MINUTES', 30))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.environ.get('REFRESH_TOKEN_EXPIRE_DAYS', 7))
@@ -76,10 +94,10 @@ def decode_token(token: str) -> dict:
         )
 
 
-async def get_current_user(
+async def get_current_participant(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
-) -> User:
+) -> Participant:
     token = credentials.credentials
     payload = decode_token(token)
     
@@ -87,6 +105,12 @@ async def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token type"
+        )
+
+    if payload.get("user_type") != "participant":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token user type"
         )
     
     register_number: str = payload.get("sub")
@@ -96,32 +120,50 @@ async def get_current_user(
             detail="Could not validate credentials"
         )
     
-    user = db.query(User).filter(User.register_number == register_number).first()
-    if user is None:
+    participant = db.query(Participant).filter(Participant.register_number == register_number).first()
+    if participant is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found"
         )
     
-    return user
+    return participant
 
 
-async def get_current_admin(
-    current_user: User = Depends(get_current_user),
+async def get_current_pda_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
-) -> User:
-    if current_user.role != UserRole.ADMIN:
+) -> PdaUser:
+    token = credentials.credentials
+    payload = decode_token(token)
+
+    if payload.get("type") != "access":
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token type"
         )
-    admin_link = db.query(PdaAdmin).filter(PdaAdmin.user_id == current_user.id).first()
-    if not admin_link:
+
+    if payload.get("user_type") != "pda":
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token user type"
         )
-    return current_user
+
+    regno: str = payload.get("sub")
+    if regno is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials"
+        )
+
+    user = db.query(PdaUser).filter(PdaUser.regno == regno).first()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found"
+        )
+
+    return user
 
 
 def generate_referral_code() -> str:

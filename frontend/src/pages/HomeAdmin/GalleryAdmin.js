@@ -16,7 +16,7 @@ const emptyGalleryItem = {
 };
 
 export default function GalleryAdmin() {
-    const { isAdmin, getAuthHeader } = useAuth();
+    const { canAccessHome, getAuthHeader } = useAuth();
     const [galleryItems, setGalleryItems] = useState([]);
     const [galleryForm, setGalleryForm] = useState(emptyGalleryItem);
     const [galleryPhotoFile, setGalleryPhotoFile] = useState(null);
@@ -37,10 +37,10 @@ export default function GalleryAdmin() {
     };
 
     useEffect(() => {
-        if (isAdmin) {
+        if (canAccessHome) {
             fetchData();
         }
-    }, [isAdmin]);
+    }, [canAccessHome]);
 
     const handleGalleryChange = (e) => {
         const { name, value, type, checked } = e.target;

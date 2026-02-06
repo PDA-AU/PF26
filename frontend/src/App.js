@@ -3,6 +3,7 @@ import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { ParticipantAuthProvider, useParticipantAuth } from "@/context/ParticipantAuthContext";
 
 // Pages
 import PersofestHome from "@/pages/persofest/PersofestHome";
@@ -11,8 +12,13 @@ import ItemsAdmin from "@/pages/HomeAdmin/ItemsAdmin";
 import TeamAdmin from "@/pages/HomeAdmin/TeamAdmin";
 import GalleryAdmin from "@/pages/HomeAdmin/GalleryAdmin";
 import SuperAdmin from "@/pages/HomeAdmin/SuperAdmin";
+import LogsAdmin from "@/pages/HomeAdmin/LogsAdmin";
+import RecruitmentsAdmin from "@/pages/HomeAdmin/RecruitmentsAdmin";
 import LoginPage from "@/pages/persofest/LoginPage";
 import RegisterPage from "@/pages/persofest/RegisterPage";
+import PdaLogin from "@/pages/pda/PdaLogin";
+import PdaRecruit from "@/pages/pda/PdaRecruit";
+import PdaProfile from "@/pages/pda/PdaProfile";
 import ParticipantDashboard from "@/pages/persofest/ParticipantDashboard";
 import AdminDashboard from "@/pages/persofest/admin/AdminDashboard";
 import AdminRounds from "@/pages/persofest/admin/AdminRounds";
@@ -20,9 +26,30 @@ import AdminParticipants from "@/pages/persofest/admin/AdminParticipants";
 import AdminScoring from "@/pages/persofest/admin/AdminScoring";
 import AdminLeaderboard from "@/pages/persofest/admin/AdminLeaderboard";
 import AdminLogs from "@/pages/persofest/admin/AdminLogs";
+import AdminLogin from "@/pages/persofest/admin/AdminLogin";
 
 // Protected Route Components
-const ProtectedRoute = ({ children, adminOnly = false }) => {
+const ProtectedParticipantRoute = ({ children }) => {
+    const { user, loading } = useParticipantAuth();
+
+    if (loading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-white">
+                <div className="neo-card animate-pulse">
+                    <p className="font-heading text-xl">Loading...</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (!user) {
+        return <Navigate to="/persofest/login" replace />;
+    }
+
+    return children;
+};
+
+const ProtectedPdaRoute = ({ children, requirePf = false, requireHome = false }) => {
     const { user, loading } = useAuth();
 
     if (loading) {
@@ -36,18 +63,23 @@ const ProtectedRoute = ({ children, adminOnly = false }) => {
     }
 
     if (!user) {
+        if (requirePf) {
+            return <Navigate to="/persofest/admin" replace />;
+        }
         return <Navigate to="/login" replace />;
     }
-
-    if (adminOnly && user.role !== 'admin') {
-        return <Navigate to="/dashboard" replace />;
+    if (requirePf && !user.is_superadmin && !user.policy?.pf) {
+        return <Navigate to="/persofest/admin" replace />;
+    }
+    if (requireHome && !user.is_superadmin && !user.policy?.home) {
+        return <Navigate to="/login" replace />;
     }
 
     return children;
 };
 
 const PublicRoute = ({ children }) => {
-    const { user, loading } = useAuth();
+    const { user, loading } = useParticipantAuth();
 
     if (loading) {
         return (
@@ -60,10 +92,27 @@ const PublicRoute = ({ children }) => {
     }
 
     if (user) {
-        return <Navigate to={user.role === 'admin' ? '/admin' : '/dashboard'} replace />;
+        return <Navigate to="/persofest/dashboard" replace />;
     }
 
     return children;
+};
+
+const PersofestAdminEntry = () => {
+    const { user, loading } = useAuth();
+    if (loading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-white">
+                <div className="neo-card animate-pulse">
+                    <p className="font-heading text-xl">Loading...</p>
+                </div>
+            </div>
+        );
+    }
+    if (!user || (!user.is_superadmin && !user.policy?.pf)) {
+        return <AdminLogin />;
+    }
+    return <AdminDashboard />;
 };
 
 function AppRoutes() {
@@ -71,60 +120,65 @@ function AppRoutes() {
         <Routes>
             {/* Public Routes */}
             <Route path="/" element={<PdaHome />} />
-            <Route path="/pda-admin" element={<Navigate to="/pda-admin/items" replace />} />
-            <Route path="/pda-admin/items" element={<ItemsAdmin />} />
-            <Route path="/pda-admin/team" element={<TeamAdmin />} />
-            <Route path="/pda-admin/gallery" element={<GalleryAdmin />} />
-            <Route path="/pda-admin/superadmin" element={<SuperAdmin />} />
+            <Route path="/login" element={<PdaLogin />} />
+            <Route path="/recruit" element={<PdaRecruit />} />
+            <Route path="/pda/profile" element={
+                <ProtectedPdaRoute>
+                    <PdaProfile />
+                </ProtectedPdaRoute>
+            } />
+            <Route path="/admin" element={<ItemsAdmin />} />
+            <Route path="/admin/items" element={<ItemsAdmin />} />
+            <Route path="/admin/team" element={<TeamAdmin />} />
+            <Route path="/admin/gallery" element={<GalleryAdmin />} />
+            <Route path="/admin/recruitments" element={<RecruitmentsAdmin />} />
+            <Route path="/admin/logs" element={<LogsAdmin />} />
+            <Route path="/admin/superadmin" element={<SuperAdmin />} />
             <Route path="/persofest" element={<PersofestHome />} />
-            <Route path="/login" element={
+            <Route path="/persofest/login" element={
                 <PublicRoute>
                     <LoginPage />
                 </PublicRoute>
             } />
-            <Route path="/register" element={
+            <Route path="/persofest/register" element={
                 <PublicRoute>
                     <RegisterPage />
                 </PublicRoute>
             } />
 
             {/* Participant Routes */}
-            <Route path="/dashboard" element={
-                <ProtectedRoute>
+            <Route path="/persofest/dashboard" element={
+                <ProtectedParticipantRoute>
                     <ParticipantDashboard />
-                </ProtectedRoute>
+                </ProtectedParticipantRoute>
             } />
 
             {/* Admin Routes */}
-            <Route path="/admin" element={
-                <ProtectedRoute adminOnly>
-                    <AdminDashboard />
-                </ProtectedRoute>
-            } />
-            <Route path="/admin/rounds" element={
-                <ProtectedRoute adminOnly>
+            <Route path="/persofest/admin" element={<PersofestAdminEntry />} />
+            <Route path="/persofest/admin/rounds" element={
+                <ProtectedPdaRoute requirePf>
                     <AdminRounds />
-                </ProtectedRoute>
+                </ProtectedPdaRoute>
             } />
-            <Route path="/admin/participants" element={
-                <ProtectedRoute adminOnly>
+            <Route path="/persofest/admin/participants" element={
+                <ProtectedPdaRoute requirePf>
                     <AdminParticipants />
-                </ProtectedRoute>
+                </ProtectedPdaRoute>
             } />
-            <Route path="/admin/scoring/:roundId" element={
-                <ProtectedRoute adminOnly>
+            <Route path="/persofest/admin/scoring/:roundId" element={
+                <ProtectedPdaRoute requirePf>
                     <AdminScoring />
-                </ProtectedRoute>
+                </ProtectedPdaRoute>
             } />
-            <Route path="/admin/leaderboard" element={
-                <ProtectedRoute adminOnly>
+            <Route path="/persofest/admin/leaderboard" element={
+                <ProtectedPdaRoute requirePf>
                     <AdminLeaderboard />
-                </ProtectedRoute>
+                </ProtectedPdaRoute>
             } />
-            <Route path="/admin/logs" element={
-                <ProtectedRoute adminOnly>
+            <Route path="/persofest/admin/logs" element={
+                <ProtectedPdaRoute requirePf>
                     <AdminLogs />
-                </ProtectedRoute>
+                </ProtectedPdaRoute>
             } />
 
             {/* Catch all */}
@@ -136,10 +190,12 @@ function AppRoutes() {
 function App() {
     return (
         <AuthProvider>
-            <BrowserRouter>
-                <AppRoutes />
-                <Toaster position="top-right" richColors />
-            </BrowserRouter>
+            <ParticipantAuthProvider>
+                <BrowserRouter>
+                    <AppRoutes />
+                    <Toaster position="top-right" richColors />
+                </BrowserRouter>
+            </ParticipantAuthProvider>
         </AuthProvider>
     );
 }

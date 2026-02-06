@@ -31,12 +31,12 @@ export default function AdminLogs() {
     const [offset, setOffset] = useState(0);
     const [limit] = useState(50);
 
-    const isSuperAdmin = user?.register_number === '0000000000';
+    const isSuperAdmin = user?.is_superadmin;
 
     const fetchLogs = useCallback(async () => {
         setLoading(true);
         try {
-            const response = await axios.get(`${API}/admin/logs?limit=${limit}&offset=${offset}`, {
+            const response = await axios.get(`${API}/persofest/admin/logs?limit=${limit}&offset=${offset}`, {
                 headers: getAuthHeader()
             });
             setLogs(response.data || []);
@@ -57,7 +57,7 @@ export default function AdminLogs() {
     };
 
     if (user && !isSuperAdmin) {
-        return <Navigate to="/admin" replace />;
+        return <Navigate to="/persofest/admin" replace />;
     }
 
     return (
@@ -84,24 +84,24 @@ export default function AdminLogs() {
             <nav className="bg-white border-b-2 border-black">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="flex gap-1 sm:gap-1">
-                        <Link to="/admin" aria-label="Dashboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
+                        <Link to="/persofest/admin" aria-label="Dashboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
                             <LayoutDashboard className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                             <span className="hidden sm:inline">Dashboard</span>
                         </Link>
-                        <Link to="/admin/rounds" aria-label="Rounds" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
+                        <Link to="/persofest/admin/rounds" aria-label="Rounds" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
                             <Calendar className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                             <span className="hidden sm:inline">Rounds</span>
                         </Link>
-                        <Link to="/admin/participants" aria-label="Participants" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
+                        <Link to="/persofest/admin/participants" aria-label="Participants" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
                             <Users className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                             <span className="hidden sm:inline">Participants</span>
                         </Link>
-                        <Link to="/admin/leaderboard" aria-label="Leaderboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
+                        <Link to="/persofest/admin/leaderboard" aria-label="Leaderboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
                             <Trophy className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                             <span className="hidden sm:inline">Leaderboard</span>
                         </Link>
                         {isSuperAdmin && (
-                            <Link to="/admin/logs" aria-label="Logs" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm border-b-4 border-primary bg-secondary">
+                            <Link to="/persofest/admin/logs" aria-label="Logs" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm border-b-4 border-primary bg-secondary">
                                 <ListChecks className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                                 <span className="hidden sm:inline">Logs</span>
                             </Link>

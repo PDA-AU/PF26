@@ -5,16 +5,18 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import { 
     Users, Search, Filter, LogOut, Sparkles, LayoutDashboard, Calendar,
-    Trophy, UserCheck, UserX, Download, ListChecks
+    Trophy, UserCheck, UserX, Download, ListChecks, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import ParticipantDetailsModal from './ParticipantDetailsModal';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const PARTICIPANT_STATS_CACHE_TTL_MS = 10 * 60 * 1000;
 const PARTICIPANT_SUMMARY_CACHE_TTL_MS = 10 * 60 * 1000;
+const PAGE_SIZE = 10;
 
 const getParticipantStatsCacheKey = (participantId) => `pf26_participant_rounds_${participantId}`;
 const getParticipantSummaryCacheKey = (participantId) => `pf26_participant_summary_${participantId}`;
@@ -62,12 +64,17 @@ export default function AdminParticipants() {
     const { user, logout, getAuthHeader } = useAuth();
     const [participants, setParticipants] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [totalParticipants, setTotalParticipants] = useState(0);
     const [selectedParticipant, setSelectedParticipant] = useState(null);
     const [roundStats, setRoundStats] = useState([]);
     const [roundStatsLoading, setRoundStatsLoading] = useState(false);
     const [roundStatsError, setRoundStatsError] = useState('');
     const [participantSummary, setParticipantSummary] = useState(null);
-    const isSuperAdmin = user?.register_number === '0000000000';
+    const [currentPage, setCurrentPage] = useState(1);
+    const [statusDialogOpen, setStatusDialogOpen] = useState(false);
+    const [statusTarget, setStatusTarget] = useState(null);
+    const [pendingStatus, setPendingStatus] = useState(null);
+    const isSuperAdmin = user?.is_superadmin;
     const [filters, setFilters] = useState({
         department: '',
         year: '',
@@ -84,26 +91,41 @@ export default function AdminParticipants() {
             if (filters.gender) params.append('gender', filters.gender);
             if (filters.status) params.append('status', filters.status);
             if (filters.search) params.append('search', filters.search);
+            params.append('page', String(currentPage));
+            params.append('page_size', String(PAGE_SIZE));
 
-            const response = await axios.get(`${API}/admin/participants?${params.toString()}`, {
+            const response = await axios.get(`${API}/persofest/admin/participants?${params.toString()}`, {
                 headers: getAuthHeader()
             });
             setParticipants(response.data);
+            setTotalParticipants(Number(response.headers['x-total-count'] || response.data.length || 0));
         } catch (error) {
             toast.error('Failed to load participants');
         } finally {
             setLoading(false);
         }
-    }, [filters, getAuthHeader]);
+    }, [filters, getAuthHeader, currentPage]);
 
     useEffect(() => {
         fetchParticipants();
     }, [fetchParticipants]);
 
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [filters]);
+
+    const totalPages = Math.max(1, Math.ceil(totalParticipants / PAGE_SIZE));
+
+    useEffect(() => {
+        if (currentPage > totalPages) {
+            setCurrentPage(totalPages);
+        }
+    }, [currentPage, totalPages]);
+
     const handleStatusChange = async (participantId, newStatus) => {
         try {
             await axios.put(
-                `${API}/admin/participants/${participantId}/status?new_status=${newStatus}`,
+                `${API}/persofest/admin/participants/${participantId}/status?new_status=${newStatus}`,
                 {},
                 { headers: getAuthHeader() }
             );
@@ -114,15 +136,23 @@ export default function AdminParticipants() {
         }
     };
 
+    const openStatusDialog = (participant, newStatus) => {
+        setStatusTarget(participant);
+        setPendingStatus(newStatus);
+        setStatusDialogOpen(true);
+    };
+
     const handleExport = async (format) => {
         try {
             const params = new URLSearchParams();
             params.append('format', format);
             if (filters.department) params.append('department', filters.department);
             if (filters.year) params.append('year', filters.year);
+            if (filters.gender) params.append('gender', filters.gender);
             if (filters.status) params.append('status', filters.status);
+            if (filters.search) params.append('search', filters.search);
 
-            const response = await axios.get(`${API}/admin/export/participants?${params.toString()}`, {
+            const response = await axios.get(`${API}/persofest/admin/export/participants?${params.toString()}`, {
                 headers: getAuthHeader(),
                 responseType: 'blob'
             });
@@ -175,7 +205,7 @@ export default function AdminParticipants() {
             if (cachedStats) {
                 setRoundStats(cachedStats);
             } else {
-                const response = await axios.get(`${API}/admin/participants/${participant.id}/rounds`, {
+                const response = await axios.get(`${API}/persofest/admin/participants/${participant.id}/rounds`, {
                     headers: getAuthHeader()
                 });
                 setRoundStats(response.data || []);
@@ -187,7 +217,7 @@ export default function AdminParticipants() {
             if (cachedSummary) {
                 setParticipantSummary(cachedSummary);
             } else {
-                const summaryResponse = await axios.get(`${API}/admin/participants/${participant.id}/summary`, {
+                const summaryResponse = await axios.get(`${API}/persofest/admin/participants/${participant.id}/summary`, {
                     headers: getAuthHeader()
                 });
                 setParticipantSummary(summaryResponse.data || null);
@@ -230,24 +260,24 @@ export default function AdminParticipants() {
             <nav className="bg-white border-b-2 border-black">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="flex gap-1 sm:gap-1">
-                        <Link to="/admin" aria-label="Dashboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
+                        <Link to="/persofest/admin" aria-label="Dashboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
                             <LayoutDashboard className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                             <span className="hidden sm:inline">Dashboard</span>
                         </Link>
-                        <Link to="/admin/rounds" aria-label="Rounds" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
+                        <Link to="/persofest/admin/rounds" aria-label="Rounds" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
                             <Calendar className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                             <span className="hidden sm:inline">Rounds</span>
                         </Link>
-                        <Link to="/admin/participants" aria-label="Participants" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm border-b-4 border-primary bg-secondary">
+                        <Link to="/persofest/admin/participants" aria-label="Participants" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm border-b-4 border-primary bg-secondary">
                             <Users className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                             <span className="hidden sm:inline">Participants</span>
                         </Link>
-                        <Link to="/admin/leaderboard" aria-label="Leaderboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
+                        <Link to="/persofest/admin/leaderboard" aria-label="Leaderboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
                             <Trophy className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                             <span className="hidden sm:inline">Leaderboard</span>
                         </Link>
                         {isSuperAdmin && (
-                            <Link to="/admin/logs" aria-label="Logs" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
+                            <Link to="/persofest/admin/logs" aria-label="Logs" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm hover:bg-muted transition-colors">
                                 <ListChecks className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                                 <span className="hidden sm:inline">Logs</span>
                             </Link>
@@ -262,7 +292,7 @@ export default function AdminParticipants() {
                     <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
                         <div>
                             <h1 className="font-heading font-bold text-3xl">Participants</h1>
-                            <p className="text-gray-600">{participants.length} participants found</p>
+                            <p className="text-gray-600">{totalParticipants} participants found</p>
                         </div>
                         <div className="flex gap-2">
                             <Button
@@ -297,7 +327,7 @@ export default function AdminParticipants() {
                             />
                         </div>
 
-                        <Select value={filters.department} onValueChange={(value) => setFilters(prev => ({ ...prev, department: value }))}>
+                        <Select value={filters.department} onValueChange={(value) => setFilters(prev => ({ ...prev, department: value === 'all' ? '' : value }))}>
                             <SelectTrigger className="neo-input" data-testid="filter-department">
                                 <SelectValue placeholder="Department" />
                             </SelectTrigger>
@@ -309,7 +339,7 @@ export default function AdminParticipants() {
                             </SelectContent>
                         </Select>
 
-                        <Select value={filters.year} onValueChange={(value) => setFilters(prev => ({ ...prev, year: value }))}>
+                        <Select value={filters.year} onValueChange={(value) => setFilters(prev => ({ ...prev, year: value === 'all' ? '' : value }))}>
                             <SelectTrigger className="neo-input" data-testid="filter-year">
                                 <SelectValue placeholder="Year" />
                             </SelectTrigger>
@@ -321,7 +351,7 @@ export default function AdminParticipants() {
                             </SelectContent>
                         </Select>
 
-                        <Select value={filters.gender} onValueChange={(value) => setFilters(prev => ({ ...prev, gender: value }))}>
+                        <Select value={filters.gender} onValueChange={(value) => setFilters(prev => ({ ...prev, gender: value === 'all' ? '' : value }))}>
                             <SelectTrigger className="neo-input" data-testid="filter-gender">
                                 <SelectValue placeholder="Gender" />
                             </SelectTrigger>
@@ -333,7 +363,7 @@ export default function AdminParticipants() {
                             </SelectContent>
                         </Select>
 
-                        <Select value={filters.status} onValueChange={(value) => setFilters(prev => ({ ...prev, status: value }))}>
+                        <Select value={filters.status} onValueChange={(value) => setFilters(prev => ({ ...prev, status: value === 'all' ? '' : value }))}>
                             <SelectTrigger className="neo-input" data-testid="filter-status">
                                 <SelectValue placeholder="Status" />
                             </SelectTrigger>
@@ -419,7 +449,7 @@ export default function AdminParticipants() {
                                                     variant="outline"
                                                     onClick={(event) => {
                                                         event.stopPropagation();
-                                                        handleStatusChange(participant.id, 'Eliminated');
+                                                        openStatusDialog(participant, 'Eliminated');
                                                     }}
                                                     className="border-2 border-black text-red-500"
                                                     data-testid={`eliminate-${participant.register_number}`}
@@ -432,7 +462,7 @@ export default function AdminParticipants() {
                                                     variant="outline"
                                                     onClick={(event) => {
                                                         event.stopPropagation();
-                                                        handleStatusChange(participant.id, 'Active');
+                                                        openStatusDialog(participant, 'Active');
                                                     }}
                                                     className="border-2 border-black text-green-500"
                                                     data-testid={`activate-${participant.register_number}`}
@@ -445,6 +475,77 @@ export default function AdminParticipants() {
                                 ))}
                             </tbody>
                         </table>
+                    </div>
+                )}
+
+                <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
+                    <DialogContent className="border-4 border-black">
+                        <DialogHeader>
+                            <DialogTitle className="font-heading font-bold text-xl">
+                                {pendingStatus === 'Eliminated' ? 'Eliminate Participant' : 'Activate Participant'}
+                            </DialogTitle>
+                        </DialogHeader>
+                        <div className="space-y-4">
+                            <p className="text-gray-600">
+                                {pendingStatus === 'Eliminated'
+                                    ? `Are you sure you want to eliminate ${statusTarget?.name || 'this participant'}?`
+                                    : `Are you sure you want to activate ${statusTarget?.name || 'this participant'}?`}
+                            </p>
+                            <div className="flex gap-2">
+                                <Button
+                                    variant="outline"
+                                    className="flex-1 border-2 border-black"
+                                    onClick={() => setStatusDialogOpen(false)}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button
+                                    className={`flex-1 ${pendingStatus === 'Eliminated' ? 'bg-red-500' : 'bg-green-500'} text-white border-2 border-black`}
+                                    onClick={() => {
+                                        if (statusTarget && pendingStatus) {
+                                            handleStatusChange(statusTarget.id, pendingStatus);
+                                        }
+                                        setStatusDialogOpen(false);
+                                    }}
+                                >
+                                    Confirm
+                                </Button>
+                            </div>
+                        </div>
+                    </DialogContent>
+                </Dialog>
+                {!loading && totalParticipants > 0 && (
+                    <div className="mt-4 flex items-center justify-between">
+                        <p className="text-sm text-gray-600">
+                            Showing {(currentPage - 1) * PAGE_SIZE + 1}-{Math.min((currentPage - 1) * PAGE_SIZE + participants.length, totalParticipants)} of {totalParticipants}
+                        </p>
+                        <div className="flex items-center gap-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                                disabled={currentPage === 1}
+                                className="border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none disabled:opacity-50"
+                                data-testid="participants-page-prev"
+                            >
+                                <ChevronLeft className="h-4 w-4" />
+                            </Button>
+                            <span className="min-w-20 text-center text-sm font-bold">
+                                Page {currentPage} / {totalPages}
+                            </span>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                                disabled={currentPage === totalPages}
+                                className="border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none disabled:opacity-50"
+                                data-testid="participants-page-next"
+                            >
+                                <ChevronRight className="h-4 w-4" />
+                            </Button>
+                        </div>
                     </div>
                 )}
             </main>

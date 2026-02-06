@@ -5,6 +5,7 @@ import axios from 'axios';
 import { Calendar, MapPin, Users, Trophy, Star, ArrowRight, Menu, X, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import pdaLogo from '@/assets/pda-logo.png';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -53,6 +54,8 @@ export default function PersofestHome() {
     const getRoundPdfUrl = (round) => {
         if (!round?.description_pdf) return null;
         if (round.description_pdf.startsWith('http')) return round.description_pdf;
+        if (round.description_pdf.startsWith('/uploads/')) return `${process.env.REACT_APP_BACKEND_URL}${round.description_pdf}`;
+        if (round.description_pdf.startsWith('uploads/')) return `${process.env.REACT_APP_BACKEND_URL}/${round.description_pdf}`;
         return `${process.env.REACT_APP_BACKEND_URL}/uploads/${round.description_pdf}`;
     };
 
@@ -71,23 +74,24 @@ export default function PersofestHome() {
 
                         {/* Desktop Nav */}
                         <div className="hidden md:flex items-center gap-4">
+                            <Link to="/" className="font-bold hover:text-primary transition-colors">Home</Link>
                             <a href="#about" className="font-bold hover:text-primary transition-colors">About</a>
                             <a href="#rounds" className="font-bold hover:text-primary transition-colors">Rounds</a>
                             <a href="#referrers" className="font-bold hover:text-primary transition-colors">Top Referrers</a>
                             {user ? (
-                                <Link to={user.role === 'admin' ? '/admin' : '/dashboard'}>
+                                <Link to={user.role === 'admin' ? '/persofest/admin' : '/persofest/dashboard'}>
                                     <Button data-testid="nav-dashboard-btn" className="bg-primary text-white border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all">
                                         Dashboard
                                     </Button>
                                 </Link>
                             ) : (
                                 <div className="flex gap-2">
-                                    <Link to="/login">
+                                    <Link to="/persofest/login">
                                         <Button data-testid="nav-login-btn" variant="outline" className="border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all">
                                             Login
                                         </Button>
                                     </Link>
-                                    <Link to="/register">
+                                    <Link to="/persofest/register">
                                         <Button data-testid="nav-register-btn" className="bg-primary text-white border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all">
                                             Register
                                         </Button>
@@ -110,19 +114,20 @@ export default function PersofestHome() {
                     {mobileMenuOpen && (
                         <div className="md:hidden py-4 border-t-2 border-black">
                             <div className="flex flex-col gap-4">
+                                <Link to="/" className="font-bold py-2" onClick={() => setMobileMenuOpen(false)}>Home</Link>
                                 <a href="#about" className="font-bold py-2" onClick={() => setMobileMenuOpen(false)}>About</a>
                                 <a href="#rounds" className="font-bold py-2" onClick={() => setMobileMenuOpen(false)}>Rounds</a>
                                 <a href="#referrers" className="font-bold py-2" onClick={() => setMobileMenuOpen(false)}>Top Referrers</a>
                                 {user ? (
-                                    <Link to={user.role === 'admin' ? '/admin' : '/dashboard'} onClick={() => setMobileMenuOpen(false)}>
+                                    <Link to={user.role === 'admin' ? '/persofest/admin' : '/persofest/dashboard'} onClick={() => setMobileMenuOpen(false)}>
                                         <Button className="w-full bg-primary text-white border-2 border-black shadow-neo">Dashboard</Button>
                                     </Link>
                                 ) : (
                                     <div className="flex flex-col gap-2">
-                                        <Link to="/login" onClick={() => setMobileMenuOpen(false)}>
+                                        <Link to="/persofest/login" onClick={() => setMobileMenuOpen(false)}>
                                             <Button variant="outline" className="w-full border-2 border-black shadow-neo">Login</Button>
                                         </Link>
-                                        <Link to="/register" onClick={() => setMobileMenuOpen(false)}>
+                                        <Link to="/persofest/register" onClick={() => setMobileMenuOpen(false)}>
                                             <Button className="w-full bg-primary text-white border-2 border-black shadow-neo">Register</Button>
                                         </Link>
                                     </div>
@@ -156,7 +161,7 @@ export default function PersofestHome() {
                             <div className="flex flex-wrap gap-4">
                                 {!user && (
                                     registrationOpen ? (
-                                        <Link to="/register">
+                                        <Link to="/persofest/register">
                                             <Button 
                                                 data-testid="hero-register-btn"
                                                 className="bg-primary text-white border-2 border-black shadow-neo-lg hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-neo transition-all text-lg px-8 py-6"
@@ -195,8 +200,8 @@ export default function PersofestHome() {
                         <div className="relative hidden lg:block">
                             <div className="relative z-10">
                                 <img 
-                                    src="https://images.unsplash.com/photo-1758270704524-596810e891b5?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzl8MHwxfHNlYXJjaHwxfHxjb2xsZWdlJTIwc3R1ZGVudHMlMjBkaXZlcnNlJTIwY2FtcHVzfGVufDB8fHx8MTc3MDAxNzA5M3ww&ixlib=rb-4.1.0&q=85"
-                                    alt="Diverse college students"
+                                    src={pdaLogo}
+                                    alt="PDA logo"
                                     className="w-full h-[500px] object-cover border-4 border-black shadow-neo-lg"
                                 />
                             </div>
@@ -212,8 +217,8 @@ export default function PersofestHome() {
                     <div className="grid md:grid-cols-2 gap-12 items-center">
                         <div className="relative">
                             <img 
-                                src="https://images.unsplash.com/photo-1575426254893-06d2712a655d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NjV8MHwxfHNlYXJjaHwxfHxtaWNyb3Bob25lJTIwc3RhZ2UlMjBzcG90bGlnaHR8ZW58MHx8fHwxNzcwMDE3MDk2fDA&ixlib=rb-4.1.0&q=85"
-                                alt="Stage performance"
+                                src={pdaLogo}
+                                alt="PDA logo"
                                 className="w-full h-[400px] object-cover border-4 border-black shadow-neo-lg"
                             />
                         </div>
@@ -223,7 +228,7 @@ export default function PersofestHome() {
                             </h2>
                             <p className="text-lg leading-relaxed">
                                 Persofest is the flagship inter-department personality development competition 
-                                organized by the <strong>Personality Development Association – Web Team</strong> at MIT Chennai.
+                                organized by the <strong>Personality Development Association</strong> at MIT Chennai.
                             </p>
                             <p className="text-lg leading-relaxed">
                                 Through 10 challenging rounds spanning <strong>Creative</strong>, <strong>Aptitude</strong>, 
@@ -394,7 +399,7 @@ export default function PersofestHome() {
                         Show what you're made of!
                     </p>
                     {!user && registrationOpen && (
-                        <Link to="/register">
+                        <Link to="/persofest/register">
                             <Button 
                                 data-testid="cta-register-btn"
                                 className="bg-accent text-black border-4 border-black shadow-neo-lg hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-neo transition-all text-xl px-12 py-6 font-bold"
@@ -434,8 +439,8 @@ export default function PersofestHome() {
                             <div className="space-y-2">
                                 <a href="#about" className="block text-gray-400 hover:text-white transition-colors">About</a>
                                 <a href="#rounds" className="block text-gray-400 hover:text-white transition-colors">Rounds</a>
-                                <Link to="/login" className="block text-gray-400 hover:text-white transition-colors">Login</Link>
-                                <Link to="/register" className="block text-gray-400 hover:text-white transition-colors">Register</Link>
+                                <Link to="/persofest/login" className="block text-gray-400 hover:text-white transition-colors">Login</Link>
+                                <Link to="/persofest/register" className="block text-gray-400 hover:text-white transition-colors">Register</Link>
                             </div>
                         </div>
                     </div>

@@ -14,6 +14,11 @@ import RoundStatsCard from './RoundStatsCard';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const STATS_CACHE_TTL_MS = 10 * 60 * 1000;
+const createCriterion = (name = '', maxMarks = 0) => ({
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name,
+    max_marks: maxMarks
+});
 
 const getStatsCacheKey = (roundId) => `pf26_round_stats_${roundId}`;
 
@@ -44,7 +49,7 @@ const saveCachedStats = (roundId, data) => {
 export default function AdminRounds() {
     const navigate = useNavigate();
     const { user, logout, getAuthHeader } = useAuth();
-    const isSuperAdmin = user?.register_number === '0000000000';
+    const isSuperAdmin = user?.is_superadmin;
     const [rounds, setRounds] = useState([]);
     const [loading, setLoading] = useState(true);
     const [dialogOpen, setDialogOpen] = useState(false);
@@ -54,14 +59,14 @@ export default function AdminRounds() {
     const [date, setDate] = useState('');
     const [mode, setMode] = useState('Offline');
     const [conductedBy, setConductedBy] = useState('');
-    const [criteria, setCriteria] = useState([{ name: 'Overall', max_marks: 100 }]);
+    const [criteria, setCriteria] = useState([createCriterion('Overall', 100)]);
     const [roundPdfFile, setRoundPdfFile] = useState(null);
     const [roundStats, setRoundStats] = useState({});
     const roundStatsRef = useRef({});
 
     const fetchRounds = useCallback(async () => {
         try {
-            const response = await axios.get(`${API}/admin/rounds`, { headers: getAuthHeader() });
+            const response = await axios.get(`${API}/persofest/admin/rounds`, { headers: getAuthHeader() });
             setRounds(response.data);
         } catch (error) {
             toast.error('Failed to load rounds');
@@ -92,7 +97,7 @@ export default function AdminRounds() {
                     });
                     return;
                 }
-                const response = await axios.get(`${API}/admin/rounds/${roundId}/stats`, {
+                const response = await axios.get(`${API}/persofest/admin/rounds/${roundId}/stats`, {
                     headers: getAuthHeader()
                 });
                 setRoundStats((prev) => {
@@ -139,7 +144,7 @@ export default function AdminRounds() {
         setDate('');
         setMode('Offline');
         setConductedBy('');
-        setCriteria([{ name: 'Overall', max_marks: 100 }]);
+        setCriteria([createCriterion('Overall', 100)]);
         setRoundPdfFile(null);
         setEditingRound(null);
     };
@@ -162,18 +167,18 @@ export default function AdminRounds() {
 
             let savedRound = null;
             if (editingRound) {
-                const response = await axios.put(`${API}/admin/rounds/${editingRound.id}`, payload, { headers: getAuthHeader() });
+                const response = await axios.put(`${API}/persofest/admin/rounds/${editingRound.id}`, payload, { headers: getAuthHeader() });
                 savedRound = response.data;
                 toast.success('Round updated');
             } else {
-                const response = await axios.post(`${API}/admin/rounds`, payload, { headers: getAuthHeader() });
+                const response = await axios.post(`${API}/persofest/admin/rounds`, payload, { headers: getAuthHeader() });
                 savedRound = response.data;
                 toast.success('Round created');
             }
             if (roundPdfFile && savedRound) {
                 const formData = new FormData();
                 formData.append('file', roundPdfFile);
-                await axios.post(`${API}/admin/rounds/${savedRound.id}/description-pdf`, formData, {
+                await axios.post(`${API}/persofest/admin/rounds/${savedRound.id}/description-pdf`, formData, {
                     headers: { ...getAuthHeader(), 'Content-Type': 'multipart/form-data' }
                 });
             }
@@ -193,8 +198,8 @@ export default function AdminRounds() {
         setMode(round.mode);
         setConductedBy(round.conducted_by || '');
         setCriteria((round.evaluation_criteria && round.evaluation_criteria.length > 0)
-            ? round.evaluation_criteria.map((c) => ({ name: c.name || '', max_marks: c.max_marks || 0 }))
-            : [{ name: 'Overall', max_marks: 100 }]
+            ? round.evaluation_criteria.map((c) => createCriterion(c.name || '', c.max_marks || 0))
+            : [createCriterion('Overall', 100)]
         );
         setRoundPdfFile(null);
         setDialogOpen(true);
@@ -203,7 +208,7 @@ export default function AdminRounds() {
     const handleDelete = async (roundId) => {
         if (!window.confirm('Delete this round?')) return;
         try {
-            await axios.delete(`${API}/admin/rounds/${roundId}`, { headers: getAuthHeader() });
+            await axios.delete(`${API}/persofest/admin/rounds/${roundId}`, { headers: getAuthHeader() });
             toast.success('Round deleted');
             fetchRounds();
         } catch (error) {
@@ -213,7 +218,7 @@ export default function AdminRounds() {
 
     const handleStateChange = async (roundId, newState) => {
         try {
-            await axios.put(`${API}/admin/rounds/${roundId}`, { state: newState }, { headers: getAuthHeader() });
+            await axios.put(`${API}/persofest/admin/rounds/${roundId}`, { state: newState }, { headers: getAuthHeader() });
             toast.success(`State changed to ${newState}`);
             fetchRounds();
         } catch (error) {
@@ -255,24 +260,24 @@ export default function AdminRounds() {
             <nav className="bg-white border-b-2 border-black">
                 <div className="max-w-7xl mx-auto px-4">
                     <div className="flex gap-1 sm:gap-1">
-                        <Link to="/admin" aria-label="Dashboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm">
+                        <Link to="/persofest/admin" aria-label="Dashboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm">
                             <LayoutDashboard className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                             <span className="hidden sm:inline">Dashboard</span>
                         </Link>
-                        <Link to="/admin/rounds" aria-label="Rounds" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm border-b-4 border-primary bg-secondary">
+                        <Link to="/persofest/admin/rounds" aria-label="Rounds" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm border-b-4 border-primary bg-secondary">
                             <Calendar className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                             <span className="hidden sm:inline">Rounds</span>
                         </Link>
-                        <Link to="/admin/participants" aria-label="Participants" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm">
+                        <Link to="/persofest/admin/participants" aria-label="Participants" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm">
                             <Users className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                             <span className="hidden sm:inline">Participants</span>
                         </Link>
-                        <Link to="/admin/leaderboard" aria-label="Leaderboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm">
+                        <Link to="/persofest/admin/leaderboard" aria-label="Leaderboard" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm">
                             <Trophy className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                             <span className="hidden sm:inline">Leaderboard</span>
                         </Link>
                         {isSuperAdmin && (
-                            <Link to="/admin/logs" aria-label="Logs" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm">
+                            <Link to="/persofest/admin/logs" aria-label="Logs" className="flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm">
                                 <ListChecks className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
                                 <span className="hidden sm:inline">Logs</span>
                             </Link>
@@ -330,24 +335,24 @@ export default function AdminRounds() {
                                             type="button"
                                             variant="outline"
                                             className="border-2 border-black"
-                                            onClick={() => setCriteria((prev) => [...prev, { name: '', max_marks: 0 }])}
+                                            onClick={() => setCriteria((prev) => [...prev, createCriterion('', 0)])}
                                         >
                                             <Plus className="w-4 h-4 mr-2" /> Add
                                         </Button>
                                     </div>
                                     <div className="space-y-2">
-                                        {criteria.map((c, idx) => (
-                                            <div key={`${c.name}-${idx}`} className="grid grid-cols-[1fr_120px_auto] gap-2 items-center">
+                                        {criteria.map((c) => (
+                                            <div key={c.id} className="grid grid-cols-[1fr_120px_auto] gap-2 items-center">
                                                 <Input
                                                     value={c.name}
-                                                    onChange={(e) => setCriteria((prev) => prev.map((item, i) => i === idx ? { ...item, name: e.target.value } : item))}
+                                                    onChange={(e) => setCriteria((prev) => prev.map((item) => item.id === c.id ? { ...item, name: e.target.value } : item))}
                                                     placeholder="Criteria name"
                                                     className="neo-input"
                                                 />
                                                 <Input
                                                     type="number"
                                                     value={c.max_marks}
-                                                    onChange={(e) => setCriteria((prev) => prev.map((item, i) => i === idx ? { ...item, max_marks: e.target.value } : item))}
+                                                    onChange={(e) => setCriteria((prev) => prev.map((item) => item.id === c.id ? { ...item, max_marks: e.target.value } : item))}
                                                     placeholder="Max marks"
                                                     className="neo-input"
                                                 />
@@ -355,7 +360,7 @@ export default function AdminRounds() {
                                                     type="button"
                                                     variant="outline"
                                                     className="border-2 border-black"
-                                                    onClick={() => setCriteria((prev) => prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev)}
+                                                    onClick={() => setCriteria((prev) => prev.length > 1 ? prev.filter((item) => item.id !== c.id) : prev)}
                                                     disabled={criteria.length === 1}
                                                 >
                                                     <X className="w-4 h-4" />
@@ -411,7 +416,7 @@ export default function AdminRounds() {
                                     {round.state === 'Draft' && <Button size="sm" onClick={() => handleStateChange(round.id, 'Published')} className="bg-blue-500 text-white border-2 border-black">Publish</Button>}
                                     {round.state === 'Published' && <Button size="sm" onClick={() => handleStateChange(round.id, 'Active')} className="bg-green-500 text-white border-2 border-black"><Play className="w-4 h-4 mr-1" />Activate</Button>}
                                     {(round.state === 'Active' || round.state === 'Completed') && (
-                                        <Link to={`/admin/scoring/${round.id}`}>
+                                        <Link to={`/persofest/admin/scoring/${round.id}`}>
                                             <Button size="sm" className="bg-primary text-white border-2 border-black"><ChevronRight className="w-4 h-4" />Scores</Button>
                                         </Link>
                                     )}

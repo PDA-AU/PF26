@@ -1,12 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Calendar, Instagram, Linkedin, Mail, Sparkles } from 'lucide-react';
+import { ArrowRight, Calendar, Sparkles, ChevronLeft, ChevronRight, Instagram, Linkedin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import PdaHeader from '@/components/layout/PdaHeader';
+import PdaFooter from '@/components/layout/PdaFooter';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import axios from 'axios';
 import pdaLogo from '@/assets/pda-logo.png';
 import pdaGroupPhoto from '@/assets/pda-group-photo.png';
 import founderPhoto from '@/assets/founder.png';
+import { useAuth } from '@/context/AuthContext';
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 const highlightStats = [
@@ -31,13 +34,20 @@ const values = [
     }
 ];
 
-const sortByDateAsc = (items) => {
+const sortByDateDesc = (items) => {
     return [...items].sort((a, b) => {
-        const aDate = a.start_date ? new Date(a.start_date).getTime() : Number.MAX_SAFE_INTEGER;
-        const bDate = b.start_date ? new Date(b.start_date).getTime() : Number.MAX_SAFE_INTEGER;
-        return aDate - bDate;
+        const aDate = a.start_date ? new Date(a.start_date).getTime() : (a.created_at ? new Date(a.created_at).getTime() : 0);
+        const bDate = b.start_date ? new Date(b.start_date).getTime() : (b.created_at ? new Date(b.created_at).getTime() : 0);
+        return bDate - aDate;
     });
 };
+
+const PROGRAMS_PAGE_SIZE = 6;
+const EVENTS_PAGE_SIZE = 6;
+const GALLERY_PAGE_SIZE = 12;
+const PROGRAMS_FETCH_LIMIT = 200;
+const EVENTS_FETCH_LIMIT = 200;
+const GALLERY_FETCH_LIMIT = 200;
 
 const formatDate = (value) => {
     if (!value) return '';
@@ -60,6 +70,7 @@ const formatDateRange = (event) => {
 };
 
 export default function PdaHome() {
+    const { user } = useAuth();
     const revealObserverRef = useRef(null);
     const programScrollRef = useRef(null);
     const eventScrollRef = useRef(null);
@@ -69,11 +80,14 @@ export default function PdaHome() {
     const [programs, setPrograms] = useState([]);
     const [events, setEvents] = useState([]);
     const [featuredEvents, setFeaturedEvents] = useState([]);
+    const [programPage, setProgramPage] = useState(1);
+    const [eventPage, setEventPage] = useState(1);
+    const [galleryPage, setGalleryPage] = useState(1);
     const [activeFeaturedIndex, setActiveFeaturedIndex] = useState(0);
     const [isFeaturedFading, setIsFeaturedFading] = useState(false);
     const [teamMembers, setTeamMembers] = useState([]);
     const [galleryItems, setGalleryItems] = useState([]);
-    const [teamFilter, setTeamFilter] = useState('Leadership');
+    const [teamFilter, setTeamFilter] = useState('Executive');
 
     useEffect(() => {
         const elements = document.querySelectorAll('[data-reveal]');
@@ -111,15 +125,17 @@ export default function PdaHome() {
         const fetchPdaContent = async () => {
             try {
                 const [programsRes, eventsRes, teamRes, galleryRes] = await Promise.all([
-                    axios.get(`${API}/pda/programs`),
-                    axios.get(`${API}/pda/events`),
+                    axios.get(`${API}/pda/programs`, { params: { limit: PROGRAMS_FETCH_LIMIT } }),
+                    axios.get(`${API}/pda/events`, { params: { limit: EVENTS_FETCH_LIMIT } }),
                     axios.get(`${API}/pda/team`),
-                    axios.get(`${API}/pda/gallery`)
+                    axios.get(`${API}/pda/gallery`, { params: { limit: GALLERY_FETCH_LIMIT } })
                 ]);
                 const programData = programsRes.data || [];
                 const eventData = eventsRes.data || [];
-                setPrograms(programData);
-                setEvents(sortByDateAsc(eventData));
+                const sortedPrograms = sortByDateDesc(programData);
+                const sortedEvents = sortByDateDesc(eventData);
+                setPrograms(sortedPrograms);
+                setEvents(sortedEvents);
                 const featuredList = eventData.filter(event => event.is_featured);
                 setFeaturedEvents(featuredList);
                 setActiveFeaturedIndex(0);
@@ -134,6 +150,18 @@ export default function PdaHome() {
     }, []);
 
     useEffect(() => {
+        setProgramPage(1);
+    }, [programs.length]);
+
+    useEffect(() => {
+        setEventPage(1);
+    }, [events.length]);
+
+    useEffect(() => {
+        setGalleryPage(1);
+    }, [galleryItems.length]);
+
+    useEffect(() => {
         if (featuredEvents.length <= 1) return;
         const intervalId = setInterval(() => {
             setIsFeaturedFading(true);
@@ -145,48 +173,59 @@ export default function PdaHome() {
         return () => clearInterval(intervalId);
     }, [featuredEvents]);
 
-    useEffect(() => {
-        if (featuredEvents.length <= 1) return;
-        const intervalId = setInterval(() => {
-            setActiveFeaturedIndex((prev) => (prev + 1) % featuredEvents.length);
-        }, 5000);
-        return () => clearInterval(intervalId);
-    }, [featuredEvents]);
-
     const heroImageSrc = pdaGroupPhoto || pdaLogo;
 
     const teamLabels = [
-        'All',
-        'Leadership',
-        'General Secretaries',
+        'Executive',
         'Content Creation',
         'Event Management',
-        'Design Team',
+        'Design',
         'Website Design',
-        'Public Relation',
+        'Public Relations',
         'Podcast',
-        'Treasurer',
-        'Librarian'
+        'Library'
     ];
 
-    const teamGroupMap = {
-        Leadership: ['Chairperson', 'Vice Chairperson'],
-        'General Secretaries': ['General Secretary'],
-        'Content Creation': ['Head of Content Creation'],
-        'Event Management': ['Head of Event Management'],
-        'Design Team': ['Head of Design'],
-        'Website Design': ['Head of Website Design'],
-        'Public Relation': ['Head of Public Relation'],
-        Podcast: ['Head of Podcast'],
-        Treasurer: ['Treasurer'],
-        Librarian: ['Chief Librarian']
+    const TEAM_SORT_ORDER = [
+        'Executive',
+        'Content Creation',
+        'Event Management',
+        'Design',
+        'Website Design',
+        'Public Relations',
+        'Podcast',
+        'Library'
+    ];
+
+    const getDesignationPriority = (designation) => {
+        const value = (designation || '').toLowerCase().trim();
+        if (value === 'head' || value.startsWith('head')) return 1;
+        if (value === 'js' || value.includes('junior secretary')) return 2;
+        if (value.includes('chair')) return 3;
+        if (value.includes('vice')) return 4;
+        if (value.includes('treasurer')) return 5;
+        if (value.includes('general secretary')) return 6;
+        return 99;
     };
 
-    const filteredTeamMembers = teamFilter === 'All'
+    const filteredTeamMembers = (teamFilter === 'All'
         ? teamMembers
-        : teamMembers.filter(member =>
-            (teamGroupMap[teamFilter] || []).includes(member.team_designation)
-        );
+        : teamMembers.filter(member => member.team === teamFilter)
+    )
+        .filter(member => !['Member', 'Volunteer'].includes(member.designation))
+        .sort((a, b) => {
+            const teamA = TEAM_SORT_ORDER.indexOf(a.team || '');
+            const teamB = TEAM_SORT_ORDER.indexOf(b.team || '');
+            if (teamA !== teamB) {
+                return (teamA === -1 ? 999 : teamA) - (teamB === -1 ? 999 : teamB);
+            }
+            const designationA = getDesignationPriority(a.designation);
+            const designationB = getDesignationPriority(b.designation);
+            if (designationA !== designationB) {
+                return designationA - designationB;
+            }
+            return (a.name || '').localeCompare(b.name || '');
+        });
 
     const openPoster = (poster) => {
         if (!poster?.src) return;
@@ -244,23 +283,10 @@ export default function PdaHome() {
     };
 
     return (
-        <div className="min-h-screen bg-[#f3efe6] text-[#11131a]">
-            <header className="sticky top-0 z-50 border-b border-black/10 bg-[#f3efe6]/90 backdrop-blur">
-                <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-5 py-4">
-                    <Link to="/" className="flex items-center gap-3">
-                        <img src={pdaLogo} alt="Personality Development Association" className="h-11 w-11 rounded-full border border-black/10 object-cover" />
-                        <div className="leading-none">
-                            <p className="text-sm font-heading font-black uppercase tracking-[0.22em] text-[#b8890b] sm:text-base md:text-lg">
-                                Personality Development Association
-                            </p>
-                          
-                        </div>
-                    </Link>
-                    
-                </div>
-            </header>
+        <div className="min-h-screen bg-[#f3efe6] text-[#11131a] flex flex-col">
+            <PdaHeader />
 
-            <main>
+            <main className="flex-1">
                 <section className="relative overflow-hidden">
                     <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(246,195,71,0.28),_transparent_55%)]" />
                     <div className="absolute inset-y-0 right-0 hidden w-1/2 bg-gradient-to-l from-white/70 via-white/30 to-transparent lg:block" />
@@ -279,9 +305,12 @@ export default function PdaHome() {
                                 Our Motto: "Discover Thyself"
                             </div>
                             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-                                <Button className="bg-[#f6c347] text-black shadow-none hover:bg-[#ffd16b]">
-                                    Become a Member
-                                </Button>
+                                <Link to={user ? "/pda/profile" : "/recruit"}>
+                                    <Button className="bg-[#f6c347] text-black shadow-none hover:bg-[#ffd16b]">
+                                        Become a Member
+                                    </Button>
+                                </Link>
+                              
                                 <Link to="/persofest" className="inline-flex items-center gap-2 rounded-md border border-black/15 bg-white/70 px-4 py-2 text-sm font-semibold text-slate-800 transition hover:border-black/30 hover:text-[#0f1115]">
                                     Explore Persofest’26
                                     <ArrowRight className="h-4 w-4" />
@@ -305,7 +334,7 @@ export default function PdaHome() {
                         <div className="relative w-full md:max-w-md" data-reveal>
                             <div className="absolute -top-6 left-6 h-24 w-24 rounded-full bg-[#f6c347]/25 blur-2xl" />
                             <div className="rounded-3xl border border-black/10 bg-white p-5 shadow-2xl backdrop-blur sm:p-6">
-                                <img src={heroImageSrc} alt="PDA group" className="h-56 w-full rounded-2xl object-cover sm:h-64" />
+                                <img src={heroImageSrc} alt="PDA group" className="h-64 w-full rounded-2xl object-cover sm:h-64" />
                                 <div className="mt-5 space-y-3 text-sm text-slate-700">
                                     <div className="flex items-center gap-2">
                                         <Sparkles className="h-4 w-4 text-[#f6c347]" />
@@ -460,10 +489,34 @@ export default function PdaHome() {
                         <div>
                             <h2 className="text-2xl font-heading font-black sm:text-3xl">Programs & Activities</h2>
                         </div>
+                        {programs.length > PROGRAMS_PAGE_SIZE ? (
+                            <div className="hidden items-center gap-2 md:flex">
+                                <button
+                                    type="button"
+                                    onClick={() => setProgramPage((prev) => Math.max(1, prev - 1))}
+                                    className="rounded-full border border-[#c99612] bg-[#f6c347] p-2 text-[#11131a] transition hover:bg-[#ffd16b] disabled:cursor-not-allowed disabled:opacity-50"
+                                    aria-label="Previous programs"
+                                    disabled={programPage === 1}
+                                >
+                                    <ChevronLeft className="h-4 w-4" />
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setProgramPage((prev) => Math.min(Math.ceil(programs.length / PROGRAMS_PAGE_SIZE), prev + 1))}
+                                    className="rounded-full border border-[#c99612] bg-[#f6c347] p-2 text-[#11131a] transition hover:bg-[#ffd16b] disabled:cursor-not-allowed disabled:opacity-50"
+                                    aria-label="Next programs"
+                                    disabled={programPage >= Math.ceil(programs.length / PROGRAMS_PAGE_SIZE)}
+                                >
+                                    <ChevronRight className="h-4 w-4" />
+                                </button>
+                            </div>
+                        ) : null}
                     </div>
-                    <div className="mt-6 hidden grid auto-rows-fr items-stretch gap-6 md:grid md:grid-cols-3" data-reveal>
+                    <div className="mt-6 hidden auto-rows-fr items-stretch gap-6 md:grid md:grid-cols-3" data-reveal>
                         {programs.length > 0 ? (
-                            programs.slice(0, 6).map((program) => renderCard(program, 'program'))
+                            programs
+                                .slice((programPage - 1) * PROGRAMS_PAGE_SIZE, programPage * PROGRAMS_PAGE_SIZE)
+                                .map((program) => renderCard(program, 'program'))
                         ) : (
                             <div className="col-span-full rounded-2xl border border-black/10 bg-white p-6 text-center text-sm text-slate-600">
                                 Program updates are coming soon.
@@ -477,7 +530,7 @@ export default function PdaHome() {
                                     ref={programScrollRef}
                                     className="flex gap-4 overflow-x-auto pb-4 no-scrollbar snap-x snap-mandatory"
                                 >
-                                    {programs.slice(0, 6).map((program) => (
+                                    {programs.map((program) => (
                                         <div key={`program-mobile-${program.id || program.title}`} className="min-w-[260px] snap-start">
                                             {renderCard(program, 'program')}
                                         </div>
@@ -487,16 +540,18 @@ export default function PdaHome() {
                                     <button
                                         type="button"
                                         onClick={() => scrollByOffset(programScrollRef, -280)}
-                                        className="rounded-full border border-[#c99612] bg-[#f6c347] px-3 py-2 text-xs uppercase tracking-[0.2em] text-[#11131a] hover:bg-[#ffd16b]"
+                                        className="rounded-full border border-[#c99612] bg-[#f6c347] p-2 text-[#11131a] hover:bg-[#ffd16b]"
+                                        aria-label="Previous programs"
                                     >
-                                        Prev
+                                        <ChevronLeft className="h-4 w-4" />
                                     </button>
                                     <button
                                         type="button"
                                         onClick={() => scrollByOffset(programScrollRef, 280)}
-                                        className="rounded-full border border-[#c99612] bg-[#f6c347] px-3 py-2 text-xs uppercase tracking-[0.2em] text-[#11131a] hover:bg-[#ffd16b]"
+                                        className="rounded-full border border-[#c99612] bg-[#f6c347] p-2 text-[#11131a] hover:bg-[#ffd16b]"
+                                        aria-label="Next programs"
                                     >
-                                        Next
+                                        <ChevronRight className="h-4 w-4" />
                                     </button>
                                 </div>
                             </>
@@ -513,10 +568,34 @@ export default function PdaHome() {
                         <div>
                             <h2 className="text-2xl font-heading font-black sm:text-3xl">Events & Workshops</h2>
                         </div>
+                        {events.length > EVENTS_PAGE_SIZE ? (
+                            <div className="hidden items-center gap-2 md:flex">
+                                <button
+                                    type="button"
+                                    onClick={() => setEventPage((prev) => Math.max(1, prev - 1))}
+                                    className="rounded-full border border-[#c99612] bg-[#f6c347] p-2 text-[#11131a] transition hover:bg-[#ffd16b] disabled:cursor-not-allowed disabled:opacity-50"
+                                    aria-label="Previous events"
+                                    disabled={eventPage === 1}
+                                >
+                                    <ChevronLeft className="h-4 w-4" />
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setEventPage((prev) => Math.min(Math.ceil(events.length / EVENTS_PAGE_SIZE), prev + 1))}
+                                    className="rounded-full border border-[#c99612] bg-[#f6c347] p-2 text-[#11131a] transition hover:bg-[#ffd16b] disabled:cursor-not-allowed disabled:opacity-50"
+                                    aria-label="Next events"
+                                    disabled={eventPage >= Math.ceil(events.length / EVENTS_PAGE_SIZE)}
+                                >
+                                    <ChevronRight className="h-4 w-4" />
+                                </button>
+                            </div>
+                        ) : null}
                     </div>
-                    <div className="mt-6 hidden grid auto-rows-fr items-stretch gap-6 md:grid md:grid-cols-3" data-reveal>
+                    <div className="mt-6 hidden auto-rows-fr items-stretch gap-6 md:grid md:grid-cols-3" data-reveal>
                         {events.length > 0 ? (
-                            events.slice(0, 6).map((event) => renderCard(event, 'event'))
+                            events
+                                .slice((eventPage - 1) * EVENTS_PAGE_SIZE, eventPage * EVENTS_PAGE_SIZE)
+                                .map((event) => renderCard(event, 'event'))
                         ) : (
                             <div className="col-span-full rounded-2xl border border-black/10 bg-white p-6 text-center text-sm text-slate-600">
                                 Upcoming events will be announced soon.
@@ -530,7 +609,7 @@ export default function PdaHome() {
                                     ref={eventScrollRef}
                                     className="flex gap-4 overflow-x-auto pb-4 no-scrollbar snap-x snap-mandatory"
                                 >
-                                    {events.slice(0, 6).map((event) => (
+                                    {events.map((event) => (
                                         <div key={`event-mobile-${event.id || event.title}`} className="min-w-[260px] snap-start">
                                             {renderCard(event, 'event')}
                                         </div>
@@ -540,16 +619,18 @@ export default function PdaHome() {
                                     <button
                                         type="button"
                                         onClick={() => scrollByOffset(eventScrollRef, -280)}
-                                        className="rounded-full border border-[#c99612] bg-[#f6c347] px-3 py-2 text-xs uppercase tracking-[0.2em] text-[#11131a] hover:bg-[#ffd16b]"
+                                        className="rounded-full border border-[#c99612] bg-[#f6c347] p-2 text-[#11131a] hover:bg-[#ffd16b]"
+                                        aria-label="Previous events"
                                     >
-                                        Prev
+                                        <ChevronLeft className="h-4 w-4" />
                                     </button>
                                     <button
                                         type="button"
                                         onClick={() => scrollByOffset(eventScrollRef, 280)}
-                                        className="rounded-full border border-[#c99612] bg-[#f6c347] px-3 py-2 text-xs uppercase tracking-[0.2em] text-[#11131a] hover:bg-[#ffd16b]"
+                                        className="rounded-full border border-[#c99612] bg-[#f6c347] p-2 text-[#11131a] hover:bg-[#ffd16b]"
+                                        aria-label="Next events"
                                     >
-                                        Next
+                                        <ChevronRight className="h-4 w-4" />
                                     </button>
                                 </div>
                             </>
@@ -611,8 +692,15 @@ export default function PdaHome() {
                                         className="mx-auto h-32 w-32 rounded-3xl border border-black/10 object-cover"
                                     />
                                     <p className="mt-4 text-[11px] uppercase tracking-[0.3em] text-slate-500">
-                                        {member.team_designation}
+                                        {member.team}
                                     </p>
+                                    {member.designation ? (
+                                        <div className="mt-2 flex justify-center">
+                                            <div className="inline-flex max-w-full items-center truncate rounded-full border border-[#f6c347]/60 bg-[#fff3c4] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.25em] text-[#7a5a00]">
+                                                {member.designation}
+                                            </div>
+                                        </div>
+                                    ) : null}
                                     <h3 className="mt-2 text-xl font-heading font-bold">{member.name}</h3>
                                     <p className="text-sm text-slate-600">{member.regno}</p>
                                     <div className="mt-4 flex items-center justify-center gap-4 text-sm text-slate-600">
@@ -650,16 +738,42 @@ export default function PdaHome() {
                 </section>
 
                 <section className="mx-auto w-full max-w-6xl px-5 py-10 md:py-14">
-                    <div data-reveal>
-                        <p className="text-xs uppercase tracking-[0.4em] text-[#f6c347]">Gallery</p>
-                        <h2 className="mt-2 text-2xl font-heading font-black sm:text-3xl">Gallery Photos</h2>
-                        <p className="mt-3 text-sm text-slate-700 md:text-base">
-                            Moments from PDA events, workshops, and community highlights.
-                        </p>
+                    <div className="flex flex-wrap items-start justify-between gap-4" data-reveal>
+                        <div>
+                            <p className="text-xs uppercase tracking-[0.4em] text-[#f6c347]">Gallery</p>
+                            <h2 className="mt-2 text-2xl font-heading font-black sm:text-3xl">Gallery Photos</h2>
+                            <p className="mt-3 text-sm text-slate-700 md:text-base">
+                                Moments from PDA events, workshops, and community highlights.
+                            </p>
+                        </div>
+                        {galleryItems.length > GALLERY_PAGE_SIZE ? (
+                            <div className="hidden items-center gap-2 md:flex">
+                                <button
+                                    type="button"
+                                    onClick={() => setGalleryPage((prev) => Math.max(1, prev - 1))}
+                                    className="rounded-full border border-[#c99612] bg-[#f6c347] p-2 text-[#11131a] transition hover:bg-[#ffd16b] disabled:cursor-not-allowed disabled:opacity-50"
+                                    aria-label="Previous gallery items"
+                                    disabled={galleryPage === 1}
+                                >
+                                    <ChevronLeft className="h-4 w-4" />
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setGalleryPage((prev) => Math.min(Math.ceil(galleryItems.length / GALLERY_PAGE_SIZE), prev + 1))}
+                                    className="rounded-full border border-[#c99612] bg-[#f6c347] p-2 text-[#11131a] transition hover:bg-[#ffd16b] disabled:cursor-not-allowed disabled:opacity-50"
+                                    aria-label="Next gallery items"
+                                    disabled={galleryPage >= Math.ceil(galleryItems.length / GALLERY_PAGE_SIZE)}
+                                >
+                                    <ChevronRight className="h-4 w-4" />
+                                </button>
+                            </div>
+                        ) : null}
                     </div>
                     <div className="mt-6 hidden items-stretch gap-4 md:grid md:grid-cols-3 lg:grid-cols-4" data-reveal>
                         {galleryItems.length > 0 ? (
-                            galleryItems.map((item) => (
+                            galleryItems
+                                .slice((galleryPage - 1) * GALLERY_PAGE_SIZE, galleryPage * GALLERY_PAGE_SIZE)
+                                .map((item) => (
                                 <div key={item.id} className="flex h-full min-h-[220px] flex-col rounded-2xl border border-black/10 bg-white p-3 shadow-sm">
                                     <img
                                         src={item.photo_url}
@@ -703,16 +817,18 @@ export default function PdaHome() {
                                     <button
                                         type="button"
                                         onClick={() => scrollByOffset(galleryScrollRef, -240)}
-                                        className="rounded-full border border-[#c99612] bg-[#f6c347] px-3 py-2 text-xs uppercase tracking-[0.2em] text-[#11131a] hover:bg-[#ffd16b]"
+                                        className="rounded-full border border-[#c99612] bg-[#f6c347] p-2 text-[#11131a] hover:bg-[#ffd16b]"
+                                        aria-label="Previous gallery items"
                                     >
-                                        Prev
+                                        <ChevronLeft className="h-4 w-4" />
                                     </button>
                                     <button
                                         type="button"
                                         onClick={() => scrollByOffset(galleryScrollRef, 240)}
-                                        className="rounded-full border border-[#c99612] bg-[#f6c347] px-3 py-2 text-xs uppercase tracking-[0.2em] text-[#11131a] hover:bg-[#ffd16b]"
+                                        className="rounded-full border border-[#c99612] bg-[#f6c347] p-2 text-[#11131a] hover:bg-[#ffd16b]"
+                                        aria-label="Next gallery items"
                                     >
-                                        Next
+                                        <ChevronRight className="h-4 w-4" />
                                     </button>
                                 </div>
                             </>
@@ -725,49 +841,7 @@ export default function PdaHome() {
                 </section>
             </main>
 
-            <footer className="border-t border-black/10 bg-white py-10">
-                <div className="mx-auto grid w-full max-w-6xl gap-6 px-5 text-sm text-slate-600 md:grid-cols-[1.2fr_0.8fr] md:items-center">
-                    <div className="flex items-start gap-4">
-                        <img src={pdaLogo} alt="PDA" className="h-12 w-12 rounded-2xl border border-black/10 object-cover" />
-                        <div>
-                            <p className="font-heading text-lg font-black text-[#0f1115]">Personality Development Association</p>
-                            <p className="mt-1 text-sm text-slate-600">Contact us</p>
-                            <a
-                                href="mailto:pda@mitindia.edu"
-                                className="mt-2 inline-flex items-center gap-2 text-sm text-slate-700 hover:text-[#0f1115]"
-                            >
-                                <Mail className="h-4 w-4" />
-                                pda@mitindia.edu
-                            </a>
-                        </div>
-                    </div>
-                    <div className="flex flex-col gap-3 md:items-end">
-                        <div className="flex flex-wrap gap-4">
-                            <Link to="/persofest" className="font-semibold text-slate-700 hover:text-[#0f1115]">Persofest’26</Link>
-                        </div>
-                        <div className="flex flex-wrap gap-4 text-slate-700">
-                            <a
-                                href="https://www.instagram.com/pda_mit/"
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-2 hover:text-[#0f1115]"
-                            >
-                                <Instagram className="h-4 w-4" />
-                                Instagram
-                            </a>
-                            <a
-                                href="https://www.linkedin.com/company/personality-development-association-mit/"
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-2 hover:text-[#0f1115]"
-                            >
-                                <Linkedin className="h-4 w-4" />
-                                LinkedIn
-                            </a>
-                        </div>
-                    </div>
-                </div>
-            </footer>
+            <PdaFooter />
 
 	            <Dialog open={posterDialogOpen} onOpenChange={setPosterDialogOpen}>
 	                <DialogContent className="max-w-3xl bg-white p-0">

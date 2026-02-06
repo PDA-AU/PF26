@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '@/context/AuthContext';
+import { useParticipantAuth } from '@/context/ParticipantAuthContext';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { Eye, EyeOff, Sparkles, ArrowLeft, Check, X } from 'lucide-react';
@@ -37,7 +37,7 @@ const GENDERS = [
 
 export default function RegisterPage() {
     const navigate = useNavigate();
-    const { register } = useAuth();
+    const { register } = useParticipantAuth();
     const [registrationOpen, setRegistrationOpen] = useState(true);
     const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
@@ -117,7 +117,7 @@ export default function RegisterPage() {
 
             await register(userData);
             toast.success('Registration successful! Welcome to Persofest\'26!');
-            navigate('/dashboard');
+            navigate('/persofest/dashboard');
         } catch (error) {
             console.error('Registration failed:', error);
             toast.error(error.response?.data?.detail || 'Registration failed. Please try again.');
@@ -393,7 +393,7 @@ export default function RegisterPage() {
 
                 <p className="text-center mt-6 text-gray-600">
                     Already have an account?{' '}
-                    <Link to="/login" className="font-bold text-primary hover:underline" data-testid="goto-login-link">
+                    <Link to="/persofest/login" className="font-bold text-primary hover:underline" data-testid="goto-login-link">
                         Login here
                     </Link>
                 </p>

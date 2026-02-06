@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '@/context/AuthContext';
+import { useParticipantAuth } from '@/context/ParticipantAuthContext';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { 
@@ -16,7 +16,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function ParticipantDashboard() {
     const navigate = useNavigate();
-    const { user, logout, updateUser, getAuthHeader } = useAuth();
+    const { user, logout, updateUser, getAuthHeader } = useParticipantAuth();
     const [roundStatuses, setRoundStatuses] = useState([]);
     const [editing, setEditing] = useState(false);
     const [copied, setCopied] = useState(false);
@@ -29,7 +29,7 @@ export default function ParticipantDashboard() {
 
     const fetchRoundStatuses = useCallback(async () => {
         try {
-            const response = await axios.get(`${API}/me/rounds`, {
+            const response = await axios.get(`${API}/participant/me/rounds`, {
                 headers: getAuthHeader()
             });
             setRoundStatuses(response.data);
@@ -66,7 +66,7 @@ export default function ParticipantDashboard() {
     const handleSaveProfile = async () => {
         setLoading(true);
         try {
-            const response = await axios.put(`${API}/me`, editData, {
+            const response = await axios.put(`${API}/participant/me`, editData, {
                 headers: getAuthHeader()
             });
             updateUser(response.data);
@@ -97,7 +97,7 @@ export default function ParticipantDashboard() {
         formData.append('file', file);
 
         try {
-            const response = await axios.post(`${API}/me/profile-picture`, formData, {
+            const response = await axios.post(`${API}/participant/me/profile-picture`, formData, {
                 headers: {
                     ...getAuthHeader(),
                     'Content-Type': 'multipart/form-data'

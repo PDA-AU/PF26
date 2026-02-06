@@ -8,11 +8,22 @@ import { Label } from '@/components/ui/label';
 import { useAuth } from '@/context/AuthContext';
 
 export default function AdminLayout({ title, subtitle, children }) {
-    const { login, logout, isAdmin, loading: authLoading, user } = useAuth();
+    const { login, logout, canAccessHome, loading: authLoading, user, isSuperAdmin } = useAuth();
     const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
     const [loginForm, setLoginForm] = useState({ register_number: '', password: '' });
     const [showPassword, setShowPassword] = useState(false);
     const [loginLoading, setLoginLoading] = useState(false);
+
+    const getErrorMessage = (error, fallback) => {
+        const detail = error?.response?.data?.detail;
+        if (Array.isArray(detail)) {
+            return detail.map((item) => item?.msg || item?.detail || JSON.stringify(item)).join(', ');
+        }
+        if (detail && typeof detail === 'object') {
+            return detail.msg || detail.detail || JSON.stringify(detail);
+        }
+        return detail || fallback;
+    };
 
     const handleLoginChange = (e) => {
         setLoginForm(prev => ({
@@ -26,7 +37,7 @@ export default function AdminLayout({ title, subtitle, children }) {
         setLoginLoading(true);
         try {
             const userData = await login(loginForm.register_number, loginForm.password);
-            if (userData.role !== 'admin') {
+            if (!userData.is_admin && !userData.is_superadmin) {
                 toast.error('Admin access required.');
                 logout();
                 return;
@@ -34,20 +45,20 @@ export default function AdminLayout({ title, subtitle, children }) {
             toast.success('Admin login successful!');
         } catch (error) {
             console.error('Login failed:', error);
-            toast.error(error.response?.data?.detail || 'Login failed. Please check your credentials.');
+            toast.error(getErrorMessage(error, 'Login failed. Please check your credentials.'));
         } finally {
             setLoginLoading(false);
         }
     };
 
     const baseNavItems = [
-        { label: 'Items', path: '/pda-admin/items' },
-        { label: 'Team', path: '/pda-admin/team' },
-        { label: 'Gallery', path: '/pda-admin/gallery' }
+        { label: 'Items', path: '/admin/items' },
+        { label: 'Team', path: '/admin/team' },
+        { label: 'Gallery', path: '/admin/gallery' }
     ];
 
-    const navItems = user?.register_number === "0000000000"
-        ? [...baseNavItems, { label: 'Superadmin', path: '/pda-admin/superadmin' }]
+    const navItems = isSuperAdmin
+        ? [...baseNavItems, { label: 'Recruitments', path: '/admin/recruitments' }, { label: 'Logs', path: '/admin/logs' }, { label: 'Superadmin', path: '/admin/superadmin' }]
         : baseNavItems;
 
     const navClass = (path) => (
@@ -68,7 +79,7 @@ export default function AdminLayout({ title, subtitle, children }) {
         );
     }
 
-    if (!isAdmin) {
+    if (!canAccessHome) {
         return (
             <div className="min-h-screen bg-white flex">
                 <div className="hidden lg:flex lg:w-1/2 bg-primary relative overflow-hidden">
@@ -100,10 +111,10 @@ export default function AdminLayout({ title, subtitle, children }) {
                         </div>
 
                         <h2 className="font-heading font-bold text-3xl md:text-4xl tracking-tight mb-2">
-                            Admin Login
+                            PDA Admin Login
                         </h2>
                         <p className="text-gray-600 mb-8">
-                            Use your admin register number and password
+                            Use your PDA admin credentials
                         </p>
 
                         <form onSubmit={handleLoginSubmit} className="space-y-6">
