@@ -13,7 +13,7 @@ export default function PdaHeader() {
         : 'PD';
 
     return (
-        <header className="sticky top-0 z-50 border-b border-black/10 bg-[#f3efe6]/90 backdrop-blur">
+        <header className="border-b border-black/10 bg-[#f3efe6]/90 backdrop-blur md:sticky md:top-0 md:z-50">
             <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-5 py-4">
                 <Link to="/" className="flex items-center gap-3">
                     <img
