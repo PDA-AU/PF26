@@ -290,8 +290,8 @@ export default function PdaHome() {
                 <section className="relative overflow-hidden">
                     <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(246,195,71,0.28),_transparent_55%)]" />
                     <div className="absolute inset-y-0 right-0 hidden w-1/2 bg-gradient-to-l from-white/70 via-white/30 to-transparent lg:block" />
-                    <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-10 px-5 py-8 md:flex-row md:items-center md:py-16">
-                        <div className="max-w-xl" data-reveal>
+                    <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-10 px-5 py-8 min-[1000px]:flex-row min-[1000px]:items-center md:py-16">
+                        <div className="w-full max-w-xl min-[1000px]:max-w-xl" data-reveal>
                             <div className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1 text-[11px] uppercase tracking-[0.4em] text-[#b8890b]">
                                 Since 1984
                             </div>
@@ -331,7 +331,7 @@ export default function PdaHome() {
                                 </div>
                             </div>
                         </div>
-                        <div className="relative w-full md:max-w-sm lg:max-w-md" data-reveal>
+                        <div className="relative w-full min-[1000px]:max-w-md" data-reveal>
                             <div className="absolute -top-6 left-6 h-24 w-24 rounded-full bg-[#f6c347]/25 blur-2xl" />
                             <div className="rounded-3xl border border-black/10 bg-white p-5 shadow-2xl backdrop-blur sm:p-6">
                                 <img src={heroImageSrc} alt="PDA group" className="h-56 w-full rounded-2xl object-cover sm:h-64 md:h-56 lg:h-64" />
