@@ -80,7 +80,7 @@ export default function PdaHome() {
     const [selectedPoster, setSelectedPoster] = useState(null);
     const [programs, setPrograms] = useState([]);
     const [events, setEvents] = useState([]);
-    const [featuredEvents, setFeaturedEvents] = useState([]);
+    const [featuredItems, setFeaturedItems] = useState([]);
     const [programPage, setProgramPage] = useState(1);
     const [eventPage, setEventPage] = useState(1);
     const [galleryPage, setGalleryPage] = useState(1);
@@ -120,7 +120,7 @@ export default function PdaHome() {
                 revealObserverRef.current.disconnect();
             }
         };
-    }, [programs, events, featuredEvents]);
+    }, [programs, events, featuredItems]);
 
     useEffect(() => {
         const fetchPdaContent = async () => {
@@ -137,8 +137,11 @@ export default function PdaHome() {
                 const sortedEvents = sortByDateDesc(eventData);
                 setPrograms(sortedPrograms);
                 setEvents(sortedEvents);
-                const featuredList = eventData.filter(event => event.is_featured);
-                setFeaturedEvents(featuredList);
+                const featuredList = [
+                    ...(programData || []).filter((item) => item.is_featured).map((item) => ({ ...item, __type: 'program' })),
+                    ...(eventData || []).filter((item) => item.is_featured).map((item) => ({ ...item, __type: 'event' }))
+                ];
+                setFeaturedItems(featuredList);
                 setActiveFeaturedIndex(0);
                 setTeamMembers(teamRes.data || []);
                 setGalleryItems(galleryRes.data || []);
@@ -163,16 +166,16 @@ export default function PdaHome() {
     }, [galleryItems.length]);
 
     useEffect(() => {
-        if (featuredEvents.length <= 1) return;
+        if (featuredItems.length <= 1) return;
         const intervalId = setInterval(() => {
             setIsFeaturedFading(true);
             setTimeout(() => {
-                setActiveFeaturedIndex((prev) => (prev + 1) % featuredEvents.length);
+                setActiveFeaturedIndex((prev) => (prev + 1) % featuredItems.length);
                 setIsFeaturedFading(false);
-            }, 700);
-        }, 8000);
+            }, 500);
+        }, 6000);
         return () => clearInterval(intervalId);
-    }, [featuredEvents]);
+    }, [featuredItems]);
 
     const heroImageSrc = pdaGroupPhoto || pdaLogo;
 
@@ -363,60 +366,60 @@ export default function PdaHome() {
                     </div>
                 </section>
 
-                {featuredEvents.length > 0 ? (
+                {featuredItems.length > 0 ? (
                     <section className="mx-auto w-full max-w-6xl px-5 pb-8">
                         <div className="grid gap-6 rounded-3xl border border-black/10 bg-gradient-to-r from-[#fff1c7] via-[#fff8e8] to-white p-6 md:grid-cols-2 md:min-h-[320px] lg:grid-cols-[1.2fr_0.8fr]" data-reveal>
                             <div className={`transition-opacity duration-700 ease-in-out ${isFeaturedFading ? 'opacity-0' : 'opacity-100'}`}>
                                 <p className="text-xs uppercase tracking-[0.4em] text-[#8b6a00]">Featured</p>
                                 <h2 className="mt-3 text-3xl font-heading font-black text-[#0f1115]">
-                                    {featuredEvents[activeFeaturedIndex]?.title}
+                                    {featuredItems[activeFeaturedIndex]?.title}
                                 </h2>
                                 <p className="mt-4 text-sm text-slate-700 md:text-base">
-                                    {featuredEvents[activeFeaturedIndex]?.hero_caption ||
-                                        featuredEvents[activeFeaturedIndex]?.description ||
+                                    {featuredItems[activeFeaturedIndex]?.hero_caption ||
+                                        featuredItems[activeFeaturedIndex]?.description ||
                                         'Event details coming soon.'}
                                 </p>
                                 <div className="mt-5 flex flex-wrap items-center gap-3 text-xs uppercase tracking-[0.2em] text-slate-600">
                                     <span className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1 text-[#0f1115]">
                                         <Calendar className="h-4 w-4 text-[#f6c347]" />
-                                        {formatDateRange(featuredEvents[activeFeaturedIndex])}
+                                        {formatDateRange(featuredItems[activeFeaturedIndex])}
                                     </span>
-                                    {featuredEvents[activeFeaturedIndex]?.format ? (
+                                    {featuredItems[activeFeaturedIndex]?.format ? (
                                         <span className="inline-flex items-center rounded-full border border-black/10 bg-white px-3 py-1 text-[#0f1115]">
-                                            {featuredEvents[activeFeaturedIndex]?.format}
+                                            {featuredItems[activeFeaturedIndex]?.format}
                                         </span>
                                     ) : null}
                                 </div>
-                                {featuredEvents[activeFeaturedIndex]?.hero_url ? (
+                                {featuredItems[activeFeaturedIndex]?.hero_url ? (
                                     <a
-                                        href={featuredEvents[activeFeaturedIndex]?.hero_url}
+                                        href={featuredItems[activeFeaturedIndex]?.hero_url}
                                         target="_blank"
                                         rel="noreferrer"
                                         className="mt-6 inline-flex items-center gap-2 rounded-md bg-[#0f1115] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#1f2330]"
                                     >
-                                        Explore Event
+                                        Explore
                                         <ArrowRight className="h-4 w-4" />
                                     </a>
                                 ) : null}
                             </div>
                             <div className={`flex items-center justify-center transition-opacity duration-700 ease-in-out ${isFeaturedFading ? 'opacity-0' : 'opacity-100'}`}>
-                                {featuredEvents[activeFeaturedIndex]?.featured_poster_url || featuredEvents[activeFeaturedIndex]?.poster_url ? (
+                                {featuredItems[activeFeaturedIndex]?.featured_poster_url || featuredItems[activeFeaturedIndex]?.poster_url ? (
                                     <button
                                         type="button"
                                         onClick={() =>
                                             openPoster({
-                                                src: featuredEvents[activeFeaturedIndex]?.featured_poster_url || featuredEvents[activeFeaturedIndex]?.poster_url,
-                                                title: featuredEvents[activeFeaturedIndex]?.title,
-                                                meta: `${formatDateRange(featuredEvents[activeFeaturedIndex])}${
-                                                    featuredEvents[activeFeaturedIndex]?.format ? ` · ${featuredEvents[activeFeaturedIndex]?.format}` : ''
+                                                src: featuredItems[activeFeaturedIndex]?.featured_poster_url || featuredItems[activeFeaturedIndex]?.poster_url,
+                                                title: featuredItems[activeFeaturedIndex]?.title,
+                                                meta: `${formatDateRange(featuredItems[activeFeaturedIndex])}${
+                                                    featuredItems[activeFeaturedIndex]?.format ? ` · ${featuredItems[activeFeaturedIndex]?.format}` : ''
                                                 }`
                                             })
                                         }
                                         className="w-full"
                                     >
                                         <img
-                                            src={featuredEvents[activeFeaturedIndex]?.featured_poster_url || featuredEvents[activeFeaturedIndex]?.poster_url}
-                                            alt={featuredEvents[activeFeaturedIndex]?.title}
+                                            src={featuredItems[activeFeaturedIndex]?.featured_poster_url || featuredItems[activeFeaturedIndex]?.poster_url}
+                                            alt={featuredItems[activeFeaturedIndex]?.title}
                                             className="aspect-[2/1] w-full rounded-2xl border border-black/10 object-cover"
                                         />
                                     </button>
@@ -426,9 +429,9 @@ export default function PdaHome() {
                                     </div>
                                 )}
                             </div>
-                            {featuredEvents.length > 1 ? (
+                            {featuredItems.length > 1 ? (
                                 <div className="md:col-span-2 flex items-center justify-center gap-2 pt-2">
-                                    {featuredEvents.map((event, index) => (
+                                    {featuredItems.map((event, index) => (
                                         <button
                                             key={`${event.title}-${index}`}
                                             type="button"

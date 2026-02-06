@@ -9,6 +9,7 @@ import { useAuth } from '@/context/AuthContext';
 import AdminLayout from '@/pages/HomeAdmin/AdminLayout';
 import { API, uploadPoster } from '@/pages/HomeAdmin/adminApi';
 import { compressImageToWebp } from '@/utils/imageCompression';
+import { toast } from 'sonner';
 
 const emptyItem = {
     type: 'program',
@@ -226,8 +227,10 @@ export default function ItemsAdmin() {
         try {
             await axios.put(`${API}/pda-admin/events/${eventId}`, { is_featured: nextValue }, { headers: getAuthHeader() });
             fetchData();
+            toast.success(nextValue ? 'Event marked as featured' : 'Event unfeatured');
         } catch (error) {
             console.error('Failed to update event feature status:', error);
+            toast.error('Failed to update event feature status');
         }
     };
 
@@ -235,8 +238,10 @@ export default function ItemsAdmin() {
         try {
             await axios.put(`${API}/pda-admin/programs/${programId}`, { is_featured: nextValue }, { headers: getAuthHeader() });
             fetchData();
+            toast.success(nextValue ? 'Program marked as featured' : 'Program unfeatured');
         } catch (error) {
             console.error('Failed to update program feature status:', error);
+            toast.error('Failed to update program feature status');
         }
     };
 
@@ -514,10 +519,10 @@ export default function ItemsAdmin() {
                                     <Button
                                         variant="outline"
                                         onClick={() => toggleProgramFeatured(program.id, !program.is_featured)}
-                                        className="border-black/10 text-xs"
+                                        className={`border-black/10 text-xs ${program.is_featured ? 'text-[#b8890b]' : ''}`}
                                         aria-label={program.is_featured ? 'Unfeature program' : 'Feature program'}
                                     >
-                                        <Flag className="h-4 w-4 sm:mr-1" />
+                                        <Flag className={`h-4 w-4 sm:mr-1 ${program.is_featured ? 'text-[#b8890b]' : ''}`} />
                                         <span className="hidden sm:inline">{program.is_featured ? 'Unfeature' : 'Feature'}</span>
                                     </Button>
                                 </div>
@@ -596,10 +601,10 @@ export default function ItemsAdmin() {
                                     <Button
                                         variant="outline"
                                         onClick={() => toggleEventFeatured(event.id, !event.is_featured)}
-                                        className="border-black/10 text-xs"
+                                        className={`border-black/10 text-xs ${event.is_featured ? 'text-[#b8890b]' : ''}`}
                                         aria-label={event.is_featured ? 'Unfeature event' : 'Feature event'}
                                     >
-                                        <Flag className="h-4 w-4 sm:mr-1" />
+                                        <Flag className={`h-4 w-4 sm:mr-1 ${event.is_featured ? 'text-[#b8890b]' : ''}`} />
                                         <span className="hidden sm:inline">{event.is_featured ? 'Unfeature' : 'Feature'}</span>
                                     </Button>
                                 </div>
