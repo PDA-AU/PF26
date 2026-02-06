@@ -152,6 +152,12 @@ def ensure_pda_team_constraints(engine):
                     """
                 )
             )
+
+
+def ensure_pda_gallery_tag_column(engine):
+    with engine.begin() as conn:
+        if _table_exists(conn, "pda_gallery") and not _column_exists(conn, "pda_gallery", "tag"):
+            conn.execute(text("ALTER TABLE pda_gallery ADD COLUMN tag VARCHAR(120)"))
         designation_constraint = conn.execute(
             text(
                 """

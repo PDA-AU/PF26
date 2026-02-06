@@ -3,25 +3,23 @@ import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/context/AuthContext';
 import AdminLayout from '@/pages/HomeAdmin/AdminLayout';
 import { API, uploadGalleryImage } from '@/pages/HomeAdmin/adminApi';
 
-const emptyGalleryItem = {
-    photo_url: '',
+const emptyEditItem = {
+    id: null,
     caption: '',
-    order: 0,
-    is_featured: false
+    tag: ''
 };
 
 export default function GalleryAdmin() {
     const { canAccessHome, getAuthHeader } = useAuth();
     const [galleryItems, setGalleryItems] = useState([]);
-    const [galleryForm, setGalleryForm] = useState(emptyGalleryItem);
-    const [galleryPhotoFile, setGalleryPhotoFile] = useState(null);
-    const [editingGalleryId, setEditingGalleryId] = useState(null);
-    const [savingGallery, setSavingGallery] = useState(false);
+    const [uploads, setUploads] = useState([]);
+    const [editForm, setEditForm] = useState(emptyEditItem);
+    const [savingUploads, setSavingUploads] = useState(false);
+    const [savingEdit, setSavingEdit] = useState(false);
     const [loading, setLoading] = useState(true);
     const [gallerySearch, setGallerySearch] = useState('');
 
@@ -42,54 +40,98 @@ export default function GalleryAdmin() {
         }
     }, [canAccessHome]);
 
-    const handleGalleryChange = (e) => {
-        const { name, value, type, checked } = e.target;
-        setGalleryForm(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
-    };
-
-    const resetGalleryForm = () => {
-        setGalleryForm(emptyGalleryItem);
-        setEditingGalleryId(null);
-        setGalleryPhotoFile(null);
-    };
-
-    const submitGalleryItem = async (e) => {
-        e.preventDefault();
-        setSavingGallery(true);
-        let photoUrl = galleryForm.photo_url.trim() || null;
-        if (galleryPhotoFile) {
-            photoUrl = await uploadGalleryImage(galleryPhotoFile, getAuthHeader);
-        }
-        const payload = {
-            photo_url: photoUrl,
-            caption: galleryForm.caption.trim() || null,
-            order: galleryForm.order ? Number(galleryForm.order) : 0,
-            is_featured: galleryForm.is_featured
-        };
-        try {
-            if (editingGalleryId) {
-                await axios.put(`${API}/pda-admin/gallery/${editingGalleryId}`, payload, { headers: getAuthHeader() });
-            } else {
-                await axios.post(`${API}/pda-admin/gallery`, payload, { headers: getAuthHeader() });
+    const handleUploadsSelected = (files) => {
+        const next = Array.from(files || []).map((file) => ({
+            id: `${file.name}-${file.size}-${file.lastModified}`,
+            file,
+            caption: '',
+            tag: '',
+            previewUrl: URL.createObjectURL(file)
+        }));
+        uploads.forEach((item) => {
+            if (item.previewUrl) {
+                URL.revokeObjectURL(item.previewUrl);
             }
-            resetGalleryForm();
+        });
+        setUploads(next);
+    };
+
+    const updateUploadMeta = (id, field, value) => {
+        setUploads((prev) =>
+            prev.map((item) => (item.id === id ? { ...item, [field]: value } : item))
+        );
+    };
+
+    const removeUpload = (id) => {
+        setUploads((prev) => {
+            const target = prev.find((item) => item.id === id);
+            if (target?.previewUrl) {
+                URL.revokeObjectURL(target.previewUrl);
+            }
+            return prev.filter((item) => item.id !== id);
+        });
+    };
+
+    const submitUploads = async (e) => {
+        e.preventDefault();
+        if (!uploads.length) return;
+        setSavingUploads(true);
+        try {
+            const uploadedUrls = await Promise.all(
+                uploads.map((item) => uploadGalleryImage(item.file, getAuthHeader))
+            );
+            const createPayloads = uploads.map((item, index) => ({
+                photo_url: uploadedUrls[index],
+                caption: item.caption.trim() || null,
+                tag: item.tag.trim() || null
+            }));
+            await Promise.all(
+                createPayloads.map((payload) =>
+                    axios.post(`${API}/pda-admin/gallery`, payload, { headers: getAuthHeader() })
+                )
+            );
+            uploads.forEach((item) => {
+                if (item.previewUrl) {
+                    URL.revokeObjectURL(item.previewUrl);
+                }
+            });
+            setUploads([]);
             fetchData();
         } catch (error) {
-            console.error('Failed to save gallery item:', error);
+            console.error('Failed to upload gallery items:', error);
         } finally {
-            setSavingGallery(false);
+            setSavingUploads(false);
         }
     };
 
-    const editGalleryItem = (item) => {
-        setGalleryForm({
-            photo_url: item.photo_url || '',
+    const startEdit = (item) => {
+        setEditForm({
+            id: item.id,
             caption: item.caption || '',
-            order: item.order ?? 0,
-            is_featured: Boolean(item.is_featured)
+            tag: item.tag || ''
         });
-        setEditingGalleryId(item.id);
-        setGalleryPhotoFile(null);
+    };
+
+    const cancelEdit = () => {
+        setEditForm(emptyEditItem);
+    };
+
+    const submitEdit = async (e) => {
+        e.preventDefault();
+        if (!editForm.id) return;
+        setSavingEdit(true);
+        try {
+            await axios.put(`${API}/pda-admin/gallery/${editForm.id}`, {
+                caption: editForm.caption.trim() || null,
+                tag: editForm.tag.trim() || null
+            }, { headers: getAuthHeader() });
+            cancelEdit();
+            fetchData();
+        } catch (error) {
+            console.error('Failed to update gallery item:', error);
+        } finally {
+            setSavingEdit(false);
+        }
     };
 
     const deleteGalleryItem = async (itemId) => {
@@ -102,7 +144,7 @@ export default function GalleryAdmin() {
     };
 
     const filteredGallery = galleryItems.filter((item) =>
-        [item.caption]
+        [item.caption, item.tag]
             .filter(Boolean)
             .some((value) => value.toLowerCase().includes(gallerySearch.toLowerCase()))
     );
@@ -115,73 +157,101 @@ export default function GalleryAdmin() {
                         <p className="text-xs uppercase tracking-[0.4em] text-slate-400">Gallery</p>
                         <h2 className="text-2xl font-heading font-black">Gallery Management</h2>
                     </div>
-                    {editingGalleryId ? (
-                        <Button variant="outline" onClick={resetGalleryForm} className="border-black/10 text-sm">
-                            Cancel Edit
-                        </Button>
-                    ) : null}
                 </div>
 
-                <form onSubmit={submitGalleryItem} className="mt-6 grid gap-4 md:grid-cols-2">
-                    <div className="md:col-span-2">
-                        <Label htmlFor="gallery-photo-url">Photo URL</Label>
+                <form onSubmit={submitUploads} className="mt-6 grid gap-4">
+                    <div>
+                        <Label htmlFor="gallery-upload-files">Upload Photos</Label>
                         <Input
-                            id="gallery-photo-url"
-                            name="photo_url"
-                            value={galleryForm.photo_url}
-                            onChange={handleGalleryChange}
-                            placeholder="https://..."
-                        />
-                    </div>
-                    <div className="md:col-span-2">
-                        <Label htmlFor="gallery-photo-file">Or Upload Photo</Label>
-                        <Input
-                            id="gallery-photo-file"
-                            name="gallery_photo_file"
+                            id="gallery-upload-files"
                             type="file"
                             accept="image/png,image/jpeg,image/webp"
-                            onChange={(e) => setGalleryPhotoFile(e.target.files?.[0] || null)}
+                            multiple
+                            onChange={(e) => handleUploadsSelected(e.target.files)}
                         />
                     </div>
-                    <div className="md:col-span-2">
-                        <Label htmlFor="gallery-caption">Caption</Label>
-                        <Textarea
-                            id="gallery-caption"
-                            name="caption"
-                            value={galleryForm.caption}
-                            onChange={handleGalleryChange}
-                            placeholder="Optional caption"
-                            rows={3}
-                        />
-                    </div>
-                    <div>
-                        <Label htmlFor="gallery-order">Order</Label>
-                        <Input
-                            id="gallery-order"
-                            name="order"
-                            type="number"
-                            value={galleryForm.order}
-                            onChange={handleGalleryChange}
-                            placeholder="0"
-                        />
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <input
-                            id="gallery-featured"
-                            name="is_featured"
-                            type="checkbox"
-                            checked={galleryForm.is_featured}
-                            onChange={handleGalleryChange}
-                            className="h-4 w-4"
-                        />
-                        <Label htmlFor="gallery-featured">Featured</Label>
-                    </div>
-                    <div className="md:col-span-2 flex justify-end">
-                        <Button type="submit" className="bg-[#f6c347] text-black hover:bg-[#ffd16b]" disabled={savingGallery}>
-                            {savingGallery ? 'Saving...' : editingGalleryId ? 'Update Photo' : 'Add Photo'}
+                    {uploads.length ? (
+                        <div className="grid gap-4 md:grid-cols-2">
+                            {uploads.map((item) => (
+                                <div key={item.id} className="rounded-2xl border border-black/10 bg-white p-4">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="flex items-start gap-3">
+                                            {item.previewUrl ? (
+                                                <img
+                                                    src={item.previewUrl}
+                                                    alt={item.file.name}
+                                                    className="h-16 w-16 rounded-lg object-cover border border-black/10"
+                                                />
+                                            ) : null}
+                                            <div>
+                                                <p className="text-sm font-semibold">{item.file.name}</p>
+                                                <p className="text-xs text-slate-500">{(item.file.size / 1024).toFixed(1)} KB</p>
+                                            </div>
+                                        </div>
+                                        <button type="button" onClick={() => removeUpload(item.id)} className="text-xs text-red-600">
+                                            Remove
+                                        </button>
+                                    </div>
+                                    <div className="mt-3 grid gap-3">
+                                        <div>
+                                            <Label className="text-xs">Caption (optional)</Label>
+                                            <Input
+                                                value={item.caption}
+                                                onChange={(e) => updateUploadMeta(item.id, 'caption', e.target.value)}
+                                                placeholder="Short caption"
+                                            />
+                                        </div>
+                                        <div>
+                                            <Label className="text-xs">Tag (optional)</Label>
+                                            <Input
+                                                value={item.tag}
+                                                onChange={(e) => updateUploadMeta(item.id, 'tag', e.target.value)}
+                                                placeholder="e.g. Workshop"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : null}
+                    <div className="flex justify-end">
+                        <Button type="submit" className="bg-[#f6c347] text-black hover:bg-[#ffd16b]" disabled={savingUploads || !uploads.length}>
+                            {savingUploads ? 'Uploading...' : `Upload ${uploads.length || ''}`.trim()}
                         </Button>
                     </div>
                 </form>
+
+                {editForm.id ? (
+                    <form onSubmit={submitEdit} className="mt-10 rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-lg font-heading font-bold">Edit Gallery Item</h3>
+                            <Button type="button" variant="outline" onClick={cancelEdit} className="border-black/10 text-xs">
+                                Cancel
+                            </Button>
+                        </div>
+                        <div className="mt-4 grid gap-3 md:grid-cols-2">
+                            <div>
+                                <Label>Caption</Label>
+                                <Input
+                                    value={editForm.caption}
+                                    onChange={(e) => setEditForm((prev) => ({ ...prev, caption: e.target.value }))}
+                                />
+                            </div>
+                            <div>
+                                <Label>Tag</Label>
+                                <Input
+                                    value={editForm.tag}
+                                    onChange={(e) => setEditForm((prev) => ({ ...prev, tag: e.target.value }))}
+                                />
+                            </div>
+                        </div>
+                        <div className="mt-4 flex justify-end">
+                            <Button type="submit" className="bg-[#11131a] text-white hover:bg-[#1f2330]" disabled={savingEdit}>
+                                {savingEdit ? 'Saving...' : 'Save Changes'}
+                            </Button>
+                        </div>
+                    </form>
+                ) : null}
 
                 <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <Label className="text-sm text-slate-600">Gallery Photos</Label>
@@ -194,16 +264,30 @@ export default function GalleryAdmin() {
                 </div>
                 <div className="mt-6 grid gap-4 md:grid-cols-2">
                     {filteredGallery.length ? filteredGallery.map((item) => (
-                        <div key={item.id} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
+                        <div
+                            key={item.id}
+                            className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4"
+                        >
                             <div className="flex items-start justify-between gap-3">
-                                <div>
-                                    <h3 className="text-base font-heading font-bold">Gallery Item</h3>
-                                    {item.caption ? (
-                                        <p className="text-xs text-slate-500">{item.caption}</p>
-                                    ) : null}
+                                <div className="flex items-start gap-3">
+                                    <img
+                                        src={item.photo_url}
+                                        alt={item.caption || 'Gallery photo'}
+                                        className="h-16 w-16 rounded-lg object-cover border border-black/10 bg-white"
+                                        loading="lazy"
+                                    />
+                                    <div>
+                                        <h3 className="text-base font-heading font-bold">Gallery Item</h3>
+                                        {item.caption ? (
+                                            <p className="text-xs text-slate-500">{item.caption}</p>
+                                        ) : null}
+                                        {item.tag ? (
+                                            <p className="text-xs uppercase tracking-[0.2em] text-[#b48900]">{item.tag}</p>
+                                        ) : null}
+                                    </div>
                                 </div>
                                 <div className="flex gap-2">
-                                    <Button variant="outline" onClick={() => editGalleryItem(item)} className="border-black/10 text-xs">
+                                    <Button variant="outline" onClick={() => startEdit(item)} className="border-black/10 text-xs">
                                         Edit
                                     </Button>
                                     <Button variant="outline" onClick={() => deleteGalleryItem(item.id)} className="border-black/10 text-xs">

@@ -219,6 +219,7 @@ class PdaGallery(Base):
     id = Column(Integer, primary_key=True, index=True)
     photo_url = Column(String(500), nullable=False)
     caption = Column(Text, nullable=True)
+    tag = Column(String(120), nullable=True)
     order = Column(Integer, default=0)
     is_featured = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

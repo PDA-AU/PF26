@@ -150,13 +150,7 @@ export default function LoginPage() {
                         </Link>
                     </p>
 
-                    <div className="mt-8 p-4 bg-muted border-2 border-black">
-                        <p className="text-sm text-gray-600">
-                            <strong>Admin Login:</strong><br />
-                            Register Number: 0000000000<br />
-                            Password: admin123
-                        </p>
-                    </div>
+                    
                 </div>
             </div>
         </div>

@@ -575,6 +575,7 @@ class PdaTeamResponse(BaseModel):
 class PdaGalleryCreate(BaseModel):
     photo_url: str = Field(..., min_length=5)
     caption: Optional[str] = None
+    tag: Optional[str] = None
     order: Optional[int] = 0
     is_featured: bool = False
 
@@ -582,6 +583,7 @@ class PdaGalleryCreate(BaseModel):
 class PdaGalleryUpdate(BaseModel):
     photo_url: Optional[str] = None
     caption: Optional[str] = None
+    tag: Optional[str] = None
     order: Optional[int] = None
     is_featured: Optional[bool] = None
 
@@ -590,6 +592,7 @@ class PdaGalleryResponse(BaseModel):
     id: int
     photo_url: str
     caption: Optional[str]
+    tag: Optional[str]
     order: Optional[int]
     is_featured: bool
     created_at: datetime
