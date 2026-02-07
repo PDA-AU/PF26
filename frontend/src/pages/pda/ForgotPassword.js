@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -12,6 +12,8 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 export default function ForgotPassword() {
     const [formData, setFormData] = useState({ regno: '', email: '' });
     const [loading, setLoading] = useState(false);
+    const cooldownSeconds = Number(process.env.REACT_APP_EMAIL_RESEND_COOLDOWN_SECONDS || 30);
+    const [cooldownLeft, setCooldownLeft] = useState(0);
 
     const handleChange = (e) => {
         setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
@@ -26,12 +28,21 @@ export default function ForgotPassword() {
                 email: formData.email || null
             });
             toast.success('If the account exists, a reset link has been sent.');
+            setCooldownLeft(cooldownSeconds);
         } catch (error) {
             toast.error(error.response?.data?.detail || 'Failed to send reset link');
         } finally {
             setLoading(false);
         }
     };
+
+    useEffect(() => {
+        if (cooldownLeft <= 0) return;
+        const timer = setInterval(() => {
+            setCooldownLeft((prev) => Math.max(prev - 1, 0));
+        }, 1000);
+        return () => clearInterval(timer);
+    }, [cooldownLeft]);
 
     return (
         <div className="min-h-screen bg-white flex flex-col">
@@ -49,8 +60,8 @@ export default function ForgotPassword() {
                             <Label htmlFor="email">Email</Label>
                             <Input id="email" name="email" type="email" value={formData.email} onChange={handleChange} className="neo-input" required />
                         </div>
-                        <Button type="submit" disabled={loading} className="w-full bg-[#f6c347] text-black border-2 border-black shadow-neo">
-                            {loading ? 'Sending...' : 'Send Reset Link'}
+                        <Button type="submit" disabled={loading || cooldownLeft > 0} className="w-full bg-[#f6c347] text-black border-2 border-black shadow-neo">
+                            {loading ? 'Sending...' : (cooldownLeft > 0 ? `Reset Link Sent (${cooldownLeft}s)` : 'Send Reset Link')}
                         </Button>
                     </form>
                     <p className="text-center mt-6">
