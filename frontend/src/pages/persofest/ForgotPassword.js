@@ -5,6 +5,8 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import PersofestHeader from '@/components/layout/PersofestHeader';
+import PersofestFooter from '@/components/layout/PersofestFooter';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -44,8 +46,10 @@ export default function ForgotPassword() {
     }, [cooldownLeft]);
 
     return (
-        <div className="min-h-screen bg-white flex items-center justify-center p-8">
-            <div className="w-full max-w-md border-2 border-black shadow-neo rounded-3xl p-8 bg-white">
+        <div className="min-h-screen bg-white flex flex-col">
+            <PersofestHeader />
+            <div className="flex-1 flex items-center justify-center p-8">
+                <div className="w-full max-w-md border-2 border-black shadow-neo rounded-3xl p-8 bg-white">
                 <h2 className="font-heading font-bold text-2xl mb-2">Forgot Password</h2>
                 <p className="text-gray-600 mb-6">Enter your register number and email.</p>
                 <form onSubmit={handleSubmit} className="space-y-4">
@@ -64,7 +68,9 @@ export default function ForgotPassword() {
                 <p className="text-center mt-6">
                     <Link to="/persofest/login" className="font-semibold text-primary hover:underline">Back to login</Link>
                 </p>
+                </div>
             </div>
+            <PersofestFooter />
         </div>
     );
 }

@@ -3,11 +3,13 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useParticipantAuth } from '@/context/ParticipantAuthContext';
 import axios from 'axios';
 import { toast } from 'sonner';
-import { Eye, EyeOff, Sparkles, ArrowLeft, Check, X } from 'lucide-react';
+import { Eye, EyeOff, ArrowLeft, Check, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import PersofestHeader from '@/components/layout/PersofestHeader';
+import PersofestFooter from '@/components/layout/PersofestFooter';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -133,8 +135,10 @@ export default function RegisterPage() {
 
     if (!registrationOpen) {
         return (
-            <div className="min-h-screen bg-white flex items-center justify-center p-8">
-                <div className="neo-card max-w-md text-center">
+            <div className="min-h-screen bg-white flex flex-col">
+                <PersofestHeader logoClassName="w-12 h-12" />
+                <div className="flex-1 flex items-center justify-center p-8">
+                    <div className="neo-card max-w-md text-center">
                     <div className="w-20 h-20 mx-auto bg-destructive border-4 border-black flex items-center justify-center mb-6">
                         <X className="w-10 h-10 text-white" />
                     </div>
@@ -147,30 +151,21 @@ export default function RegisterPage() {
                             <ArrowLeft className="mr-2 w-5 h-5" /> Back to Home
                         </Button>
                     </Link>
+                    </div>
                 </div>
+                <PersofestFooter />
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen bg-white">
-            {/* Header */}
-            <div className="bg-primary border-b-4 border-black py-4">
-                <div className="max-w-4xl mx-auto px-4 flex items-center justify-between">
-                    <Link to="/persofest" className="flex items-center gap-2 text-white">
-                        <ArrowLeft className="w-5 h-5" />
-                        <span className="font-medium">Back</span>
-                    </Link>
-                    <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 bg-white border-2 border-black flex items-center justify-center">
-                            <Sparkles className="w-5 h-5 text-primary" />
-                        </div>
-                        <span className="font-heading font-bold text-white">PERSOFEST'26</span>
-                    </div>
-                </div>
-            </div>
-
-            <div className="max-w-2xl mx-auto px-4 py-12">
+        <div className="min-h-screen bg-white flex flex-col">
+            <PersofestHeader logoClassName="w-12 h-12" />
+            <div className="max-w-2xl mx-auto px-4 py-12 w-full">
+                <Link to="/persofest" className="inline-flex items-center gap-2 text-gray-600 hover:text-black mb-6 transition-colors">
+                    <ArrowLeft className="w-5 h-5" />
+                    <span className="font-medium">Back to Home</span>
+                </Link>
                 <div className="text-center mb-8">
                     <h1 className="font-heading font-bold text-3xl md:text-4xl tracking-tight mb-2">
                         Join Persofest'26
@@ -403,6 +398,7 @@ export default function RegisterPage() {
                     </Link>
                 </p>
             </div>
+            <PersofestFooter />
         </div>
     );
 }

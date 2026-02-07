@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useParticipantAuth } from '@/context/ParticipantAuthContext';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { 
-    User, Copy, Check, Edit2, Save, X, LogOut, Sparkles, 
+    User, Copy, Check, Edit2, Save, X, 
     Upload, Calendar, Trophy, CheckCircle, XCircle, Clock
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { compressImageToWebp } from '@/utils/imageCompression';
+import PersofestHeader from '@/components/layout/PersofestHeader';
+import PersofestFooter from '@/components/layout/PersofestFooter';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -160,38 +162,9 @@ export default function ParticipantDashboard() {
     if (!user) return null;
 
     return (
-        <div className="min-h-screen bg-muted">
-            {/* Header */}
-            <header className="bg-white border-b-4 border-black sticky top-0 z-50">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex justify-between items-center h-16">
-                        <Link to="/" className="flex items-center gap-2">
-                            <div className="w-10 h-10 bg-primary border-2 border-black shadow-neo flex items-center justify-center">
-                                <Sparkles className="w-6 h-6 text-white" />
-                            </div>
-                            <span className="font-heading font-black text-xl tracking-tight hidden sm:block">PERSOFEST'26</span>
-                        </Link>
-
-                        <div className="flex items-center gap-4">
-                            <div className="hidden md:block text-right">
-                                <p className="font-bold">{user.name}</p>
-                                <p className="text-sm text-gray-500">{user.register_number}</p>
-                            </div>
-                            <Button
-                                variant="outline"
-                                onClick={handleLogout}
-                                className="border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all"
-                                data-testid="logout-btn"
-                            >
-                                <LogOut className="w-5 h-5" />
-                                <span className="ml-2 hidden sm:inline">Logout</span>
-                            </Button>
-                        </div>
-                    </div>
-                </div>
-            </header>
-
-            <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="min-h-screen bg-muted flex flex-col">
+            <PersofestHeader />
+            <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
                 {!user.email_verified ? (
                     <div className="neo-card mb-6 bg-yellow-50 border-yellow-500">
                         <div className="flex items-center justify-between gap-4">
@@ -405,6 +378,7 @@ export default function ParticipantDashboard() {
                     </div>
                 </div>
             </main>
+            <PersofestFooter />
         </div>
     );
 }

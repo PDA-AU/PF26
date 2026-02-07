@@ -42,8 +42,8 @@ const sortByDateDesc = (items) => {
     });
 };
 
-const PROGRAMS_PAGE_SIZE = 6;
-const EVENTS_PAGE_SIZE = 6;
+const PROGRAMS_PAGE_SIZE = 3;
+const EVENTS_PAGE_SIZE = 3;
 const GALLERY_PAGE_SIZE = 12;
 const PROGRAMS_FETCH_LIMIT = 200;
 const EVENTS_FETCH_LIMIT = 200;

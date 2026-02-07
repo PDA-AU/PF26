@@ -62,9 +62,7 @@ export default function PdaLogin() {
             <div className="flex-1 flex">
                 <div className="hidden lg:flex lg:w-1/2 bg-[#11131a] relative overflow-hidden">
                     <div className="relative z-10 flex flex-col justify-center items-center w-full p-12 text-white">
-                        <div className="w-20 h-20 bg-white border-4 border-black shadow-neo-lg flex items-center justify-center mb-8">
-                            <img src={PdaLogo} alt="PDA logo" className="w-12 h-12 object-contain" />
-                        </div>
+                        <img src={PdaLogo} alt="PDA logo" className="w-16 h-16 object-contain mb-8" />
                         <h1 className="font-heading font-black text-5xl tracking-tighter mb-4 text-center">
                             PDA MEMBERS
                         </h1>

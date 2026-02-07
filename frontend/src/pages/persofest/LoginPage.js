@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import PdaLogo from '@/assets/pda-logo.png';
+import PersofestHeader from '@/components/layout/PersofestHeader';
 
 export default function LoginPage() {
     const navigate = useNavigate();
@@ -42,13 +43,13 @@ export default function LoginPage() {
     };
 
     return (
-        <div className="min-h-screen bg-white flex">
+        <div className="min-h-screen bg-white flex flex-col">
+            <PersofestHeader logoClassName="w-12 h-12" />
+            <div className="flex-1 flex">
             {/* Decorative Side Panel */}
             <div className="hidden lg:flex lg:w-1/2 bg-primary relative overflow-hidden">
                 <div className="relative z-10 flex flex-col justify-center items-center w-full p-12 text-white">
-                    <div className="w-20 h-20 bg-white border-4 border-black shadow-neo-lg flex items-center justify-center mb-8">
-                        <img src={PdaLogo} alt="PDA logo" className="w-12 h-12 object-contain" />
-                    </div>
+                    <img src={PdaLogo} alt="PDA logo" className="w-20 h-20 object-contain mb-8" />
                     <h1 className="font-heading font-black text-5xl tracking-tighter mb-4 text-center">
                         PERSOFEST'26
                     </h1>
@@ -59,16 +60,16 @@ export default function LoginPage() {
             </div>
 
             {/* Login Form */}
-            <div className="flex-1 flex items-center justify-center p-8">
-                <div className="w-full max-w-md">
+                <div className="flex-1 flex items-center justify-center p-8">
+                    <div className="w-full max-w-md">
                     <Link to="/persofest" className="inline-flex items-center gap-2 text-gray-600 hover:text-black mb-8 transition-colors">
                         <ArrowLeft className="w-5 h-5" />
                         <span className="font-medium">Back to Home</span>
                     </Link>
 
                     <div className="lg:hidden flex items-center gap-2 mb-8">
-                        <div className="w-10 h-10 bg-primary border-2 border-black shadow-neo flex items-center justify-center">
-                            <img src={PdaLogo} alt="PDA logo" className="w-6 h-6 object-contain" />
+                        <div className="w-12 h-12 bg-primary border-2 border-black shadow-neo flex items-center justify-center">
+                            <img src={PdaLogo} alt="PDA logo" className="w-8 h-8 object-contain" />
                         </div>
                         <span className="font-heading font-black text-xl">PERSOFEST'26</span>
                     </div>
@@ -158,6 +159,7 @@ export default function LoginPage() {
 
                     
                 </div>
+            </div>
             </div>
         </div>
     );

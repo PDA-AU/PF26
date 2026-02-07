@@ -2,11 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import axios from 'axios';
-import { Calendar, MapPin, Users, Trophy, Star, ArrowRight, Menu, X, Sparkles } from 'lucide-react';
+import { Calendar, MapPin, Users, Trophy, Star, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import pdaLogo from '@/assets/pda-logo.png';
 import MrMs from '@/assets/mrms.png';
+import PersofestHeader from '@/components/layout/PersofestHeader';
+import PersofestFooter from '@/components/layout/PersofestFooter';
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function PersofestHome() {
@@ -14,7 +16,6 @@ export default function PersofestHome() {
     const [rounds, setRounds] = useState([]);
     const [topReferrers, setTopReferrers] = useState([]);
     const [registrationOpen, setRegistrationOpen] = useState(true);
-    const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [roundDialogOpen, setRoundDialogOpen] = useState(false);
     const [selectedRound, setSelectedRound] = useState(null);
 
@@ -61,82 +62,7 @@ export default function PersofestHome() {
 
     return (
         <div className="min-h-screen bg-white overflow-hidden">
-            {/* Navigation */}
-            <nav className="sticky top-0 z-50 bg-white border-b-2 border-black">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex justify-between items-center h-16">
-                        <Link to="/persofest" className="flex items-center gap-2">
-                            <div className="w-10 h-10 bg-primary border-2 border-black shadow-neo flex items-center justify-center">
-                                <Sparkles className="w-6 h-6 text-white" />
-                            </div>
-                            <span className="font-heading font-black text-xl tracking-tight">PERSOFEST'26</span>
-                        </Link>
-
-                        {/* Desktop Nav */}
-                        <div className="hidden md:flex items-center gap-4">
-                            <Link to="/" className="font-bold hover:text-primary transition-colors">Home</Link>
-                            <a href="#about" className="font-bold hover:text-primary transition-colors">About</a>
-                            <a href="#rounds" className="font-bold hover:text-primary transition-colors">Rounds</a>
-                            <a href="#referrers" className="font-bold hover:text-primary transition-colors">Top Referrers</a>
-                            {user ? (
-                                <Link to={user.role === 'admin' ? '/persofest/admin' : '/persofest/dashboard'}>
-                                    <Button data-testid="nav-dashboard-btn" className="bg-primary text-white border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all">
-                                        Dashboard
-                                    </Button>
-                                </Link>
-                            ) : (
-                                <div className="flex gap-2">
-                                    <Link to="/persofest/login">
-                                        <Button data-testid="nav-login-btn" variant="outline" className="border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all">
-                                            Login
-                                        </Button>
-                                    </Link>
-                                    <Link to="/persofest/register">
-                                        <Button data-testid="nav-register-btn" className="bg-primary text-white border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all">
-                                            Register
-                                        </Button>
-                                    </Link>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Mobile Menu Button */}
-                        <button 
-                            className="md:hidden p-2 border-2 border-black bg-white shadow-neo"
-                            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                            data-testid="mobile-menu-btn"
-                        >
-                            {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-                        </button>
-                    </div>
-
-                    {/* Mobile Menu */}
-                    {mobileMenuOpen && (
-                        <div className="md:hidden py-4 border-t-2 border-black">
-                            <div className="flex flex-col gap-4">
-                                <Link to="/" className="font-bold py-2" onClick={() => setMobileMenuOpen(false)}>Home</Link>
-                                <a href="#about" className="font-bold py-2" onClick={() => setMobileMenuOpen(false)}>About</a>
-                                <a href="#rounds" className="font-bold py-2" onClick={() => setMobileMenuOpen(false)}>Rounds</a>
-                                <a href="#referrers" className="font-bold py-2" onClick={() => setMobileMenuOpen(false)}>Top Referrers</a>
-                                {user ? (
-                                    <Link to={user.role === 'admin' ? '/persofest/admin' : '/persofest/dashboard'} onClick={() => setMobileMenuOpen(false)}>
-                                        <Button className="w-full bg-primary text-white border-2 border-black shadow-neo">Dashboard</Button>
-                                    </Link>
-                                ) : (
-                                    <div className="flex flex-col gap-2">
-                                        <Link to="/persofest/login" onClick={() => setMobileMenuOpen(false)}>
-                                            <Button variant="outline" className="w-full border-2 border-black shadow-neo">Login</Button>
-                                        </Link>
-                                        <Link to="/persofest/register" onClick={() => setMobileMenuOpen(false)}>
-                                            <Button className="w-full bg-primary text-white border-2 border-black shadow-neo">Register</Button>
-                                        </Link>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    )}
-                </div>
-            </nav>
+            <PersofestHeader />
 
             {/* Hero Section */}
             <section className="relative py-16 md:py-24 lg:py-32">
@@ -148,11 +74,11 @@ export default function PersofestHome() {
                                 <span className="font-bold text-sm uppercase tracking-wider">Inter-Department Competition</span>
                             </div>
                             
-                            <h1 className="font-heading font-black text-5xl md:text-6xl lg:text-7xl tracking-tighter leading-tight">
+                            <h1 className="font-heading font-black text-4xl sm:text-5xl md:text-6xl lg:text-7xl tracking-tighter leading-tight">
                                 PERSO<span className="text-primary">FEST</span>'26
                             </h1>
                             
-                            <p className="text-lg md:text-xl font-medium text-gray-700 max-w-xl leading-relaxed">
+                            <p className="text-base sm:text-lg md:text-xl font-medium text-gray-700 max-w-xl leading-relaxed">
                                 Unleash your personality at the biggest inter-department competition at 
                                 <span className="font-bold text-black"> Maras Institute of Technology, Chennai</span>. 
                                 10 rounds of creativity, aptitude, and communication excellence.
@@ -202,7 +128,7 @@ export default function PersofestHome() {
                                 <img 
                                     src={pdaLogo}
                                     alt="PDA logo"
-                                    className="w-full h-[500px] object-cover border-4 border-black shadow-neo-lg"
+                                    className="w-full aspect-square object-cover border-4 border-black shadow-neo-lg"
                                 />
                             </div>
                             <div className="absolute -bottom-6 -left-6 w-full h-full bg-primary border-4 border-black -z-10"></div>
@@ -219,7 +145,7 @@ export default function PersofestHome() {
                             <img 
                                 src={MrMs}
                                 alt="PDA logo"
-                                className="w-full h-[400px] object-cover border-4 border-black shadow-neo-lg"
+                                className="w-full aspect-[2:1] object-cover border-4 border-black shadow-neo-lg"
                             />
                         </div>
                         <div className="space-y-6">
@@ -411,44 +337,7 @@ export default function PersofestHome() {
                 </div>
             </section>
 
-            {/* Footer */}
-            <footer className="bg-black text-white py-12 border-t-4 border-primary">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="grid md:grid-cols-3 gap-8">
-                        <div>
-                            <div className="flex items-center gap-2 mb-4">
-                                <div className="w-10 h-10 bg-primary border-2 border-white flex items-center justify-center">
-                                    <Sparkles className="w-6 h-6 text-white" />
-                                </div>
-                                <span className="font-heading font-black text-xl">PERSOFEST'26</span>
-                            </div>
-                            <p className="text-gray-400">
-                                Inter-Department Personality Development Competition
-                            </p>
-                        </div>
-                        <div>
-                            <h4 className="font-heading font-bold mb-4">Organized By</h4>
-                            <p className="text-gray-400">
-                                Personality Development Association<br />
-                                Web Team<br />
-                                Maras Institute of Technology, Chennai
-                            </p>
-                        </div>
-                        <div>
-                            <h4 className="font-heading font-bold mb-4">Quick Links</h4>
-                            <div className="space-y-2">
-                                <a href="#about" className="block text-gray-400 hover:text-white transition-colors">About</a>
-                                <a href="#rounds" className="block text-gray-400 hover:text-white transition-colors">Rounds</a>
-                                <Link to="/persofest/login" className="block text-gray-400 hover:text-white transition-colors">Login</Link>
-                                <Link to="/persofest/register" className="block text-gray-400 hover:text-white transition-colors">Register</Link>
-                            </div>
-                        </div>
-                    </div>
-                    <div className="border-t border-gray-800 mt-8 pt-8 text-center text-gray-500">
-                        <p>© 2026 Persofest. All rights reserved.</p>
-                    </div>
-                </div>
-            </footer>
+            <PersofestFooter />
         </div>
     );
 }
