@@ -39,15 +39,15 @@ export default function ForgotPassword() {
             <div className="flex-1 flex items-center justify-center p-8">
                 <div className="w-full max-w-md border-2 border-black shadow-neo rounded-3xl p-8 bg-white">
                     <h2 className="font-heading font-bold text-2xl mb-2">Forgot Password</h2>
-                    <p className="text-gray-600 mb-6">Enter your register number or email.</p>
+                    <p className="text-gray-600 mb-6">Enter your register number and email.</p>
                     <form onSubmit={handleSubmit} className="space-y-4">
                         <div>
                             <Label htmlFor="regno">Register Number</Label>
-                            <Input id="regno" name="regno" value={formData.regno} onChange={handleChange} className="neo-input" />
+                            <Input id="regno" name="regno" value={formData.regno} onChange={handleChange} className="neo-input" required />
                         </div>
                         <div>
                             <Label htmlFor="email">Email</Label>
-                            <Input id="email" name="email" type="email" value={formData.email} onChange={handleChange} className="neo-input" />
+                            <Input id="email" name="email" type="email" value={formData.email} onChange={handleChange} className="neo-input" required />
                         </div>
                         <Button type="submit" disabled={loading} className="w-full bg-[#f6c347] text-black border-2 border-black shadow-neo">
                             {loading ? 'Sending...' : 'Send Reset Link'}

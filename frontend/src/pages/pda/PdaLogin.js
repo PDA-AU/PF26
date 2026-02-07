@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, Sparkles, ArrowLeft } from 'lucide-react';
+import { Eye, EyeOff, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/context/AuthContext';
 import PdaHeader from '@/components/layout/PdaHeader';
+import PdaLogo from '@/assets/pda-logo.png';
 
 export default function PdaLogin() {
     const navigate = useNavigate();
@@ -52,7 +53,7 @@ export default function PdaLogin() {
                 <div className="hidden lg:flex lg:w-1/2 bg-[#11131a] relative overflow-hidden">
                     <div className="relative z-10 flex flex-col justify-center items-center w-full p-12 text-white">
                         <div className="w-20 h-20 bg-white border-4 border-black shadow-neo-lg flex items-center justify-center mb-8">
-                            <Sparkles className="w-10 h-10 text-[#f6c347]" />
+                            <img src={PdaLogo} alt="PDA logo" className="w-12 h-12 object-contain" />
                         </div>
                         <h1 className="font-heading font-black text-5xl tracking-tighter mb-4 text-center">
                             PDA MEMBERS

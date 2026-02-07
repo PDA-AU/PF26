@@ -217,12 +217,13 @@ async def verify_pda_email(payload: EmailVerificationRequest, db: Session = Depe
 
 @router.post("/auth/password/forgot")
 async def forgot_pda_password(payload: PdaForgotPasswordRequest, db: Session = Depends(get_db)):
-    user = None
-    if payload.regno:
-        user = db.query(PdaUser).filter(PdaUser.regno == payload.regno).first()
-    if not user and payload.email:
-        user = db.query(PdaUser).filter(PdaUser.email == payload.email).first()
-    if user:
+    if payload.regno and payload.email:
+        user = db.query(PdaUser).filter(
+            PdaUser.regno == payload.regno,
+            PdaUser.email == payload.email
+        ).first()
+        if not user:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Register number and email do not match")
         if user.password_reset_sent_at:
             sent_at = ensure_timezone(user.password_reset_sent_at)
             delta = (now_tz() - sent_at).total_seconds()

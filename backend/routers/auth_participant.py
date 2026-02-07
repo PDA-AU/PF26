@@ -187,12 +187,13 @@ async def verify_participant_email(payload: EmailVerificationRequest, db: Sessio
 
 @router.post("/participant-auth/password/forgot")
 async def forgot_participant_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
-    user = None
-    if payload.register_number:
-        user = db.query(Participant).filter(Participant.register_number == payload.register_number).first()
-    if not user and payload.email:
-        user = db.query(Participant).filter(Participant.email == payload.email).first()
-    if user:
+    if payload.register_number and payload.email:
+        user = db.query(Participant).filter(
+            Participant.register_number == payload.register_number,
+            Participant.email == payload.email
+        ).first()
+        if not user:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Register number and email do not match")
         if user.password_reset_sent_at:
             sent_at = ensure_timezone(user.password_reset_sent_at)
             delta = (now_tz() - sent_at).total_seconds()
