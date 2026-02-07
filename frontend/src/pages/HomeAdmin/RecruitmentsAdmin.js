@@ -51,6 +51,19 @@ const TEAM_FILTERS = [
     'Unassigned'
 ];
 
+const DEPARTMENTS = [
+    { value: "Artificial Intelligence and Data Science", label: "AI & Data Science" },
+    { value: "Aerospace Engineering", label: "Aerospace Engineering" },
+    { value: "Automobile Engineering", label: "Automobile Engineering" },
+    { value: "Computer Technology", label: "Computer Technology" },
+    { value: "Electronics and Communication Engineering", label: "ECE" },
+    { value: "Electronics and Instrumentation Engineering", label: "EIE" },
+    { value: "Production Technology", label: "Production Technology" },
+    { value: "Robotics and Automation", label: "Robotics & Automation" },
+    { value: "Rubber and Plastics Technology", label: "Rubber & Plastics" },
+    { value: "Information Technology", label: "Information Technology" }
+];
+
 const emptyMemberForm = {
     name: '',
     regno: '',
@@ -236,7 +249,19 @@ export default function RecruitmentsAdmin() {
                     </div>
                     <div>
                         <Label>Department</Label>
-                        <Input name="dept" value={memberForm.dept} onChange={handleMemberChange} />
+                        <Select
+                            value={memberForm.dept}
+                            onValueChange={(value) => setMemberForm((prev) => ({ ...prev, dept: value }))}
+                        >
+                            <SelectTrigger className="w-full">
+                                <SelectValue placeholder="Select department" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {DEPARTMENTS.map((dept) => (
+                                    <SelectItem key={dept.value} value={dept.value}>{dept.label}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
                     </div>
                     <div>
                         <Label>Team</Label>

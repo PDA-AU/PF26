@@ -56,6 +56,8 @@ def _build_pda_user_response(db: Session, user: PdaUser) -> PdaUserResponse:
         preferred_team=preferred_team,
         team=team.team if team else None,
         designation=team.designation if team else None,
+        instagram_url=team.instagram_url if team else None,
+        linkedin_url=team.linkedin_url if team else None,
         is_admin=is_admin,
         is_superadmin=is_superadmin,
         policy=policy,
@@ -183,6 +185,14 @@ async def update_pda_me(
         user.dept = update_data.dept
     if update_data.image_url is not None:
         user.image_url = update_data.image_url
+    if update_data.instagram_url is not None or update_data.linkedin_url is not None:
+        team = db.query(PdaTeam).filter(PdaTeam.user_id == user.id).first()
+        if not team:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only PDA team members can update social handles")
+        if update_data.instagram_url is not None:
+            team.instagram_url = update_data.instagram_url
+        if update_data.linkedin_url is not None:
+            team.linkedin_url = update_data.linkedin_url
 
     db.commit()
     if email_changed:

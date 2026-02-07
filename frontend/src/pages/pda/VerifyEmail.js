@@ -23,7 +23,7 @@ export default function VerifyEmail() {
             try {
                 await axios.post(`${API}/auth/email/verify`, { token });
                 if (user) {
-                    navigate('/pda/profile', { replace: true });
+                    navigate('/profile', { replace: true });
                     return;
                 }
                 setStatus('success');
@@ -50,7 +50,7 @@ export default function VerifyEmail() {
                     {status === 'error' && <p className="text-lg font-semibold">Invalid or expired verification link.</p>}
                     <div className="mt-6">
                         <Button asChild className="w-full bg-[#f6c347] text-black border-2 border-black shadow-neo">
-                            <Link to={user ? "/pda/profile" : "/login"}>{user ? "Go to Profile" : "Go to Login"}</Link>
+                            <Link to={user ? "/profile" : "/login"}>{user ? "Go to Profile" : "Go to Login"}</Link>
                         </Button>
                     </div>
                 </div>

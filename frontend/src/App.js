@@ -134,7 +134,7 @@ function AppRoutes() {
             <Route path="/verify-email" element={<PdaVerifyEmail />} />
             <Route path="/forgot-password" element={<PdaForgotPassword />} />
             <Route path="/reset-password" element={<PdaResetPassword />} />
-            <Route path="/pda/profile" element={
+            <Route path="/profile" element={
                 <ProtectedPdaRoute>
                     <PdaProfile />
                 </ProtectedPdaRoute>

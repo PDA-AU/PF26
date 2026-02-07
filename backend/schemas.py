@@ -172,6 +172,8 @@ class PdaUserUpdate(BaseModel):
     phno: Optional[str] = None
     dept: Optional[str] = None
     image_url: Optional[str] = None
+    instagram_url: Optional[str] = None
+    linkedin_url: Optional[str] = None
 
 
 class PdaForgotPasswordRequest(BaseModel):
@@ -194,6 +196,8 @@ class PdaUserResponse(BaseModel):
     preferred_team: Optional[str] = None
     team: Optional[str] = None
     designation: Optional[str] = None
+    instagram_url: Optional[str] = None
+    linkedin_url: Optional[str] = None
     is_admin: bool = False
     is_superadmin: bool = False
     policy: Optional[Dict[str, bool]] = None

@@ -43,7 +43,7 @@ export default function PdaHeader() {
                   
                     {user ? (
                         <div className="hidden items-center gap-3 md:flex">
-                            <Link to="/pda/profile">
+                            <Link to="/profile">
                                 {user.image_url ? (
                                     <img
                                         src={user.image_url}
@@ -101,7 +101,7 @@ export default function PdaHeader() {
                             </Link>
                         ) : (
                             <>
-                                <Link to="/pda/profile" className="text-sm font-semibold text-slate-700 hover:text-[#0f1115]" onClick={() => setMenuOpen(false)}>
+                                <Link to="/profile" className="text-sm font-semibold text-slate-700 hover:text-[#0f1115]" onClick={() => setMenuOpen(false)}>
                                     My Profile
                                 </Link>
                                 <button

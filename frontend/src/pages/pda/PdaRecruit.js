@@ -109,7 +109,7 @@ export default function PdaRecruit() {
                 return;
             }
             toast.success('Application submitted successfully!');
-            navigate('/pda/profile');
+            navigate('/profile');
         } catch (error) {
             console.error('Recruitment failed:', error);
             toast.error(getErrorMessage(error, 'Failed to submit application'));

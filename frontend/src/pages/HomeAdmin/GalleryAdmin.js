@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -26,6 +26,7 @@ export default function GalleryAdmin() {
     const [loading, setLoading] = useState(true);
     const [gallerySearch, setGallerySearch] = useState('');
     const [draggingId, setDraggingId] = useState(null);
+    const editFormRef = useRef(null);
 
     const fetchData = async () => {
         try {
@@ -125,6 +126,7 @@ export default function GalleryAdmin() {
             caption: item.caption || '',
             tag: item.tag || ''
         });
+        editFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
 
     const cancelEdit = () => {
@@ -308,12 +310,20 @@ export default function GalleryAdmin() {
                 </form>
 
                 {editForm.id ? (
-                    <form onSubmit={submitEdit} className="mt-10 rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
+                    <form ref={editFormRef} onSubmit={submitEdit} className="mt-10 rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
                         <div className="flex items-center justify-between">
                             <h3 className="text-lg font-heading font-bold">Edit Gallery Item</h3>
                             <Button type="button" variant="outline" onClick={cancelEdit} className="border-black/10 text-xs">
                                 Cancel
                             </Button>
+                        </div>
+                        <div className="mt-4 rounded-2xl border border-black/10 bg-white p-4">
+                            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Preview</p>
+                            <img
+                                src={galleryItems.find((item) => item.id === editForm.id)?.photo_url}
+                                alt="Gallery preview"
+                                className="mt-3 h-40 w-full rounded-xl object-cover"
+                            />
                         </div>
                         <div className="mt-4 grid gap-3 md:grid-cols-2">
                             <div>
@@ -368,7 +378,6 @@ export default function GalleryAdmin() {
                                         loading="lazy"
                                     />
                                     <div>
-                                        <h3 className="text-base font-heading font-bold">Gallery Item</h3>
                                         {item.caption ? (
                                             <p className="text-xs text-slate-500">{item.caption}</p>
                                         ) : null}

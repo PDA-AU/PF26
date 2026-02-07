@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
@@ -11,7 +11,7 @@ import PdaLogo from '@/assets/pda-logo.png';
 
 export default function PdaLogin() {
     const navigate = useNavigate();
-    const { login } = useAuth();
+    const { login, user, loading: authLoading } = useAuth();
     const [formData, setFormData] = useState({ regno: '', password: '' });
     const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
@@ -37,7 +37,7 @@ export default function PdaLogin() {
         try {
             await login(formData.regno, formData.password);
             toast.success('Login successful');
-            navigate('/pda/profile');
+            navigate('/profile');
         } catch (error) {
             console.error('PDA login failed:', error);
             toast.error(getErrorMessage(error, 'Login failed. Please check your credentials.'));
@@ -45,6 +45,16 @@ export default function PdaLogin() {
             setLoading(false);
         }
     };
+
+    useEffect(() => {
+        if (!authLoading && user) {
+            navigate('/profile', { replace: true });
+        }
+    }, [authLoading, user, navigate]);
+
+    if (authLoading) {
+        return null;
+    }
 
     return (
         <div className="min-h-screen bg-white flex flex-col">

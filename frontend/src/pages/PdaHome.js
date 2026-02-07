@@ -322,7 +322,7 @@ export default function PdaHome() {
                                 Our Motto: "Discover Thyself"
                             </div>
                             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-                                <Link to={user ? "/pda/profile" : "/recruit"}>
+                                <Link to={user ? "/profile" : "/recruit"}>
                                     <Button className="bg-[#f6c347] text-black shadow-none hover:bg-[#ffd16b]">
                                         Become a Member
                                     </Button>

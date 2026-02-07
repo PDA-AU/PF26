@@ -26,19 +26,47 @@ const TEAMS = [
 
 const EXEC_DESIG = ['Chairperson', 'Vice Chairperson', 'Treasurer', 'General Secretary'];
 const TEAM_DESIG = ['Head', 'JS', 'Member', 'Volunteer'];
+const DEPT_SHORT = {
+    'Computer Technology': 'CT',
+    'Information Technology': 'IT',
+    'Rubber And Plastics Technology': 'RPT',
+    'Rubber and Plastics Technology': 'RPT',
+    'Artificial Intelligence And Data Science': 'AI&DS',
+    'Artificial Intelligence and Data Science': 'AI&DS',
+    'Artificial Intelligence & Data Science': 'AI&DS',
+    'Electronics And Communication Engineering': 'ECE',
+    'Electronics and Communication Engineering': 'ECE',
+    'Electronics Engineering': 'ECE',
+    'Electronics And Instrumentation Engineering': 'EIE',
+    'Electronics and Instrumentation Engineering': 'EIE',
+    'Instrumentation Engineering': 'EIE',
+    'Automobile Engineering': 'AUTO',
+    'Aerospace Engineering': 'AERO',
+    'Aerospace': 'AERO',
+    'Aeronautical Engineering': 'AERO',
+    'Production Technology': 'PROD',
+    'Robotics And Automation': 'RAE',
+    'Robotics and Automation': 'RAE'
+};
 
 export default function TeamAdmin() {
-    const { isSuperAdmin, getAuthHeader } = useAuth();
+    const { isSuperAdmin, canAccessHome, getAuthHeader } = useAuth();
     const [teamMembers, setTeamMembers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [teamFilter, setTeamFilter] = useState('All');
     const [designationFilter, setDesignationFilter] = useState('All');
+    const [sortBy, setSortBy] = useState('name');
+    const [sortDir, setSortDir] = useState('asc');
+    const [batchFilter, setBatchFilter] = useState('All');
     const [page, setPage] = useState(1);
     const [selectedMember, setSelectedMember] = useState(null);
-    const [editForm, setEditForm] = useState({ team: '', designation: '' });
+    const [editForm, setEditForm] = useState({ team: '', designation: '', instagram_url: '', linkedin_url: '' });
     const [photoFile, setPhotoFile] = useState(null);
     const [saving, setSaving] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
+    const [activeIndex, setActiveIndex] = useState(-1);
+    const [hoveredDept, setHoveredDept] = useState(null);
 
     const fetchData = useCallback(async () => {
         try {
@@ -52,10 +80,10 @@ export default function TeamAdmin() {
     }, [getAuthHeader]);
 
     useEffect(() => {
-        if (isSuperAdmin) {
+        if (canAccessHome) {
             fetchData();
         }
-    }, [isSuperAdmin, fetchData]);
+    }, [canAccessHome, fetchData]);
 
     const filtered = useMemo(() => {
         const filteredByTeam = teamMembers.filter((member) => {
@@ -74,20 +102,48 @@ export default function TeamAdmin() {
         );
     }, [teamMembers, search, teamFilter, designationFilter]);
 
+    const sorted = useMemo(() => {
+        const rows = [...filtered];
+        const dir = sortDir === 'asc' ? 1 : -1;
+        const getBatch = (m) => (m.regno ? String(m.regno).slice(0, 4) : '');
+        rows.sort((a, b) => {
+            let va = '';
+            let vb = '';
+            if (sortBy === 'team') {
+                va = a.team || '';
+                vb = b.team || '';
+            } else if (sortBy === 'designation') {
+                va = a.designation || '';
+                vb = b.designation || '';
+            } else if (sortBy === 'batch') {
+                va = getBatch(a);
+                vb = getBatch(b);
+            } else {
+                va = a.name || '';
+                vb = b.name || '';
+            }
+            return va.localeCompare(vb) * dir;
+        });
+        return rows;
+    }, [filtered, sortBy, sortDir]);
+
     useEffect(() => {
         setPage(1);
-    }, [search, teamFilter, designationFilter]);
+    }, [search, teamFilter, designationFilter, sortBy, sortDir]);
 
-    const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-    const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+    const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+    const paged = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
     const openMember = (member) => {
         setSelectedMember(member);
         setEditForm({
             team: member.team || '',
-            designation: member.designation || ''
+            designation: member.designation || '',
+            instagram_url: member.instagram_url || '',
+            linkedin_url: member.linkedin_url || ''
         });
         setPhotoFile(null);
+        setIsEditing(false);
     };
 
     const updateMember = async () => {
@@ -102,6 +158,8 @@ export default function TeamAdmin() {
             const payload = {
                 team: editForm.team,
                 designation: editForm.designation,
+                instagram_url: editForm.instagram_url || null,
+                linkedin_url: editForm.linkedin_url || null,
                 photo_url: photoUrl
             };
             await axios.put(`${API}/pda-admin/team/${selectedMember.id}`, payload, { headers: getAuthHeader() });
@@ -111,8 +169,17 @@ export default function TeamAdmin() {
             console.error('Failed to update team member:', error);
         } finally {
             setSaving(false);
+            setIsEditing(false);
         }
     };
+
+    useEffect(() => {
+        if (paged.length === 0) {
+            setActiveIndex(-1);
+            return;
+        }
+        setActiveIndex((prev) => (prev < 0 || prev >= paged.length ? 0 : prev));
+    }, [paged]);
 
     const handleExport = async (format) => {
         try {
@@ -132,9 +199,9 @@ export default function TeamAdmin() {
         }
     };
 
-    if (!isSuperAdmin) {
+    if (!canAccessHome) {
         return (
-            <AdminLayout title="Team Management" subtitle="Superadmin access required.">
+            <AdminLayout title="Team Management" subtitle="Admin access required.">
                 <div className="rounded-3xl border border-black/10 bg-white p-8 text-center text-sm text-slate-600">
                     You do not have permission to view this page.
                 </div>
@@ -142,8 +209,187 @@ export default function TeamAdmin() {
         );
     }
 
+    const statsMembers = teamMembers.filter((m) => String(m.regno) !== '0000000000');
+    const totalMembers = statsMembers.length;
+    const teamCounts = TEAMS.reduce((acc, team) => {
+        acc[team] = statsMembers.filter((m) => m.team === team).length;
+        return acc;
+    }, { Unassigned: statsMembers.filter((m) => !m.team).length });
+    const maxTeamCount = Math.max(1, ...Object.values(teamCounts));
+
+    const normalizeDept = (dept) => {
+        if (!dept) return 'Unknown';
+        const trimmed = String(dept).trim();
+        if (DEPT_SHORT[trimmed]) return DEPT_SHORT[trimmed];
+        const key = trimmed.toLowerCase();
+        if (key.includes('artificial intelligence')) return 'AI&DS';
+        if (key.includes('computer technology')) return 'CT';
+        if (key.includes('information technology')) return 'IT';
+        if (key.includes('rubber')) return 'RPT';
+        if (key.includes('electronics') && key.includes('communication')) return 'ECE';
+        if (key.includes('electronics') && key.includes('instrumentation')) return 'EIE';
+        if (key.includes('instrumentation')) return 'EIE';
+        if (key.includes('aero')) return 'AERO';
+        if (key.includes('automobile')) return 'AUTO';
+        if (key.includes('production')) return 'PROD';
+        if (key.includes('robotics')) return 'RAE';
+        return trimmed;
+    };
+
+    const deptCountsRaw = statsMembers.reduce((acc, member) => {
+        const dept = normalizeDept(member.dept);
+        acc[dept] = (acc[dept] || 0) + 1;
+        return acc;
+    }, {});
+    const deptEntries = Object.entries(deptCountsRaw).sort((a, b) => b[1] - a[1]);
+    const deptData = deptEntries;
+    const deptTotal = deptData.reduce((sum, [, count]) => sum + count, 0) || 1;
+    const deptColors = ['#f6c347', '#11131a', '#c99612', '#5b6b8a', '#9aa3b2', '#e7d8a3', '#3b82f6'];
+    const deptSegments = deptData.reduce((acc, [label, count], idx) => {
+        const start = acc.offset;
+        const end = start + (count / deptTotal) * 360;
+        acc.segments.push({ label, count, color: deptColors[idx % deptColors.length], start, end });
+        acc.offset = end;
+        return acc;
+    }, { offset: 0, segments: [] }).segments;
+
+    const batchCounts = statsMembers.reduce((acc, member) => {
+        const batch = member.regno ? String(member.regno).slice(0, 4) : 'Unknown';
+        acc[batch] = (acc[batch] || 0) + 1;
+        return acc;
+    }, {});
+    const batchEntries = Object.entries(batchCounts).sort((a, b) => b[1] - a[1]);
+    const selectedBatchMembers = batchFilter === 'All'
+        ? statsMembers
+        : statsMembers.filter((m) => (m.regno ? String(m.regno).slice(0, 4) : 'Unknown') === batchFilter);
+    const batchDeptCounts = selectedBatchMembers.reduce((acc, member) => {
+        const dept = normalizeDept(member.dept);
+        acc[dept] = (acc[dept] || 0) + 1;
+        return acc;
+    }, {});
+    const batchDeptEntries = Object.entries(batchDeptCounts).sort((a, b) => b[1] - a[1]);
+
     return (
         <AdminLayout title="Team Management" subtitle="Manage PDA team members and roles.">
+            <section className="mb-6 rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                        <p className="text-xs uppercase tracking-[0.4em] text-slate-400">Overview</p>
+                        <h2 className="text-2xl font-heading font-black">PDA Team Stats</h2>
+                    </div>
+                    <div className="text-sm text-slate-600">Total members: <span className="font-semibold text-[#11131a]">{totalMembers}</span></div>
+                </div>
+
+                <div className="mt-6 grid gap-6 lg:grid-cols-3">
+                    <div className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
+                        <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Members Per Team</p>
+                        <div className="mt-4 space-y-2">
+                            {Object.entries(teamCounts).map(([team, count]) => (
+                                <button
+                                    key={team}
+                                    type="button"
+                                    className="flex w-full items-center gap-3 text-left"
+                                    onClick={() => setTeamFilter(team === 'Unassigned' ? 'All' : team)}
+                                    title="Click to filter list by team"
+                                >
+                                    <span className="w-28 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 sm:w-32">{team}</span>
+                                    <div className="h-2 flex-1 rounded-full bg-[#f1f2f4]">
+                                        <div className="h-2 rounded-full bg-[#f6c347]" style={{ width: `${(count / maxTeamCount) * 100}%` }} />
+                                    </div>
+                                    <span className="w-6 text-right text-xs text-slate-600">{count}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
+                        <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Department Distribution</p>
+                        <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center">
+                            <div className="relative mx-auto h-36 w-36 flex-shrink-0 sm:mx-0 sm:h-40 sm:w-40">
+                                <svg viewBox="0 0 160 160" className="h-36 w-36 sm:h-40 sm:w-40">
+                                    <circle cx="80" cy="80" r="78" fill="#f1f2f4" stroke="#e5e7eb" strokeWidth="2" />
+                                    {deptSegments.map((seg) => {
+                                        const r = 78;
+                                        const startRad = (Math.PI / 180) * (seg.start - 90);
+                                        const endRad = (Math.PI / 180) * (seg.end - 90);
+                                        const x1 = 80 + r * Math.cos(startRad);
+                                        const y1 = 80 + r * Math.sin(startRad);
+                                        const x2 = 80 + r * Math.cos(endRad);
+                                        const y2 = 80 + r * Math.sin(endRad);
+                                        const largeArc = seg.end - seg.start > 180 ? 1 : 0;
+                                        const path = `M 80 80 L ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2} Z`;
+                                        return (
+                                            <path
+                                                key={seg.label}
+                                                d={path}
+                                                fill={seg.color}
+                                                onMouseEnter={() => setHoveredDept(seg)}
+                                                onMouseLeave={() => setHoveredDept(null)}
+                                            />
+                                        );
+                                    })}
+                                </svg>
+                                {hoveredDept && (
+                                    <div className="absolute -top-10 left-1/2 w-56 -translate-x-1/2 rounded-xl border border-black/10 bg-white px-3 py-2 text-center text-xs text-slate-700 shadow-sm">
+                                        {hoveredDept.label} ({hoveredDept.count})
+                                    </div>
+                                )}
+                            </div>
+                            <div className="space-y-2 text-xs text-slate-600 sm:max-h-40 sm:overflow-auto">
+                                {deptData.map(([label, count], idx) => (
+                                    <button
+                                        key={label}
+                                        type="button"
+                                        className="flex items-center gap-2 text-left"
+                                        onClick={() => setSearch(label)}
+                                        title="Click to filter list by department"
+                                    >
+                                        <span className="h-2 w-2 rounded-full" style={{ background: deptColors[idx % deptColors.length] }} />
+                                        <span className="font-semibold">{label}</span>
+                                        <span className="text-slate-400">({count})</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
+                        <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Batch Distribution</p>
+                        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                            <div>
+                                <Label>Batch</Label>
+                                <select
+                                    value={batchFilter}
+                                    onChange={(e) => setBatchFilter(e.target.value)}
+                                    className="mt-2 w-full rounded-md border border-black/10 bg-white px-3 py-2 text-sm"
+                                >
+                                    <option value="All">All Batches</option>
+                                    {batchEntries.map(([batch]) => (
+                                        <option key={batch} value={batch}>{batch}</option>
+                                    ))}
+                                </select>
+                                <p className="mt-3 text-sm text-slate-600">
+                                    Total in batch: <span className="font-semibold">{selectedBatchMembers.length}</span>
+                                </p>
+                            </div>
+                            <div>
+                                <Label>Dept wise members</Label>
+                                <div className="mt-2 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+                                    {batchDeptEntries.length ? batchDeptEntries.map(([dept, count]) => (
+                                        <div key={dept} className="flex items-center justify-between rounded-lg border border-black/10 bg-white px-3 py-2">
+                                            <span className="font-semibold text-slate-700">{dept}</span>
+                                            <span className="text-slate-500">{count}</span>
+                                        </div>
+                                    )) : (
+                                        <div className="col-span-2 text-sm text-slate-500">No members found.</div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
             <section className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
@@ -186,6 +432,20 @@ export default function TeamAdmin() {
                                 ))}
                             </SelectContent>
                         </Select>
+                        <Select value={sortBy} onValueChange={setSortBy}>
+                            <SelectTrigger className="sm:w-44">
+                                <SelectValue placeholder="Sort by" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="name">Sort: Name</SelectItem>
+                                <SelectItem value="team">Sort: Team</SelectItem>
+                                <SelectItem value="designation">Sort: Designation</SelectItem>
+                                <SelectItem value="batch">Sort: Batch</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <Button variant="outline" className="border-black/10" onClick={() => setSortDir(prev => (prev === 'asc' ? 'desc' : 'asc'))}>
+                            {sortDir === 'asc' ? 'Asc' : 'Desc'}
+                        </Button>
                     </div>
                     <div className="flex items-center gap-2">
                         <Button variant="outline" onClick={() => setPage(Math.max(1, page - 1))} disabled={page === 1}>Prev</Button>
@@ -194,134 +454,138 @@ export default function TeamAdmin() {
                     </div>
                 </div>
 
-                <div className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="mt-6">
                     {loading ? (
-                        <div className="col-span-full text-center text-sm text-slate-500">Loading...</div>
+                        <div className="text-center text-sm text-slate-500">Loading...</div>
                     ) : paged.length ? (
-                        paged.map(member => (
-                            <button
-                                key={member.id}
-                                type="button"
-                                onClick={() => openMember(member)}
-                                className="group flex h-full flex-col overflow-hidden rounded-3xl border border-black/10 bg-white text-left shadow-sm transition hover:-translate-y-1 hover:border-black/30 hover:shadow-md"
-                            >
-                                <div className="relative h-44 w-full overflow-hidden bg-[#f7f4ea]">
-                                    <img
-                                        src={member.photo_url || pdaLogo}
-                                        alt={member.name}
-                                        className="h-full w-full object-cover transition group-hover:scale-[1.02]"
-                                    />
-                                </div>
-                                <div className="flex flex-1 flex-col gap-3 p-5">
-                                    <div>
-                                        <p className="text-lg font-heading font-bold text-[#0f1115]">{member.name}</p>
-                                        <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{member.regno}</p>
-                                    </div>
-                                    <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#8b6a00]">
-                                        <span className="rounded-full border border-[#f6c347]/40 bg-[#fff8e6] px-3 py-1">
-                                            {member.team || 'Unassigned'}
-                                        </span>
-                                        <span className="rounded-full border border-black/10 bg-slate-50 px-3 py-1 text-slate-600">
-                                            {member.designation || 'Member'}
-                                        </span>
-                                    </div>
-                                    <div className="space-y-1 text-sm text-slate-600">
-                                        {member.dept ? (
-                                            <p>{member.dept}</p>
-                                        ) : null}
-                                        {member.email ? (
-                                            <p>{member.email}</p>
-                                        ) : null}
-                                        {member.phno ? (
-                                            <p>{member.phno}</p>
-                                        ) : null}
-                                        {member.dob ? (
-                                            <p>DOB: {member.dob}</p>
-                                        ) : null}
-                                    </div>
-                                    <span className="mt-auto text-xs text-slate-400">Tap to edit</span>
-                                </div>
-                            </button>
-                        ))
+                        <div
+                            className="overflow-hidden rounded-2xl border border-black/10"
+                            tabIndex={0}
+                            onKeyDown={(e) => {
+                                if (!paged.length) return;
+                                if (e.key === 'ArrowDown') {
+                                    e.preventDefault();
+                                    setActiveIndex((prev) => Math.min(paged.length - 1, prev + 1));
+                                }
+                                if (e.key === 'ArrowUp') {
+                                    e.preventDefault();
+                                    setActiveIndex((prev) => Math.max(0, prev - 1));
+                                }
+                                if (e.key === 'Enter' && activeIndex >= 0) {
+                                    e.preventDefault();
+                                    openMember(paged[activeIndex]);
+                                }
+                            }}
+                        >
+                            <div className="hidden sm:grid grid-cols-[1.6fr_1fr_1fr_1fr] bg-[#fff7dc] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-600">
+                                <span>Name</span>
+                                <span>Reg No</span>
+                                <span>Team</span>
+                                <span>Designation</span>
+                            </div>
+                            <div className="divide-y divide-black/5">
+                                {paged.map(member => (
+                                    <button
+                                        key={member.id}
+                                        type="button"
+                                        onClick={() => openMember(member)}
+                                        className={`w-full px-4 py-3 text-left text-sm hover:bg-[#fffaf0] sm:grid sm:grid-cols-[1.6fr_1fr_1fr_1fr] sm:items-center ${paged[activeIndex]?.id === member.id ? 'bg-[#fff3c4]' : ''}`}
+                                    >
+                                        <div className="flex flex-col gap-1 sm:block">
+                                            <span className="font-medium text-[#11131a]">{member.name || 'Unnamed'}</span>
+                                            <span className="text-xs text-slate-500 sm:hidden">{member.regno || 'N/A'}</span>
+                                        </div>
+                                        <span className="hidden text-slate-600 sm:inline">{member.regno || 'N/A'}</span>
+                                        <span className="text-slate-600">{member.team || 'Unassigned'}</span>
+                                        <span className="text-slate-600">{member.designation || 'Member'}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
                     ) : (
-                        <div className="col-span-full text-center text-sm text-slate-500">No members found.</div>
+                        <div className="text-center text-sm text-slate-500">No members found.</div>
                     )}
                 </div>
             </section>
 
             <Dialog open={!!selectedMember} onOpenChange={() => setSelectedMember(null)}>
-                <DialogContent className="max-w-2xl bg-white">
+                <DialogContent className="max-w-3xl bg-white">
                     <DialogHeader>
-                        <DialogTitle className="text-xl font-heading font-black">Edit Member</DialogTitle>
+                        <DialogTitle className="text-xl font-heading font-black">Member Details</DialogTitle>
                     </DialogHeader>
                     {selectedMember && (
-                        <div className="grid gap-4 md:grid-cols-[160px_1fr]">
-                            <div>
+                        <div className="space-y-6">
+                            <div className="flex justify-center">
                                 <img
                                     src={selectedMember.photo_url || pdaLogo}
                                     alt={selectedMember.name}
-                                    className="h-40 w-40 rounded-2xl object-cover"
+                                    className="h-56 w-56 rounded-3xl object-cover"
                                 />
-                                <div className="mt-3 space-y-1 text-xs text-slate-500">
-                                    <p><span className="font-semibold text-slate-600">Reg No:</span> {selectedMember.regno}</p>
-                                    {selectedMember.email ? (
-                                        <p><span className="font-semibold text-slate-600">Email:</span> {selectedMember.email}</p>
-                                    ) : null}
-                                    {selectedMember.phno ? (
-                                        <p><span className="font-semibold text-slate-600">Phone:</span> {selectedMember.phno}</p>
-                                    ) : null}
-                                    {selectedMember.dept ? (
-                                        <p><span className="font-semibold text-slate-600">Dept:</span> {selectedMember.dept}</p>
-                                    ) : null}
-                                    {selectedMember.dob ? (
-                                        <p><span className="font-semibold text-slate-600">DOB:</span> {selectedMember.dob}</p>
-                                    ) : null}
-                                    {selectedMember.team ? (
-                                        <p><span className="font-semibold text-slate-600">Team:</span> {selectedMember.team}</p>
-                                    ) : null}
-                                    {selectedMember.designation ? (
-                                        <p><span className="font-semibold text-slate-600">Designation:</span> {selectedMember.designation}</p>
-                                    ) : null}
+                            </div>
+                            <div className="grid gap-6 md:grid-cols-2">
+                                <div className="space-y-2 text-xs text-slate-500">
+                                    <p><span className="font-semibold text-slate-600">Reg No:</span> {selectedMember.regno || 'N/A'}</p>
+                                    <p><span className="font-semibold text-slate-600">Email:</span> {selectedMember.email || 'N/A'}</p>
+                                    <p><span className="font-semibold text-slate-600">Phone:</span> {selectedMember.phno || 'N/A'}</p>
+                                    <p><span className="font-semibold text-slate-600">Dept:</span> {selectedMember.dept || 'N/A'}</p>
+                                    <p><span className="font-semibold text-slate-600">Instagram:</span> {selectedMember.instagram_url || 'N/A'}</p>
+                                </div>
+                                <div className="space-y-2 text-xs text-slate-500">
+                                    <p><span className="font-semibold text-slate-600">DOB:</span> {selectedMember.dob || 'N/A'}</p>
+                                    <p><span className="font-semibold text-slate-600">Team:</span> {selectedMember.team || 'Unassigned'}</p>
+                                    <p><span className="font-semibold text-slate-600">Designation:</span> {selectedMember.designation || 'Member'}</p>
+                                    <p><span className="font-semibold text-slate-600">LinkedIn:</span> {selectedMember.linkedin_url || 'N/A'}</p>
                                 </div>
                             </div>
-                            <div className="space-y-3">
-                                <div>
-                                    <Label>Name</Label>
-                                    <Input value={selectedMember.name} readOnly className="bg-slate-50" />
+                            <div className="space-y-4">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Member</p>
+                                        <h3 className="text-lg font-heading font-black">{selectedMember.name || 'Unnamed'}</h3>
+                                    </div>
+                                    {isSuperAdmin ? (
+                                        <Button variant="outline" className="border-black/10" onClick={() => setIsEditing((prev) => !prev)}>
+                                            {isEditing ? 'Cancel' : 'Edit'}
+                                        </Button>
+                                    ) : null}
                                 </div>
-                                <div>
-                                    <Label>Register Number</Label>
-                                    <Input value={selectedMember.regno} readOnly className="bg-slate-50" />
+
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                    <div>
+                                        <Label>Team</Label>
+                                        <Select value={editForm.team} onValueChange={(value) => setEditForm(prev => ({ ...prev, team: value }))} disabled={!isEditing || !isSuperAdmin}>
+                                            <SelectTrigger><SelectValue placeholder="Select team" /></SelectTrigger>
+                                            <SelectContent>
+                                                {TEAMS.map(team => (
+                                                    <SelectItem key={team} value={team}>{team}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div>
+                                        <Label>Designation</Label>
+                                        <Select value={editForm.designation} onValueChange={(value) => setEditForm(prev => ({ ...prev, designation: value }))} disabled={!isEditing || !isSuperAdmin}>
+                                            <SelectTrigger><SelectValue placeholder="Select designation" /></SelectTrigger>
+                                            <SelectContent>
+                                                {(editForm.team === 'Executive' ? EXEC_DESIG : TEAM_DESIG).map(desig => (
+                                                    <SelectItem key={desig} value={desig}>{desig}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="sm:col-span-2">
+                                        <Label>Update Photo</Label>
+                                        <Input type="file" accept="image/*" onChange={(e) => setPhotoFile(e.target.files?.[0] || null)} disabled={!isEditing || !isSuperAdmin} />
+                                    </div>
                                 </div>
-                                <div>
-                                    <Label>Team</Label>
-                                    <Select value={editForm.team} onValueChange={(value) => setEditForm(prev => ({ ...prev, team: value }))}>
-                                        <SelectTrigger><SelectValue placeholder="Select team" /></SelectTrigger>
-                                        <SelectContent>
-                                            {TEAMS.map(team => (
-                                                <SelectItem key={team} value={team}>{team}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div>
-                                    <Label>Designation</Label>
-                                    <Select value={editForm.designation} onValueChange={(value) => setEditForm(prev => ({ ...prev, designation: value }))}>
-                                        <SelectTrigger><SelectValue placeholder="Select designation" /></SelectTrigger>
-                                        <SelectContent>
-                                            {(editForm.team === 'Executive' ? EXEC_DESIG : TEAM_DESIG).map(desig => (
-                                                <SelectItem key={desig} value={desig}>{desig}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div>
-                                    <Label>Upload New Photo</Label>
-                                    <Input type="file" accept="image/*" onChange={(e) => setPhotoFile(e.target.files?.[0] || null)} />
-                                </div>
-                                <Button onClick={updateMember} disabled={saving} className="bg-[#f6c347] text-black hover:bg-[#ffd16b]">
-                                    {saving ? 'Saving...' : 'Save Changes'}
-                                </Button>
+
+                                {isSuperAdmin ? (
+                                    <div className="flex justify-end">
+                                        <Button onClick={updateMember} disabled={!isEditing || saving} className="bg-[#f6c347] text-black hover:bg-[#ffd16b]">
+                                            {saving ? 'Saving...' : 'Save Changes'}
+                                        </Button>
+                                    </div>
+                                ) : null}
                             </div>
                         </div>
                     )}

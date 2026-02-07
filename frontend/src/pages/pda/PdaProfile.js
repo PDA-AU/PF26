@@ -37,7 +37,9 @@ export default function PdaProfile() {
         dob: '',
         gender: '',
         phno: '',
-        dept: ''
+        dept: '',
+        instagram_url: '',
+        linkedin_url: ''
     });
     const [passwordData, setPasswordData] = useState({
         oldPassword: '',
@@ -69,7 +71,9 @@ export default function PdaProfile() {
                 dob: user.dob || '',
                 gender: user.gender || '',
                 phno: user.phno || '',
-                dept: user.dept || ''
+                dept: user.dept || '',
+                instagram_url: user.instagram_url || '',
+                linkedin_url: user.linkedin_url || ''
             });
         }
     }, [user]);
@@ -251,6 +255,30 @@ export default function PdaProfile() {
                             <Label>Designation</Label>
                             <Input value={user.designation || 'Not assigned'} readOnly className="bg-slate-50" />
                         </div>
+                        {user.is_member ? (
+                            <>
+                                <div>
+                                    <Label>Instagram</Label>
+                                    <Input
+                                        name="instagram_url"
+                                        value={formData.instagram_url}
+                                        onChange={handleChange}
+                                        placeholder="https://instagram.com/username"
+                                        disabled={!isEditing}
+                                    />
+                                </div>
+                                <div>
+                                    <Label>LinkedIn</Label>
+                                    <Input
+                                        name="linkedin_url"
+                                        value={formData.linkedin_url}
+                                        onChange={handleChange}
+                                        placeholder="https://linkedin.com/in/username"
+                                        disabled={!isEditing}
+                                    />
+                                </div>
+                            </>
+                        ) : null}
                         <div className="md:col-span-2">
                             <Label>Change Profile Picture</Label>
                             <Input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setImageFile(e.target.files?.[0] || null)} disabled={!isEditing} />
@@ -270,8 +298,11 @@ export default function PdaProfile() {
                                                     name: user.name || '',
                                                     email: user.email || '',
                                                     dob: user.dob || '',
+                                                    gender: user.gender || '',
                                                     phno: user.phno || '',
-                                                    dept: user.dept || ''
+                                                    dept: user.dept || '',
+                                                    instagram_url: user.instagram_url || '',
+                                                    linkedin_url: user.linkedin_url || ''
                                                 });
                                             }
                                         }}

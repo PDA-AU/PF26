@@ -228,7 +228,7 @@ async def delete_pda_event(
 
 @router.get("/pda-admin/team", response_model=List[PdaTeamResponse])
 async def list_team_members(
-    admin: PdaUser = Depends(require_superadmin),
+    admin: PdaUser = Depends(require_pda_home_admin),
     db: Session = Depends(get_db)
 ):
     rows = (
