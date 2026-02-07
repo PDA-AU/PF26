@@ -38,6 +38,19 @@ const EXECUTIVE_DESIGNATIONS = [
     'Treasurer'
 ];
 
+const TEAM_FILTERS = [
+    'All',
+    'Executive',
+    'Content Creation',
+    'Event Management',
+    'Design',
+    'Website Design',
+    'Public Relations',
+    'Podcast',
+    'Library',
+    'Unassigned'
+];
+
 const emptyMemberForm = {
     name: '',
     regno: '',
@@ -58,6 +71,8 @@ export default function RecruitmentsAdmin() {
     const [memberPhoto, setMemberPhoto] = useState(null);
     const [savingMember, setSavingMember] = useState(false);
     const [exporting, setExporting] = useState(false);
+    const [recruitSearch, setRecruitSearch] = useState('');
+    const [recruitTeamFilter, setRecruitTeamFilter] = useState('All');
 
     const fetchRecruitments = useCallback(async () => {
         try {
@@ -183,6 +198,16 @@ export default function RecruitmentsAdmin() {
         );
     }
 
+    const filteredRecruitments = recruitments.filter((recruit) => {
+        const preferredTeam = recruit?.preferred_team;
+        const teamMatch = recruitTeamFilter === 'All'
+            || (recruitTeamFilter === 'Unassigned' && !preferredTeam)
+            || preferredTeam === recruitTeamFilter;
+        const haystack = `${recruit?.name || ''} ${recruit?.regno || ''} ${recruit?.email || ''}`.toLowerCase();
+        return teamMatch && haystack.includes(recruitSearch.trim().toLowerCase());
+    });
+    const allVisibleSelected = filteredRecruitments.length > 0 && filteredRecruitments.every((recruit) => selectedRecruitments.includes(recruit.id));
+
     return (
         <AdminLayout title="Recruitments" subtitle="Review and approve PDA recruitment applications.">
             <section className="mb-6 rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
@@ -277,8 +302,49 @@ export default function RecruitmentsAdmin() {
                         </Button>
                     </div>
                 </div>
+                <div className="mt-6 grid gap-4 md:grid-cols-3">
+                    <div className="md:col-span-2">
+                        <Label htmlFor="recruit-search">Search Applications</Label>
+                        <Input
+                            id="recruit-search"
+                            value={recruitSearch}
+                            onChange={(e) => setRecruitSearch(e.target.value)}
+                            placeholder="Search by name, regno, or email"
+                        />
+                    </div>
+                    <div>
+                        <Label htmlFor="recruit-team-filter">Preferred Team</Label>
+                        <select
+                            id="recruit-team-filter"
+                            value={recruitTeamFilter}
+                            onChange={(e) => setRecruitTeamFilter(e.target.value)}
+                            className="w-full rounded-md border border-black/10 bg-white px-3 py-2 text-sm"
+                        >
+                            {TEAM_FILTERS.map((team) => (
+                                <option key={team} value={team}>{team}</option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+                <div className="mt-4 flex items-center justify-between text-sm text-slate-600">
+                    <label className="flex items-center gap-2">
+                        <input
+                            type="checkbox"
+                            checked={allVisibleSelected}
+                            onChange={(e) => {
+                                if (e.target.checked) {
+                                    setSelectedRecruitments(filteredRecruitments.map((recruit) => recruit.id));
+                                } else {
+                                    setSelectedRecruitments([]);
+                                }
+                            }}
+                        />
+                        Select all visible
+                    </label>
+                    <span>{filteredRecruitments.length} applications</span>
+                </div>
                 <div className="mt-6 space-y-3">
-                    {recruitments.map((recruit) => (
+                    {filteredRecruitments.map((recruit) => (
                         <label key={recruit.id} className="flex flex-col gap-4 rounded-2xl border border-black/10 p-4 md:flex-row">
                             <div className="flex items-start gap-4">
                                 <input
@@ -339,7 +405,7 @@ export default function RecruitmentsAdmin() {
                             </div>
                         </label>
                     ))}
-                    {recruitments.length === 0 && (
+                    {filteredRecruitments.length === 0 && (
                         <div className="text-sm text-slate-500">No pending applications.</div>
                     )}
                 </div>

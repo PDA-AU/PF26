@@ -14,7 +14,6 @@ from database import get_db
 from models import PdaAdmin, PdaUser, PdaTeam, AdminLog, SystemConfig
 from schemas import PdaAdminCreate, PdaAdminPolicyUpdate, PdaUserResponse, AdminLogResponse, RecruitmentApprovalItem
 from security import require_superadmin
-from auth import get_password_hash
 from utils import log_admin_action, _upload_bytes_to_s3
 
 router = APIRouter()
@@ -30,6 +29,7 @@ def _build_admin_response(db: Session, user: PdaUser) -> PdaUserResponse:
         id=user.id,
         regno=user.regno,
         email=user.email,
+        email_verified=user.email_verified,
         name=user.name,
         dob=user.dob,
         phno=user.phno,
@@ -105,23 +105,13 @@ async def create_pda_admin(
     db: Session = Depends(get_db),
     request: Request = None
 ):
-    user = db.query(PdaUser).filter(PdaUser.regno == admin_data.regno).first()
+    user = db.query(PdaUser).filter(PdaUser.id == admin_data.user_id).first()
     if not user:
-        user = PdaUser(
-            regno=admin_data.regno,
-            email=f"{admin_data.regno}@pda.local",
-            hashed_password=get_password_hash(admin_data.password),
-            name=f"Admin {admin_data.regno}",
-            phno=None,
-            dept=None,
-            is_member=False
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-    else:
-        user.hashed_password = get_password_hash(admin_data.password)
-        db.commit()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    team = db.query(PdaTeam).filter(PdaTeam.user_id == user.id).first()
+    if not team:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User must be in PDA team to become admin")
 
     existing_admin = db.query(PdaAdmin).filter(PdaAdmin.user_id == user.id).first()
     if existing_admin:
@@ -129,7 +119,6 @@ async def create_pda_admin(
 
     admin_row = PdaAdmin(
         user_id=user.id,
-        hashed_password=get_password_hash(admin_data.password),
         policy={"home": True, "pf": False, "superAdmin": False}
     )
     db.add(admin_row)

@@ -66,6 +66,13 @@ class Participant(Base):
     register_number = Column(String(10), unique=True, index=True, nullable=False)
     email = Column(String(255), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
+    email_verified_at = Column(DateTime(timezone=True), nullable=True)
+    email_verification_token_hash = Column(String(255), nullable=True)
+    email_verification_expires_at = Column(DateTime(timezone=True), nullable=True)
+    email_verification_sent_at = Column(DateTime(timezone=True), nullable=True)
+    password_reset_token_hash = Column(String(255), nullable=True)
+    password_reset_expires_at = Column(DateTime(timezone=True), nullable=True)
+    password_reset_sent_at = Column(DateTime(timezone=True), nullable=True)
     name = Column(String(255), nullable=False)
     phone = Column(String(10), nullable=False)
     gender = Column(SQLEnum(Gender), nullable=False)
@@ -83,6 +90,10 @@ class Participant(Base):
     
     scores = relationship("Score", back_populates="participant")
 
+    @property
+    def email_verified(self) -> bool:
+        return self.email_verified_at is not None
+
 
 class PdaUser(Base):
     __tablename__ = "users"
@@ -91,6 +102,13 @@ class PdaUser(Base):
     regno = Column(String(20), unique=True, index=True, nullable=False)
     email = Column(String(255), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
+    email_verified_at = Column(DateTime(timezone=True), nullable=True)
+    email_verification_token_hash = Column(String(255), nullable=True)
+    email_verification_expires_at = Column(DateTime(timezone=True), nullable=True)
+    email_verification_sent_at = Column(DateTime(timezone=True), nullable=True)
+    password_reset_token_hash = Column(String(255), nullable=True)
+    password_reset_expires_at = Column(DateTime(timezone=True), nullable=True)
+    password_reset_sent_at = Column(DateTime(timezone=True), nullable=True)
     name = Column(String(255), nullable=False)
     dob = Column(Date, nullable=True)
     gender = Column(String(10), nullable=True)
@@ -101,6 +119,10 @@ class PdaUser(Base):
     is_member = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    @property
+    def email_verified(self) -> bool:
+        return self.email_verified_at is not None
 
 
 class Round(Base):
@@ -162,7 +184,6 @@ class PdaAdmin(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
-    hashed_password = Column(String(255), nullable=False)
     policy = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -220,4 +241,3 @@ class PdaGallery(Base):
     is_featured = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-

@@ -22,6 +22,7 @@ export default function ParticipantDashboard() {
     const [editing, setEditing] = useState(false);
     const [copied, setCopied] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [sendingVerification, setSendingVerification] = useState(false);
     const [editData, setEditData] = useState({
         name: user?.name || '',
         phone: user?.phone || '',
@@ -116,6 +117,18 @@ export default function ParticipantDashboard() {
         toast.success('Logged out successfully');
     };
 
+    const handleResendVerification = async () => {
+        setSendingVerification(true);
+        try {
+            await axios.post(`${API}/participant-auth/email/send-verification`, {}, { headers: getAuthHeader() });
+            toast.success('Verification email sent');
+        } catch (error) {
+            toast.error(error.response?.data?.detail || 'Failed to send verification email');
+        } finally {
+            setSendingVerification(false);
+        }
+    };
+
     const getProfileImageUrl = () => {
         if (!user.profile_picture) return undefined;
         if (user.profile_picture.startsWith('http')) return user.profile_picture;
@@ -179,6 +192,19 @@ export default function ParticipantDashboard() {
             </header>
 
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                {!user.email_verified ? (
+                    <div className="neo-card mb-6 bg-yellow-50 border-yellow-500">
+                        <div className="flex items-center justify-between gap-4">
+                            <div>
+                                <h2 className="font-heading font-bold text-lg">Email not verified</h2>
+                                <p className="text-gray-600 text-sm">Please verify your email. Update it first if it’s a dummy address.</p>
+                            </div>
+                            <Button onClick={handleResendVerification} disabled={sendingVerification} className="border-2 border-black shadow-neo bg-primary text-white hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all">
+                                {sendingVerification ? 'Sending...' : 'Resend'}
+                            </Button>
+                        </div>
+                    </div>
+                ) : null}
                 {/* Status Banner */}
                 <div className={`neo-card mb-8 ${user.status === 'Eliminated' ? 'bg-red-50 border-red-500' : 'bg-green-50 border-green-500'}`}>
                     <div className="flex items-center gap-4">

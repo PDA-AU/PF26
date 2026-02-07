@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
+from time_utils import ensure_timezone, now_tz
 from typing import Optional
 import io
 
@@ -16,11 +18,16 @@ from schemas import (
     PdaPasswordChangeResponse,
     PresignRequest,
     PresignResponse,
-    ImageUrlUpdate
+    ImageUrlUpdate,
+    EmailVerificationRequest,
+    PdaForgotPasswordRequest,
+    ResetPasswordRequest
 )
 from auth import verify_password, get_password_hash, create_access_token, create_refresh_token, decode_token
 from security import require_pda_user
 from utils import _upload_to_s3, _generate_presigned_put_url
+from email_workflows import issue_verification, verify_email_token, issue_password_reset, reset_password_with_token
+import os
 
 router = APIRouter()
 
@@ -38,6 +45,7 @@ def _build_pda_user_response(db: Session, user: PdaUser) -> PdaUserResponse:
         id=user.id,
         regno=user.regno,
         email=user.email,
+        email_verified=user.email_verified,
         name=user.name,
         dob=user.dob,
         gender=user.gender,
@@ -55,7 +63,7 @@ def _build_pda_user_response(db: Session, user: PdaUser) -> PdaUserResponse:
     )
 
 
-@router.post("/auth/register", response_model=PdaTokenResponse)
+@router.post("/auth/register")
 async def pda_register(user_data: PdaUserRegister, db: Session = Depends(get_db)):
     reg_config = db.query(SystemConfig).filter(SystemConfig.key == "pda_recruitment_open").first()
     if reg_config and reg_config.value == "false":
@@ -90,6 +98,14 @@ async def pda_register(user_data: PdaUserRegister, db: Session = Depends(get_db)
     db.commit()
     db.refresh(new_user)
 
+    try:
+        issue_verification(db, new_user, "pda")
+    except Exception:
+        pass
+
+    if os.environ.get("EMAIL_VERIFY_REQUIRED", "false").lower() == "true":
+        return JSONResponse(status_code=202, content={"status": "verification_required"})
+
     access_token = create_access_token({"sub": new_user.regno, "user_type": "pda"})
     refresh_token = create_refresh_token({"sub": new_user.regno, "user_type": "pda"})
     return PdaTokenResponse(
@@ -104,6 +120,8 @@ async def pda_login(login_data: PdaUserLogin, db: Session = Depends(get_db)):
     user = db.query(PdaUser).filter(PdaUser.regno == login_data.regno).first()
     if not user or not verify_password(login_data.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    if os.environ.get("EMAIL_VERIFY_REQUIRED", "false").lower() == "true" and not user.email_verified:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Email not verified")
 
     access_token = create_access_token({"sub": user.regno, "user_type": "pda"})
     refresh_token = create_refresh_token({"sub": user.regno, "user_type": "pda"})
@@ -144,10 +162,17 @@ async def update_pda_me(
     user: PdaUser = Depends(require_pda_user),
     db: Session = Depends(get_db)
 ):
+    email_changed = False
     if update_data.name is not None:
         user.name = update_data.name
     if update_data.email is not None:
-        user.email = update_data.email
+        if update_data.email != user.email:
+            user.email = update_data.email
+            user.email_verified_at = None
+            user.email_verification_token_hash = None
+            user.email_verification_expires_at = None
+            user.email_verification_sent_at = None
+            email_changed = True
     if update_data.dob is not None:
         user.dob = update_data.dob
     if update_data.gender is not None:
@@ -160,8 +185,63 @@ async def update_pda_me(
         user.image_url = update_data.image_url
 
     db.commit()
+    if email_changed:
+        try:
+            issue_verification(db, user, "pda")
+        except Exception:
+            pass
     db.refresh(user)
     return _build_pda_user_response(db, user)
+
+
+@router.post("/auth/email/send-verification")
+async def send_pda_email_verification(
+    user: PdaUser = Depends(require_pda_user),
+    db: Session = Depends(get_db)
+):
+    ok, reason = issue_verification(db, user, "pda")
+    if not ok and reason == "cooldown":
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Please wait before resending")
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unable to send verification email")
+    return {"status": "ok"}
+
+
+@router.post("/auth/email/verify")
+async def verify_pda_email(payload: EmailVerificationRequest, db: Session = Depends(get_db)):
+    user = verify_email_token(db, PdaUser, payload.token)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token")
+    return {"status": "ok"}
+
+
+@router.post("/auth/password/forgot")
+async def forgot_pda_password(payload: PdaForgotPasswordRequest, db: Session = Depends(get_db)):
+    user = None
+    if payload.regno:
+        user = db.query(PdaUser).filter(PdaUser.regno == payload.regno).first()
+    if not user and payload.email:
+        user = db.query(PdaUser).filter(PdaUser.email == payload.email).first()
+    if user:
+        if user.password_reset_sent_at:
+            sent_at = ensure_timezone(user.password_reset_sent_at)
+            delta = (now_tz() - sent_at).total_seconds()
+            if delta < 300:
+                return {"status": "ok"}
+        issue_password_reset(db, user, "pda")
+    return {"status": "ok"}
+
+
+@router.post("/auth/password/reset")
+async def reset_pda_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
+    if payload.new_password != payload.confirm_password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New password and confirm password do not match")
+    user = reset_password_with_token(db, PdaUser, payload.token)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token")
+    user.hashed_password = get_password_hash(payload.new_password)
+    db.commit()
+    return {"status": "ok"}
 
 
 @router.post("/me/change-password", response_model=PdaPasswordChangeResponse)

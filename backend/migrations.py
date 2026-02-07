@@ -218,7 +218,6 @@ def ensure_pda_admins_table(engine):
                 CREATE TABLE IF NOT EXISTS pda_admins (
                     id SERIAL PRIMARY KEY,
                     user_id INTEGER UNIQUE NOT NULL,
-                    hashed_password VARCHAR(255) NOT NULL,
                     policy JSON,
                     created_at TIMESTAMPTZ DEFAULT now()
                 )
@@ -227,12 +226,12 @@ def ensure_pda_admins_table(engine):
         )
         if not _column_exists(conn, "pda_admins", "user_id"):
             conn.execute(text("ALTER TABLE pda_admins ADD COLUMN user_id INTEGER"))
-        if not _column_exists(conn, "pda_admins", "hashed_password"):
-            conn.execute(text("ALTER TABLE pda_admins ADD COLUMN hashed_password VARCHAR(255)"))
         if not _column_exists(conn, "pda_admins", "policy"):
             conn.execute(text("ALTER TABLE pda_admins ADD COLUMN policy JSON"))
         if not _column_exists(conn, "pda_admins", "created_at"):
             conn.execute(text("ALTER TABLE pda_admins ADD COLUMN created_at TIMESTAMPTZ DEFAULT now()"))
+        if _column_exists(conn, "pda_admins", "hashed_password"):
+            conn.execute(text("ALTER TABLE pda_admins DROP COLUMN hashed_password"))
         fk_exists = conn.execute(
             text(
                 """
@@ -361,6 +360,40 @@ def assign_participants_event(engine):
         )
 
 
+def ensure_email_auth_columns(engine):
+    with engine.begin() as conn:
+        if _table_exists(conn, "participants"):
+            if not _column_exists(conn, "participants", "email_verified_at"):
+                conn.execute(text("ALTER TABLE participants ADD COLUMN email_verified_at TIMESTAMPTZ"))
+            if not _column_exists(conn, "participants", "email_verification_token_hash"):
+                conn.execute(text("ALTER TABLE participants ADD COLUMN email_verification_token_hash VARCHAR(255)"))
+            if not _column_exists(conn, "participants", "email_verification_expires_at"):
+                conn.execute(text("ALTER TABLE participants ADD COLUMN email_verification_expires_at TIMESTAMPTZ"))
+            if not _column_exists(conn, "participants", "email_verification_sent_at"):
+                conn.execute(text("ALTER TABLE participants ADD COLUMN email_verification_sent_at TIMESTAMPTZ"))
+            if not _column_exists(conn, "participants", "password_reset_token_hash"):
+                conn.execute(text("ALTER TABLE participants ADD COLUMN password_reset_token_hash VARCHAR(255)"))
+            if not _column_exists(conn, "participants", "password_reset_expires_at"):
+                conn.execute(text("ALTER TABLE participants ADD COLUMN password_reset_expires_at TIMESTAMPTZ"))
+            if not _column_exists(conn, "participants", "password_reset_sent_at"):
+                conn.execute(text("ALTER TABLE participants ADD COLUMN password_reset_sent_at TIMESTAMPTZ"))
+
+        if _table_exists(conn, "users"):
+            if not _column_exists(conn, "users", "email_verified_at"):
+                conn.execute(text("ALTER TABLE users ADD COLUMN email_verified_at TIMESTAMPTZ"))
+            if not _column_exists(conn, "users", "email_verification_token_hash"):
+                conn.execute(text("ALTER TABLE users ADD COLUMN email_verification_token_hash VARCHAR(255)"))
+            if not _column_exists(conn, "users", "email_verification_expires_at"):
+                conn.execute(text("ALTER TABLE users ADD COLUMN email_verification_expires_at TIMESTAMPTZ"))
+            if not _column_exists(conn, "users", "email_verification_sent_at"):
+                conn.execute(text("ALTER TABLE users ADD COLUMN email_verification_sent_at TIMESTAMPTZ"))
+            if not _column_exists(conn, "users", "password_reset_token_hash"):
+                conn.execute(text("ALTER TABLE users ADD COLUMN password_reset_token_hash VARCHAR(255)"))
+            if not _column_exists(conn, "users", "password_reset_expires_at"):
+                conn.execute(text("ALTER TABLE users ADD COLUMN password_reset_expires_at TIMESTAMPTZ"))
+            if not _column_exists(conn, "users", "password_reset_sent_at"):
+                conn.execute(text("ALTER TABLE users ADD COLUMN password_reset_sent_at TIMESTAMPTZ"))
+
 def normalize_pda_team_schema(db: Session):
     conn = db.connection()
     if not _table_exists(conn, "pda_team"):
@@ -465,7 +498,7 @@ def ensure_superadmin_policies(db: Session):
     for member, user in superadmins:
         admin_row = db.query(PdaAdmin).filter(PdaAdmin.user_id == user.id).first()
         if not admin_row:
-            admin_row = PdaAdmin(user_id=user.id, hashed_password=get_password_hash("admin123"), policy={"home": True, "pf": True})
+            admin_row = PdaAdmin(user_id=user.id, policy={"home": True, "pf": True})
             db.add(admin_row)
         elif not admin_row.policy:
             admin_row.policy = {"home": True, "pf": True}
@@ -508,6 +541,6 @@ def ensure_default_superadmin(db: Session):
 
     admin_row = db.query(PdaAdmin).filter(PdaAdmin.user_id == user.id).first()
     if not admin_row:
-        admin_row = PdaAdmin(user_id=user.id, hashed_password=get_password_hash("admin123"), policy={"home": True, "pf": True})
+        admin_row = PdaAdmin(user_id=user.id, policy={"home": True, "pf": True})
         db.add(admin_row)
         db.commit()

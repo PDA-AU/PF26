@@ -20,6 +20,7 @@ from migrations import (
     ensure_pda_team_constraints,
     ensure_pda_gallery_tag_column,
     ensure_pda_admins_table,
+    ensure_email_auth_columns,
     normalize_pda_admins_schema,
     drop_admin_logs_fk,
     seed_persofest_event,
@@ -73,6 +74,7 @@ async def startup_event():
     ensure_pda_gallery_tag_column(engine)
     drop_admin_logs_fk(engine)
     ensure_pda_admins_table(engine)
+    ensure_email_auth_columns(engine)
 
     # Create tables based on models
     Base.metadata.create_all(bind=engine)

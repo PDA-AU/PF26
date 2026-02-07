@@ -19,6 +19,9 @@ import RegisterPage from "@/pages/persofest/RegisterPage";
 import PdaLogin from "@/pages/pda/PdaLogin";
 import PdaRecruit from "@/pages/pda/PdaRecruit";
 import PdaProfile from "@/pages/pda/PdaProfile";
+import PdaVerifyEmail from "@/pages/pda/VerifyEmail";
+import PdaForgotPassword from "@/pages/pda/ForgotPassword";
+import PdaResetPassword from "@/pages/pda/ResetPassword";
 import ParticipantDashboard from "@/pages/persofest/ParticipantDashboard";
 import AdminDashboard from "@/pages/persofest/admin/AdminDashboard";
 import AdminRounds from "@/pages/persofest/admin/AdminRounds";
@@ -27,6 +30,9 @@ import AdminScoring from "@/pages/persofest/admin/AdminScoring";
 import AdminLeaderboard from "@/pages/persofest/admin/AdminLeaderboard";
 import AdminLogs from "@/pages/persofest/admin/AdminLogs";
 import AdminLogin from "@/pages/persofest/admin/AdminLogin";
+import ParticipantVerifyEmail from "@/pages/persofest/VerifyEmail";
+import ParticipantForgotPassword from "@/pages/persofest/ForgotPassword";
+import ParticipantResetPassword from "@/pages/persofest/ResetPassword";
 
 // Protected Route Components
 const ProtectedParticipantRoute = ({ children }) => {
@@ -125,6 +131,9 @@ function AppRoutes() {
             <Route path="/" element={<PdaHome />} />
             <Route path="/login" element={<PdaLogin />} />
             <Route path="/recruit" element={<PdaRecruit />} />
+            <Route path="/verify-email" element={<PdaVerifyEmail />} />
+            <Route path="/forgot-password" element={<PdaForgotPassword />} />
+            <Route path="/reset-password" element={<PdaResetPassword />} />
             <Route path="/pda/profile" element={
                 <ProtectedPdaRoute>
                     <PdaProfile />
@@ -147,6 +156,9 @@ function AppRoutes() {
                     <LoginPage />
                 </PublicRoute>
             } />
+            <Route path="/persofest/verify-email" element={<ParticipantVerifyEmail />} />
+            <Route path="/persofest/forgot-password" element={<ParticipantForgotPassword />} />
+            <Route path="/persofest/reset-password" element={<ParticipantResetPassword />} />
             <Route path="/persofest/register" element={
                 <PublicRoute>
                     <RegisterPage />

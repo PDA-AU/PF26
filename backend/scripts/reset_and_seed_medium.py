@@ -255,9 +255,9 @@ def seed() -> None:
 
         db.add_all(
             [
-                PdaAdmin(user_id=super_user.id, hashed_password=get_password_hash("admin123"), policy={"home": True, "pf": True}),
-                PdaAdmin(user_id=pf_admin_user.id, hashed_password=get_password_hash("admin123"), policy={"home": False, "pf": True}),
-                PdaAdmin(user_id=users[0].id, hashed_password=get_password_hash("admin123"), policy={"home": True, "pf": False}),
+                PdaAdmin(user_id=super_user.id, policy={"home": True, "pf": True}),
+                PdaAdmin(user_id=pf_admin_user.id, policy={"home": False, "pf": True}),
+                PdaAdmin(user_id=users[0].id, policy={"home": True, "pf": False}),
             ]
         )
 

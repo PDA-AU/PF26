@@ -115,7 +115,12 @@ export default function RegisterPage() {
                 referral_code: formData.referral_code || null
             };
 
-            await register(userData);
+            const result = await register(userData);
+            if (result?.status === 'verification_required') {
+                toast.success('Check your email to verify your account, then log in.');
+                navigate('/persofest/login');
+                return;
+            }
             toast.success('Registration successful! Welcome to Persofest\'26!');
             navigate('/persofest/dashboard');
         } catch (error) {

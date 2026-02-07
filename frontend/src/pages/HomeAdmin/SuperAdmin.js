@@ -9,8 +9,7 @@ import { API } from '@/pages/HomeAdmin/adminApi';
 import { toast } from 'sonner';
 
 const emptyAdmin = {
-    regno: '',
-    password: ''
+    user_id: ''
 };
 
 export default function SuperAdmin() {
@@ -20,6 +19,8 @@ export default function SuperAdmin() {
     const [originalPolicies, setOriginalPolicies] = useState({});
     const [policySaving, setPolicySaving] = useState(false);
     const [adminForm, setAdminForm] = useState(emptyAdmin);
+    const [teamMembers, setTeamMembers] = useState([]);
+    const [teamSearch, setTeamSearch] = useState('');
     const [saving, setSaving] = useState(false);
     const [snapshotLoading, setSnapshotLoading] = useState(false);
     const [snapshotUrl, setSnapshotUrl] = useState('');
@@ -39,6 +40,8 @@ export default function SuperAdmin() {
             });
             setPolicyEdits(edits);
             setOriginalPolicies(originals);
+            const teamRes = await axios.get(`${API}/pda-admin/team`, { headers: getAuthHeader() });
+            setTeamMembers(teamRes.data || []);
             const recruitmentRes = await axios.get(`${API}/pda-admin/superadmin/recruitment-status`, { headers: getAuthHeader() });
             if (typeof recruitmentRes.data?.recruitment_open === 'boolean') {
                 setRecruitmentOpen(recruitmentRes.data.recruitment_open);
@@ -54,23 +57,24 @@ export default function SuperAdmin() {
         }
     }, [user, fetchData]);
 
-    const handleAdminChange = (e) => {
-        const { name, value } = e.target;
-        setAdminForm(prev => ({ ...prev, [name]: value }));
-    };
-
     const submitAdmin = async (e) => {
         e.preventDefault();
+        if (!adminForm.user_id) {
+            toast.error('Select a team member to grant admin access.');
+            return;
+        }
         setSaving(true);
         try {
             await axios.post(`${API}/pda-admin/superadmin/admins`, {
-                regno: adminForm.regno.trim(),
-                password: adminForm.password.trim()
+                user_id: Number(adminForm.user_id)
             }, { headers: getAuthHeader() });
             setAdminForm(emptyAdmin);
+            setTeamSearch('');
             fetchData();
+            toast.success('Admin access granted.');
         } catch (error) {
             console.error('Failed to create admin:', error);
+            toast.error('Failed to grant admin access.');
         } finally {
             setSaving(false);
         }
@@ -178,6 +182,14 @@ export default function SuperAdmin() {
         );
     }
 
+    const filteredTeamMembers = teamMembers.filter((member) => {
+        if (!member?.user_id) return false;
+        const haystack = `${member?.name || ''} ${member?.regno || ''} ${member?.email || ''}`.toLowerCase();
+        return haystack.includes(teamSearch.trim().toLowerCase());
+    });
+    const selectedMember = teamMembers.find((member) => String(member.user_id) === String(adminForm.user_id));
+    const isSelectedAlreadyAdmin = Boolean(selectedMember && admins.some((admin) => String(admin.id) === String(selectedMember.user_id)));
+
     return (
         <AdminLayout title="Superadmin" subtitle="Manage admin users, recruitments, and audit actions.">
             <section className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
@@ -189,32 +201,64 @@ export default function SuperAdmin() {
                 </div>
 
                 <form onSubmit={submitAdmin} className="mt-6 grid gap-4 md:grid-cols-2">
-                    <div>
-                        <Label htmlFor="admin-regno">Register Number</Label>
+                    <div className="md:col-span-2">
+                        <Label htmlFor="admin-search">Search Team Members</Label>
                         <Input
-                            id="admin-regno"
-                            name="regno"
-                            value={adminForm.regno}
-                            onChange={handleAdminChange}
-                            placeholder="0000000000"
-                            required
+                            id="admin-search"
+                            name="admin-search"
+                            value={teamSearch}
+                            onChange={(e) => setTeamSearch(e.target.value)}
+                            placeholder="Search by name, regno, or email"
                         />
+                        {teamSearch.trim().length > 0 && filteredTeamMembers.length > 0 && (
+                            <div className="mt-2 max-h-56 overflow-auto rounded-xl border border-black/10 bg-white shadow-sm">
+                                {filteredTeamMembers.slice(0, 12).map((member) => (
+                                    <button
+                                        key={member.user_id}
+                                        type="button"
+                                        className="flex w-full items-center justify-between gap-3 px-4 py-2 text-left text-sm hover:bg-[#fff7dc]"
+                                        onClick={() => {
+                                            setAdminForm({ user_id: String(member.user_id) });
+                                            setTeamSearch(`${member.name || 'Unnamed'} · ${member.regno || 'N/A'}`);
+                                        }}
+                                    >
+                                        <span className="font-medium">{member.name || 'Unnamed'}</span>
+                                        <span className="text-xs text-slate-500">{member.regno || 'N/A'} · {member.team || 'Team'} · {member.designation || 'Role'}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
                     </div>
-                    <div>
-                        <Label htmlFor="admin-password">Password</Label>
-                        <Input
-                            id="admin-password"
-                            name="password"
-                            type="password"
-                            value={adminForm.password}
-                            onChange={handleAdminChange}
-                            placeholder="Set a password"
-                            required
-                        />
+                    <div className="md:col-span-2">
+                        <Label>Selected Member</Label>
+                        <div className="rounded-md border border-black/10 bg-[#fffdf7] px-4 py-3 text-sm">
+                            {selectedMember ? (
+                                <span>
+                                    <span className="font-medium">{selectedMember.name || 'Unnamed'}</span>
+                                    {' · '}
+                                    {selectedMember.regno || 'N/A'}
+                                    {' · '}
+                                    {selectedMember.team || 'Team'}
+                                    {' · '}
+                                    {selectedMember.designation || 'Role'}
+                                </span>
+                            ) : (
+                                <span className="text-slate-500">No member selected.</span>
+                            )}
+                        </div>
+                        {selectedMember && isSelectedAlreadyAdmin && (
+                            <p className="mt-2 text-sm text-amber-700">
+                                This member already has admin access.
+                            </p>
+                        )}
                     </div>
                     <div className="md:col-span-2 flex justify-end">
-                        <Button type="submit" className="bg-[#f6c347] text-black hover:bg-[#ffd16b]" disabled={saving}>
-                            {saving ? 'Saving...' : 'Create Admin'}
+                        <Button
+                            type="submit"
+                            className="bg-[#f6c347] text-black hover:bg-[#ffd16b]"
+                            disabled={saving || isSelectedAlreadyAdmin}
+                        >
+                            {saving ? 'Saving...' : 'Grant Admin Access'}
                         </Button>
                     </div>
                 </form>

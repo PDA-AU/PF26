@@ -80,11 +80,14 @@ export const AuthProvider = ({ children }) => {
 
     const register = async (userData) => {
         const response = await axios.post(`${API}/auth/register`, userData);
+        if (response.status === 202 || response.data?.status === 'verification_required') {
+            return { status: 'verification_required' };
+        }
         const { access_token, refresh_token, user: newUser } = response.data;
         setAccessToken(access_token);
         setRefreshToken(refresh_token);
-            localStorage.setItem('pdaAccessToken', access_token);
-            localStorage.setItem('pdaRefreshToken', refresh_token);
+        localStorage.setItem('pdaAccessToken', access_token);
+        localStorage.setItem('pdaRefreshToken', refresh_token);
         setUser(newUser);
         return newUser;
     };

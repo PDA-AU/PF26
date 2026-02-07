@@ -100,6 +100,7 @@ class UserResponse(BaseModel):
     id: int
     register_number: str
     email: str
+    email_verified: bool
     name: str
     phone: str
     gender: GenderEnum
@@ -121,6 +122,21 @@ class UserUpdate(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[EmailStr] = None
+
+
+class EmailVerificationRequest(BaseModel):
+    token: str = Field(..., min_length=10)
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: Optional[EmailStr] = None
+    register_number: Optional[str] = None
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(..., min_length=10)
+    new_password: str = Field(..., min_length=6)
+    confirm_password: str = Field(..., min_length=6)
 
 
 class PdaUserRegister(BaseModel):
@@ -158,10 +174,16 @@ class PdaUserUpdate(BaseModel):
     image_url: Optional[str] = None
 
 
+class PdaForgotPasswordRequest(BaseModel):
+    email: Optional[EmailStr] = None
+    regno: Optional[str] = None
+
+
 class PdaUserResponse(BaseModel):
     id: int
     regno: str
     email: str
+    email_verified: bool
     name: str
     dob: Optional[date] = None
     gender: Optional[str] = None
@@ -402,8 +424,7 @@ class AdminLogResponse(BaseModel):
 
 
 class PdaAdminCreate(BaseModel):
-    regno: str = Field(..., min_length=6)
-    password: str = Field(..., min_length=6)
+    user_id: int = Field(..., ge=1)
 
 
 class PdaAdminPolicyUpdate(BaseModel):

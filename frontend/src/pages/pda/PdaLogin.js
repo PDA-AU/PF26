@@ -111,6 +111,9 @@ export default function PdaLogin() {
                                     {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                                 </button>
                             </div>
+                            <div className="text-right">
+                                <Link to="/forgot-password" className="text-sm font-semibold text-[#b8890b] hover:underline">Forgot password?</Link>
+                            </div>
                         </div>
 
                         <Button

@@ -1,4 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
+from time_utils import ensure_timezone, now_tz
 from typing import List
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -14,7 +16,10 @@ from schemas import (
     UserUpdate,
     PresignRequest,
     PresignResponse,
-    ProfilePictureUpdate
+    ProfilePictureUpdate,
+    EmailVerificationRequest,
+    ForgotPasswordRequest,
+    ResetPasswordRequest
 )
 from auth import verify_password, get_password_hash, create_access_token, create_refresh_token, decode_token, generate_referral_code
 from security import require_participant
@@ -23,6 +28,8 @@ import io
 from utils import _upload_to_s3, _generate_presigned_put_url
 from models import Round, Score, RoundState
 from schemas import ParticipantRoundStatus
+from email_workflows import issue_verification, verify_email_token, issue_password_reset, reset_password_with_token
+import os
 
 router = APIRouter()
 
@@ -37,7 +44,7 @@ def _get_persofest_event(db: Session) -> Event:
     return event
 
 
-@router.post("/participant-auth/register", response_model=TokenResponse)
+@router.post("/participant-auth/register")
 async def participant_register(user_data: UserRegister, db: Session = Depends(get_db)):
     reg_config = db.query(SystemConfig).filter(SystemConfig.key == "registration_open").first()
     if reg_config and reg_config.value == "false":
@@ -69,6 +76,14 @@ async def participant_register(user_data: UserRegister, db: Session = Depends(ge
     db.commit()
     db.refresh(new_user)
 
+    try:
+        issue_verification(db, new_user, "participant")
+    except Exception:
+        pass
+
+    if os.environ.get("EMAIL_VERIFY_REQUIRED", "false").lower() == "true":
+        return JSONResponse(status_code=202, content={"status": "verification_required"})
+
     access_token = create_access_token({"sub": new_user.register_number, "user_type": "participant"})
     refresh_token = create_refresh_token({"sub": new_user.register_number, "user_type": "participant"})
     return TokenResponse(
@@ -83,6 +98,8 @@ async def participant_login(login_data: UserLogin, db: Session = Depends(get_db)
     user = db.query(Participant).filter(Participant.register_number == login_data.register_number).first()
     if not user or not verify_password(login_data.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    if os.environ.get("EMAIL_VERIFY_REQUIRED", "false").lower() == "true" and not user.email_verified:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Email not verified")
 
     access_token = create_access_token({"sub": user.register_number, "user_type": "participant"})
     refresh_token = create_refresh_token({"sub": user.register_number, "user_type": "participant"})
@@ -123,16 +140,78 @@ async def update_participant_me(
     user: Participant = Depends(require_participant),
     db: Session = Depends(get_db)
 ):
+    email_changed = False
     if user_data.name is not None:
         user.name = user_data.name
     if user_data.phone is not None:
         user.phone = user_data.phone
     if user_data.email is not None:
-        user.email = user_data.email
+        if user_data.email != user.email:
+            user.email = user_data.email
+            user.email_verified_at = None
+            user.email_verification_token_hash = None
+            user.email_verification_expires_at = None
+            user.email_verification_sent_at = None
+            email_changed = True
 
     db.commit()
+    if email_changed:
+        try:
+            issue_verification(db, user, "participant")
+        except Exception:
+            pass
     db.refresh(user)
     return UserResponse.model_validate(user)
+
+
+@router.post("/participant-auth/email/send-verification")
+async def send_participant_verification(
+    user: Participant = Depends(require_participant),
+    db: Session = Depends(get_db)
+):
+    ok, reason = issue_verification(db, user, "participant")
+    if not ok and reason == "cooldown":
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Please wait before resending")
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unable to send verification email")
+    return {"status": "ok"}
+
+
+@router.post("/participant-auth/email/verify")
+async def verify_participant_email(payload: EmailVerificationRequest, db: Session = Depends(get_db)):
+    user = verify_email_token(db, Participant, payload.token)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token")
+    return {"status": "ok"}
+
+
+@router.post("/participant-auth/password/forgot")
+async def forgot_participant_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    user = None
+    if payload.register_number:
+        user = db.query(Participant).filter(Participant.register_number == payload.register_number).first()
+    if not user and payload.email:
+        user = db.query(Participant).filter(Participant.email == payload.email).first()
+    if user:
+        if user.password_reset_sent_at:
+            sent_at = ensure_timezone(user.password_reset_sent_at)
+            delta = (now_tz() - sent_at).total_seconds()
+            if delta < 300:
+                return {"status": "ok"}
+        issue_password_reset(db, user, "participant")
+    return {"status": "ok"}
+
+
+@router.post("/participant-auth/password/reset")
+async def reset_participant_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
+    if payload.new_password != payload.confirm_password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New password and confirm password do not match")
+    user = reset_password_with_token(db, Participant, payload.token)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token")
+    user.hashed_password = get_password_hash(payload.new_password)
+    db.commit()
+    return {"status": "ok"}
 
 
 @router.post("/participant/me/profile-picture", response_model=UserResponse)

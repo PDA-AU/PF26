@@ -48,6 +48,7 @@ export default function PdaProfile() {
     const [changingPassword, setChangingPassword] = useState(false);
     const [imageFile, setImageFile] = useState(null);
     const [isEditing, setIsEditing] = useState(false);
+    const [sendingVerification, setSendingVerification] = useState(false);
 
     const getErrorMessage = (error, fallback) => {
         const detail = error?.response?.data?.detail;
@@ -137,6 +138,18 @@ export default function PdaProfile() {
         }
     };
 
+    const handleResendVerification = async () => {
+        setSendingVerification(true);
+        try {
+            await axios.post(`${API}/auth/email/send-verification`, {}, { headers: getAuthHeader() });
+            toast.success('Verification email sent');
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to send verification email'));
+        } finally {
+            setSendingVerification(false);
+        }
+    };
+
     if (!user) return null;
 
     return (
@@ -144,6 +157,17 @@ export default function PdaProfile() {
             <PdaHeader />
             <div className="mx-auto w-full max-w-4xl px-5 py-10 flex-1">
                 <div className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
+                    {!user.email_verified ? (
+                        <div className="mb-6 rounded-2xl border-2 border-black bg-[#fff4d6] p-4 text-sm text-black">
+                            <p className="font-semibold">Your email is not verified.</p>
+                            <p className="mt-1 text-xs text-slate-700">Please verify to secure your account. If you used a dummy email, update it first.</p>
+                            <div className="mt-3 flex justify-end">
+                                <Button type="button" onClick={handleResendVerification} disabled={sendingVerification} className="bg-[#11131a] text-white hover:bg-[#1f2330]">
+                                    {sendingVerification ? 'Sending...' : 'Resend Verification'}
+                                </Button>
+                            </div>
+                        </div>
+                    ) : null}
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                             <h1 className="text-3xl font-heading font-black">My PDA Profile</h1>

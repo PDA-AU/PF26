@@ -99,10 +99,15 @@ export default function PdaRecruit() {
         }
         setLoading(true);
         try {
-            await register({
+            const result = await register({
                 ...formData,
                 preferred_team: formData.preferred_team || undefined
             });
+            if (result?.status === 'verification_required') {
+                toast.success('Check your email to verify your account, then log in.');
+                navigate('/login');
+                return;
+            }
             toast.success('Application submitted successfully!');
             navigate('/pda/profile');
         } catch (error) {
