@@ -14,6 +14,9 @@ import GalleryAdmin from "@/pages/HomeAdmin/GalleryAdmin";
 import SuperAdmin from "@/pages/HomeAdmin/SuperAdmin";
 import LogsAdmin from "@/pages/HomeAdmin/LogsAdmin";
 import RecruitmentsAdmin from "@/pages/HomeAdmin/RecruitmentsAdmin";
+import AdminEvents from "@/pages/events/AdminEvents";
+import AdminEventManage from "@/pages/events/AdminEventManage";
+import EventDashboard from "@/pages/events/EventDashboard";
 import LoginPage from "@/pages/persofest/LoginPage";
 import RegisterPage from "@/pages/persofest/RegisterPage";
 import PdaLogin from "@/pages/pda/PdaLogin";
@@ -55,7 +58,7 @@ const ProtectedParticipantRoute = ({ children }) => {
     return children;
 };
 
-const ProtectedPdaRoute = ({ children, requirePf = false, requireHome = false, requireSuperAdmin = false }) => {
+const ProtectedPdaRoute = ({ children, requirePf = false, requireHome = false, requireSuperAdmin = false, requireEvents = false }) => {
     const { user, loading } = useAuth();
 
     if (loading) {
@@ -82,6 +85,13 @@ const ProtectedPdaRoute = ({ children, requirePf = false, requireHome = false, r
     }
     if (requireHome && !user.is_superadmin && !user.policy?.home) {
         return <Navigate to="/login" replace />;
+    }
+    if (requireEvents && !user.is_superadmin) {
+        const eventsPolicy = (user.policy && typeof user.policy.events === 'object') ? user.policy.events : null;
+        const hasAnyEventAccess = !!eventsPolicy && Object.values(eventsPolicy).some((value) => Boolean(value));
+        if (!hasAnyEventAccess) {
+            return <Navigate to="/login" replace />;
+        }
     }
 
     return children;
@@ -143,6 +153,16 @@ function AppRoutes() {
             <Route path="/admin/items" element={<ItemsAdmin />} />
             <Route path="/admin/team" element={<TeamAdmin />} />
             <Route path="/admin/gallery" element={<GalleryAdmin />} />
+            <Route path="/admin/events" element={
+                <ProtectedPdaRoute requireEvents>
+                    <AdminEvents />
+                </ProtectedPdaRoute>
+            } />
+            <Route path="/admin/events/:eventSlug" element={
+                <ProtectedPdaRoute requireEvents>
+                    <AdminEventManage />
+                </ProtectedPdaRoute>
+            } />
             <Route path="/admin/recruitments" element={
                 <ProtectedPdaRoute requireSuperAdmin>
                     <RecruitmentsAdmin />
@@ -163,6 +183,11 @@ function AppRoutes() {
                 <PublicRoute>
                     <RegisterPage />
                 </PublicRoute>
+            } />
+            <Route path="/events/:eventSlug" element={
+                <ProtectedPdaRoute>
+                    <EventDashboard />
+                </ProtectedPdaRoute>
             } />
 
             {/* Participant Routes */}

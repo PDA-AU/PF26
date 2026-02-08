@@ -935,7 +935,7 @@ async def freeze_round(round_id: int, admin=Depends(require_pda_pf_admin), db: S
 
 
 @router.post("/persofest/admin/rounds/{round_id}/unfreeze")
-async def unfreeze_round(round_id: int, admin=Depends(require_superadmin), db: Session = Depends(get_db)):
+async def unfreeze_round(round_id: int, admin=Depends(require_pda_pf_admin), db: Session = Depends(get_db)):
     round = db.query(Round).filter(Round.id == round_id).first()
     if not round:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")

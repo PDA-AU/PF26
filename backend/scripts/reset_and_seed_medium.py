@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
 from auth import get_password_hash
@@ -39,6 +40,29 @@ def _load_db_url() -> str:
     return db_url
 
 
+def _is_local_host(host: str | None) -> bool:
+    if host is None:
+        # Unix socket / file-backed local database.
+        return True
+    normalized = host.strip().lower()
+    return normalized in {"localhost", "127.0.0.1", "::1"}
+
+
+def _assert_reset_allowed(db_url: str) -> None:
+    allow = os.environ.get("ALLOW_DB_RESET", "").strip().lower()
+    if allow != "true":
+        raise RuntimeError(
+            "Refusing destructive reset. Set ALLOW_DB_RESET=true to run this script."
+        )
+
+    url = make_url(db_url)
+    if not _is_local_host(url.host):
+        raise RuntimeError(
+            f"Refusing destructive reset on non-local DB host: {url.host!r}. "
+            "Only localhost/127.0.0.1/::1 are allowed."
+        )
+
+
 def _truncate_all(engine) -> None:
     with engine.begin() as conn:
         tables = conn.execute(
@@ -62,6 +86,7 @@ def _truncate_all(engine) -> None:
 def seed() -> None:
     random.seed(42)
     db_url = _load_db_url()
+    _assert_reset_allowed(db_url)
     engine = create_engine(db_url, pool_pre_ping=True)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

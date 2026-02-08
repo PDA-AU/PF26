@@ -7,6 +7,8 @@ import tempfile
 import subprocess
 from datetime import datetime
 import io
+from urllib.parse import urlparse
+from urllib.request import urlopen
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 
@@ -14,10 +16,60 @@ from database import get_db
 from models import PdaAdmin, PdaUser, PdaTeam, AdminLog, SystemConfig
 from schemas import PdaAdminCreate, PdaAdminPolicyUpdate, PdaUserResponse, AdminLogResponse, RecruitmentApprovalItem
 from security import require_superadmin
-from utils import log_admin_action, _upload_bytes_to_s3
+from utils import log_admin_action, _upload_bytes_to_s3, S3_CLIENT, S3_BUCKET_NAME
 
 router = APIRouter()
 DATABASE_URL = os.environ.get("DATABASE_URL")
+DB_RESTORE_CONFIRM_TEXT = "CONFIRM RESTORE"
+
+
+def _resolve_pg_binary(kind: str) -> str:
+    # Allow explicit override first for production/runtime control.
+    if kind == "dump":
+        override = os.environ.get("PG_DUMP_BIN")
+    elif kind == "restore":
+        override = os.environ.get("PG_RESTORE_BIN")
+    else:
+        override = os.environ.get("PSQL_BIN")
+    if override and os.path.isfile(override) and os.access(override, os.X_OK):
+        return override
+
+    if kind == "dump":
+        candidates = [
+            "/opt/homebrew/opt/postgresql@16/bin/pg_dump",
+            "/opt/homebrew/opt/libpq/bin/pg_dump",
+            "/usr/local/opt/postgresql@16/bin/pg_dump",
+            "/usr/local/opt/libpq/bin/pg_dump",
+            "/usr/lib/postgresql/16/bin/pg_dump",
+            "pg_dump",
+        ]
+    elif kind == "restore":
+        candidates = [
+            "/opt/homebrew/opt/postgresql@16/bin/pg_restore",
+            "/opt/homebrew/opt/libpq/bin/pg_restore",
+            "/usr/local/opt/postgresql@16/bin/pg_restore",
+            "/usr/local/opt/libpq/bin/pg_restore",
+            "/usr/lib/postgresql/16/bin/pg_restore",
+            "pg_restore",
+        ]
+    else:
+        candidates = [
+            "/opt/homebrew/opt/postgresql@16/bin/psql",
+            "/opt/homebrew/opt/libpq/bin/psql",
+            "/usr/local/opt/postgresql@16/bin/psql",
+            "/usr/local/opt/libpq/bin/psql",
+            "/usr/lib/postgresql/16/bin/psql",
+            "psql",
+        ]
+
+    for candidate in candidates:
+        if os.path.isabs(candidate):
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                return candidate
+        else:
+            return candidate
+
+    return candidates[-1]
 
 
 def _build_admin_response(db: Session, user: PdaUser) -> PdaUserResponse:
@@ -46,7 +98,7 @@ def _build_admin_response(db: Session, user: PdaUser) -> PdaUserResponse:
     )
 
 
-def _create_pg_dump() -> tuple[str, str]:
+def _create_pg_dump(prefix: str = "pda_snapshot") -> tuple[str, str]:
     if not DATABASE_URL:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="DATABASE_URL not configured")
     url = make_url(DATABASE_URL)
@@ -54,12 +106,13 @@ def _create_pg_dump() -> tuple[str, str]:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Snapshot only supported for PostgreSQL")
 
     timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-    filename = f"pda_snapshot_{timestamp}.dump"
+    filename = f"{prefix}_{timestamp}.dump"
     tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".dump")
     tmp_file.close()
 
+    pg_dump_bin = _resolve_pg_binary("dump")
     cmd = [
-        "pg_dump",
+        pg_dump_bin,
         "--format=custom",
         "--no-owner",
         "--no-acl",
@@ -77,11 +130,151 @@ def _create_pg_dump() -> tuple[str, str]:
     try:
         result = subprocess.run(cmd, env=env, capture_output=True, text=True, check=True)
     except FileNotFoundError:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="pg_dump not installed on server")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"pg_dump not installed on server (resolved binary: {pg_dump_bin})")
     except subprocess.CalledProcessError as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"pg_dump failed: {exc.stderr.strip() or exc.stdout.strip()}") from exc
+        stderr = exc.stderr.strip() or exc.stdout.strip()
+        if "server version" in stderr and "pg_dump version" in stderr:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=(
+                    f"pg_dump failed due to version mismatch. "
+                    f"Resolved binary: {pg_dump_bin}. "
+                    "Set PG_DUMP_BIN to a PostgreSQL 16 pg_dump binary."
+                ),
+            ) from exc
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"pg_dump failed: {stderr}") from exc
 
     return tmp_file.name, filename
+
+
+def _get_latest_snapshot_meta(db: Session):
+    latest_log = (
+        db.query(AdminLog)
+        .filter(AdminLog.action == "Upload DB snapshot")
+        .order_by(AdminLog.created_at.desc(), AdminLog.id.desc())
+        .first()
+    )
+    if not latest_log or not isinstance(latest_log.meta, dict):
+        return None
+
+    snapshot_url = latest_log.meta.get("url")
+    snapshot_filename = latest_log.meta.get("filename")
+    if not snapshot_url or not snapshot_filename:
+        return None
+
+    return {
+        "url": snapshot_url,
+        "filename": snapshot_filename,
+        "uploaded_at": latest_log.created_at.isoformat() if latest_log.created_at else None,
+    }
+
+
+def _download_snapshot_dump(snapshot_url: str) -> bytes:
+    if not snapshot_url:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Snapshot URL missing")
+
+    parsed = urlparse(snapshot_url)
+    object_key = parsed.path.lstrip("/")
+
+    if S3_CLIENT and S3_BUCKET_NAME and object_key:
+        try:
+            res = S3_CLIENT.get_object(Bucket=S3_BUCKET_NAME, Key=object_key)
+            return res["Body"].read()
+        except Exception:
+            pass
+
+    try:
+        with urlopen(snapshot_url, timeout=30) as response:
+            return response.read()
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to download snapshot dump") from exc
+
+
+def _restore_pg_dump(dump_bytes: bytes) -> None:
+    if not DATABASE_URL:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="DATABASE_URL not configured")
+    if not dump_bytes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Snapshot dump is empty")
+
+    url = make_url(DATABASE_URL)
+    if not url.drivername.startswith("postgresql"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Restore only supported for PostgreSQL")
+
+    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".dump")
+    sql_file = tempfile.NamedTemporaryFile(delete=False, suffix=".sql")
+    sql_file.close()
+    try:
+        tmp_file.write(dump_bytes)
+        tmp_file.flush()
+        tmp_file.close()
+
+        pg_restore_bin = _resolve_pg_binary("restore")
+        psql_bin = _resolve_pg_binary("psql")
+        cmd = [
+            pg_restore_bin,
+            "--clean",
+            "--if-exists",
+            "--no-owner",
+            "--no-acl",
+            "--exit-on-error",
+            "--host", url.host or "localhost",
+            "--port", str(url.port or 5432),
+            "--username", url.username or "",
+            "--dbname", url.database or "",
+            tmp_file.name,
+        ]
+        env = os.environ.copy()
+        if url.password:
+            env["PGPASSWORD"] = url.password
+
+        try:
+            subprocess.run(cmd, env=env, capture_output=True, text=True, check=True)
+            return
+        except subprocess.CalledProcessError as exc:
+            detail = exc.stderr.strip() or exc.stdout.strip() or "pg_restore failed"
+            if 'unrecognized configuration parameter "transaction_timeout"' not in detail:
+                raise
+
+            # Fallback for PG17-generated dumps restored on PG16.
+            export_cmd = [
+                pg_restore_bin,
+                "--clean",
+                "--if-exists",
+                "--no-owner",
+                "--no-acl",
+                "--exit-on-error",
+                "--file",
+                sql_file.name,
+                tmp_file.name,
+            ]
+            subprocess.run(export_cmd, env=env, capture_output=True, text=True, check=True)
+
+            with open(sql_file.name, "r", encoding="utf-8") as handle:
+                sql_text = handle.read()
+            sql_text = sql_text.replace("SET transaction_timeout = 0;\n", "")
+            with open(sql_file.name, "w", encoding="utf-8") as handle:
+                handle.write(sql_text)
+
+            psql_cmd = [
+                psql_bin,
+                "--host", url.host or "localhost",
+                "--port", str(url.port or 5432),
+                "--username", url.username or "",
+                "--dbname", url.database or "",
+                "--set", "ON_ERROR_STOP=1",
+                "--file", sql_file.name,
+            ]
+            subprocess.run(psql_cmd, env=env, capture_output=True, text=True, check=True)
+    except FileNotFoundError:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"pg_restore not installed on server (resolved binary: {pg_restore_bin})")
+    except subprocess.CalledProcessError as exc:
+        detail = exc.stderr.strip() or exc.stdout.strip() or "pg_restore failed"
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail) from exc
+    finally:
+        if os.path.exists(tmp_file.name):
+            os.remove(tmp_file.name)
+        if os.path.exists(sql_file.name):
+            os.remove(sql_file.name)
 
 
 @router.get("/pda-admin/superadmin/admins", response_model=List[PdaUserResponse])
@@ -119,7 +312,7 @@ async def create_pda_admin(
 
     admin_row = PdaAdmin(
         user_id=user.id,
-        policy={"home": True, "pf": False, "superAdmin": False}
+        policy={"home": True, "pf": False, "superAdmin": False, "events": {}}
     )
     db.add(admin_row)
     db.commit()
@@ -202,7 +395,76 @@ async def upload_db_snapshot(
         if os.path.exists(file_path):
             os.remove(file_path)
     log_admin_action(db, superadmin, "Upload DB snapshot", request.method if request else None, request.url.path if request else None, {"filename": filename, "url": url})
-    return {"url": url, "filename": filename}
+    return {"url": url, "filename": filename, "uploaded_at": datetime.utcnow().isoformat() + "Z"}
+
+
+@router.get("/pda-admin/superadmin/db-snapshot/latest")
+async def get_latest_db_snapshot(
+    _: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+):
+    return {"snapshot": _get_latest_snapshot_meta(db)}
+
+
+@router.post("/pda-admin/superadmin/db-snapshot/restore")
+async def restore_db_snapshot(
+    payload: dict,
+    superadmin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    confirm_text = str((payload or {}).get("confirm_text") or "").strip()
+    if confirm_text != DB_RESTORE_CONFIRM_TEXT:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f'Type "{DB_RESTORE_CONFIRM_TEXT}" to confirm restore',
+        )
+
+    snapshot = _get_latest_snapshot_meta(db)
+    if not snapshot:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No snapshot available to restore")
+
+    # Always create a fallback snapshot of the current DB before destructive restore.
+    fallback_file_path, fallback_filename = _create_pg_dump(prefix="fallback_snapshot")
+    try:
+        with open(fallback_file_path, "rb") as handle:
+            fallback_data = handle.read()
+        fallback_url = _upload_bytes_to_s3(
+            fallback_data,
+            "dbsnapshot/fallback",
+            fallback_filename,
+            content_type="application/octet-stream",
+        )
+    finally:
+        if os.path.exists(fallback_file_path):
+            os.remove(fallback_file_path)
+
+    log_admin_action(
+        db,
+        superadmin,
+        "Restore DB snapshot",
+        request.method if request else None,
+        request.url.path if request else None,
+        {
+            "filename": snapshot.get("filename"),
+            "url": snapshot.get("url"),
+            "fallback_filename": fallback_filename,
+            "fallback_url": fallback_url,
+        },
+    )
+
+    dump_bytes = _download_snapshot_dump(snapshot.get("url"))
+    db.close()
+    _restore_pg_dump(dump_bytes)
+
+    return {
+        "restored": True,
+        "filename": snapshot.get("filename"),
+        "url": snapshot.get("url"),
+        "fallback_filename": fallback_filename,
+        "fallback_url": fallback_url,
+        "restored_at": datetime.utcnow().isoformat() + "Z",
+    }
 
 
 @router.get("/pda-admin/superadmin/recruitment-status")

@@ -1,5 +1,6 @@
 from typing import Optional, Dict
 from fastapi import Depends, HTTPException, status
+from fastapi import Request
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -13,6 +14,15 @@ def _get_team_and_policy(db: Session, user: PdaUser):
     policy: Optional[Dict[str, bool]] = admin_row.policy if admin_row else None
     is_superadmin = bool(admin_row and policy and policy.get("superAdmin"))
     return team, admin_row, policy, is_superadmin
+
+
+def _can_access_event_policy(policy: Optional[Dict[str, bool]], event_slug: str) -> bool:
+    if not policy:
+        return False
+    events = policy.get("events") if isinstance(policy, dict) else None
+    if not isinstance(events, dict):
+        return False
+    return bool(events.get(event_slug))
 
 
 def require_pda_user(user: PdaUser = Depends(get_current_pda_user)) -> PdaUser:
@@ -53,6 +63,24 @@ def require_superadmin(
     _, admin_row, policy, is_superadmin = _get_team_and_policy(db, user)
     if not admin_row or not policy or not is_superadmin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superadmin access required")
+    return user
+
+
+def require_pda_event_admin(
+    request: Request,
+    user: PdaUser = Depends(get_current_pda_user),
+    db: Session = Depends(get_db)
+) -> PdaUser:
+    _, admin_row, policy, is_superadmin = _get_team_and_policy(db, user)
+    if is_superadmin:
+        return user
+
+    event_slug = request.path_params.get("event_slug") or request.path_params.get("slug")
+    if not event_slug:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing event slug")
+
+    if not admin_row or not _can_access_event_policy(policy, event_slug):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin policy does not allow access to this event")
     return user
 
 

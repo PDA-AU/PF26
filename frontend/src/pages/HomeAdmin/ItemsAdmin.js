@@ -140,7 +140,7 @@ export default function ItemsAdmin() {
             hero_url: itemForm.hero_url.trim() || null
         };
         try {
-            const endpoint = isProgram ? 'programs' : 'events';
+            const endpoint = isProgram ? 'programs' : 'home-events';
             if (editingItem) {
                 await axios.put(`${API}/pda-admin/${endpoint}/${editingItem.id}`, payload, { headers: getAuthHeader() });
             } else {
@@ -216,7 +216,7 @@ export default function ItemsAdmin() {
 
     const deleteEvent = async (eventId) => {
         try {
-            await axios.delete(`${API}/pda-admin/events/${eventId}`, { headers: getAuthHeader() });
+            await axios.delete(`${API}/pda-admin/home-events/${eventId}`, { headers: getAuthHeader() });
             fetchData();
         } catch (error) {
             console.error('Failed to delete event:', error);
@@ -225,7 +225,7 @@ export default function ItemsAdmin() {
 
     const toggleEventFeatured = async (eventId, nextValue) => {
         try {
-            await axios.put(`${API}/pda-admin/events/${eventId}`, { is_featured: nextValue }, { headers: getAuthHeader() });
+            await axios.put(`${API}/pda-admin/home-events/${eventId}`, { is_featured: nextValue }, { headers: getAuthHeader() });
             fetchData();
             toast.success(nextValue ? 'Event marked as featured' : 'Event unfeatured');
         } catch (error) {

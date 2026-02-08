@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, Date, Enum as SQLEnum, ForeignKey, Text, JSON
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, Date, Enum as SQLEnum, ForeignKey, Text, JSON, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -239,5 +239,232 @@ class PdaGallery(Base):
     tag = Column(String(120), nullable=True)
     order = Column(Integer, default=0)
     is_featured = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PdaEventType(enum.Enum):
+    SESSION = "Session"
+    WORKSHOP = "Workshop"
+    EVENT = "Event"
+
+
+class PdaEventFormat(enum.Enum):
+    ONLINE = "Online"
+    OFFLINE = "Offline"
+    HYBRID = "Hybrid"
+
+
+class PdaEventTemplate(enum.Enum):
+    ATTENDANCE_ONLY = "attendance_only"
+    ATTENDANCE_SCORING = "attendance_scoring"
+
+
+class PdaEventParticipantMode(enum.Enum):
+    INDIVIDUAL = "individual"
+    TEAM = "team"
+
+
+class PdaEventRoundMode(enum.Enum):
+    SINGLE = "single"
+    MULTI = "multi"
+
+
+class PdaEventStatus(enum.Enum):
+    OPEN = "open"
+    CLOSED = "closed"
+
+
+class PdaEventEntityType(enum.Enum):
+    USER = "user"
+    TEAM = "team"
+
+
+class PdaEventRoundState(enum.Enum):
+    DRAFT = "Draft"
+    PUBLISHED = "Published"
+    ACTIVE = "Active"
+    COMPLETED = "Completed"
+
+
+class PdaEventInviteStatus(enum.Enum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+
+
+class PdaEventBadgePlace(enum.Enum):
+    WINNER = "Winner"
+    RUNNER = "Runner"
+    SPECIAL_MENTION = "SpecialMention"
+
+
+class PdaEvent(Base):
+    __tablename__ = "pda_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    slug = Column(String(120), unique=True, nullable=False, index=True)
+    event_code = Column(String(20), unique=True, nullable=False, index=True)
+    club_id = Column(Integer, default=1, nullable=False)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    poster_url = Column(String(500), nullable=True)
+    event_type = Column(SQLEnum(PdaEventType), nullable=False)
+    format = Column(SQLEnum(PdaEventFormat), nullable=False)
+    template_option = Column(SQLEnum(PdaEventTemplate), nullable=False)
+    participant_mode = Column(SQLEnum(PdaEventParticipantMode), nullable=False)
+    round_mode = Column(SQLEnum(PdaEventRoundMode), nullable=False)
+    round_count = Column(Integer, nullable=False, default=1)
+    team_min_size = Column(Integer, nullable=True)
+    team_max_size = Column(Integer, nullable=True)
+    status = Column(SQLEnum(PdaEventStatus), nullable=False, default=PdaEventStatus.CLOSED)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PdaEventRegistration(Base):
+    __tablename__ = "pda_event_registrations"
+    __table_args__ = (
+        UniqueConstraint("event_id", "user_id", name="uq_pda_event_registration_event_user"),
+        UniqueConstraint("event_id", "team_id", name="uq_pda_event_registration_event_team"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("pda_events.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    team_id = Column(Integer, ForeignKey("pda_event_teams.id"), nullable=True, index=True)
+    entity_type = Column(SQLEnum(PdaEventEntityType), nullable=False)
+    registered_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PdaEventTeam(Base):
+    __tablename__ = "pda_event_teams"
+    __table_args__ = (
+        UniqueConstraint("event_id", "team_code", name="uq_pda_event_team_event_code"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("pda_events.id"), nullable=False, index=True)
+    team_code = Column(String(5), nullable=False)
+    team_name = Column(String(255), nullable=False)
+    team_lead_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PdaEventTeamMember(Base):
+    __tablename__ = "pda_event_team_members"
+    __table_args__ = (
+        UniqueConstraint("team_id", "user_id", name="uq_pda_event_team_member_team_user"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    team_id = Column(Integer, ForeignKey("pda_event_teams.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    role = Column(String(20), nullable=False, default="member")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PdaEventRound(Base):
+    __tablename__ = "pda_event_rounds"
+    __table_args__ = (
+        UniqueConstraint("event_id", "round_no", name="uq_pda_event_round_event_round_no"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("pda_events.id"), nullable=False, index=True)
+    round_no = Column(Integer, nullable=False)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    date = Column(DateTime(timezone=True), nullable=True)
+    mode = Column(SQLEnum(PdaEventFormat), nullable=False, default=PdaEventFormat.OFFLINE)
+    state = Column(SQLEnum(PdaEventRoundState), nullable=False, default=PdaEventRoundState.DRAFT)
+    evaluation_criteria = Column(JSON, nullable=True)
+    elimination_type = Column(String(20), nullable=True)
+    elimination_value = Column(Float, nullable=True)
+    is_frozen = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PdaEventAttendance(Base):
+    __tablename__ = "pda_event_attendance"
+    __table_args__ = (
+        UniqueConstraint(
+            "event_id",
+            "round_id",
+            "entity_type",
+            "user_id",
+            "team_id",
+            name="uq_pda_event_attendance_entity",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("pda_events.id"), nullable=False, index=True)
+    round_id = Column(Integer, ForeignKey("pda_event_rounds.id"), nullable=True, index=True)
+    entity_type = Column(SQLEnum(PdaEventEntityType), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    team_id = Column(Integer, ForeignKey("pda_event_teams.id"), nullable=True, index=True)
+    is_present = Column(Boolean, nullable=False, default=False)
+    marked_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    marked_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PdaEventScore(Base):
+    __tablename__ = "pda_event_scores"
+    __table_args__ = (
+        UniqueConstraint(
+            "event_id",
+            "round_id",
+            "entity_type",
+            "user_id",
+            "team_id",
+            name="uq_pda_event_score_entity",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("pda_events.id"), nullable=False, index=True)
+    round_id = Column(Integer, ForeignKey("pda_event_rounds.id"), nullable=False, index=True)
+    entity_type = Column(SQLEnum(PdaEventEntityType), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    team_id = Column(Integer, ForeignKey("pda_event_teams.id"), nullable=True, index=True)
+    criteria_scores = Column(JSON, nullable=True)
+    total_score = Column(Float, nullable=False, default=0)
+    normalized_score = Column(Float, nullable=False, default=0)
+    is_present = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PdaEventBadge(Base):
+    __tablename__ = "pda_event_badges"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("pda_events.id"), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    image_url = Column(String(500), nullable=True)
+    place = Column(SQLEnum(PdaEventBadgePlace), nullable=False)
+    score = Column(Float, nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    team_id = Column(Integer, ForeignKey("pda_event_teams.id"), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PdaEventInvite(Base):
+    __tablename__ = "pda_event_invites"
+    __table_args__ = (
+        UniqueConstraint("event_id", "team_id", "invited_user_id", name="uq_pda_event_invite_unique"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("pda_events.id"), nullable=False, index=True)
+    team_id = Column(Integer, ForeignKey("pda_event_teams.id"), nullable=False, index=True)
+    invited_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    invited_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    status = Column(SQLEnum(PdaEventInviteStatus), nullable=False, default=PdaEventInviteStatus.PENDING)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

@@ -28,10 +28,12 @@ from migrations import (
     normalize_pda_team_schema,
     normalize_pda_team,
     ensure_superadmin_policies,
-    ensure_default_superadmin
+    ensure_default_superadmin,
+    ensure_pda_event_tables
 )
 
 from routers import public, auth_pda, auth_participant, pda_public, pda_admin, persofest_admin, superadmin
+from routers import pda_events, pda_events_admin
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -75,6 +77,7 @@ async def startup_event():
     drop_admin_logs_fk(engine)
     ensure_pda_admins_table(engine)
     ensure_email_auth_columns(engine)
+    ensure_pda_event_tables(engine)
 
     # Create tables based on models
     Base.metadata.create_all(bind=engine)
@@ -113,3 +116,5 @@ app.include_router(pda_public.router, prefix="/api")
 app.include_router(pda_admin.router, prefix="/api")
 app.include_router(superadmin.router, prefix="/api")
 app.include_router(persofest_admin.router, prefix="/api")
+app.include_router(pda_events.router, prefix="/api")
+app.include_router(pda_events_admin.router, prefix="/api")

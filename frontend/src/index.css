@@ -131,13 +131,13 @@ code {
 }
 
 ::-webkit-scrollbar-thumb {
-    background: #8B5CF6;
+    background: #FDE047;
     border: 2px solid black;
     border-radius: 0;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: #7C3AED;
+    background:#FDE047;
 }
 
 /* Selection color */

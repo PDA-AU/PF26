@@ -2,10 +2,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Calendar, Sparkles, ChevronLeft, ChevronRight, Instagram, Linkedin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import PdaHeader from '@/components/layout/PdaHeader';
 import PdaFooter from '@/components/layout/PdaFooter';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import axios from 'axios';
+import { toast } from 'sonner';
 import pdaLogo from '@/assets/pda-logo.png';
 import pdaGroupPhoto from '@/assets/pda-group-photo.png';
 import founderPhoto from '@/assets/founder.png';
@@ -70,7 +72,7 @@ const formatDateRange = (event) => {
 };
 
 export default function PdaHome() {
-    const { user } = useAuth();
+    const { user, getAuthHeader } = useAuth();
     const revealObserverRef = useRef(null);
     const programScrollRef = useRef(null);
     const eventScrollRef = useRef(null);
@@ -89,6 +91,11 @@ export default function PdaHome() {
     const [teamMembers, setTeamMembers] = useState([]);
     const [galleryItems, setGalleryItems] = useState([]);
     const [teamFilter, setTeamFilter] = useState('Executive');
+    const [managedEvents, setManagedEvents] = useState([]);
+    const [registerDialogOpen, setRegisterDialogOpen] = useState(false);
+    const [registerTargetEvent, setRegisterTargetEvent] = useState(null);
+    const [teamCreateName, setTeamCreateName] = useState('');
+    const [teamJoinCode, setTeamJoinCode] = useState('');
 
     useEffect(() => {
         const elements = document.querySelectorAll('[data-reveal]');
@@ -125,11 +132,12 @@ export default function PdaHome() {
     useEffect(() => {
         const fetchPdaContent = async () => {
             try {
-                const [programsRes, eventsRes, teamRes, galleryRes] = await Promise.all([
+                const [programsRes, eventsRes, teamRes, galleryRes, managedRes] = await Promise.all([
                     axios.get(`${API}/pda/programs`, { params: { limit: PROGRAMS_FETCH_LIMIT } }),
                     axios.get(`${API}/pda/events`, { params: { limit: EVENTS_FETCH_LIMIT } }),
                     axios.get(`${API}/pda/team`),
-                    axios.get(`${API}/pda/gallery`, { params: { limit: GALLERY_FETCH_LIMIT } })
+                    axios.get(`${API}/pda/gallery`, { params: { limit: GALLERY_FETCH_LIMIT } }),
+                    axios.get(`${API}/pda/events/ongoing`)
                 ]);
                 const programData = programsRes.data || [];
                 const eventData = eventsRes.data || [];
@@ -145,6 +153,7 @@ export default function PdaHome() {
                 setActiveFeaturedIndex(0);
                 setTeamMembers(teamRes.data || []);
                 setGalleryItems(galleryRes.data || []);
+                setManagedEvents(managedRes.data || []);
             } catch (error) {
                 console.error('Failed to load PDA content:', error);
             }
@@ -297,6 +306,55 @@ export default function PdaHome() {
                 <span className="mt-auto" />
             </button>
         );
+    };
+
+    const openManagedEventRegister = (eventItem) => {
+        if (!user) return;
+        setRegisterTargetEvent(eventItem);
+        setTeamCreateName('');
+        setTeamJoinCode('');
+        setRegisterDialogOpen(true);
+    };
+
+    const registerManagedIndividual = async () => {
+        if (!registerTargetEvent) return;
+        try {
+            await axios.post(`${API}/pda/events/${registerTargetEvent.slug}/register`, {}, { headers: getAuthHeader() });
+            setRegisterDialogOpen(false);
+            toast.success('Registered successfully');
+        } catch (error) {
+            toast.error(error.response?.data?.detail || 'Registration failed');
+        }
+    };
+
+    const createManagedTeam = async () => {
+        if (!registerTargetEvent || !teamCreateName.trim()) return;
+        try {
+            await axios.post(
+                `${API}/pda/events/${registerTargetEvent.slug}/teams/create`,
+                { team_name: teamCreateName.trim() },
+                { headers: getAuthHeader() }
+            );
+            setRegisterDialogOpen(false);
+            toast.success('Team created and registered');
+        } catch (error) {
+            toast.error(error.response?.data?.detail || 'Team creation failed');
+        }
+    };
+
+    const joinManagedTeam = async () => {
+        if (!registerTargetEvent || !teamJoinCode.trim()) return;
+        try {
+            await axios.post(
+                `${API}/pda/events/${registerTargetEvent.slug}/teams/join`,
+                { team_code: teamJoinCode.trim().toUpperCase() },
+                { headers: getAuthHeader() }
+            );
+            setRegisterDialogOpen(false);
+            toast.success('Joined team successfully');
+        } catch (error) {
+            toast.error(error.response?.data?.detail || 'Join team failed');
+        }
     };
 
     return (
@@ -660,6 +718,60 @@ export default function PdaHome() {
                     </div>
                 </section>
 
+                <section className="mx-auto w-full max-w-6xl px-5 py-10 md:py-14">
+                    <div className="flex items-center justify-between gap-4" data-reveal>
+                        <div>
+                            <p className="text-xs uppercase tracking-[0.4em] text-[#f6c347]">Managed Events</p>
+                            <h2 className="text-2xl font-heading font-black sm:text-3xl">Ongoing Events</h2>
+                            <p className="mt-3 text-sm text-slate-700 md:text-base">
+                                Register for live PDA events and manage your participation from dedicated dashboards.
+                            </p>
+                        </div>
+                    </div>
+                    <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3" data-reveal>
+                        {managedEvents.length > 0 ? (
+                            managedEvents.map((eventItem) => (
+                                <div key={eventItem.id} className="rounded-2xl border border-black/10 bg-white p-5 shadow-sm">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <span className="rounded-md border border-black/10 bg-[#fff3c4] px-2 py-1 text-xs uppercase tracking-[0.2em] text-[#7a5a00]">
+                                            {eventItem.event_code}
+                                        </span>
+                                        <span className="rounded-md border border-black/10 bg-[#11131a] px-2 py-1 text-xs uppercase tracking-[0.2em] text-[#f6c347]">
+                                            {eventItem.status}
+                                        </span>
+                                    </div>
+                                    <h3 className="mt-3 text-xl font-heading font-black">{eventItem.title}</h3>
+                                    <p className="mt-2 text-sm text-slate-600">{eventItem.description || 'No description available.'}</p>
+                                    <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                                        <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventItem.event_type}</span>
+                                        <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventItem.format}</span>
+                                        <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventItem.participant_mode}</span>
+                                        <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventItem.round_count} rounds</span>
+                                    </div>
+                                    <div className="mt-4 flex flex-wrap gap-2">
+                                        <Link to={`/events/${eventItem.slug}`}>
+                                            <Button variant="outline" className="border-black/20">Dashboard</Button>
+                                        </Link>
+                                        {user ? (
+                                            <Button className="bg-[#f6c347] text-black hover:bg-[#ffd16b]" onClick={() => openManagedEventRegister(eventItem)}>
+                                                Register
+                                            </Button>
+                                        ) : (
+                                            <Link to="/login">
+                                                <Button className="bg-[#f6c347] text-black hover:bg-[#ffd16b]">Login to Register</Button>
+                                            </Link>
+                                        )}
+                                    </div>
+                                </div>
+                            ))
+                        ) : (
+                            <div className="col-span-full rounded-2xl border border-black/10 bg-white p-6 text-center text-sm text-slate-600">
+                                No ongoing managed events right now.
+                            </div>
+                        )}
+                    </div>
+                </section>
+
                 <section className="mx-auto w-full max-w-6xl px-5 py-10 md:py-14" data-reveal>
                     <div className="rounded-3xl border border-black/10 bg-gradient-to-r from-[#11131a] via-[#1a1d26] to-[#11131a] p-8 text-white md:p-12">
                         <p className="text-xs uppercase tracking-[0.4em] text-[#f6c347]">Flagship Festival</p>
@@ -917,6 +1029,57 @@ export default function PdaHome() {
                             </p>
                         </div>
                     </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={registerDialogOpen} onOpenChange={setRegisterDialogOpen}>
+                <DialogContent className="border-4 border-black">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading font-black text-2xl">
+                            {registerTargetEvent?.title || 'Event Registration'}
+                        </DialogTitle>
+                    </DialogHeader>
+                    {registerTargetEvent ? (
+                        <div className="space-y-4">
+                            <p className="text-sm text-slate-600">
+                                Confirm registration for this event. A confirmation email will be sent after successful registration.
+                            </p>
+                            {registerTargetEvent.participant_mode === 'individual' ? (
+                                <div className="flex justify-end gap-2">
+                                    <Button variant="outline" className="border-black/20" onClick={() => setRegisterDialogOpen(false)}>Cancel</Button>
+                                    <Button className="bg-[#f6c347] text-black hover:bg-[#ffd16b]" onClick={registerManagedIndividual}>
+                                        Confirm Registration
+                                    </Button>
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    <div className="rounded-xl border border-black/10 bg-[#fffdf7] p-3">
+                                        <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Create Team</p>
+                                        <div className="mt-2 flex gap-2">
+                                            <Input
+                                                value={teamCreateName}
+                                                onChange={(e) => setTeamCreateName(e.target.value)}
+                                                placeholder="Team name"
+                                            />
+                                            <Button onClick={createManagedTeam} className="bg-[#11131a] text-white hover:bg-[#1f2330]">Create</Button>
+                                        </div>
+                                    </div>
+                                    <div className="rounded-xl border border-black/10 bg-[#fffdf7] p-3">
+                                        <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Join Team</p>
+                                        <div className="mt-2 flex gap-2">
+                                            <Input
+                                                value={teamJoinCode}
+                                                onChange={(e) => setTeamJoinCode(e.target.value.toUpperCase())}
+                                                placeholder="5-char team code"
+                                                maxLength={5}
+                                            />
+                                            <Button onClick={joinManagedTeam} className="bg-[#11131a] text-white hover:bg-[#1f2330]">Join</Button>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    ) : null}
                 </DialogContent>
             </Dialog>
         </div>

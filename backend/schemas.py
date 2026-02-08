@@ -200,7 +200,7 @@ class PdaUserResponse(BaseModel):
     linkedin_url: Optional[str] = None
     is_admin: bool = False
     is_superadmin: bool = False
-    policy: Optional[Dict[str, bool]] = None
+    policy: Optional[Dict[str, Any]] = None
     created_at: datetime
 
     class Config:
@@ -432,7 +432,7 @@ class PdaAdminCreate(BaseModel):
 
 
 class PdaAdminPolicyUpdate(BaseModel):
-    policy: Dict[str, bool]
+    policy: Dict[str, Any]
 
 
 # Dashboard Stats
@@ -661,6 +661,313 @@ class TopReferrer(BaseModel):
     register_number: Optional[str] = None
     department: Optional[DepartmentEnum] = None
     referral_count: int
+
+
+# PDA Managed Event Engine
+class PdaManagedEventTypeEnum(str, Enum):
+    SESSION = "Session"
+    WORKSHOP = "Workshop"
+    EVENT = "Event"
+
+
+class PdaManagedEventFormatEnum(str, Enum):
+    ONLINE = "Online"
+    OFFLINE = "Offline"
+    HYBRID = "Hybrid"
+
+
+class PdaManagedEventTemplateEnum(str, Enum):
+    ATTENDANCE_ONLY = "attendance_only"
+    ATTENDANCE_SCORING = "attendance_scoring"
+
+
+class PdaManagedParticipantModeEnum(str, Enum):
+    INDIVIDUAL = "individual"
+    TEAM = "team"
+
+
+class PdaManagedRoundModeEnum(str, Enum):
+    SINGLE = "single"
+    MULTI = "multi"
+
+
+class PdaManagedEventStatusEnum(str, Enum):
+    OPEN = "open"
+    CLOSED = "closed"
+
+
+class PdaManagedEntityTypeEnum(str, Enum):
+    USER = "user"
+    TEAM = "team"
+
+
+class PdaManagedRoundStateEnum(str, Enum):
+    DRAFT = "Draft"
+    PUBLISHED = "Published"
+    ACTIVE = "Active"
+    COMPLETED = "Completed"
+
+
+class PdaManagedBadgePlaceEnum(str, Enum):
+    WINNER = "Winner"
+    RUNNER = "Runner"
+    SPECIAL_MENTION = "SpecialMention"
+
+
+class PdaManagedEventCreate(BaseModel):
+    title: str = Field(..., min_length=2)
+    description: Optional[str] = None
+    poster_url: Optional[str] = None
+    event_type: PdaManagedEventTypeEnum
+    format: PdaManagedEventFormatEnum
+    template_option: PdaManagedEventTemplateEnum
+    participant_mode: PdaManagedParticipantModeEnum
+    round_mode: PdaManagedRoundModeEnum
+    round_count: int = Field(1, ge=1, le=20)
+    team_min_size: Optional[int] = Field(None, ge=1, le=100)
+    team_max_size: Optional[int] = Field(None, ge=1, le=100)
+    club_id: int = Field(1, ge=1)
+
+
+class PdaManagedEventUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    poster_url: Optional[str] = None
+    event_type: Optional[PdaManagedEventTypeEnum] = None
+    format: Optional[PdaManagedEventFormatEnum] = None
+    template_option: Optional[PdaManagedEventTemplateEnum] = None
+    participant_mode: Optional[PdaManagedParticipantModeEnum] = None
+    round_mode: Optional[PdaManagedRoundModeEnum] = None
+    round_count: Optional[int] = Field(None, ge=1, le=20)
+    team_min_size: Optional[int] = Field(None, ge=1, le=100)
+    team_max_size: Optional[int] = Field(None, ge=1, le=100)
+    status: Optional[PdaManagedEventStatusEnum] = None
+
+
+class PdaManagedEventResponse(BaseModel):
+    id: int
+    slug: str
+    event_code: str
+    club_id: int
+    title: str
+    description: Optional[str] = None
+    poster_url: Optional[str] = None
+    event_type: PdaManagedEventTypeEnum
+    format: PdaManagedEventFormatEnum
+    template_option: PdaManagedEventTemplateEnum
+    participant_mode: PdaManagedParticipantModeEnum
+    round_mode: PdaManagedRoundModeEnum
+    round_count: int
+    team_min_size: Optional[int] = None
+    team_max_size: Optional[int] = None
+    status: PdaManagedEventStatusEnum
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PdaManagedEventDashboard(BaseModel):
+    event: PdaManagedEventResponse
+    is_registered: bool = False
+    entity_type: Optional[PdaManagedEntityTypeEnum] = None
+    entity_id: Optional[int] = None
+    team_code: Optional[str] = None
+    team_name: Optional[str] = None
+    team_members: List[Dict[str, Any]] = Field(default_factory=list)
+    rounds_count: int = 0
+    badges_count: int = 0
+
+
+class PdaManagedTeamCreate(BaseModel):
+    team_name: str = Field(..., min_length=2, max_length=255)
+
+
+class PdaManagedTeamJoin(BaseModel):
+    team_code: str = Field(..., min_length=5, max_length=5)
+
+
+class PdaManagedTeamInvite(BaseModel):
+    regno: str = Field(..., min_length=1, max_length=20)
+
+
+class PdaManagedTeamMemberResponse(BaseModel):
+    user_id: int
+    regno: str
+    name: str
+    role: str
+
+
+class PdaManagedTeamResponse(BaseModel):
+    id: int
+    event_id: int
+    team_code: str
+    team_name: str
+    team_lead_user_id: int
+    members: List[PdaManagedTeamMemberResponse] = Field(default_factory=list)
+
+
+class PdaManagedRoundCriteria(BaseModel):
+    name: str
+    max_marks: float
+
+
+class PdaManagedRoundCreate(BaseModel):
+    round_no: int = Field(..., ge=1, le=20)
+    name: str = Field(..., min_length=2)
+    description: Optional[str] = None
+    date: Optional[datetime] = None
+    mode: PdaManagedEventFormatEnum = PdaManagedEventFormatEnum.OFFLINE
+    evaluation_criteria: Optional[List[PdaManagedRoundCriteria]] = None
+
+
+class PdaManagedRoundUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    date: Optional[datetime] = None
+    mode: Optional[PdaManagedEventFormatEnum] = None
+    state: Optional[PdaManagedRoundStateEnum] = None
+    evaluation_criteria: Optional[List[PdaManagedRoundCriteria]] = None
+    elimination_type: Optional[str] = None
+    elimination_value: Optional[float] = None
+
+
+class PdaManagedRoundResponse(BaseModel):
+    id: int
+    event_id: int
+    round_no: int
+    name: str
+    description: Optional[str] = None
+    date: Optional[datetime] = None
+    mode: PdaManagedEventFormatEnum
+    state: PdaManagedRoundStateEnum
+    evaluation_criteria: Optional[List[Dict[str, Any]]] = None
+    elimination_type: Optional[str] = None
+    elimination_value: Optional[float] = None
+    is_frozen: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PdaManagedAttendanceMarkRequest(BaseModel):
+    entity_type: PdaManagedEntityTypeEnum
+    user_id: Optional[int] = None
+    team_id: Optional[int] = None
+    round_id: Optional[int] = None
+    is_present: bool = True
+
+
+class PdaManagedAttendanceScanRequest(BaseModel):
+    token: str
+    round_id: Optional[int] = None
+
+
+class PdaManagedAttendanceResponse(BaseModel):
+    id: int
+    event_id: int
+    round_id: Optional[int] = None
+    entity_type: PdaManagedEntityTypeEnum
+    user_id: Optional[int] = None
+    team_id: Optional[int] = None
+    is_present: bool
+    marked_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class PdaManagedScoreEntry(BaseModel):
+    entity_type: PdaManagedEntityTypeEnum
+    user_id: Optional[int] = None
+    team_id: Optional[int] = None
+    criteria_scores: Dict[str, float] = Field(default_factory=dict)
+    is_present: bool = True
+
+
+class PdaManagedScoreResponse(BaseModel):
+    id: int
+    event_id: int
+    round_id: int
+    entity_type: PdaManagedEntityTypeEnum
+    user_id: Optional[int] = None
+    team_id: Optional[int] = None
+    criteria_scores: Optional[Dict[str, float]] = None
+    total_score: float
+    normalized_score: float
+    is_present: bool
+
+    class Config:
+        from_attributes = True
+
+
+class PdaManagedParticipantListItem(BaseModel):
+    entity_type: PdaManagedEntityTypeEnum
+    entity_id: int
+    name: str
+    regno_or_code: str
+    members_count: Optional[int] = None
+    is_registered: bool = True
+    cumulative_score: float = 0
+    attendance_count: int = 0
+
+
+class PdaManagedBadgeCreate(BaseModel):
+    title: str = Field(..., min_length=2)
+    image_url: Optional[str] = None
+    place: PdaManagedBadgePlaceEnum
+    score: Optional[float] = None
+    user_id: Optional[int] = None
+    team_id: Optional[int] = None
+
+
+class PdaManagedBadgeResponse(BaseModel):
+    id: int
+    event_id: int
+    title: str
+    image_url: Optional[str] = None
+    place: PdaManagedBadgePlaceEnum
+    score: Optional[float] = None
+    user_id: Optional[int] = None
+    team_id: Optional[int] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PdaManagedMyEvent(BaseModel):
+    event: PdaManagedEventResponse
+    entity_type: Optional[PdaManagedEntityTypeEnum] = None
+    entity_id: Optional[int] = None
+    is_registered: bool = False
+    attendance_count: int = 0
+    cumulative_score: float = 0
+
+
+class PdaManagedAchievement(BaseModel):
+    event_slug: str
+    event_title: str
+    badge_title: str
+    badge_place: PdaManagedBadgePlaceEnum
+    image_url: Optional[str] = None
+    score: Optional[float] = None
+
+
+class PdaManagedCertificateResponse(BaseModel):
+    event_slug: str
+    event_title: str
+    eligible: bool
+    certificate_text: Optional[str] = None
+    generated_at: Optional[datetime] = None
+
+
+class PdaManagedQrResponse(BaseModel):
+    event_slug: str
+    entity_type: PdaManagedEntityTypeEnum
+    entity_id: int
+    qr_token: str
 
 
 # Update forward reference

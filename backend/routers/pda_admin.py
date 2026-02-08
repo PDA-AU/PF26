@@ -126,7 +126,7 @@ async def delete_pda_program(
     return {"message": "Program deleted successfully"}
 
 
-@router.post("/pda-admin/events", response_model=EventResponse)
+@router.post("/pda-admin/home-events", response_model=EventResponse)
 async def create_pda_event(
     event_data: EventCreate,
     admin: PdaUser = Depends(require_pda_home_admin),
@@ -153,7 +153,7 @@ async def create_pda_event(
     return EventResponse.model_validate(new_event)
 
 
-@router.put("/pda-admin/events/{event_id}", response_model=EventResponse)
+@router.put("/pda-admin/home-events/{event_id}", response_model=EventResponse)
 async def update_pda_event(
     event_id: int,
     event_data: EventUpdate,
@@ -192,7 +192,7 @@ async def update_pda_event(
     return EventResponse.model_validate(event)
 
 
-@router.post("/pda-admin/events/{event_id}/feature", response_model=EventResponse)
+@router.post("/pda-admin/home-events/{event_id}/feature", response_model=EventResponse)
 async def feature_pda_event(
     event_id: int,
     admin: PdaUser = Depends(require_pda_home_admin),
@@ -210,7 +210,7 @@ async def feature_pda_event(
     return EventResponse.model_validate(event)
 
 
-@router.delete("/pda-admin/events/{event_id}")
+@router.delete("/pda-admin/home-events/{event_id}")
 async def delete_pda_event(
     event_id: int,
     admin: PdaUser = Depends(require_pda_home_admin),

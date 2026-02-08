@@ -8,8 +8,8 @@ import { Label } from '@/components/ui/label';
 import { useAuth } from '@/context/AuthContext';
 import PdaLogo from '@/assets/pda-logo.png';
 
-export default function AdminLayout({ title, subtitle, children }) {
-    const { login, logout, canAccessHome, loading: authLoading, user, isSuperAdmin } = useAuth();
+export default function AdminLayout({ title, subtitle, children, allowEventAdmin = false }) {
+    const { login, logout, canAccessHome, canAccessEvents, loading: authLoading, user, isSuperAdmin } = useAuth();
     const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
     const [loginForm, setLoginForm] = useState({ register_number: '', password: '' });
     const [showPassword, setShowPassword] = useState(false);
@@ -52,11 +52,16 @@ export default function AdminLayout({ title, subtitle, children }) {
         }
     };
 
-    const baseNavItems = [
-        { label: 'Items', path: '/admin/items' },
-        { label: 'Team', path: '/admin/team' },
-        { label: 'Gallery', path: '/admin/gallery' }
-    ];
+    const baseNavItems = canAccessHome
+        ? [
+            { label: 'Items', path: '/admin/items' },
+            { label: 'Team', path: '/admin/team' },
+            { label: 'Gallery', path: '/admin/gallery' }
+        ]
+        : [];
+    if (canAccessEvents) {
+        baseNavItems.push({ label: 'Events', path: '/admin/events' });
+    }
 
     const navItems = isSuperAdmin
         ? [...baseNavItems, { label: 'Recruitments', path: '/admin/recruitments' }, { label: 'Logs', path: '/admin/logs' }, { label: 'Superadmin', path: '/admin/superadmin' }]
@@ -80,7 +85,8 @@ export default function AdminLayout({ title, subtitle, children }) {
         );
     }
 
-    if (!canAccessHome) {
+    const allowPanel = canAccessHome || (allowEventAdmin && canAccessEvents);
+    if (!allowPanel) {
         return (
             <div className="min-h-screen bg-white flex">
                 <div className="hidden lg:flex lg:w-1/2 bg-primary relative overflow-hidden">

@@ -498,10 +498,18 @@ def ensure_superadmin_policies(db: Session):
     for member, user in superadmins:
         admin_row = db.query(PdaAdmin).filter(PdaAdmin.user_id == user.id).first()
         if not admin_row:
-            admin_row = PdaAdmin(user_id=user.id, policy={"home": True, "pf": True})
+            admin_row = PdaAdmin(user_id=user.id, policy={"home": True, "pf": True, "superAdmin": True, "events": {}})
             db.add(admin_row)
         elif not admin_row.policy:
-            admin_row.policy = {"home": True, "pf": True}
+            admin_row.policy = {"home": True, "pf": True, "superAdmin": True, "events": {}}
+        else:
+            policy = dict(admin_row.policy)
+            policy["home"] = True
+            policy["pf"] = True
+            policy["superAdmin"] = True
+            if not isinstance(policy.get("events"), dict):
+                policy["events"] = {}
+            admin_row.policy = policy
     db.commit()
 
 
@@ -541,6 +549,197 @@ def ensure_default_superadmin(db: Session):
 
     admin_row = db.query(PdaAdmin).filter(PdaAdmin.user_id == user.id).first()
     if not admin_row:
-        admin_row = PdaAdmin(user_id=user.id, policy={"home": True, "pf": True})
+        admin_row = PdaAdmin(user_id=user.id, policy={"home": True, "pf": True, "superAdmin": True, "events": {}})
         db.add(admin_row)
         db.commit()
+    else:
+        policy = dict(admin_row.policy or {})
+        policy.setdefault("home", True)
+        policy.setdefault("pf", True)
+        policy.setdefault("superAdmin", True)
+        if not isinstance(policy.get("events"), dict):
+            policy["events"] = {}
+        admin_row.policy = policy
+        db.commit()
+
+
+def ensure_pda_event_tables(engine):
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS pda_events (
+                    id SERIAL PRIMARY KEY,
+                    slug VARCHAR(120) UNIQUE NOT NULL,
+                    event_code VARCHAR(20) UNIQUE NOT NULL,
+                    club_id INTEGER NOT NULL DEFAULT 1,
+                    title VARCHAR(255) NOT NULL,
+                    description TEXT,
+                    poster_url VARCHAR(500),
+                    event_type VARCHAR(30) NOT NULL,
+                    format VARCHAR(30) NOT NULL,
+                    template_option VARCHAR(50) NOT NULL,
+                    participant_mode VARCHAR(30) NOT NULL,
+                    round_mode VARCHAR(30) NOT NULL,
+                    round_count INTEGER NOT NULL DEFAULT 1,
+                    team_min_size INTEGER,
+                    team_max_size INTEGER,
+                    status VARCHAR(20) NOT NULL DEFAULT 'closed',
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ
+                )
+                """
+            )
+        )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS pda_event_teams (
+                    id SERIAL PRIMARY KEY,
+                    event_id INTEGER NOT NULL REFERENCES pda_events(id) ON DELETE CASCADE,
+                    team_code VARCHAR(5) NOT NULL,
+                    team_name VARCHAR(255) NOT NULL,
+                    team_lead_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ,
+                    CONSTRAINT uq_pda_event_team_event_code UNIQUE (event_id, team_code)
+                )
+                """
+            )
+        )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS pda_event_registrations (
+                    id SERIAL PRIMARY KEY,
+                    event_id INTEGER NOT NULL REFERENCES pda_events(id) ON DELETE CASCADE,
+                    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                    team_id INTEGER REFERENCES pda_event_teams(id) ON DELETE CASCADE,
+                    entity_type VARCHAR(10) NOT NULL,
+                    registered_at TIMESTAMPTZ DEFAULT now(),
+                    CONSTRAINT uq_pda_event_registration_event_user UNIQUE (event_id, user_id),
+                    CONSTRAINT uq_pda_event_registration_event_team UNIQUE (event_id, team_id)
+                )
+                """
+            )
+        )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS pda_event_team_members (
+                    id SERIAL PRIMARY KEY,
+                    team_id INTEGER NOT NULL REFERENCES pda_event_teams(id) ON DELETE CASCADE,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    role VARCHAR(20) NOT NULL DEFAULT 'member',
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ,
+                    CONSTRAINT uq_pda_event_team_member_team_user UNIQUE (team_id, user_id)
+                )
+                """
+            )
+        )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS pda_event_rounds (
+                    id SERIAL PRIMARY KEY,
+                    event_id INTEGER NOT NULL REFERENCES pda_events(id) ON DELETE CASCADE,
+                    round_no INTEGER NOT NULL,
+                    name VARCHAR(255) NOT NULL,
+                    description TEXT,
+                    date TIMESTAMPTZ,
+                    mode VARCHAR(30) NOT NULL DEFAULT 'Offline',
+                    state VARCHAR(30) NOT NULL DEFAULT 'Draft',
+                    evaluation_criteria JSON,
+                    elimination_type VARCHAR(20),
+                    elimination_value FLOAT,
+                    is_frozen BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ,
+                    CONSTRAINT uq_pda_event_round_event_round_no UNIQUE (event_id, round_no)
+                )
+                """
+            )
+        )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS pda_event_attendance (
+                    id SERIAL PRIMARY KEY,
+                    event_id INTEGER NOT NULL REFERENCES pda_events(id) ON DELETE CASCADE,
+                    round_id INTEGER REFERENCES pda_event_rounds(id) ON DELETE CASCADE,
+                    entity_type VARCHAR(10) NOT NULL,
+                    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                    team_id INTEGER REFERENCES pda_event_teams(id) ON DELETE CASCADE,
+                    is_present BOOLEAN NOT NULL DEFAULT FALSE,
+                    marked_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    marked_at TIMESTAMPTZ DEFAULT now(),
+                    CONSTRAINT uq_pda_event_attendance_entity UNIQUE (event_id, round_id, entity_type, user_id, team_id)
+                )
+                """
+            )
+        )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS pda_event_scores (
+                    id SERIAL PRIMARY KEY,
+                    event_id INTEGER NOT NULL REFERENCES pda_events(id) ON DELETE CASCADE,
+                    round_id INTEGER NOT NULL REFERENCES pda_event_rounds(id) ON DELETE CASCADE,
+                    entity_type VARCHAR(10) NOT NULL,
+                    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                    team_id INTEGER REFERENCES pda_event_teams(id) ON DELETE CASCADE,
+                    criteria_scores JSON,
+                    total_score FLOAT NOT NULL DEFAULT 0,
+                    normalized_score FLOAT NOT NULL DEFAULT 0,
+                    is_present BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ,
+                    CONSTRAINT uq_pda_event_score_entity UNIQUE (event_id, round_id, entity_type, user_id, team_id)
+                )
+                """
+            )
+        )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS pda_event_badges (
+                    id SERIAL PRIMARY KEY,
+                    event_id INTEGER NOT NULL REFERENCES pda_events(id) ON DELETE CASCADE,
+                    title VARCHAR(255) NOT NULL,
+                    image_url VARCHAR(500),
+                    place VARCHAR(30) NOT NULL,
+                    score FLOAT,
+                    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    team_id INTEGER REFERENCES pda_event_teams(id) ON DELETE SET NULL,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ
+                )
+                """
+            )
+        )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS pda_event_invites (
+                    id SERIAL PRIMARY KEY,
+                    event_id INTEGER NOT NULL REFERENCES pda_events(id) ON DELETE CASCADE,
+                    team_id INTEGER NOT NULL REFERENCES pda_event_teams(id) ON DELETE CASCADE,
+                    invited_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    invited_by_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ,
+                    CONSTRAINT uq_pda_event_invite_unique UNIQUE (event_id, team_id, invited_user_id)
+                )
+                """
+            )
+        )

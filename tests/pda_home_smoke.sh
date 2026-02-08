@@ -70,6 +70,6 @@ echo "[9/9] Frontend route declarations (static check)"
 grep -q 'path="/"' frontend/src/App.js || { echo "Missing / route in App.js"; exit 1; }
 grep -q 'path="/login"' frontend/src/App.js || { echo "Missing /login route in App.js"; exit 1; }
 grep -q 'path="/recruit"' frontend/src/App.js || { echo "Missing /recruit route in App.js"; exit 1; }
-grep -q 'path="/pda/profile"' frontend/src/App.js || { echo "Missing /pda/profile route in App.js"; exit 1; }
+grep -q 'path="/profile"' frontend/src/App.js || { echo "Missing /profile route in App.js"; exit 1; }
 
 echo "PDA Home smoke checks passed."
