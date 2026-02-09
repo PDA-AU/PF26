@@ -12,37 +12,37 @@ router = APIRouter()
 
 
 @router.get("/")
-async def root():
+def root():
     return {"message": "Persofest'26 API is running"}
 
 
 @router.get("/health")
-async def health_check():
+def health_check():
     return {"status": "healthy"}
 
 
 @router.get("/registration-status")
-async def get_registration_status(db: Session = Depends(get_db)):
+def get_registration_status(db: Session = Depends(get_db)):
     reg_config = db.query(SystemConfig).filter(SystemConfig.key == "registration_open").first()
     registration_open = reg_config.value == "true" if reg_config else True
     return {"registration_open": registration_open}
 
 
 @router.get("/pda/recruitment-status")
-async def get_pda_recruitment_status(db: Session = Depends(get_db)):
+def get_pda_recruitment_status(db: Session = Depends(get_db)):
     reg_config = db.query(SystemConfig).filter(SystemConfig.key == "pda_recruitment_open").first()
     recruitment_open = reg_config.value == "true" if reg_config else True
     return {"recruitment_open": recruitment_open}
 
 
 @router.get("/rounds/public", response_model=List[RoundPublicResponse])
-async def get_public_rounds(db: Session = Depends(get_db)):
+def get_public_rounds(db: Session = Depends(get_db)):
     rounds = db.query(Round).filter(Round.state != RoundState.DRAFT).order_by(Round.id).all()
     return [RoundPublicResponse.model_validate(r) for r in rounds]
 
 
 @router.get("/top-referrers", response_model=List[TopReferrer])
-async def get_top_referrers(db: Session = Depends(get_db)):
+def get_top_referrers(db: Session = Depends(get_db)):
     top_referrers = db.query(
         Participant.name,
         Participant.register_number,
@@ -53,7 +53,7 @@ async def get_top_referrers(db: Session = Depends(get_db)):
 
 
 @router.get("/routes")
-async def list_routes():
+def list_routes():
     return {
         "generated_at": datetime.utcnow().isoformat() + "Z",
         "routes": [

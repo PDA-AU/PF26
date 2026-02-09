@@ -30,7 +30,7 @@ def _build_team_response(member: PdaTeam, user: Optional[PdaUser]) -> PdaTeamRes
 
 
 @router.get("/pda/programs", response_model=List[ProgramResponse])
-async def get_pda_programs(
+def get_pda_programs(
     db: Session = Depends(get_db),
     limit: int = Query(default=200, ge=1, le=500)
 ):
@@ -45,7 +45,7 @@ async def get_pda_programs(
 
 
 @router.get("/pda/events", response_model=List[EventResponse])
-async def get_pda_events(
+def get_pda_events(
     db: Session = Depends(get_db),
     limit: int = Query(default=200, ge=1, le=500)
 ):
@@ -60,7 +60,7 @@ async def get_pda_events(
 
 
 @router.get("/pda/featured-event", response_model=EventResponse)
-async def get_featured_event(db: Session = Depends(get_db)):
+def get_featured_event(db: Session = Depends(get_db)):
     event = db.query(PdaItem).filter(PdaItem.type == "event", PdaItem.is_featured == True).order_by(PdaItem.updated_at.desc()).first()
     if not event:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No featured event")
@@ -68,7 +68,7 @@ async def get_featured_event(db: Session = Depends(get_db)):
 
 
 @router.get("/pda/team", response_model=List[PdaTeamResponse])
-async def get_pda_team(db: Session = Depends(get_db)):
+def get_pda_team(db: Session = Depends(get_db)):
     rows = (
         db.query(PdaTeam, PdaUser)
         .join(PdaUser, PdaTeam.user_id == PdaUser.id, isouter=True)
@@ -84,7 +84,7 @@ async def get_pda_team(db: Session = Depends(get_db)):
 
 
 @router.get("/pda/gallery", response_model=List[PdaGalleryResponse])
-async def get_pda_gallery(
+def get_pda_gallery(
     db: Session = Depends(get_db),
     limit: int = Query(default=200, ge=1, le=500)
 ):

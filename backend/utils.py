@@ -2,10 +2,12 @@ import os
 import uuid
 from pathlib import Path
 from typing import Optional, List, Dict
+from urllib.parse import unquote, urlparse
 from fastapi import HTTPException, status, UploadFile
 from sqlalchemy.orm import Session
 from models import AdminLog, PdaUser
 import boto3
+from botocore.config import Config
 
 AWS_REGION = os.environ.get("AWS_REGION")
 S3_BUCKET_NAME = os.environ.get("S3_BUCKET_NAME")
@@ -14,11 +16,14 @@ S3_SECRET_KEY = os.environ.get("S3_SECRET_KEY") or os.environ.get("AWS_SECRET_AC
 
 S3_CLIENT = None
 if AWS_REGION and S3_BUCKET_NAME and S3_ACCESS_KEY and S3_SECRET_KEY:
+    s3_config = Config(signature_version="s3v4", s3={"addressing_style": "virtual"})
     S3_CLIENT = boto3.client(
         "s3",
         region_name=AWS_REGION,
         aws_access_key_id=S3_ACCESS_KEY,
-        aws_secret_access_key=S3_SECRET_KEY
+        aws_secret_access_key=S3_SECRET_KEY,
+        endpoint_url=f"https://s3.{AWS_REGION}.amazonaws.com",
+        config=s3_config,
     )
 
 
@@ -39,6 +44,46 @@ def _build_s3_url(key: str) -> str:
     if not S3_BUCKET_NAME or not AWS_REGION:
         raise RuntimeError("S3 configuration missing")
     return f"https://{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{key}"
+
+
+def _extract_s3_key_from_url(url: Optional[str]) -> Optional[str]:
+    if not url:
+        return None
+    try:
+        parsed = urlparse(url)
+        host = (parsed.netloc or "").lower()
+        path = (parsed.path or "").lstrip("/")
+        if not host or not path:
+            return None
+        if not S3_BUCKET_NAME:
+            return None
+
+        bucket = S3_BUCKET_NAME.lower()
+        if host == f"{bucket}.s3.amazonaws.com" or host.startswith(f"{bucket}.s3."):
+            return unquote(path)
+        return None
+    except Exception:
+        return None
+
+
+def _generate_presigned_get_url_for_key(key: str, expires_in: int = 3600) -> str:
+    if not S3_CLIENT or not S3_BUCKET_NAME:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="S3 not configured")
+    try:
+        return S3_CLIENT.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": S3_BUCKET_NAME, "Key": key},
+            ExpiresIn=expires_in,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create download URL") from exc
+
+
+def _generate_presigned_get_url_from_s3_url(url: Optional[str], expires_in: int = 3600) -> Optional[str]:
+    key = _extract_s3_key_from_url(url)
+    if not key:
+        return url
+    return _generate_presigned_get_url_for_key(key, expires_in=expires_in)
 
 
 def _upload_to_s3(file: UploadFile, key_prefix: str, allowed_types: Optional[List[str]] = None) -> str:

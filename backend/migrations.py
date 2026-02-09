@@ -1,8 +1,11 @@
 from typing import Dict, Tuple
+import re
+import secrets
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from models import PdaTeam, PdaUser, PdaAdmin
 from auth import get_password_hash
+from persohub_service import ensure_default_persohub_setup
 
 TEAM_MAP: Dict[str, Tuple[str, str]] = {
     "Chairperson": ("Executive", "Chairperson"),
@@ -114,6 +117,34 @@ def ensure_pda_users_gender_column(engine):
     with engine.begin() as conn:
         if _table_exists(conn, "users") and not _column_exists(conn, "users", "gender"):
             conn.execute(text("ALTER TABLE users ADD COLUMN gender VARCHAR(10)"))
+
+
+def _normalize_profile_seed(name: str) -> str:
+    value = re.sub(r"[^a-z0-9_]+", "", str(name or "").strip().lower().replace(" ", "_"))
+    value = re.sub(r"_+", "_", value).strip("_")
+    if len(value) < 3:
+        value = "user"
+    return value[:32]
+
+
+def ensure_pda_users_profile_name_column(engine):
+    with engine.begin() as conn:
+        if not _table_exists(conn, "users"):
+            return
+        if not _column_exists(conn, "users", "profile_name"):
+            conn.execute(text("ALTER TABLE users ADD COLUMN profile_name VARCHAR(64)"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_profile_name ON users(profile_name)"))
+
+        rows = conn.execute(text("SELECT id, name FROM users WHERE profile_name IS NULL OR profile_name = ''")).fetchall()
+        for row in rows:
+            base = _normalize_profile_seed(row.name)
+            candidate = f"{base}_{secrets.randbelow(100000):05d}"[:40]
+            while conn.execute(text("SELECT 1 FROM users WHERE profile_name = :profile_name"), {"profile_name": candidate}).fetchone():
+                candidate = f"{base}_{secrets.randbelow(100000):05d}"[:40]
+            conn.execute(
+                text("UPDATE users SET profile_name = :profile_name WHERE id = :id"),
+                {"profile_name": candidate, "id": row.id},
+            )
 
 
 def ensure_pda_team_columns(engine):
@@ -743,3 +774,233 @@ def ensure_pda_event_tables(engine):
                 """
             )
         )
+
+
+def ensure_persohub_tables(engine):
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS persohub_clubs (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(120) UNIQUE NOT NULL,
+                    club_url VARCHAR(500),
+                    club_logo_url VARCHAR(500),
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ
+                )
+                """
+            )
+        )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS persohub_communities (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(120) NOT NULL,
+                    profile_id VARCHAR(64) UNIQUE NOT NULL,
+                    club_id INTEGER REFERENCES persohub_clubs(id) ON DELETE SET NULL,
+                    admin_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+                    hashed_password VARCHAR(255) NOT NULL,
+                    logo_url VARCHAR(500),
+                    description TEXT,
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ
+                )
+                """
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_communities_club_id ON persohub_communities(club_id)"))
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS persohub_community_follows (
+                    id SERIAL PRIMARY KEY,
+                    community_id INTEGER NOT NULL REFERENCES persohub_communities(id) ON DELETE CASCADE,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    CONSTRAINT uq_persohub_follow_community_user UNIQUE (community_id, user_id)
+                )
+                """
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_community_follows_user ON persohub_community_follows(user_id)"))
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS persohub_posts (
+                    id SERIAL PRIMARY KEY,
+                    community_id INTEGER NOT NULL REFERENCES persohub_communities(id) ON DELETE CASCADE,
+                    admin_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+                    slug_token VARCHAR(64) UNIQUE NOT NULL,
+                    description TEXT,
+                    like_count INTEGER NOT NULL DEFAULT 0,
+                    comment_count INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ
+                )
+                """
+            )
+        )
+        conn.execute(text("ALTER TABLE persohub_posts DROP COLUMN IF EXISTS title"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_posts_community_created ON persohub_posts(community_id, created_at DESC)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_posts_likes_created ON persohub_posts(like_count DESC, created_at DESC)"))
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS persohub_post_attachments (
+                    id SERIAL PRIMARY KEY,
+                    post_id INTEGER NOT NULL REFERENCES persohub_posts(id) ON DELETE CASCADE,
+                    s3_url VARCHAR(800) NOT NULL,
+                    preview_image_urls JSONB,
+                    mime_type VARCHAR(120),
+                    attachment_kind VARCHAR(30),
+                    size_bytes INTEGER,
+                    order_no INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMPTZ DEFAULT now()
+                )
+                """
+            )
+        )
+        conn.execute(text("ALTER TABLE persohub_post_attachments ADD COLUMN IF NOT EXISTS preview_image_urls JSONB"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_attachments_post_order ON persohub_post_attachments(post_id, order_no ASC)"))
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS persohub_post_likes (
+                    id SERIAL PRIMARY KEY,
+                    post_id INTEGER NOT NULL REFERENCES persohub_posts(id) ON DELETE CASCADE,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    CONSTRAINT uq_persohub_like_post_user UNIQUE (post_id, user_id)
+                )
+                """
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_likes_post ON persohub_post_likes(post_id)"))
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS persohub_post_comments (
+                    id SERIAL PRIMARY KEY,
+                    post_id INTEGER NOT NULL REFERENCES persohub_posts(id) ON DELETE CASCADE,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    comment_text TEXT NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ
+                )
+                """
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_comments_post_created ON persohub_post_comments(post_id, created_at DESC)"))
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS persohub_hashtags (
+                    id SERIAL PRIMARY KEY,
+                    hashtag_text VARCHAR(120) UNIQUE NOT NULL,
+                    count INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ
+                )
+                """
+            )
+        )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS persohub_post_hashtags (
+                    id SERIAL PRIMARY KEY,
+                    post_id INTEGER NOT NULL REFERENCES persohub_posts(id) ON DELETE CASCADE,
+                    hashtag_id INTEGER NOT NULL REFERENCES persohub_hashtags(id) ON DELETE CASCADE,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    CONSTRAINT uq_persohub_post_hashtag UNIQUE (post_id, hashtag_id)
+                )
+                """
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_post_hashtags_hashtag ON persohub_post_hashtags(hashtag_id)"))
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS persohub_post_mentions (
+                    id SERIAL PRIMARY KEY,
+                    post_id INTEGER NOT NULL REFERENCES persohub_posts(id) ON DELETE CASCADE,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    CONSTRAINT uq_persohub_post_mention UNIQUE (post_id, user_id)
+                )
+                """
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_mentions_post ON persohub_post_mentions(post_id)"))
+
+        # Ensure legacy FK constraints also use ON DELETE CASCADE for post cleanup.
+        conn.execute(text("ALTER TABLE persohub_post_attachments DROP CONSTRAINT IF EXISTS persohub_post_attachments_post_id_fkey"))
+        conn.execute(
+            text(
+                """
+                ALTER TABLE persohub_post_attachments
+                ADD CONSTRAINT persohub_post_attachments_post_id_fkey
+                FOREIGN KEY (post_id) REFERENCES persohub_posts(id) ON DELETE CASCADE
+                """
+            )
+        )
+
+        conn.execute(text("ALTER TABLE persohub_post_likes DROP CONSTRAINT IF EXISTS persohub_post_likes_post_id_fkey"))
+        conn.execute(
+            text(
+                """
+                ALTER TABLE persohub_post_likes
+                ADD CONSTRAINT persohub_post_likes_post_id_fkey
+                FOREIGN KEY (post_id) REFERENCES persohub_posts(id) ON DELETE CASCADE
+                """
+            )
+        )
+
+        conn.execute(text("ALTER TABLE persohub_post_comments DROP CONSTRAINT IF EXISTS persohub_post_comments_post_id_fkey"))
+        conn.execute(
+            text(
+                """
+                ALTER TABLE persohub_post_comments
+                ADD CONSTRAINT persohub_post_comments_post_id_fkey
+                FOREIGN KEY (post_id) REFERENCES persohub_posts(id) ON DELETE CASCADE
+                """
+            )
+        )
+
+        conn.execute(text("ALTER TABLE persohub_post_hashtags DROP CONSTRAINT IF EXISTS persohub_post_hashtags_post_id_fkey"))
+        conn.execute(
+            text(
+                """
+                ALTER TABLE persohub_post_hashtags
+                ADD CONSTRAINT persohub_post_hashtags_post_id_fkey
+                FOREIGN KEY (post_id) REFERENCES persohub_posts(id) ON DELETE CASCADE
+                """
+            )
+        )
+
+        conn.execute(text("ALTER TABLE persohub_post_mentions DROP CONSTRAINT IF EXISTS persohub_post_mentions_post_id_fkey"))
+        conn.execute(
+            text(
+                """
+                ALTER TABLE persohub_post_mentions
+                ADD CONSTRAINT persohub_post_mentions_post_id_fkey
+                FOREIGN KEY (post_id) REFERENCES persohub_posts(id) ON DELETE CASCADE
+                """
+            )
+        )
+
+
+def ensure_persohub_defaults(db: Session):
+    ensure_default_persohub_setup(db)

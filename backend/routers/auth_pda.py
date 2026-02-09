@@ -27,6 +27,11 @@ from auth import verify_password, get_password_hash, create_access_token, create
 from security import require_pda_user
 from utils import _upload_to_s3, _generate_presigned_put_url
 from email_workflows import issue_verification, verify_email_token, issue_password_reset, reset_password_with_token
+from persohub_service import (
+    ensure_user_follows_default_communities,
+    generate_unique_profile_name,
+    is_profile_name_valid,
+)
 import os
 
 router = APIRouter()
@@ -47,6 +52,7 @@ def _build_pda_user_response(db: Session, user: PdaUser) -> PdaUserResponse:
         email=user.email,
         email_verified=user.email_verified,
         name=user.name,
+        profile_name=user.profile_name,
         dob=user.dob,
         gender=user.gender,
         phno=user.phno,
@@ -66,7 +72,7 @@ def _build_pda_user_response(db: Session, user: PdaUser) -> PdaUserResponse:
 
 
 @router.post("/auth/register")
-async def pda_register(user_data: PdaUserRegister, db: Session = Depends(get_db)):
+def pda_register(user_data: PdaUserRegister, db: Session = Depends(get_db)):
     reg_config = db.query(SystemConfig).filter(SystemConfig.key == "pda_recruitment_open").first()
     if reg_config and reg_config.value == "false":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Recruitment is closed")
@@ -88,6 +94,7 @@ async def pda_register(user_data: PdaUserRegister, db: Session = Depends(get_db)
         email=user_data.email,
         hashed_password=get_password_hash(user_data.password),
         name=user_data.name,
+        profile_name=generate_unique_profile_name(db, user_data.name),
         dob=user_data.dob,
         gender=user_data.gender,
         phno=user_data.phno,
@@ -99,6 +106,8 @@ async def pda_register(user_data: PdaUserRegister, db: Session = Depends(get_db)
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+    ensure_user_follows_default_communities(db, new_user.id)
+    db.commit()
 
     try:
         issue_verification(db, new_user, "pda")
@@ -118,7 +127,7 @@ async def pda_register(user_data: PdaUserRegister, db: Session = Depends(get_db)
 
 
 @router.post("/auth/login", response_model=PdaTokenResponse)
-async def pda_login(login_data: PdaUserLogin, db: Session = Depends(get_db)):
+def pda_login(login_data: PdaUserLogin, db: Session = Depends(get_db)):
     user = db.query(PdaUser).filter(PdaUser.regno == login_data.regno).first()
     if not user or not verify_password(login_data.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
@@ -135,7 +144,7 @@ async def pda_login(login_data: PdaUserLogin, db: Session = Depends(get_db)):
 
 
 @router.post("/auth/refresh", response_model=PdaTokenResponse)
-async def pda_refresh(request: RefreshTokenRequest, db: Session = Depends(get_db)):
+def pda_refresh(request: RefreshTokenRequest, db: Session = Depends(get_db)):
     payload = decode_token(request.refresh_token)
     if payload.get("type") != "refresh" or payload.get("user_type") != "pda":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
@@ -154,12 +163,12 @@ async def pda_refresh(request: RefreshTokenRequest, db: Session = Depends(get_db
 
 
 @router.get("/me", response_model=PdaUserResponse)
-async def get_pda_me(user: PdaUser = Depends(require_pda_user), db: Session = Depends(get_db)):
+def get_pda_me(user: PdaUser = Depends(require_pda_user), db: Session = Depends(get_db)):
     return _build_pda_user_response(db, user)
 
 
 @router.put("/me", response_model=PdaUserResponse)
-async def update_pda_me(
+def update_pda_me(
     update_data: PdaUserUpdate,
     user: PdaUser = Depends(require_pda_user),
     db: Session = Depends(get_db)
@@ -167,6 +176,22 @@ async def update_pda_me(
     email_changed = False
     if update_data.name is not None:
         user.name = update_data.name
+    if update_data.profile_name is not None:
+        if not is_profile_name_valid(update_data.profile_name):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid profile name format")
+        existing = db.query(PdaUser).filter(
+            PdaUser.profile_name == update_data.profile_name,
+            PdaUser.id != user.id
+        ).first()
+        if existing:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Profile name already in use")
+        from models import PersohubCommunity
+        community_conflict = db.query(PersohubCommunity).filter(
+            PersohubCommunity.profile_id == update_data.profile_name
+        ).first()
+        if community_conflict:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Profile name reserved by community")
+        user.profile_name = update_data.profile_name
     if update_data.email is not None:
         if update_data.email != user.email:
             user.email = update_data.email
@@ -205,7 +230,7 @@ async def update_pda_me(
 
 
 @router.post("/auth/email/send-verification")
-async def send_pda_email_verification(
+def send_pda_email_verification(
     user: PdaUser = Depends(require_pda_user),
     db: Session = Depends(get_db)
 ):
@@ -218,7 +243,7 @@ async def send_pda_email_verification(
 
 
 @router.post("/auth/email/verify")
-async def verify_pda_email(payload: EmailVerificationRequest, db: Session = Depends(get_db)):
+def verify_pda_email(payload: EmailVerificationRequest, db: Session = Depends(get_db)):
     user = verify_email_token(db, PdaUser, payload.token)
     if not user:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token")
@@ -226,7 +251,7 @@ async def verify_pda_email(payload: EmailVerificationRequest, db: Session = Depe
 
 
 @router.post("/auth/password/forgot")
-async def forgot_pda_password(payload: PdaForgotPasswordRequest, db: Session = Depends(get_db)):
+def forgot_pda_password(payload: PdaForgotPasswordRequest, db: Session = Depends(get_db)):
     if payload.regno and payload.email:
         user = db.query(PdaUser).filter(
             PdaUser.regno == payload.regno,
@@ -244,7 +269,7 @@ async def forgot_pda_password(payload: PdaForgotPasswordRequest, db: Session = D
 
 
 @router.post("/auth/password/reset")
-async def reset_pda_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
+def reset_pda_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
     if payload.new_password != payload.confirm_password:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New password and confirm password do not match")
     user = reset_password_with_token(db, PdaUser, payload.token)
@@ -256,7 +281,7 @@ async def reset_pda_password(payload: ResetPasswordRequest, db: Session = Depend
 
 
 @router.post("/me/change-password", response_model=PdaPasswordChangeResponse)
-async def change_pda_password(
+def change_pda_password(
     payload: PdaPasswordChangeRequest,
     user: PdaUser = Depends(require_pda_user),
     db: Session = Depends(get_db)
@@ -272,14 +297,14 @@ async def change_pda_password(
 
 
 @router.post("/me/profile-picture", response_model=PdaUserResponse)
-async def update_pda_profile_picture(
+def update_pda_profile_picture(
     file: UploadFile = File(...),
     user: PdaUser = Depends(require_pda_user),
     db: Session = Depends(get_db)
 ):
     if not file.filename:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing filename")
-    contents = await file.read()
+    contents = file.file.read()
     if len(contents) > 12 * 1024 * 1024:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File size exceeds 12MB limit")
     file.file = io.BytesIO(contents)
@@ -292,7 +317,7 @@ async def update_pda_profile_picture(
 
 
 @router.post("/me/profile-picture/presign", response_model=PresignResponse)
-async def presign_pda_profile_picture(
+def presign_pda_profile_picture(
     payload: PresignRequest,
     user: PdaUser = Depends(require_pda_user)
 ):
@@ -305,7 +330,7 @@ async def presign_pda_profile_picture(
 
 
 @router.post("/me/profile-picture/confirm", response_model=PdaUserResponse)
-async def confirm_pda_profile_picture(
+def confirm_pda_profile_picture(
     payload: ImageUrlUpdate,
     user: PdaUser = Depends(require_pda_user),
     db: Session = Depends(get_db)

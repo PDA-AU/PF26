@@ -15,6 +15,7 @@ from migrations import (
     ensure_pda_users_table,
     ensure_pda_users_dob_column,
     ensure_pda_users_gender_column,
+    ensure_pda_users_profile_name_column,
     ensure_pda_team_columns,
     ensure_pda_items_columns,
     ensure_pda_team_constraints,
@@ -29,11 +30,14 @@ from migrations import (
     normalize_pda_team,
     ensure_superadmin_policies,
     ensure_default_superadmin,
-    ensure_pda_event_tables
+    ensure_pda_event_tables,
+    ensure_persohub_tables,
+    ensure_persohub_defaults,
 )
 
 from routers import public, auth_pda, auth_participant, pda_public, pda_admin, persofest_admin, superadmin
 from routers import pda_events, pda_events_admin
+from routers import persohub_public, persohub_community_auth, persohub_community_admin
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -70,6 +74,7 @@ async def startup_event():
     ensure_pda_users_table(engine)
     ensure_pda_users_dob_column(engine)
     ensure_pda_users_gender_column(engine)
+    ensure_pda_users_profile_name_column(engine)
     ensure_pda_team_columns(engine)
     ensure_pda_items_columns(engine)
     ensure_pda_team_constraints(engine)
@@ -78,6 +83,7 @@ async def startup_event():
     ensure_pda_admins_table(engine)
     ensure_email_auth_columns(engine)
     ensure_pda_event_tables(engine)
+    ensure_persohub_tables(engine)
 
     # Create tables based on models
     Base.metadata.create_all(bind=engine)
@@ -93,6 +99,7 @@ async def startup_event():
         normalize_pda_admins_schema(db)
         ensure_default_superadmin(db)
         ensure_superadmin_policies(db)
+        ensure_persohub_defaults(db)
 
         # Initialize system config
         reg_config = db.query(SystemConfig).filter(SystemConfig.key == "registration_open").first()
@@ -118,3 +125,6 @@ app.include_router(superadmin.router, prefix="/api")
 app.include_router(persofest_admin.router, prefix="/api")
 app.include_router(pda_events.router, prefix="/api")
 app.include_router(pda_events_admin.router, prefix="/api")
+app.include_router(persohub_public.router, prefix="/api")
+app.include_router(persohub_community_auth.router, prefix="/api")
+app.include_router(persohub_community_admin.router, prefix="/api")

@@ -64,9 +64,13 @@ export default function TeamAdmin() {
     const [editForm, setEditForm] = useState({ team: '', designation: '', instagram_url: '', linkedin_url: '' });
     const [photoFile, setPhotoFile] = useState(null);
     const [saving, setSaving] = useState(false);
+    const [deleting, setDeleting] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const [activeIndex, setActiveIndex] = useState(-1);
     const [hoveredDept, setHoveredDept] = useState(null);
+    const [confirmOpen, setConfirmOpen] = useState(false);
+    const [confirmText, setConfirmText] = useState('');
+    const [confirmAction, setConfirmAction] = useState(null);
 
     const fetchData = useCallback(async () => {
         try {
@@ -170,6 +174,34 @@ export default function TeamAdmin() {
         } finally {
             setSaving(false);
             setIsEditing(false);
+        }
+    };
+
+    const removeFromPda = async () => {
+        if (!selectedMember) return;
+        setDeleting(true);
+        try {
+            await axios.delete(`${API}/pda-admin/team/${selectedMember.id}`, { headers: getAuthHeader() });
+            setSelectedMember(null);
+            fetchData();
+        } catch (error) {
+            console.error('Failed to delete team member:', error);
+        } finally {
+            setDeleting(false);
+        }
+    };
+
+    const deleteUser = async () => {
+        if (!selectedMember?.user_id) return;
+        setDeleting(true);
+        try {
+            await axios.delete(`${API}/pda-admin/users/${selectedMember.user_id}`, { headers: getAuthHeader() });
+            setSelectedMember(null);
+            fetchData();
+        } catch (error) {
+            console.error('Failed to delete user:', error);
+        } finally {
+            setDeleting(false);
         }
     };
 
@@ -508,7 +540,10 @@ export default function TeamAdmin() {
                 </div>
             </section>
 
-            <Dialog open={!!selectedMember} onOpenChange={() => setSelectedMember(null)}>
+            <Dialog open={!!selectedMember} onOpenChange={() => {
+                setSelectedMember(null);
+                setConfirmOpen(false);
+            }}>
                 <DialogContent className="max-w-3xl bg-white">
                     <DialogHeader>
                         <DialogTitle className="text-xl font-heading font-black">Member Details</DialogTitle>
@@ -580,7 +615,33 @@ export default function TeamAdmin() {
                                 </div>
 
                                 {isSuperAdmin ? (
-                                    <div className="flex justify-end">
+                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                            <Button
+                                                variant="outline"
+                                                onClick={() => {
+                                                    setConfirmText('');
+                                                    setConfirmAction('remove');
+                                                    setConfirmOpen(true);
+                                                }}
+                                                disabled={deleting}
+                                                className="border-red-200 text-red-600 hover:bg-red-50"
+                                            >
+                                                {deleting ? 'Deleting...' : 'Remove From PDA'}
+                                            </Button>
+                                            <Button
+                                                variant="outline"
+                                                onClick={() => {
+                                                    setConfirmText('');
+                                                    setConfirmAction('delete_user');
+                                                    setConfirmOpen(true);
+                                                }}
+                                                disabled={deleting || !selectedMember?.user_id}
+                                                className="border-red-400 text-red-700 hover:bg-red-100"
+                                            >
+                                                {deleting ? 'Deleting...' : 'Delete User'}
+                                            </Button>
+                                        </div>
                                         <Button onClick={updateMember} disabled={!isEditing || saving} className="bg-[#f6c347] text-black hover:bg-[#ffd16b]">
                                             {saving ? 'Saving...' : 'Save Changes'}
                                         </Button>
@@ -589,6 +650,62 @@ export default function TeamAdmin() {
                             </div>
                         </div>
                     )}
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+                <DialogContent className="max-w-md bg-white">
+                    <DialogHeader>
+                        <DialogTitle className="text-lg font-heading font-black">Confirm Delete</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        {confirmAction === 'remove' ? (
+                            <p className="text-sm text-slate-600">
+                                Type <span className="font-semibold">REMOVE</span> to remove{' '}
+                                <span className="font-semibold">{selectedMember?.name || 'this member'}</span> from the PDA team.
+                            </p>
+                        ) : (
+                            <p className="text-sm text-slate-600">
+                                Type <span className="font-semibold">DELETE</span> to permanently delete{' '}
+                                <span className="font-semibold">{selectedMember?.name || 'this member'}</span>.
+                            </p>
+                        )}
+                        <Input
+                            value={confirmText}
+                            onChange={(e) => setConfirmText(e.target.value)}
+                            placeholder={confirmAction === 'remove' ? 'Type REMOVE' : 'Type DELETE'}
+                            className="w-full"
+                        />
+                        <div className="flex justify-end gap-2">
+                            <Button
+                                variant="outline"
+                                onClick={() => setConfirmOpen(false)}
+                                className="border-black/10"
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={async () => {
+                                    if (confirmAction === 'remove' && confirmText.trim().toUpperCase() !== 'REMOVE') return;
+                                    if (confirmAction === 'delete_user' && confirmText.trim().toUpperCase() !== 'DELETE') return;
+                                    setConfirmOpen(false);
+                                    if (confirmAction === 'remove') {
+                                        await removeFromPda();
+                                    } else {
+                                        await deleteUser();
+                                    }
+                                }}
+                                disabled={
+                                    (confirmAction === 'remove' && confirmText.trim().toUpperCase() !== 'REMOVE')
+                                    || (confirmAction === 'delete_user' && confirmText.trim().toUpperCase() !== 'DELETE')
+                                    || deleting
+                                }
+                                className="bg-red-600 text-white hover:bg-red-700"
+                            >
+                                {deleting ? 'Deleting...' : 'Confirm Delete'}
+                            </Button>
+                        </div>
+                    </div>
                 </DialogContent>
             </Dialog>
         </AdminLayout>

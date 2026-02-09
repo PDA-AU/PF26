@@ -170,7 +170,7 @@ def _registered_entities(db: Session, event: PdaEvent):
 
 
 @router.get("/pda-admin/events", response_model=List[PdaManagedEventResponse])
-async def list_managed_events(
+def list_managed_events(
     admin_ctx=Depends(get_admin_context),
     db: Session = Depends(get_db),
 ):
@@ -192,7 +192,7 @@ async def list_managed_events(
 
 
 @router.post("/pda-admin/events", response_model=PdaManagedEventResponse)
-async def create_managed_event(
+def create_managed_event(
     payload: PdaManagedEventCreate,
     admin: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db),
@@ -260,7 +260,7 @@ async def create_managed_event(
 
 
 @router.put("/pda-admin/events/{slug}", response_model=PdaManagedEventResponse)
-async def update_managed_event(
+def update_managed_event(
     slug: str,
     payload: PdaManagedEventUpdate,
     admin: PdaUser = Depends(require_superadmin),
@@ -302,7 +302,7 @@ async def update_managed_event(
 
 
 @router.get("/pda-admin/events/{slug}/dashboard")
-async def event_dashboard(
+def event_dashboard(
     slug: str,
     _: PdaUser = Depends(require_pda_event_admin),
     db: Session = Depends(get_db),
@@ -327,7 +327,7 @@ async def event_dashboard(
 
 
 @router.get("/pda-admin/events/{slug}/participants")
-async def event_participants(
+def event_participants(
     slug: str,
     search: Optional[str] = None,
     page: int = Query(1, ge=1),
@@ -354,7 +354,7 @@ async def event_participants(
 
 
 @router.get("/pda-admin/events/{slug}/attendance")
-async def event_attendance(
+def event_attendance(
     slug: str,
     round_id: Optional[int] = None,
     _: PdaUser = Depends(require_pda_event_admin),
@@ -387,7 +387,7 @@ async def event_attendance(
 
 
 @router.post("/pda-admin/events/{slug}/attendance/mark")
-async def mark_attendance(
+def mark_attendance(
     slug: str,
     payload: PdaManagedAttendanceMarkRequest,
     admin: PdaUser = Depends(require_pda_event_admin),
@@ -426,7 +426,7 @@ async def mark_attendance(
 
 
 @router.post("/pda-admin/events/{slug}/attendance/scan")
-async def scan_attendance(
+def scan_attendance(
     slug: str,
     payload: PdaManagedAttendanceScanRequest,
     admin: PdaUser = Depends(require_pda_event_admin),
@@ -445,11 +445,11 @@ async def scan_attendance(
         round_id=payload.round_id,
         is_present=True,
     )
-    return await mark_attendance(slug=slug, payload=mark_payload, admin=admin, db=db)
+    return mark_attendance(slug=slug, payload=mark_payload, admin=admin, db=db)
 
 
 @router.get("/pda-admin/events/{slug}/rounds", response_model=List[PdaManagedRoundResponse])
-async def list_rounds(
+def list_rounds(
     slug: str,
     _: PdaUser = Depends(require_pda_event_admin),
     db: Session = Depends(get_db),
@@ -460,7 +460,7 @@ async def list_rounds(
 
 
 @router.post("/pda-admin/events/{slug}/rounds", response_model=PdaManagedRoundResponse)
-async def create_round(
+def create_round(
     slug: str,
     payload: PdaManagedRoundCreate,
     admin: PdaUser = Depends(require_pda_event_admin),
@@ -487,7 +487,7 @@ async def create_round(
 
 
 @router.put("/pda-admin/events/{slug}/rounds/{round_id}", response_model=PdaManagedRoundResponse)
-async def update_round(
+def update_round(
     slug: str,
     round_id: int,
     payload: PdaManagedRoundUpdate,
@@ -517,7 +517,7 @@ async def update_round(
 
 
 @router.get("/pda-admin/events/{slug}/rounds/{round_id}/participants")
-async def round_participants(
+def round_participants(
     slug: str,
     round_id: int,
     _: PdaUser = Depends(require_pda_event_admin),
@@ -551,7 +551,7 @@ async def round_participants(
 
 
 @router.post("/pda-admin/events/{slug}/rounds/{round_id}/scores")
-async def save_scores(
+def save_scores(
     slug: str,
     round_id: int,
     entries: List[PdaManagedScoreEntry],
@@ -619,7 +619,7 @@ async def save_scores(
 
 
 @router.post("/pda-admin/events/{slug}/rounds/{round_id}/import-scores")
-async def import_scores(
+def import_scores(
     slug: str,
     round_id: int,
     file: UploadFile = File(...),
@@ -635,7 +635,7 @@ async def import_scores(
     if not file.filename.endswith(".xlsx"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only .xlsx is supported")
 
-    wb = load_workbook(filename=io.BytesIO(await file.read()))
+    wb = load_workbook(filename=io.BytesIO(file.file.read()))
     ws = wb.active
     headers = [str(cell.value or "").strip() for cell in ws[1]]
     headers_norm = {h.lower(): idx for idx, h in enumerate(headers)}
@@ -735,7 +735,7 @@ async def import_scores(
 
 
 @router.get("/pda-admin/events/{slug}/rounds/{round_id}/score-template")
-async def score_template(
+def score_template(
     slug: str,
     round_id: int,
     _: PdaUser = Depends(require_pda_event_admin),
@@ -769,7 +769,7 @@ async def score_template(
 
 
 @router.post("/pda-admin/events/{slug}/rounds/{round_id}/freeze")
-async def freeze_round(
+def freeze_round(
     slug: str,
     round_id: int,
     admin: PdaUser = Depends(require_pda_event_admin),
@@ -814,7 +814,7 @@ async def freeze_round(
 
 
 @router.post("/pda-admin/events/{slug}/rounds/{round_id}/unfreeze")
-async def unfreeze_round(
+def unfreeze_round(
     slug: str,
     round_id: int,
     admin: PdaUser = Depends(require_pda_event_admin),
@@ -832,7 +832,7 @@ async def unfreeze_round(
 
 
 @router.get("/pda-admin/events/{slug}/leaderboard")
-async def event_leaderboard(
+def event_leaderboard(
     slug: str,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=500),
@@ -905,7 +905,7 @@ def _export_to_xlsx(headers: List[str], rows: List[List[object]]) -> bytes:
 
 
 @router.get("/pda-admin/events/{slug}/export/participants")
-async def export_participants(
+def export_participants(
     slug: str,
     format: str = Query("csv"),
     _: PdaUser = Depends(require_pda_event_admin),
@@ -927,13 +927,13 @@ async def export_participants(
 
 
 @router.get("/pda-admin/events/{slug}/export/leaderboard")
-async def export_leaderboard(
+def export_leaderboard(
     slug: str,
     format: str = Query("csv"),
     _: PdaUser = Depends(require_pda_event_admin),
     db: Session = Depends(get_db),
 ):
-    leaderboard = await event_leaderboard(slug=slug, page=1, page_size=10000, response=None, _=None, db=db)
+    leaderboard = event_leaderboard(slug=slug, page=1, page_size=10000, response=None, _=None, db=db)
     headers = ["Rank", "Entity Type", "Name", "Register/Team Code", "Attendance", "Score"]
     rows = [[row["rank"], row["entity_type"], row["name"], row["regno_or_code"], row["attendance_count"], row["cumulative_score"]] for row in leaderboard]
     event = _get_event_or_404(db, slug)
@@ -949,14 +949,14 @@ async def export_leaderboard(
 
 
 @router.get("/pda-admin/events/{slug}/export/round/{round_id}")
-async def export_round(
+def export_round(
     slug: str,
     round_id: int,
     format: str = Query("csv"),
     _: PdaUser = Depends(require_pda_event_admin),
     db: Session = Depends(get_db),
 ):
-    result = await round_participants(slug=slug, round_id=round_id, _=None, db=db)
+    result = round_participants(slug=slug, round_id=round_id, _=None, db=db)
     headers = ["Entity Type", "Name", "Register/Team Code", "Total Score", "Normalized Score", "Present"]
     rows = [
         [
@@ -982,7 +982,7 @@ async def export_round(
 
 
 @router.post("/pda-admin/events/{slug}/badges", response_model=PdaManagedBadgeResponse)
-async def create_badge(
+def create_badge(
     slug: str,
     payload: PdaManagedBadgeCreate,
     admin: PdaUser = Depends(require_pda_event_admin),
@@ -1008,7 +1008,7 @@ async def create_badge(
 
 
 @router.get("/pda-admin/events/{slug}/badges", response_model=List[PdaManagedBadgeResponse])
-async def list_badges(
+def list_badges(
     slug: str,
     _: PdaUser = Depends(require_pda_event_admin),
     db: Session = Depends(get_db),

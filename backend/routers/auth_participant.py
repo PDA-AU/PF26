@@ -45,7 +45,7 @@ def _get_persofest_event(db: Session) -> Event:
 
 
 @router.post("/participant-auth/register")
-async def participant_register(user_data: UserRegister, db: Session = Depends(get_db)):
+def participant_register(user_data: UserRegister, db: Session = Depends(get_db)):
     reg_config = db.query(SystemConfig).filter(SystemConfig.key == "registration_open").first()
     if reg_config and reg_config.value == "false":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Registration is closed")
@@ -94,7 +94,7 @@ async def participant_register(user_data: UserRegister, db: Session = Depends(ge
 
 
 @router.post("/participant-auth/login", response_model=TokenResponse)
-async def participant_login(login_data: UserLogin, db: Session = Depends(get_db)):
+def participant_login(login_data: UserLogin, db: Session = Depends(get_db)):
     user = db.query(Participant).filter(Participant.register_number == login_data.register_number).first()
     if not user or not verify_password(login_data.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
@@ -111,7 +111,7 @@ async def participant_login(login_data: UserLogin, db: Session = Depends(get_db)
 
 
 @router.post("/participant-auth/refresh", response_model=TokenResponse)
-async def participant_refresh(request: RefreshTokenRequest, db: Session = Depends(get_db)):
+def participant_refresh(request: RefreshTokenRequest, db: Session = Depends(get_db)):
     payload = decode_token(request.refresh_token)
     if payload.get("type") != "refresh" or payload.get("user_type") != "participant":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
@@ -130,12 +130,12 @@ async def participant_refresh(request: RefreshTokenRequest, db: Session = Depend
 
 
 @router.get("/participant/me", response_model=UserResponse)
-async def get_participant_me(user: Participant = Depends(require_participant)):
+def get_participant_me(user: Participant = Depends(require_participant)):
     return UserResponse.model_validate(user)
 
 
 @router.put("/participant/me", response_model=UserResponse)
-async def update_participant_me(
+def update_participant_me(
     user_data: UserUpdate,
     user: Participant = Depends(require_participant),
     db: Session = Depends(get_db)
@@ -165,7 +165,7 @@ async def update_participant_me(
 
 
 @router.post("/participant-auth/email/send-verification")
-async def send_participant_verification(
+def send_participant_verification(
     user: Participant = Depends(require_participant),
     db: Session = Depends(get_db)
 ):
@@ -178,7 +178,7 @@ async def send_participant_verification(
 
 
 @router.post("/participant-auth/email/verify")
-async def verify_participant_email(payload: EmailVerificationRequest, db: Session = Depends(get_db)):
+def verify_participant_email(payload: EmailVerificationRequest, db: Session = Depends(get_db)):
     user = verify_email_token(db, Participant, payload.token)
     if not user:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token")
@@ -186,7 +186,7 @@ async def verify_participant_email(payload: EmailVerificationRequest, db: Sessio
 
 
 @router.post("/participant-auth/password/forgot")
-async def forgot_participant_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
+def forgot_participant_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
     if payload.register_number and payload.email:
         user = db.query(Participant).filter(
             Participant.register_number == payload.register_number,
@@ -204,7 +204,7 @@ async def forgot_participant_password(payload: ForgotPasswordRequest, db: Sessio
 
 
 @router.post("/participant-auth/password/reset")
-async def reset_participant_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
+def reset_participant_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
     if payload.new_password != payload.confirm_password:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New password and confirm password do not match")
     user = reset_password_with_token(db, Participant, payload.token)
@@ -216,14 +216,14 @@ async def reset_participant_password(payload: ResetPasswordRequest, db: Session 
 
 
 @router.post("/participant/me/profile-picture", response_model=UserResponse)
-async def update_participant_profile_picture(
+def update_participant_profile_picture(
     file: UploadFile = File(...),
     user: Participant = Depends(require_participant),
     db: Session = Depends(get_db)
 ):
     if not file.filename:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing filename")
-    contents = await file.read()
+    contents = file.file.read()
     if len(contents) > 12 * 1024 * 1024:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File size exceeds 12MB limit")
     file.file = io.BytesIO(contents)
@@ -237,7 +237,7 @@ async def update_participant_profile_picture(
 
 
 @router.post("/participant/me/profile-picture/presign", response_model=PresignResponse)
-async def presign_participant_profile_picture(
+def presign_participant_profile_picture(
     payload: PresignRequest,
     user: Participant = Depends(require_participant)
 ):
@@ -250,7 +250,7 @@ async def presign_participant_profile_picture(
 
 
 @router.post("/participant/me/profile-picture/confirm", response_model=UserResponse)
-async def confirm_participant_profile_picture(
+def confirm_participant_profile_picture(
     payload: ProfilePictureUpdate,
     user: Participant = Depends(require_participant),
     db: Session = Depends(get_db)
@@ -262,7 +262,7 @@ async def confirm_participant_profile_picture(
 
 
 @router.get("/participant/me/rounds", response_model=List[ParticipantRoundStatus])
-async def get_my_round_status(user: Participant = Depends(require_participant), db: Session = Depends(get_db)):
+def get_my_round_status(user: Participant = Depends(require_participant), db: Session = Depends(get_db)):
     rounds = db.query(Round).filter(Round.state.in_([RoundState.ACTIVE, RoundState.COMPLETED])).order_by(Round.id).all()
     statuses = []
     for round in rounds:

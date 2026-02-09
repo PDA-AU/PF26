@@ -7,7 +7,26 @@ from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 
 from database import get_db
-from models import PdaItem, PdaTeam, PdaGallery, PdaUser
+from models import (
+    PdaItem,
+    PdaTeam,
+    PdaGallery,
+    PdaUser,
+    PdaAdmin,
+    PdaEventRegistration,
+    PdaEventTeam,
+    PdaEventTeamMember,
+    PdaEventAttendance,
+    PdaEventScore,
+    PdaEventBadge,
+    PdaEventInvite,
+    PersohubCommunity,
+    PersohubCommunityFollow,
+    PersohubPost,
+    PersohubPostLike,
+    PersohubPostComment,
+    PersohubPostMention,
+)
 from schemas import (
     ProgramCreate, ProgramUpdate, ProgramResponse,
     EventCreate, EventUpdate, EventResponse,
@@ -41,8 +60,31 @@ def _build_team_response(member: PdaTeam, user: Optional[PdaUser]) -> PdaTeamRes
     )
 
 
+def _user_dependency_checks(db: Session, user_id: int) -> List[str]:
+    checks = [
+        ("pda_event_registrations", db.query(PdaEventRegistration).filter(PdaEventRegistration.user_id == user_id).first()),
+        ("pda_event_teams", db.query(PdaEventTeam).filter(PdaEventTeam.team_lead_user_id == user_id).first()),
+        ("pda_event_team_members", db.query(PdaEventTeamMember).filter(PdaEventTeamMember.user_id == user_id).first()),
+        ("pda_event_attendance", db.query(PdaEventAttendance).filter(
+            (PdaEventAttendance.user_id == user_id) | (PdaEventAttendance.marked_by_user_id == user_id)
+        ).first()),
+        ("pda_event_scores", db.query(PdaEventScore).filter(PdaEventScore.user_id == user_id).first()),
+        ("pda_event_badges", db.query(PdaEventBadge).filter(PdaEventBadge.user_id == user_id).first()),
+        ("pda_event_invites", db.query(PdaEventInvite).filter(
+            (PdaEventInvite.invited_user_id == user_id) | (PdaEventInvite.invited_by_user_id == user_id)
+        ).first()),
+        ("persohub_communities", db.query(PersohubCommunity).filter(PersohubCommunity.admin_id == user_id).first()),
+        ("persohub_community_follows", db.query(PersohubCommunityFollow).filter(PersohubCommunityFollow.user_id == user_id).first()),
+        ("persohub_posts", db.query(PersohubPost).filter(PersohubPost.admin_id == user_id).first()),
+        ("persohub_post_likes", db.query(PersohubPostLike).filter(PersohubPostLike.user_id == user_id).first()),
+        ("persohub_post_comments", db.query(PersohubPostComment).filter(PersohubPostComment.user_id == user_id).first()),
+        ("persohub_post_mentions", db.query(PersohubPostMention).filter(PersohubPostMention.user_id == user_id).first()),
+    ]
+    return [name for name, hit in checks if hit is not None]
+
+
 @router.post("/pda-admin/programs", response_model=ProgramResponse)
-async def create_pda_program(
+def create_pda_program(
     program_data: ProgramCreate,
     admin: PdaUser = Depends(require_pda_home_admin),
     db: Session = Depends(get_db),
@@ -70,7 +112,7 @@ async def create_pda_program(
 
 
 @router.put("/pda-admin/programs/{program_id}", response_model=ProgramResponse)
-async def update_pda_program(
+def update_pda_program(
     program_id: int,
     program_data: ProgramUpdate,
     admin: PdaUser = Depends(require_pda_home_admin),
@@ -111,7 +153,7 @@ async def update_pda_program(
 
 
 @router.delete("/pda-admin/programs/{program_id}")
-async def delete_pda_program(
+def delete_pda_program(
     program_id: int,
     admin: PdaUser = Depends(require_pda_home_admin),
     db: Session = Depends(get_db),
@@ -127,7 +169,7 @@ async def delete_pda_program(
 
 
 @router.post("/pda-admin/home-events", response_model=EventResponse)
-async def create_pda_event(
+def create_pda_event(
     event_data: EventCreate,
     admin: PdaUser = Depends(require_pda_home_admin),
     db: Session = Depends(get_db),
@@ -154,7 +196,7 @@ async def create_pda_event(
 
 
 @router.put("/pda-admin/home-events/{event_id}", response_model=EventResponse)
-async def update_pda_event(
+def update_pda_event(
     event_id: int,
     event_data: EventUpdate,
     admin: PdaUser = Depends(require_pda_home_admin),
@@ -193,7 +235,7 @@ async def update_pda_event(
 
 
 @router.post("/pda-admin/home-events/{event_id}/feature", response_model=EventResponse)
-async def feature_pda_event(
+def feature_pda_event(
     event_id: int,
     admin: PdaUser = Depends(require_pda_home_admin),
     db: Session = Depends(get_db),
@@ -211,7 +253,7 @@ async def feature_pda_event(
 
 
 @router.delete("/pda-admin/home-events/{event_id}")
-async def delete_pda_event(
+def delete_pda_event(
     event_id: int,
     admin: PdaUser = Depends(require_pda_home_admin),
     db: Session = Depends(get_db),
@@ -227,7 +269,7 @@ async def delete_pda_event(
 
 
 @router.get("/pda-admin/team", response_model=List[PdaTeamResponse])
-async def list_team_members(
+def list_team_members(
     admin: PdaUser = Depends(require_pda_home_admin),
     db: Session = Depends(get_db)
 ):
@@ -241,7 +283,7 @@ async def list_team_members(
 
 
 @router.post("/pda-admin/team", response_model=PdaTeamResponse)
-async def create_team_member(
+def create_team_member(
     member_data: PdaTeamCreate,
     admin: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db),
@@ -260,7 +302,7 @@ async def create_team_member(
         if not user:
             user = PdaUser(
                 regno=payload["regno"],
-                email=payload.get("email") or f"{payload['regno']}@pda.local",
+                email=payload.get("email") or f"{payload['regno']}@pda.com",
                 hashed_password=get_password_hash("password"),
                 name=payload.get("name") or f"PDA Member {payload['regno']}",
                 phno=payload.get("phno"),
@@ -296,7 +338,7 @@ async def create_team_member(
 
 
 @router.put("/pda-admin/team/{member_id}", response_model=PdaTeamResponse)
-async def update_team_member(
+def update_team_member(
     member_id: int,
     member_data: PdaTeamUpdate,
     admin: PdaUser = Depends(require_superadmin),
@@ -337,7 +379,7 @@ async def update_team_member(
 
 
 @router.delete("/pda-admin/team/{member_id}")
-async def delete_team_member(
+def delete_team_member(
     member_id: int,
     admin: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db),
@@ -352,8 +394,34 @@ async def delete_team_member(
     return {"message": "Team member deleted successfully"}
 
 
+@router.delete("/pda-admin/users/{user_id}")
+def delete_pda_user(
+    user_id: int,
+    admin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    user = db.query(PdaUser).filter(PdaUser.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    blocking = _user_dependency_checks(db, user_id)
+    if blocking:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"User has related records: {', '.join(blocking)}"
+        )
+
+    db.query(PdaTeam).filter(PdaTeam.user_id == user_id).delete(synchronize_session=False)
+    db.query(PdaAdmin).filter(PdaAdmin.user_id == user_id).delete(synchronize_session=False)
+    db.delete(user)
+    db.commit()
+    log_admin_action(db, admin, "Delete PDA user", request.method if request else None, request.url.path if request else None, {"user_id": user_id})
+    return {"message": "User deleted successfully"}
+
+
 @router.get("/pda-admin/team/export")
-async def export_team_members(
+def export_team_members(
     format: str = "csv",
     admin: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db)
@@ -386,7 +454,7 @@ async def export_team_members(
 
 
 @router.post("/pda-admin/gallery", response_model=PdaGalleryResponse)
-async def create_gallery_item(
+def create_gallery_item(
     gallery_data: PdaGalleryCreate,
     admin: PdaUser = Depends(require_pda_home_admin),
     db: Session = Depends(get_db),
@@ -401,7 +469,7 @@ async def create_gallery_item(
 
 
 @router.put("/pda-admin/gallery/{item_id}", response_model=PdaGalleryResponse)
-async def update_gallery_item(
+def update_gallery_item(
     item_id: int,
     gallery_data: PdaGalleryUpdate,
     admin: PdaUser = Depends(require_pda_home_admin),
@@ -422,7 +490,7 @@ async def update_gallery_item(
 
 
 @router.delete("/pda-admin/gallery/{item_id}")
-async def delete_gallery_item(
+def delete_gallery_item(
     item_id: int,
     admin: PdaUser = Depends(require_pda_home_admin),
     db: Session = Depends(get_db),
@@ -438,7 +506,7 @@ async def delete_gallery_item(
 
 
 @router.post("/pda-admin/posters")
-async def upload_pda_poster(
+def upload_pda_poster(
     file: UploadFile = File(...),
     admin: PdaUser = Depends(require_pda_home_admin),
     db: Session = Depends(get_db),
@@ -453,7 +521,7 @@ async def upload_pda_poster(
 
 
 @router.post("/pda-admin/posters/presign", response_model=PresignResponse)
-async def presign_pda_poster(
+def presign_pda_poster(
     payload: PresignRequest,
     admin: PdaUser = Depends(require_pda_home_admin)
 ):
@@ -466,7 +534,7 @@ async def presign_pda_poster(
 
 
 @router.post("/pda-admin/gallery-uploads")
-async def upload_pda_gallery_image(
+def upload_pda_gallery_image(
     file: UploadFile = File(...),
     admin: PdaUser = Depends(require_pda_home_admin),
     db: Session = Depends(get_db),
@@ -481,7 +549,7 @@ async def upload_pda_gallery_image(
 
 
 @router.post("/pda-admin/gallery-uploads/presign", response_model=PresignResponse)
-async def presign_pda_gallery_image(
+def presign_pda_gallery_image(
     payload: PresignRequest,
     admin: PdaUser = Depends(require_pda_home_admin)
 ):
@@ -494,7 +562,7 @@ async def presign_pda_gallery_image(
 
 
 @router.post("/pda-admin/team-uploads")
-async def upload_pda_team_image(
+def upload_pda_team_image(
     file: UploadFile = File(...),
     admin: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db),
@@ -509,7 +577,7 @@ async def upload_pda_team_image(
 
 
 @router.post("/pda-admin/team-uploads/presign", response_model=PresignResponse)
-async def presign_pda_team_image(
+def presign_pda_team_image(
     payload: PresignRequest,
     admin: PdaUser = Depends(require_superadmin)
 ):

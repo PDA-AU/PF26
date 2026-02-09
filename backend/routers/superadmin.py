@@ -278,7 +278,7 @@ def _restore_pg_dump(dump_bytes: bytes) -> None:
 
 
 @router.get("/pda-admin/superadmin/admins", response_model=List[PdaUserResponse])
-async def list_pda_admins(
+def list_pda_admins(
     _: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db)
 ):
@@ -292,7 +292,7 @@ async def list_pda_admins(
 
 
 @router.post("/pda-admin/superadmin/admins", response_model=PdaUserResponse)
-async def create_pda_admin(
+def create_pda_admin(
     admin_data: PdaAdminCreate,
     superadmin: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db),
@@ -322,7 +322,7 @@ async def create_pda_admin(
 
 
 @router.delete("/pda-admin/superadmin/admins/{user_id}")
-async def delete_pda_admin(
+def delete_pda_admin(
     user_id: int,
     superadmin: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db),
@@ -341,7 +341,7 @@ async def delete_pda_admin(
 
 
 @router.put("/pda-admin/superadmin/admins/{user_id}/policy", response_model=PdaUserResponse)
-async def update_admin_policy(
+def update_admin_policy(
     user_id: int,
     policy_data: PdaAdminPolicyUpdate,
     superadmin: PdaUser = Depends(require_superadmin),
@@ -365,7 +365,7 @@ async def update_admin_policy(
 
 
 @router.get("/pda-admin/superadmin/logs", response_model=List[AdminLogResponse])
-async def get_homeadmin_logs(
+def get_homeadmin_logs(
     _: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db),
     limit: int = 50
@@ -381,7 +381,7 @@ async def get_homeadmin_logs(
 
 
 @router.post("/pda-admin/superadmin/db-snapshot")
-async def upload_db_snapshot(
+def upload_db_snapshot(
     superadmin: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db),
     request: Request = None
@@ -399,7 +399,7 @@ async def upload_db_snapshot(
 
 
 @router.get("/pda-admin/superadmin/db-snapshot/latest")
-async def get_latest_db_snapshot(
+def get_latest_db_snapshot(
     _: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db),
 ):
@@ -407,7 +407,7 @@ async def get_latest_db_snapshot(
 
 
 @router.post("/pda-admin/superadmin/db-snapshot/restore")
-async def restore_db_snapshot(
+def restore_db_snapshot(
     payload: dict,
     superadmin: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db),
@@ -468,7 +468,7 @@ async def restore_db_snapshot(
 
 
 @router.get("/pda-admin/superadmin/recruitment-status")
-async def get_recruitment_status(
+def get_recruitment_status(
     _: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db)
 ):
@@ -478,7 +478,7 @@ async def get_recruitment_status(
 
 
 @router.post("/pda-admin/superadmin/recruitment-toggle")
-async def toggle_recruitment(
+def toggle_recruitment(
     superadmin: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db),
     request: Request = None
@@ -497,7 +497,7 @@ async def toggle_recruitment(
 
 
 @router.get("/pda-admin/recruitments", response_model=List[PdaUserResponse])
-async def list_recruitments(
+def list_recruitments(
     _: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db)
 ):
@@ -506,7 +506,7 @@ async def list_recruitments(
 
 
 @router.get("/pda-admin/recruitments/export")
-async def export_recruitments(
+def export_recruitments(
     superadmin: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db),
     request: Request = None
@@ -547,7 +547,7 @@ async def export_recruitments(
 
 
 @router.post("/pda-admin/recruitments/approve")
-async def approve_recruitments(
+def approve_recruitments(
     payload: List[object],
     superadmin: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db),

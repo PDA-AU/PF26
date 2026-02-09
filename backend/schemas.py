@@ -166,6 +166,7 @@ class PdaUserLogin(BaseModel):
 
 class PdaUserUpdate(BaseModel):
     name: Optional[str] = None
+    profile_name: Optional[str] = None
     email: Optional[EmailStr] = None
     dob: Optional[date] = None
     gender: Optional[str] = None
@@ -174,6 +175,15 @@ class PdaUserUpdate(BaseModel):
     image_url: Optional[str] = None
     instagram_url: Optional[str] = None
     linkedin_url: Optional[str] = None
+
+    @field_validator("profile_name")
+    @classmethod
+    def validate_profile_name(cls, v):
+        if v is None:
+            return v
+        if not re.fullmatch(r"[a-z0-9_]{3,40}", v):
+            raise ValueError("profile_name must match [a-z0-9_] and be 3-40 chars")
+        return v
 
 
 class PdaForgotPasswordRequest(BaseModel):
@@ -187,6 +197,7 @@ class PdaUserResponse(BaseModel):
     email: str
     email_verified: bool
     name: str
+    profile_name: Optional[str] = None
     dob: Optional[date] = None
     gender: Optional[str] = None
     phno: Optional[str] = None

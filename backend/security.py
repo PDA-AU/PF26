@@ -1,11 +1,12 @@
 from typing import Optional, Dict
 from fastapi import Depends, HTTPException, status
 from fastapi import Request
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
 from database import get_db
-from auth import get_current_pda_user, get_current_participant
-from models import PdaUser, PdaAdmin, PdaTeam
+from auth import decode_token, get_current_pda_user, get_current_participant
+from models import PdaUser, PdaAdmin, PdaTeam, PersohubCommunity
 
 
 def _get_team_and_policy(db: Session, user: PdaUser):
@@ -95,3 +96,61 @@ def get_admin_context(
         "policy": policy,
         "is_superadmin": is_superadmin
     }
+
+
+optional_bearer = HTTPBearer(auto_error=False)
+community_bearer = HTTPBearer(auto_error=False)
+
+
+def get_optional_pda_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_bearer),
+    db: Session = Depends(get_db),
+) -> Optional[PdaUser]:
+    if not credentials:
+        return None
+    try:
+        payload = decode_token(credentials.credentials)
+    except HTTPException:
+        return None
+    if payload.get("type") != "access" or payload.get("user_type") != "pda":
+        return None
+    regno = payload.get("sub")
+    if not regno:
+        return None
+    return db.query(PdaUser).filter(PdaUser.regno == regno).first()
+
+
+def require_persohub_community(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(community_bearer),
+    db: Session = Depends(get_db),
+) -> PersohubCommunity:
+    if not credentials:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Community authentication required")
+    payload = decode_token(credentials.credentials)
+    if payload.get("type") != "access" or payload.get("user_type") != "community":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid community token")
+    profile_id = payload.get("sub")
+    if not profile_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid community token")
+    community = db.query(PersohubCommunity).filter(PersohubCommunity.profile_id == profile_id).first()
+    if not community:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Community account not found")
+    return community
+
+
+def get_optional_persohub_community(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_bearer),
+    db: Session = Depends(get_db),
+) -> Optional[PersohubCommunity]:
+    if not credentials:
+        return None
+    try:
+        payload = decode_token(credentials.credentials)
+    except HTTPException:
+        return None
+    if payload.get("type") != "access" or payload.get("user_type") != "community":
+        return None
+    profile_id = payload.get("sub")
+    if not profile_id:
+        return None
+    return db.query(PersohubCommunity).filter(PersohubCommunity.profile_id == profile_id).first()

@@ -36,6 +36,9 @@ import AdminLogin from "@/pages/persofest/admin/AdminLogin";
 import ParticipantVerifyEmail from "@/pages/persofest/VerifyEmail";
 import ParticipantForgotPassword from "@/pages/persofest/ForgotPassword";
 import ParticipantResetPassword from "@/pages/persofest/ResetPassword";
+import PersohubFeedPage from "@/pages/persohub/PersohubFeedPage";
+import PersohubPostPage from "@/pages/persohub/PersohubPostPage";
+import PersohubProfilePage from "@/pages/persohub/PersohubProfilePage";
 
 // Protected Route Components
 const ProtectedParticipantRoute = ({ children }) => {
@@ -189,6 +192,9 @@ function AppRoutes() {
                     <EventDashboard />
                 </ProtectedPdaRoute>
             } />
+            <Route path="/persohub" element={<PersohubFeedPage />} />
+            <Route path="/persohub/p/:slugToken" element={<PersohubPostPage />} />
+            <Route path="/persohub/:profileName" element={<PersohubProfilePage />} />
 
             {/* Participant Routes */}
             <Route path="/persofest/dashboard" element={

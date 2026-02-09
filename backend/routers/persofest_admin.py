@@ -107,7 +107,7 @@ def _build_leaderboard_grouped_subquery(
 
 
 @router.get("/persofest/admin/dashboard", response_model=DashboardStats)
-async def get_dashboard_stats(admin=Depends(require_pda_pf_admin), db: Session = Depends(get_db)):
+def get_dashboard_stats(admin=Depends(require_pda_pf_admin), db: Session = Depends(get_db)):
     total = db.query(Participant).filter(Participant.role == UserRole.PARTICIPANT).count()
     active = db.query(Participant).filter(Participant.role == UserRole.PARTICIPANT, Participant.status == ParticipantStatus.ACTIVE).count()
     eliminated = total - active
@@ -179,7 +179,7 @@ async def get_dashboard_stats(admin=Depends(require_pda_pf_admin), db: Session =
 
 
 @router.post("/persofest/admin/toggle-registration")
-async def toggle_registration(admin=Depends(require_pda_pf_admin), db: Session = Depends(get_db)):
+def toggle_registration(admin=Depends(require_pda_pf_admin), db: Session = Depends(get_db)):
     reg_config = db.query(SystemConfig).filter(SystemConfig.key == "registration_open").first()
     if not reg_config:
         reg_config = SystemConfig(key="registration_open", value="false")
@@ -192,7 +192,7 @@ async def toggle_registration(admin=Depends(require_pda_pf_admin), db: Session =
 
 
 @router.get("/persofest/admin/participants", response_model=List[ParticipantListResponse])
-async def get_participants(
+def get_participants(
     department: Optional[DepartmentEnum] = None,
     year: Optional[YearOfStudyEnum] = None,
     gender: Optional[GenderEnum] = None,
@@ -232,7 +232,7 @@ async def get_participants(
 
 
 @router.put("/persofest/admin/participants/{participant_id}/status")
-async def update_participant_status(
+def update_participant_status(
     participant_id: int,
     new_status: ParticipantStatusEnum = Query(...),
     admin=Depends(require_pda_pf_admin),
@@ -249,7 +249,7 @@ async def update_participant_status(
 
 
 @router.get("/persofest/admin/participants/{participant_id}/rounds", response_model=List[AdminParticipantRoundStat])
-async def get_participant_round_stats(
+def get_participant_round_stats(
     participant_id: int,
     admin=Depends(require_pda_pf_admin),
     db: Session = Depends(get_db)
@@ -298,7 +298,7 @@ async def get_participant_round_stats(
 
 
 @router.get("/persofest/admin/participants/{participant_id}/summary", response_model=ParticipantLeaderboardSummary)
-async def get_participant_summary(participant_id: int, admin=Depends(require_pda_pf_admin), db: Session = Depends(get_db)):
+def get_participant_summary(participant_id: int, admin=Depends(require_pda_pf_admin), db: Session = Depends(get_db)):
     participant = db.query(Participant).filter(Participant.id == participant_id, Participant.role == UserRole.PARTICIPANT).first()
     if not participant:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Participant not found")
@@ -335,13 +335,13 @@ async def get_participant_summary(participant_id: int, admin=Depends(require_pda
 
 
 @router.get("/persofest/admin/rounds", response_model=List[RoundResponse])
-async def get_all_rounds(admin=Depends(require_pda_pf_admin), db: Session = Depends(get_db)):
+def get_all_rounds(admin=Depends(require_pda_pf_admin), db: Session = Depends(get_db)):
     rounds = db.query(Round).order_by(Round.id).all()
     return [RoundResponse.model_validate(r) for r in rounds]
 
 
 @router.post("/persofest/admin/rounds", response_model=RoundResponse)
-async def create_round(round_data: RoundCreate, admin=Depends(require_pda_pf_admin), db: Session = Depends(get_db)):
+def create_round(round_data: RoundCreate, admin=Depends(require_pda_pf_admin), db: Session = Depends(get_db)):
     latest_round = db.query(Round).order_by(Round.id.desc()).first()
     next_round_no = f"PF{(latest_round.id + 1) if latest_round else 1:02d}"
 
@@ -363,7 +363,7 @@ async def create_round(round_data: RoundCreate, admin=Depends(require_pda_pf_adm
 
 
 @router.put("/persofest/admin/rounds/{round_id}", response_model=RoundResponse)
-async def update_round(round_id: int, round_data: RoundUpdate, admin=Depends(require_pda_pf_admin), db: Session = Depends(get_db)):
+def update_round(round_id: int, round_data: RoundUpdate, admin=Depends(require_pda_pf_admin), db: Session = Depends(get_db)):
     round = db.query(Round).filter(Round.id == round_id).first()
     if not round:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
@@ -479,14 +479,14 @@ async def update_round(round_id: int, round_data: RoundUpdate, admin=Depends(req
 
 
 @router.post("/persofest/admin/rounds/{round_id}/description-pdf", response_model=RoundResponse)
-async def upload_round_pdf(round_id: int, file: UploadFile = File(...), admin=Depends(require_pda_pf_admin), db: Session = Depends(get_db)):
+def upload_round_pdf(round_id: int, file: UploadFile = File(...), admin=Depends(require_pda_pf_admin), db: Session = Depends(get_db)):
     round = db.query(Round).filter(Round.id == round_id).first()
     if not round:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
     if not file.filename:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing filename")
 
-    contents = await file.read()
+    contents = file.file.read()
     if len(contents) > 5 * 1024 * 1024:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File size exceeds 5MB limit")
     file.file = io.BytesIO(contents)
@@ -498,7 +498,7 @@ async def upload_round_pdf(round_id: int, file: UploadFile = File(...), admin=De
 
 
 @router.post("/persofest/admin/rounds/{round_id}/description-pdf/presign", response_model=PresignResponse)
-async def presign_round_pdf(
+def presign_round_pdf(
     round_id: int,
     payload: PresignRequest,
     admin=Depends(require_pda_pf_admin),
@@ -516,7 +516,7 @@ async def presign_round_pdf(
 
 
 @router.delete("/persofest/admin/rounds/{round_id}")
-async def delete_round(round_id: int, admin=Depends(require_pda_pf_admin), db: Session = Depends(get_db)):
+def delete_round(round_id: int, admin=Depends(require_pda_pf_admin), db: Session = Depends(get_db)):
     round = db.query(Round).filter(Round.id == round_id).first()
     if not round:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
@@ -527,7 +527,7 @@ async def delete_round(round_id: int, admin=Depends(require_pda_pf_admin), db: S
 
 
 @router.get("/persofest/admin/rounds/{round_id}/participants", response_model=List[ScoreResponse])
-async def get_round_participants(
+def get_round_participants(
     round_id: int,
     search: Optional[str] = None,
     admin=Depends(require_pda_pf_admin),
@@ -594,7 +594,7 @@ async def get_round_participants(
 
 
 @router.get("/persofest/admin/rounds/{round_id}/stats", response_model=RoundStatsResponse)
-async def get_round_stats(round_id: int, admin=Depends(require_pda_pf_admin), db: Session = Depends(get_db)):
+def get_round_stats(round_id: int, admin=Depends(require_pda_pf_admin), db: Session = Depends(get_db)):
     scores = db.query(Score).filter(Score.round_id == round_id).all()
     total_count = len(scores)
     present_scores = [s for s in scores if s.is_present]
@@ -629,7 +629,7 @@ async def get_round_stats(round_id: int, admin=Depends(require_pda_pf_admin), db
 
 
 @router.post("/persofest/admin/rounds/{round_id}/scores")
-async def enter_scores(
+def enter_scores(
     round_id: int,
     scores: List[ScoreEntry],
     admin=Depends(require_pda_pf_admin),
@@ -701,7 +701,7 @@ async def enter_scores(
 
 
 @router.post("/persofest/admin/rounds/{round_id}/import-scores")
-async def import_scores_from_excel(
+def import_scores_from_excel(
     round_id: int,
     file: UploadFile = File(...),
     admin=Depends(require_pda_pf_admin),
@@ -717,7 +717,7 @@ async def import_scores_from_excel(
     if not file.filename.endswith(".xlsx"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only Excel .xlsx files are supported")
 
-    contents = await file.read()
+    contents = file.file.read()
     wb = load_workbook(filename=io.BytesIO(contents))
     ws = wb.active
 
@@ -857,7 +857,7 @@ async def import_scores_from_excel(
 
 
 @router.get("/persofest/admin/rounds/{round_id}/score-template")
-async def download_score_template(
+def download_score_template(
     round_id: int,
     admin=Depends(require_pda_pf_admin),
     db: Session = Depends(get_db)
@@ -896,7 +896,7 @@ async def download_score_template(
 
 
 @router.post("/persofest/admin/rounds/{round_id}/freeze")
-async def freeze_round(round_id: int, admin=Depends(require_pda_pf_admin), db: Session = Depends(get_db)):
+def freeze_round(round_id: int, admin=Depends(require_pda_pf_admin), db: Session = Depends(get_db)):
     round = db.query(Round).filter(Round.id == round_id).first()
     if not round:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
@@ -935,7 +935,7 @@ async def freeze_round(round_id: int, admin=Depends(require_pda_pf_admin), db: S
 
 
 @router.post("/persofest/admin/rounds/{round_id}/unfreeze")
-async def unfreeze_round(round_id: int, admin=Depends(require_pda_pf_admin), db: Session = Depends(get_db)):
+def unfreeze_round(round_id: int, admin=Depends(require_pda_pf_admin), db: Session = Depends(get_db)):
     round = db.query(Round).filter(Round.id == round_id).first()
     if not round:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
@@ -948,7 +948,7 @@ async def unfreeze_round(round_id: int, admin=Depends(require_pda_pf_admin), db:
 
 
 @router.get("/persofest/admin/leaderboard", response_model=List[LeaderboardEntry])
-async def get_leaderboard(
+def get_leaderboard(
     department: Optional[DepartmentEnum] = None,
     year: Optional[YearOfStudyEnum] = None,
     gender: Optional[GenderEnum] = None,
@@ -1027,7 +1027,7 @@ async def get_leaderboard(
 
 
 @router.get("/persofest/admin/logs", response_model=List[AdminLogResponse])
-async def get_admin_logs(
+def get_admin_logs(
     admin=Depends(require_superadmin),
     db: Session = Depends(get_db),
     limit: int = 50,
@@ -1043,7 +1043,7 @@ async def get_admin_logs(
 
 
 @router.get("/persofest/admin/export/participants")
-async def export_participants(
+def export_participants(
     format: str = "csv",
     department: Optional[DepartmentEnum] = None,
     year: Optional[YearOfStudyEnum] = None,
@@ -1092,7 +1092,7 @@ async def export_participants(
 
 
 @router.get("/persofest/admin/export/round/{round_id}")
-async def export_round_scores(
+def export_round_scores(
     round_id: int,
     format: str = "csv",
     admin=Depends(require_pda_pf_admin),
@@ -1157,7 +1157,7 @@ async def export_round_scores(
 
 
 @router.get("/persofest/admin/export/leaderboard")
-async def export_leaderboard(
+def export_leaderboard(
     format: str = "csv",
     department: Optional[DepartmentEnum] = None,
     year: Optional[YearOfStudyEnum] = None,

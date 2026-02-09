@@ -110,6 +110,7 @@ class PdaUser(Base):
     password_reset_expires_at = Column(DateTime(timezone=True), nullable=True)
     password_reset_sent_at = Column(DateTime(timezone=True), nullable=True)
     name = Column(String(255), nullable=False)
+    profile_name = Column(String(64), unique=True, index=True, nullable=True)
     dob = Column(Date, nullable=True)
     gender = Column(String(10), nullable=True)
     phno = Column(String(20), nullable=True)
@@ -468,3 +469,127 @@ class PdaEventInvite(Base):
     status = Column(SQLEnum(PdaEventInviteStatus), nullable=False, default=PdaEventInviteStatus.PENDING)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PersohubClub(Base):
+    __tablename__ = "persohub_clubs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(120), unique=True, nullable=False, index=True)
+    club_url = Column(String(500), nullable=True)
+    club_logo_url = Column(String(500), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PersohubCommunity(Base):
+    __tablename__ = "persohub_communities"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(120), nullable=False)
+    profile_id = Column(String(64), unique=True, nullable=False, index=True)
+    club_id = Column(Integer, ForeignKey("persohub_clubs.id"), nullable=True, index=True)
+    admin_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    hashed_password = Column(String(255), nullable=False)
+    logo_url = Column(String(500), nullable=True)
+    description = Column(Text, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PersohubCommunityFollow(Base):
+    __tablename__ = "persohub_community_follows"
+    __table_args__ = (
+        UniqueConstraint("community_id", "user_id", name="uq_persohub_follow_community_user"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    community_id = Column(Integer, ForeignKey("persohub_communities.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PersohubPost(Base):
+    __tablename__ = "persohub_posts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    community_id = Column(Integer, ForeignKey("persohub_communities.id"), nullable=False, index=True)
+    admin_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    slug_token = Column(String(64), unique=True, nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    like_count = Column(Integer, nullable=False, default=0)
+    comment_count = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PersohubPostAttachment(Base):
+    __tablename__ = "persohub_post_attachments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(Integer, ForeignKey("persohub_posts.id"), nullable=False, index=True)
+    s3_url = Column(String(800), nullable=False)
+    preview_image_urls = Column(JSON, nullable=True)
+    mime_type = Column(String(120), nullable=True)
+    attachment_kind = Column(String(30), nullable=True)
+    size_bytes = Column(Integer, nullable=True)
+    order_no = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PersohubPostLike(Base):
+    __tablename__ = "persohub_post_likes"
+    __table_args__ = (
+        UniqueConstraint("post_id", "user_id", name="uq_persohub_like_post_user"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(Integer, ForeignKey("persohub_posts.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PersohubPostComment(Base):
+    __tablename__ = "persohub_post_comments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(Integer, ForeignKey("persohub_posts.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    comment_text = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PersohubHashtag(Base):
+    __tablename__ = "persohub_hashtags"
+
+    id = Column(Integer, primary_key=True, index=True)
+    hashtag_text = Column(String(120), unique=True, nullable=False, index=True)
+    count = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PersohubPostHashtag(Base):
+    __tablename__ = "persohub_post_hashtags"
+    __table_args__ = (
+        UniqueConstraint("post_id", "hashtag_id", name="uq_persohub_post_hashtag"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(Integer, ForeignKey("persohub_posts.id"), nullable=False, index=True)
+    hashtag_id = Column(Integer, ForeignKey("persohub_hashtags.id"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PersohubPostMention(Base):
+    __tablename__ = "persohub_post_mentions"
+    __table_args__ = (
+        UniqueConstraint("post_id", "user_id", name="uq_persohub_post_mention"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(Integer, ForeignKey("persohub_posts.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

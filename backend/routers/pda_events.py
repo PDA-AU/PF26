@@ -122,7 +122,7 @@ def _send_registration_email(user: PdaUser, event: PdaEvent, details: str) -> No
 
 
 @router.get("/pda/events/ongoing", response_model=List[PdaManagedEventResponse])
-async def list_ongoing_events(db: Session = Depends(get_db)):
+def list_ongoing_events(db: Session = Depends(get_db)):
     events = (
         db.query(PdaEvent)
         .filter(PdaEvent.status == PdaEventStatus.OPEN)
@@ -133,13 +133,13 @@ async def list_ongoing_events(db: Session = Depends(get_db)):
 
 
 @router.get("/pda/events/{slug}", response_model=PdaManagedEventResponse)
-async def get_event(slug: str, db: Session = Depends(get_db)):
+def get_event(slug: str, db: Session = Depends(get_db)):
     event = _get_event_or_404(db, slug)
     return PdaManagedEventResponse.model_validate(event)
 
 
 @router.get("/pda/events/{slug}/dashboard", response_model=PdaManagedEventDashboard)
-async def get_event_dashboard(
+def get_event_dashboard(
     slug: str,
     user: PdaUser = Depends(require_pda_user),
     db: Session = Depends(get_db),
@@ -199,7 +199,7 @@ async def get_event_dashboard(
 
 
 @router.post("/pda/events/{slug}/register", response_model=PdaManagedEventDashboard)
-async def register_individual_event(
+def register_individual_event(
     slug: str,
     user: PdaUser = Depends(require_pda_user),
     db: Session = Depends(get_db),
@@ -215,7 +215,7 @@ async def register_individual_event(
         PdaEventRegistration.user_id == user.id,
     ).first()
     if existing:
-        return await get_event_dashboard(slug=slug, user=user, db=db)
+        return get_event_dashboard(slug=slug, user=user, db=db)
 
     row = PdaEventRegistration(
         event_id=event.id,
@@ -226,11 +226,11 @@ async def register_individual_event(
     db.add(row)
     db.commit()
     _send_registration_email(user, event, "Participant mode: Individual")
-    return await get_event_dashboard(slug=slug, user=user, db=db)
+    return get_event_dashboard(slug=slug, user=user, db=db)
 
 
 @router.post("/pda/events/{slug}/teams/create", response_model=PdaManagedTeamResponse)
-async def create_team(
+def create_team(
     slug: str,
     payload: PdaManagedTeamCreate,
     user: PdaUser = Depends(require_pda_user),
@@ -277,7 +277,7 @@ async def create_team(
 
 
 @router.post("/pda/events/{slug}/teams/join", response_model=PdaManagedTeamResponse)
-async def join_team(
+def join_team(
     slug: str,
     payload: PdaManagedTeamJoin,
     user: PdaUser = Depends(require_pda_user),
@@ -330,7 +330,7 @@ async def join_team(
 
 
 @router.get("/pda/events/{slug}/team", response_model=PdaManagedTeamResponse)
-async def get_my_team(
+def get_my_team(
     slug: str,
     user: PdaUser = Depends(require_pda_user),
     db: Session = Depends(get_db),
@@ -345,7 +345,7 @@ async def get_my_team(
 
 
 @router.post("/pda/events/{slug}/team/invite")
-async def invite_to_team(
+def invite_to_team(
     slug: str,
     payload: PdaManagedTeamInvite,
     user: PdaUser = Depends(require_pda_user),
@@ -410,7 +410,7 @@ async def invite_to_team(
 
 
 @router.get("/pda/events/{slug}/qr", response_model=PdaManagedQrResponse)
-async def get_event_qr_token(
+def get_event_qr_token(
     slug: str,
     user: PdaUser = Depends(require_pda_user),
     db: Session = Depends(get_db),
@@ -447,7 +447,7 @@ async def get_event_qr_token(
 
 
 @router.get("/pda/me/events", response_model=List[PdaManagedMyEvent])
-async def my_events(user: PdaUser = Depends(require_pda_user), db: Session = Depends(get_db)):
+def my_events(user: PdaUser = Depends(require_pda_user), db: Session = Depends(get_db)):
     registrations = db.query(PdaEventRegistration).filter(PdaEventRegistration.user_id == user.id).all()
     team_rows = (
         db.query(PdaEventTeamMember, PdaEventTeam)
@@ -512,7 +512,7 @@ async def my_events(user: PdaUser = Depends(require_pda_user), db: Session = Dep
 
 
 @router.get("/pda/me/achievements", response_model=List[PdaManagedAchievement])
-async def my_achievements(user: PdaUser = Depends(require_pda_user), db: Session = Depends(get_db)):
+def my_achievements(user: PdaUser = Depends(require_pda_user), db: Session = Depends(get_db)):
     team = db.query(PdaEventTeamMember).filter(PdaEventTeamMember.user_id == user.id).all()
     team_ids = [row.team_id for row in team]
     badge_query = db.query(PdaEventBadge, PdaEvent).join(PdaEvent, PdaEventBadge.event_id == PdaEvent.id)
@@ -535,7 +535,7 @@ async def my_achievements(user: PdaUser = Depends(require_pda_user), db: Session
 
 
 @router.get("/pda/me/certificates/{event_slug}", response_model=PdaManagedCertificateResponse)
-async def get_certificate(
+def get_certificate(
     event_slug: str,
     user: PdaUser = Depends(require_pda_user),
     db: Session = Depends(get_db),
