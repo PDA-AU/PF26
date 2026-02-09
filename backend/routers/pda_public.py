@@ -23,8 +23,9 @@ def _build_team_response(member: PdaTeam, user: Optional[PdaUser]) -> PdaTeamRes
         team=member.team,
         designation=member.designation,
         photo_url=user.image_url if user else None,
-        instagram_url=member.instagram_url,
-        linkedin_url=member.linkedin_url,
+        instagram_url=user.instagram_url if user else None,
+        linkedin_url=user.linkedin_url if user else None,
+        github_url=user.github_url if user else None,
         created_at=member.created_at
     )
 

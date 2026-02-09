@@ -62,7 +62,7 @@ export default function TeamAdmin() {
     const [batchFilter, setBatchFilter] = useState('All');
     const [page, setPage] = useState(1);
     const [selectedMember, setSelectedMember] = useState(null);
-    const [editForm, setEditForm] = useState({ team: '', designation: '', instagram_url: '', linkedin_url: '' });
+    const [editForm, setEditForm] = useState({ team: '', designation: '', instagram_url: '', linkedin_url: '', github_url: '' });
     const [photoFile, setPhotoFile] = useState(null);
     const [saving, setSaving] = useState(false);
     const [deleting, setDeleting] = useState(false);
@@ -145,7 +145,8 @@ export default function TeamAdmin() {
             team: member.team || '',
             designation: member.designation || '',
             instagram_url: member.instagram_url || '',
-            linkedin_url: member.linkedin_url || ''
+            linkedin_url: member.linkedin_url || '',
+            github_url: member.github_url || ''
         });
         setPhotoFile(null);
         setIsEditing(false);
@@ -165,6 +166,7 @@ export default function TeamAdmin() {
                 designation: editForm.designation,
                 instagram_url: editForm.instagram_url || null,
                 linkedin_url: editForm.linkedin_url || null,
+                github_url: editForm.github_url || null,
                 photo_url: photoUrl
             };
             await axios.put(`${API}/pda-admin/team/${selectedMember.id}`, payload, { headers: getAuthHeader() });
@@ -526,7 +528,7 @@ export default function TeamAdmin() {
                                         key={member.id}
                                         type="button"
                                         onClick={() => openMember(member)}
-                                        className={`w-full px-4 py-3 text-left text-sm hover:bg-[#fffaf0] sm:grid sm:grid-cols-[1.6fr_1fr_1fr_1fr] sm:items-center ${paged[activeIndex]?.id === member.id ? 'bg-[#fff3c4]' : ''}`}
+                                        className="w-full px-4 py-3 text-left text-sm hover:bg-[#fffaf0] sm:grid sm:grid-cols-[1.6fr_1fr_1fr_1fr] sm:items-center"
                                     >
                                         <div className="flex flex-col gap-1 sm:block">
                                             <span className="font-medium text-[#11131a]">{member.name || 'Unnamed'}</span>
@@ -575,6 +577,7 @@ export default function TeamAdmin() {
                                     <p><span className="font-semibold text-slate-600">Team:</span> {selectedMember.team || 'Unassigned'}</p>
                                     <p><span className="font-semibold text-slate-600">Designation:</span> {selectedMember.designation || 'Member'}</p>
                                     <p><span className="font-semibold text-slate-600">LinkedIn:</span> {selectedMember.linkedin_url || 'N/A'}</p>
+                                    <p><span className="font-semibold text-slate-600">GitHub:</span> {selectedMember.github_url || 'N/A'}</p>
                                 </div>
                             </div>
                             <div className="space-y-4">
@@ -612,6 +615,33 @@ export default function TeamAdmin() {
                                                 ))}
                                             </SelectContent>
                                         </Select>
+                                    </div>
+                                    <div>
+                                        <Label>Instagram</Label>
+                                        <Input
+                                            value={editForm.instagram_url}
+                                            onChange={(e) => setEditForm((prev) => ({ ...prev, instagram_url: e.target.value }))}
+                                            placeholder="https://instagram.com/username"
+                                            disabled={!isEditing || !isSuperAdmin}
+                                        />
+                                    </div>
+                                    <div>
+                                        <Label>LinkedIn</Label>
+                                        <Input
+                                            value={editForm.linkedin_url}
+                                            onChange={(e) => setEditForm((prev) => ({ ...prev, linkedin_url: e.target.value }))}
+                                            placeholder="https://linkedin.com/in/username"
+                                            disabled={!isEditing || !isSuperAdmin}
+                                        />
+                                    </div>
+                                    <div className="sm:col-span-2">
+                                        <Label>GitHub</Label>
+                                        <Input
+                                            value={editForm.github_url}
+                                            onChange={(e) => setEditForm((prev) => ({ ...prev, github_url: e.target.value }))}
+                                            placeholder="https://github.com/username"
+                                            disabled={!isEditing || !isSuperAdmin}
+                                        />
                                     </div>
                                     <div className="sm:col-span-2">
                                         <Label>Update Photo</Label>

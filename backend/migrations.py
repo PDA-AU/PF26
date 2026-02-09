@@ -96,6 +96,9 @@ def ensure_pda_users_table(engine):
                     gender VARCHAR(10),
                     phno VARCHAR(20),
                     dept VARCHAR(150),
+                    instagram_url VARCHAR(500),
+                    linkedin_url VARCHAR(500),
+                    github_url VARCHAR(500),
                     image_url VARCHAR(500),
                     json_content JSON,
                     is_member BOOLEAN DEFAULT FALSE,
@@ -147,18 +150,28 @@ def ensure_pda_users_profile_name_column(engine):
             )
 
 
+def ensure_pda_user_social_columns(engine):
+    with engine.begin() as conn:
+        if not _table_exists(conn, "users"):
+            return
+        if not _column_exists(conn, "users", "instagram_url"):
+            conn.execute(text("ALTER TABLE users ADD COLUMN instagram_url VARCHAR(500)"))
+        if not _column_exists(conn, "users", "linkedin_url"):
+            conn.execute(text("ALTER TABLE users ADD COLUMN linkedin_url VARCHAR(500)"))
+        if not _column_exists(conn, "users", "github_url"):
+            conn.execute(text("ALTER TABLE users ADD COLUMN github_url VARCHAR(500)"))
+
+
 def ensure_pda_team_columns(engine):
     with engine.begin() as conn:
+        if not _table_exists(conn, "pda_team"):
+            return
         if not _column_exists(conn, "pda_team", "user_id"):
             conn.execute(text("ALTER TABLE pda_team ADD COLUMN user_id INTEGER"))
         if not _column_exists(conn, "pda_team", "team"):
             conn.execute(text("ALTER TABLE pda_team ADD COLUMN team VARCHAR(120)"))
         if not _column_exists(conn, "pda_team", "designation"):
             conn.execute(text("ALTER TABLE pda_team ADD COLUMN designation VARCHAR(120)"))
-        if not _column_exists(conn, "pda_team", "instagram_url"):
-            conn.execute(text("ALTER TABLE pda_team ADD COLUMN instagram_url VARCHAR(500)"))
-        if not _column_exists(conn, "pda_team", "linkedin_url"):
-            conn.execute(text("ALTER TABLE pda_team ADD COLUMN linkedin_url VARCHAR(500)"))
         if _column_exists(conn, "pda_team", "team_designation"):
             conn.execute(text("ALTER TABLE pda_team DROP COLUMN team_designation"))
 
@@ -426,11 +439,10 @@ def ensure_email_auth_columns(engine):
                 conn.execute(text("ALTER TABLE users ADD COLUMN password_reset_sent_at TIMESTAMPTZ"))
 
 def normalize_pda_team_schema(db: Session):
-    conn = db.connection()
-    if not _table_exists(conn, "pda_team"):
+    if not _table_exists(db.connection(), "pda_team"):
         return
 
-    has_regno = _column_exists(conn, "pda_team", "regno")
+    has_regno = _column_exists(db.connection(), "pda_team", "regno")
     if has_regno:
         rows = db.execute(
             text(
@@ -480,12 +492,85 @@ def normalize_pda_team_schema(db: Session):
         db.commit()
 
         for col in ("name", "regno", "dept", "email", "phno", "photo_url"):
-            if _column_exists(conn, "pda_team", col):
+            if _column_exists(db.connection(), "pda_team", col):
                 db.execute(text(f"ALTER TABLE pda_team DROP COLUMN IF EXISTS {col}"))
         db.commit()
 
     db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS pda_team_user_id_key ON pda_team (user_id)"))
     db.commit()
+
+
+def migrate_pda_team_social_handles_to_users(db: Session):
+    if not _table_exists(db.connection(), "users"):
+        return
+
+    changed = False
+
+    if not _column_exists(db.connection(), "users", "instagram_url"):
+        db.execute(text("ALTER TABLE users ADD COLUMN instagram_url VARCHAR(500)"))
+        changed = True
+    if not _column_exists(db.connection(), "users", "linkedin_url"):
+        db.execute(text("ALTER TABLE users ADD COLUMN linkedin_url VARCHAR(500)"))
+        changed = True
+    if not _column_exists(db.connection(), "users", "github_url"):
+        db.execute(text("ALTER TABLE users ADD COLUMN github_url VARCHAR(500)"))
+        changed = True
+
+    if not _table_exists(db.connection(), "pda_team"):
+        if changed:
+            db.commit()
+        return
+
+    has_instagram = _column_exists(db.connection(), "pda_team", "instagram_url")
+    has_linkedin = _column_exists(db.connection(), "pda_team", "linkedin_url")
+    has_github = _column_exists(db.connection(), "pda_team", "github_url")
+    if has_instagram or has_linkedin or has_github:
+        select_columns = ["user_id"]
+        if has_instagram:
+            select_columns.append("instagram_url")
+        if has_linkedin:
+            select_columns.append("linkedin_url")
+        if has_github:
+            select_columns.append("github_url")
+
+        rows = db.execute(
+            text(f"SELECT {', '.join(select_columns)} FROM pda_team WHERE user_id IS NOT NULL")
+        ).mappings().all()
+        for row in rows:
+            instagram_url = row.get("instagram_url")
+            linkedin_url = row.get("linkedin_url")
+            github_url = row.get("github_url")
+            db.execute(
+                text(
+                    """
+                    UPDATE users
+                    SET instagram_url = COALESCE(NULLIF(TRIM(users.instagram_url), ''), :instagram_url),
+                        linkedin_url = COALESCE(NULLIF(TRIM(users.linkedin_url), ''), :linkedin_url),
+                        github_url = COALESCE(NULLIF(TRIM(users.github_url), ''), :github_url)
+                    WHERE id = :user_id
+                    """
+                ),
+                {
+                    "user_id": row["user_id"],
+                    "instagram_url": str(instagram_url).strip() if instagram_url else None,
+                    "linkedin_url": str(linkedin_url).strip() if linkedin_url else None,
+                    "github_url": str(github_url).strip() if github_url else None,
+                }
+            )
+        changed = True
+
+    if _column_exists(db.connection(), "pda_team", "instagram_url"):
+        db.execute(text("ALTER TABLE pda_team DROP COLUMN instagram_url"))
+        changed = True
+    if _column_exists(db.connection(), "pda_team", "linkedin_url"):
+        db.execute(text("ALTER TABLE pda_team DROP COLUMN linkedin_url"))
+        changed = True
+    if _column_exists(db.connection(), "pda_team", "github_url"):
+        db.execute(text("ALTER TABLE pda_team DROP COLUMN github_url"))
+        changed = True
+
+    if changed:
+        db.commit()
 
 
 def normalize_pda_team(db: Session):

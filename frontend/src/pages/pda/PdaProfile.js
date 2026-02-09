@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import PdaHeader from '@/components/layout/PdaHeader';
 import PdaFooter from '@/components/layout/PdaFooter';
 import { compressImageToWebp } from '@/utils/imageCompression';
@@ -30,6 +31,16 @@ const DEPARTMENTS = [
 const GENDERS = [
     { value: 'Male', label: 'Male' },
     { value: 'Female', label: 'Female' }
+];
+
+const RECRUITMENT_TEAMS = [
+    'Content Creation',
+    'Event Management',
+    'Design',
+    'Website Design',
+    'Public Relations',
+    'Podcast',
+    'Library'
 ];
 
 const formatDateTime = (value) => {
@@ -142,7 +153,8 @@ export default function PdaProfile() {
         phno: '',
         dept: '',
         instagram_url: '',
-        linkedin_url: ''
+        linkedin_url: '',
+        github_url: ''
     });
     const [passwordData, setPasswordData] = useState({
         oldPassword: '',
@@ -154,6 +166,11 @@ export default function PdaProfile() {
     const [imageFile, setImageFile] = useState(null);
     const [isEditing, setIsEditing] = useState(false);
     const [sendingVerification, setSendingVerification] = useState(false);
+    const [recruitmentOpen, setRecruitmentOpen] = useState(true);
+    const [recruitmentLoading, setRecruitmentLoading] = useState(true);
+    const [preferredTeam, setPreferredTeam] = useState('');
+    const [applyingRecruitment, setApplyingRecruitment] = useState(false);
+    const [joinDialogOpen, setJoinDialogOpen] = useState(false);
 
     const [myEvents, setMyEvents] = useState([]);
     const [achievements, setAchievements] = useState([]);
@@ -181,7 +198,8 @@ export default function PdaProfile() {
             phno: user.phno || '',
             dept: user.dept || '',
             instagram_url: user.instagram_url || '',
-            linkedin_url: user.linkedin_url || ''
+            linkedin_url: user.linkedin_url || '',
+            github_url: user.github_url || ''
         });
         setImageFile(null);
     }, [user]);
@@ -210,6 +228,31 @@ export default function PdaProfile() {
     useEffect(() => {
         fetchManagedData();
     }, [fetchManagedData]);
+
+    useEffect(() => {
+        let active = true;
+        const fetchRecruitmentStatus = async () => {
+            setRecruitmentLoading(true);
+            try {
+                const res = await axios.get(`${API}/pda/recruitment-status`);
+                if (active && typeof res.data?.recruitment_open === 'boolean') {
+                    setRecruitmentOpen(res.data.recruitment_open);
+                }
+            } catch (error) {
+                if (active) {
+                    setRecruitmentOpen(false);
+                }
+            } finally {
+                if (active) {
+                    setRecruitmentLoading(false);
+                }
+            }
+        };
+        fetchRecruitmentStatus();
+        return () => {
+            active = false;
+        };
+    }, []);
 
     const sortedMyEvents = useMemo(() => {
         return [...myEvents].sort((a, b) => {
@@ -241,9 +284,24 @@ export default function PdaProfile() {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        const instagram_url = String(formData.instagram_url || '').trim();
+        const linkedin_url = String(formData.linkedin_url || '').trim();
+        const github_url = String(formData.github_url || '').trim();
         setSaving(true);
         try {
-            const response = await axios.put(`${API}/me`, formData, { headers: getAuthHeader() });
+            const payload = {
+                name: formData.name,
+                email: formData.email,
+                dob: formData.dob,
+                gender: formData.gender,
+                phno: formData.phno,
+                dept: formData.dept,
+                instagram_url: instagram_url || null,
+                linkedin_url: linkedin_url || null,
+                github_url: github_url || null
+            };
+
+            const response = await axios.put(`${API}/me`, payload, { headers: getAuthHeader() });
             let updatedUser = response.data;
 
             if (imageFile) {
@@ -364,6 +422,35 @@ export default function PdaProfile() {
             toast.error(getErrorMessage(error, 'Failed to generate certificate'));
         } finally {
             setCertificateLoadingSlug('');
+        }
+    };
+
+    const handleJoinPda = async () => {
+        if (!preferredTeam) {
+            toast.error('Please select a preferred team');
+            return;
+        }
+        setApplyingRecruitment(true);
+        try {
+            const response = await axios.post(
+                `${API}/pda/recruitment/apply`,
+                { preferred_team: preferredTeam },
+                { headers: getAuthHeader() }
+            );
+            const appliedUser = response?.data && typeof response.data === 'object'
+                ? { ...response.data, is_applied: true, preferred_team: response.data.preferred_team || preferredTeam }
+                : { is_applied: true, preferred_team: preferredTeam };
+            updateUser(appliedUser);
+            toast.success('Application submitted successfully');
+            setJoinDialogOpen(false);
+            setPreferredTeam('');
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to submit registration'));
+            if (error?.response?.status === 403) {
+                setRecruitmentOpen(false);
+            }
+        } finally {
+            setApplyingRecruitment(false);
         }
     };
 
@@ -578,7 +665,7 @@ export default function PdaProfile() {
                         </div>
                         <div>
                             <Label>Membership Status</Label>
-                            <Input value={user.is_member ? 'Member' : 'Applicant'} readOnly className="bg-slate-50" />
+                            <Input value={user.is_member ? 'Member' : (user.is_applied ? 'Applied' : 'Not Applied')} readOnly className="bg-slate-50" />
                         </div>
                         <div>
                             <Label>Team</Label>
@@ -588,18 +675,18 @@ export default function PdaProfile() {
                             <Label>Designation</Label>
                             <Input value={user.designation || 'Not assigned'} readOnly className="bg-slate-50" />
                         </div>
-                        {user.is_member ? (
-                            <>
-                                <div>
-                                    <Label>Instagram</Label>
-                                    <Input name="instagram_url" value={formData.instagram_url} onChange={handleChange} placeholder="https://instagram.com/username" disabled={!isEditing} />
-                                </div>
-                                <div>
-                                    <Label>LinkedIn</Label>
-                                    <Input name="linkedin_url" value={formData.linkedin_url} onChange={handleChange} placeholder="https://linkedin.com/in/username" disabled={!isEditing} />
-                                </div>
-                            </>
-                        ) : null}
+                        <div>
+                            <Label>Instagram</Label>
+                            <Input name="instagram_url" value={formData.instagram_url} onChange={handleChange} placeholder="https://instagram.com/username" disabled={!isEditing} />
+                        </div>
+                        <div>
+                            <Label>LinkedIn</Label>
+                            <Input name="linkedin_url" value={formData.linkedin_url} onChange={handleChange} placeholder="https://linkedin.com/in/username" disabled={!isEditing} />
+                        </div>
+                        <div>
+                            <Label>GitHub</Label>
+                            <Input name="github_url" value={formData.github_url} onChange={handleChange} placeholder="https://github.com/username" disabled={!isEditing} />
+                        </div>
                         <div className="md:col-span-2">
                             <Label>Change Profile Picture</Label>
                             <Input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setImageFile(e.target.files?.[0] || null)} disabled={!isEditing} />
@@ -621,30 +708,96 @@ export default function PdaProfile() {
                         ) : null}
                     </form>
 
-                    <form onSubmit={handleChangePassword} className="mt-8 rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
-                        <h3 className="text-lg font-semibold text-slate-900">Change Password</h3>
-                        <p className="mt-1 text-xs text-slate-500">Use your old password to set a new one.</p>
-                        <div className="mt-4 grid gap-4 md:grid-cols-3">
-                            <div>
-                                <Label>Old Password</Label>
-                                <Input name="oldPassword" type="password" value={passwordData.oldPassword} onChange={handlePasswordChange} />
+                    {isEditing ? (
+                        <form onSubmit={handleChangePassword} className="mt-8 rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
+                            <h3 className="text-lg font-semibold text-slate-900">Change Password</h3>
+                            <p className="mt-1 text-xs text-slate-500">Use your old password to set a new one.</p>
+                            <div className="mt-4 grid gap-4 md:grid-cols-3">
+                                <div>
+                                    <Label>Old Password</Label>
+                                    <Input name="oldPassword" type="password" value={passwordData.oldPassword} onChange={handlePasswordChange} />
+                                </div>
+                                <div>
+                                    <Label>New Password</Label>
+                                    <Input name="newPassword" type="password" value={passwordData.newPassword} onChange={handlePasswordChange} />
+                                </div>
+                                <div>
+                                    <Label>Confirm Password</Label>
+                                    <Input name="confirmPassword" type="password" value={passwordData.confirmPassword} onChange={handlePasswordChange} />
+                                </div>
                             </div>
-                            <div>
-                                <Label>New Password</Label>
-                                <Input name="newPassword" type="password" value={passwordData.newPassword} onChange={handlePasswordChange} />
+                            <div className="mt-4 flex justify-end">
+                                <Button type="submit" disabled={changingPassword} className="bg-[#11131a] text-white hover:bg-[#1f2330]">
+                                    {changingPassword ? 'Updating...' : 'Update Password'}
+                                </Button>
                             </div>
-                            <div>
-                                <Label>Confirm Password</Label>
-                                <Input name="confirmPassword" type="password" value={passwordData.confirmPassword} onChange={handlePasswordChange} />
-                            </div>
-                        </div>
-                        <div className="mt-4 flex justify-end">
-                            <Button type="submit" disabled={changingPassword} className="bg-[#11131a] text-white hover:bg-[#1f2330]">
-                                {changingPassword ? 'Updating...' : 'Update Password'}
-                            </Button>
-                        </div>
-                    </form>
+                        </form>
+                    ) : null}
                 </section>
+
+                {!user.is_member ? (
+                    <section className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
+                        <h2 className="text-2xl font-heading font-black">Recruitment</h2>
+                        <p className="mt-1 text-sm text-slate-600">Apply to join PDA from here.</p>
+
+                        <div className="mt-5 rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
+                            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Recruitment Status</p>
+                            {recruitmentLoading ? (
+                                <p className="mt-2 text-sm text-slate-600">Checking recruitment availability...</p>
+                            ) : recruitmentOpen ? (
+                                <div className="mt-3">
+                                    {user.is_applied ? (
+                                        <>
+                                            <p className="text-sm font-semibold text-slate-900">Application submitted. Awaiting admin review.</p>
+                                            <p className="mt-1 text-sm text-slate-600">Preferred Team: {user.preferred_team || 'Not specified'}</p>
+                                        </>
+                                    ) : (
+                                        <p className="text-sm text-slate-700">Recruitment is open. Submit your application to join PDA.</p>
+                                    )}
+                                    <Button
+                                        type="button"
+                                        onClick={() => setJoinDialogOpen(true)}
+                                        disabled={user.is_applied}
+                                        className="mt-3 bg-[#f6c347] text-black hover:bg-[#ffd16b] disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                        {user.is_applied ? 'Already Applied' : 'Join PDA'}
+                                    </Button>
+                                </div>
+                            ) : (
+                                <p className="mt-2 text-sm text-slate-600">Recruitment is currently closed.</p>
+                            )}
+                        </div>
+                    </section>
+                ) : null}
+
+                <Dialog open={joinDialogOpen} onOpenChange={setJoinDialogOpen}>
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>Join PDA</DialogTitle>
+                        </DialogHeader>
+                        <div className="space-y-3 py-2">
+                            <Label>Preferred Team</Label>
+                            <Select value={preferredTeam} onValueChange={setPreferredTeam}>
+                                <SelectTrigger className="w-full">
+                                    <SelectValue placeholder="Select preferred team" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {RECRUITMENT_TEAMS.map((team) => (
+                                        <SelectItem key={team} value={team}>{team}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <DialogFooter>
+                            <Button type="button" variant="outline" onClick={() => setJoinDialogOpen(false)} disabled={applyingRecruitment}>
+                                Cancel
+                            </Button>
+                            <Button type="button" onClick={handleJoinPda} disabled={applyingRecruitment || !preferredTeam} className="bg-[#f6c347] text-black hover:bg-[#ffd16b]">
+                                {applyingRecruitment ? 'Submitting...' : 'Submit Application'}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
             </main>
             <PdaFooter />
         </div>

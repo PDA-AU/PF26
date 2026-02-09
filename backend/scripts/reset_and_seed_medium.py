@@ -193,6 +193,9 @@ def seed() -> None:
                 dob=date(2004, (i % 12) + 1, (i % 27) + 1),
                 phno=f"8{(i+1):09d}"[-10:],
                 dept=depts[i % len(depts)].value,
+                instagram_url=f"https://instagram.com/pdauser{i+1}",
+                linkedin_url=f"https://linkedin.com/in/pdauser{i+1}",
+                github_url=f"https://github.com/pdauser{i+1}",
                 image_url=f"https://picsum.photos/seed/pda{i+1}/300/300",
                 json_content={"preferred_team": "Design" if i % 2 == 0 else "Event Management"},
                 is_member=True,
@@ -206,6 +209,9 @@ def seed() -> None:
             dob=date(2000, 1, 1),
             phno="9000000000",
             dept="Administration",
+            instagram_url="https://instagram.com/superadmin",
+            linkedin_url="https://linkedin.com/in/superadmin",
+            github_url="https://github.com/superadmin",
             image_url="https://picsum.photos/seed/superadmin/300/300",
             json_content={},
             is_member=True,
@@ -218,6 +224,9 @@ def seed() -> None:
             dob=date(2001, 1, 1),
             phno="9111111111",
             dept="Administration",
+            instagram_url="https://instagram.com/pfadmin",
+            linkedin_url="https://linkedin.com/in/pfadmin",
+            github_url="https://github.com/pfadmin",
             image_url="https://picsum.photos/seed/pfadmin/300/300",
             json_content={},
             is_member=True,
@@ -240,6 +249,9 @@ def seed() -> None:
                     gender="Male" if i % 2 == 0 else "Female",
                     phno=f"9{(i+1):09d}"[-10:],
                     dept=depts[(i + 3) % len(depts)].value,
+                    instagram_url=f"https://instagram.com/applicant{i+1}",
+                    linkedin_url=f"https://linkedin.com/in/applicant{i+1}",
+                    github_url=f"https://github.com/applicant{i+1}",
                     image_url=f"https://picsum.photos/seed/applicant{i+1}/300/300",
                     json_content={"preferred_team": "Design" if i % 2 == 0 else "Event Management"},
                     is_member=False,
@@ -267,14 +279,12 @@ def seed() -> None:
             ("Podcast", "Member", users[15]),
             ("Library", "Member", users[16]),
         ]
-        for idx, (team, desig, u) in enumerate(teams):
+        for team, desig, u in teams:
             db.add(
                 PdaTeam(
                     user_id=u.id,
                     team=team,
                     designation=desig,
-                    instagram_url=f"https://instagram.com/mock_{idx+1}",
-                    linkedin_url=f"https://linkedin.com/in/mock_{idx+1}",
                 )
             )
 

@@ -75,7 +75,7 @@ export const AuthProvider = ({ children }) => {
             localStorage.setItem('pdaAccessToken', access_token);
             localStorage.setItem('pdaRefreshToken', refresh_token);
         setUser(userData);
-        return userData;
+        return response.data;
     };
 
     const register = async (userData) => {

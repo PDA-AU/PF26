@@ -159,6 +159,18 @@ class PdaUserRegister(BaseModel):
         return v
 
 
+class PdaRecruitmentApplyRequest(BaseModel):
+    preferred_team: str = Field(..., min_length=2, max_length=64)
+
+    @field_validator('preferred_team')
+    @classmethod
+    def validate_preferred_team(cls, v):
+        value = str(v or "").strip()
+        if not value:
+            raise ValueError('Preferred team is required')
+        return value
+
+
 class PdaUserLogin(BaseModel):
     regno: str
     password: str
@@ -175,6 +187,7 @@ class PdaUserUpdate(BaseModel):
     image_url: Optional[str] = None
     instagram_url: Optional[str] = None
     linkedin_url: Optional[str] = None
+    github_url: Optional[str] = None
 
     @field_validator("profile_name")
     @classmethod
@@ -204,11 +217,13 @@ class PdaUserResponse(BaseModel):
     dept: Optional[str] = None
     image_url: Optional[str] = None
     is_member: bool
+    is_applied: bool = False
     preferred_team: Optional[str] = None
     team: Optional[str] = None
     designation: Optional[str] = None
     instagram_url: Optional[str] = None
     linkedin_url: Optional[str] = None
+    github_url: Optional[str] = None
     is_admin: bool = False
     is_superadmin: bool = False
     policy: Optional[Dict[str, Any]] = None
@@ -253,6 +268,8 @@ class PdaTokenResponse(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     user: PdaUserResponse
+    password_reset_required: Optional[bool] = None
+    reset_token: Optional[str] = None
 
 
 class ParticipantListResponse(BaseModel):
@@ -594,6 +611,7 @@ class PdaTeamCreate(BaseModel):
     photo_url: Optional[str] = None
     instagram_url: Optional[str] = None
     linkedin_url: Optional[str] = None
+    github_url: Optional[str] = None
 
 
 class PdaTeamUpdate(BaseModel):
@@ -609,6 +627,7 @@ class PdaTeamUpdate(BaseModel):
     photo_url: Optional[str] = None
     instagram_url: Optional[str] = None
     linkedin_url: Optional[str] = None
+    github_url: Optional[str] = None
 
 
 class PdaTeamResponse(BaseModel):
@@ -625,6 +644,7 @@ class PdaTeamResponse(BaseModel):
     photo_url: Optional[str] = None
     instagram_url: Optional[str] = None
     linkedin_url: Optional[str] = None
+    github_url: Optional[str] = None
     created_at: datetime
 
     class Config:

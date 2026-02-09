@@ -57,8 +57,9 @@ def _build_team_response(member: PdaTeam, user: Optional[PdaUser]) -> PdaTeamRes
         team=member.team,
         designation=member.designation,
         photo_url=user.image_url if user else None,
-        instagram_url=member.instagram_url,
-        linkedin_url=member.linkedin_url,
+        instagram_url=user.instagram_url if user else None,
+        linkedin_url=user.linkedin_url if user else None,
+        github_url=user.github_url if user else None,
         created_at=member.created_at
     )
 
@@ -297,7 +298,7 @@ def create_team_member(
     if payload.get("user_id"):
         user = db.query(PdaUser).filter(PdaUser.id == payload["user_id"]).first()
         if user:
-            for field in ("name", "email", "phno", "dept"):
+            for field in ("name", "email", "phno", "dept", "instagram_url", "linkedin_url", "github_url"):
                 if payload.get(field):
                     setattr(user, field, payload[field])
     if not user and payload.get("regno"):
@@ -310,6 +311,9 @@ def create_team_member(
                 name=payload.get("name") or f"PDA Member {payload['regno']}",
                 phno=payload.get("phno"),
                 dept=payload.get("dept"),
+                instagram_url=payload.get("instagram_url"),
+                linkedin_url=payload.get("linkedin_url"),
+                github_url=payload.get("github_url"),
                 image_url=payload.get("photo_url"),
                 json_content={},
                 is_member=True
@@ -317,7 +321,7 @@ def create_team_member(
             db.add(user)
             db.flush()
         else:
-            for field in ("name", "email", "phno", "dept"):
+            for field in ("name", "email", "phno", "dept", "instagram_url", "linkedin_url", "github_url"):
                 if payload.get(field):
                     setattr(user, field, payload[field])
 
@@ -327,9 +331,7 @@ def create_team_member(
     new_member = PdaTeam(
         user_id=user.id,
         team=payload.get("team"),
-        designation=payload.get("designation"),
-        instagram_url=payload.get("instagram_url"),
-        linkedin_url=payload.get("linkedin_url")
+        designation=payload.get("designation")
     )
     if payload.get("photo_url") and (not user.image_url or user.image_url != payload["photo_url"]):
         user.image_url = payload["photo_url"]
@@ -353,7 +355,7 @@ def update_team_member(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team member not found")
 
     updates = member_data.model_dump(exclude_unset=True)
-    for field in ("team", "designation", "instagram_url", "linkedin_url"):
+    for field in ("team", "designation"):
         if field in updates:
             setattr(member, field, updates[field])
 
@@ -366,7 +368,7 @@ def update_team_member(
         user = db.query(PdaUser).filter(PdaUser.regno == updates["regno"]).first()
     if user:
         member.user_id = user.id
-        for field in ("name", "email", "phno", "dept", "dob"):
+        for field in ("name", "email", "phno", "dept", "dob", "instagram_url", "linkedin_url", "github_url"):
             if field in updates and updates[field] is not None:
                 setattr(user, field, updates[field])
         if "photo_url" in updates and updates.get("photo_url"):

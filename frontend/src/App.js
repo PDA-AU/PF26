@@ -21,6 +21,7 @@ import LoginPage from "@/pages/persofest/LoginPage";
 import RegisterPage from "@/pages/persofest/RegisterPage";
 import PdaLogin from "@/pages/pda/PdaLogin";
 import PdaRecruit from "@/pages/pda/PdaRecruit";
+import PdaSignup from "@/pages/pda/PdaSignup";
 import PdaProfile from "@/pages/pda/PdaProfile";
 import PdaVerifyEmail from "@/pages/pda/VerifyEmail";
 import PdaForgotPassword from "@/pages/pda/ForgotPassword";
@@ -143,6 +144,7 @@ function AppRoutes() {
             {/* Public Routes */}
             <Route path="/" element={<PdaHome />} />
             <Route path="/login" element={<PdaLogin />} />
+            <Route path="/signup" element={<PdaSignup />} />
             <Route path="/recruit" element={<PdaRecruit />} />
             <Route path="/verify-email" element={<PdaVerifyEmail />} />
             <Route path="/forgot-password" element={<PdaForgotPassword />} />

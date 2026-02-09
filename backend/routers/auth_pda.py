@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from time_utils import ensure_timezone, now_tz
+from email_tokens import generate_token, hash_token, RESET_TOKEN_TTL_SECONDS
+from datetime import timedelta
 from typing import Optional
 import io
 
@@ -9,6 +11,7 @@ from database import get_db
 from models import PdaUser, PdaTeam, PdaAdmin, SystemConfig
 from schemas import (
     PdaUserRegister,
+    PdaRecruitmentApplyRequest,
     PdaUserLogin,
     PdaTokenResponse,
     RefreshTokenRequest,
@@ -37,15 +40,29 @@ import os
 router = APIRouter()
 
 
+def _extract_recruitment_state(user: PdaUser):
+    preferred_team = None
+    is_applied = False
+    if isinstance(user.json_content, dict):
+        raw_team = user.json_content.get("preferred_team")
+        if isinstance(raw_team, str):
+            raw_team = raw_team.strip()
+        preferred_team = raw_team or None
+        raw_is_applied = user.json_content.get("is_applied")
+        if isinstance(raw_is_applied, bool):
+            is_applied = raw_is_applied
+    if preferred_team and not is_applied:
+        is_applied = True
+    return preferred_team, is_applied
+
+
 def _build_pda_user_response(db: Session, user: PdaUser) -> PdaUserResponse:
     team = db.query(PdaTeam).filter(PdaTeam.user_id == user.id).first()
     admin_row = db.query(PdaAdmin).filter(PdaAdmin.user_id == user.id).first()
     policy = admin_row.policy if admin_row else None
     is_superadmin = bool(admin_row and policy and policy.get("superAdmin"))
     is_admin = bool(admin_row)
-    preferred_team = None
-    if isinstance(user.json_content, dict):
-        preferred_team = user.json_content.get("preferred_team")
+    preferred_team, is_applied = _extract_recruitment_state(user)
     return PdaUserResponse(
         id=user.id,
         regno=user.regno,
@@ -59,11 +76,13 @@ def _build_pda_user_response(db: Session, user: PdaUser) -> PdaUserResponse:
         dept=user.dept,
         image_url=user.image_url,
         is_member=user.is_member,
+        is_applied=is_applied,
         preferred_team=preferred_team,
         team=team.team if team else None,
         designation=team.designation if team else None,
-        instagram_url=team.instagram_url if team else None,
-        linkedin_url=team.linkedin_url if team else None,
+        instagram_url=user.instagram_url,
+        linkedin_url=user.linkedin_url,
+        github_url=user.github_url,
         is_admin=is_admin,
         is_superadmin=is_superadmin,
         policy=policy,
@@ -71,11 +90,21 @@ def _build_pda_user_response(db: Session, user: PdaUser) -> PdaUserResponse:
     )
 
 
+def _issue_inline_password_reset(db: Session, user: PdaUser) -> str:
+    token = generate_token()
+    user.password_reset_token_hash = hash_token(token)
+    user.password_reset_expires_at = now_tz() + timedelta(seconds=RESET_TOKEN_TTL_SECONDS)
+    user.password_reset_sent_at = now_tz()
+    db.commit()
+    return token
+
+
 @router.post("/auth/register")
 def pda_register(user_data: PdaUserRegister, db: Session = Depends(get_db)):
-    reg_config = db.query(SystemConfig).filter(SystemConfig.key == "pda_recruitment_open").first()
-    if reg_config and reg_config.value == "false":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Recruitment is closed")
+    if user_data.preferred_team:
+        reg_config = db.query(SystemConfig).filter(SystemConfig.key == "pda_recruitment_open").first()
+        if reg_config and reg_config.value == "false":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Recruitment is closed")
 
     existing = db.query(PdaUser).filter(
         (PdaUser.regno == user_data.regno) | (PdaUser.email == user_data.email)
@@ -83,11 +112,14 @@ def pda_register(user_data: PdaUserRegister, db: Session = Depends(get_db)):
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists")
 
-    json_content = {}
+    json_content = {"is_applied": False}
     if user_data.preferred_team:
-        if user_data.preferred_team == "Executive":
+        preferred_team = user_data.preferred_team.strip()
+        if preferred_team == "Executive":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Executive team cannot be selected")
-        json_content["preferred_team"] = user_data.preferred_team
+        json_content["preferred_team"] = preferred_team
+        json_content["is_applied"] = True
+        json_content["applied_at"] = now_tz().isoformat()
 
     new_user = PdaUser(
         regno=user_data.regno,
@@ -126,6 +158,38 @@ def pda_register(user_data: PdaUserRegister, db: Session = Depends(get_db)):
     )
 
 
+@router.post("/pda/recruitment/apply", response_model=PdaUserResponse)
+def apply_for_pda_recruitment(
+    payload: PdaRecruitmentApplyRequest,
+    user: PdaUser = Depends(require_pda_user),
+    db: Session = Depends(get_db)
+):
+    if user.is_member:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You are already a PDA member")
+
+    reg_config = db.query(SystemConfig).filter(SystemConfig.key == "pda_recruitment_open").first()
+    if reg_config and reg_config.value == "false":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Recruitment is closed")
+
+    preferred_team, is_applied = _extract_recruitment_state(user)
+    if is_applied:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Recruitment application already submitted")
+
+    preferred_team = payload.preferred_team.strip()
+    if preferred_team == "Executive":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Executive team cannot be selected")
+
+    # JSON columns don't reliably detect in-place dict mutation; assign a fresh object.
+    json_content = dict(user.json_content) if isinstance(user.json_content, dict) else {}
+    json_content["preferred_team"] = preferred_team
+    json_content["is_applied"] = True
+    json_content["applied_at"] = now_tz().isoformat()
+    user.json_content = json_content
+    db.commit()
+    db.refresh(user)
+    return _build_pda_user_response(db, user)
+
+
 @router.post("/auth/login", response_model=PdaTokenResponse)
 def pda_login(login_data: PdaUserLogin, db: Session = Depends(get_db)):
     user = db.query(PdaUser).filter(PdaUser.regno == login_data.regno).first()
@@ -136,10 +200,14 @@ def pda_login(login_data: PdaUserLogin, db: Session = Depends(get_db)):
 
     access_token = create_access_token({"sub": user.regno, "user_type": "pda"})
     refresh_token = create_refresh_token({"sub": user.regno, "user_type": "pda"})
+    reset_required = verify_password("password", user.hashed_password)
+    reset_token = _issue_inline_password_reset(db, user) if reset_required else None
     return PdaTokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
-        user=_build_pda_user_response(db, user)
+        user=_build_pda_user_response(db, user),
+        password_reset_required=reset_required,
+        reset_token=reset_token
     )
 
 
@@ -210,14 +278,15 @@ def update_pda_me(
         user.dept = update_data.dept
     if update_data.image_url is not None:
         user.image_url = update_data.image_url
-    if update_data.instagram_url is not None or update_data.linkedin_url is not None:
-        team = db.query(PdaTeam).filter(PdaTeam.user_id == user.id).first()
-        if not team:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only PDA team members can update social handles")
-        if update_data.instagram_url is not None:
-            team.instagram_url = update_data.instagram_url
-        if update_data.linkedin_url is not None:
-            team.linkedin_url = update_data.linkedin_url
+    if "instagram_url" in update_data.model_fields_set:
+        normalized_instagram = str(update_data.instagram_url or "").strip()
+        user.instagram_url = normalized_instagram or None
+    if "linkedin_url" in update_data.model_fields_set:
+        normalized_linkedin = str(update_data.linkedin_url or "").strip()
+        user.linkedin_url = normalized_linkedin or None
+    if "github_url" in update_data.model_fields_set:
+        normalized_github = str(update_data.github_url or "").strip()
+        user.github_url = normalized_github or None
 
     db.commit()
     if email_changed:

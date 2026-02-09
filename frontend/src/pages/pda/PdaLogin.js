@@ -15,6 +15,7 @@ export default function PdaLogin() {
     const [formData, setFormData] = useState({ regno: '', password: '' });
     const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [forceReset, setForceReset] = useState(false);
 
     const handleChange = (e) => {
         setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
@@ -35,7 +36,13 @@ export default function PdaLogin() {
         e.preventDefault();
         setLoading(true);
         try {
-            await login(formData.regno, formData.password);
+            const data = await login(formData.regno, formData.password);
+            if (data?.password_reset_required && data?.reset_token) {
+                setForceReset(true);
+                toast.info('Please reset your password to continue.');
+                navigate(`/reset-password?token=${data.reset_token}`);
+                return;
+            }
             toast.success('Login successful');
             navigate('/profile');
         } catch (error) {
@@ -47,10 +54,10 @@ export default function PdaLogin() {
     };
 
     useEffect(() => {
-        if (!authLoading && user) {
+        if (!authLoading && user && !forceReset) {
             navigate('/profile', { replace: true });
         }
-    }, [authLoading, user, navigate]);
+    }, [authLoading, user, navigate, forceReset]);
 
     if (authLoading) {
         return null;
@@ -136,7 +143,7 @@ export default function PdaLogin() {
 
                     <p className="text-center mt-8 text-gray-600">
                         New to PDA?{' '}
-                        <Link to="/recruit" className="font-bold text-[#b8890b] hover:underline">Apply here</Link>
+                        <Link to="/signup" className="font-bold text-[#b8890b] hover:underline">Sign up here</Link>
                     </p>
                     </div>
                 </div>

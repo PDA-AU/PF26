@@ -67,6 +67,7 @@ def list_routes():
             {"method": "POST", "path": "/auth/register"},
             {"method": "POST", "path": "/auth/login"},
             {"method": "POST", "path": "/auth/refresh"},
+            {"method": "POST", "path": "/pda/recruitment/apply"},
             {"method": "GET", "path": "/me"},
             {"method": "PUT", "path": "/me"},
             {"method": "POST", "path": "/me/change-password"},

@@ -23,6 +23,22 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 DB_RESTORE_CONFIRM_TEXT = "CONFIRM RESTORE"
 
 
+def _extract_recruitment_state(user: PdaUser):
+    preferred_team = None
+    is_applied = False
+    if isinstance(user.json_content, dict):
+        raw_team = user.json_content.get("preferred_team")
+        if isinstance(raw_team, str):
+            raw_team = raw_team.strip()
+        preferred_team = raw_team or None
+        raw_is_applied = user.json_content.get("is_applied")
+        if isinstance(raw_is_applied, bool):
+            is_applied = raw_is_applied
+    if preferred_team and not is_applied:
+        is_applied = True
+    return preferred_team, is_applied
+
+
 def _resolve_pg_binary(kind: str) -> str:
     # Allow explicit override first for production/runtime control.
     if kind == "dump":
@@ -77,6 +93,7 @@ def _build_admin_response(db: Session, user: PdaUser) -> PdaUserResponse:
     admin_row = db.query(PdaAdmin).filter(PdaAdmin.user_id == user.id).first()
     policy = admin_row.policy if admin_row else None
     is_superadmin = bool(admin_row and policy and policy.get("superAdmin"))
+    preferred_team, is_applied = _extract_recruitment_state(user)
     return PdaUserResponse(
         id=user.id,
         regno=user.regno,
@@ -88,9 +105,13 @@ def _build_admin_response(db: Session, user: PdaUser) -> PdaUserResponse:
         dept=user.dept,
         image_url=user.image_url,
         is_member=user.is_member,
-        preferred_team=(user.json_content or {}).get("preferred_team") if isinstance(user.json_content, dict) else None,
+        is_applied=is_applied,
+        preferred_team=preferred_team,
         team=team.team if team else None,
         designation=team.designation if team else None,
+        instagram_url=user.instagram_url,
+        linkedin_url=user.linkedin_url,
+        github_url=user.github_url,
         is_admin=bool(admin_row),
         is_superadmin=is_superadmin,
         policy=policy,
@@ -501,7 +522,8 @@ def list_recruitments(
     _: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db)
 ):
-    pending = db.query(PdaUser).filter(PdaUser.is_member == False).order_by(PdaUser.created_at.desc()).all()
+    pending_candidates = db.query(PdaUser).filter(PdaUser.is_member == False).order_by(PdaUser.created_at.desc()).all()
+    pending = [user for user in pending_candidates if _extract_recruitment_state(user)[1]]
     return [_build_admin_response(db, u) for u in pending]
 
 
@@ -511,7 +533,8 @@ def export_recruitments(
     db: Session = Depends(get_db),
     request: Request = None
 ):
-    pending = db.query(PdaUser).filter(PdaUser.is_member == False).order_by(PdaUser.created_at.desc()).all()
+    pending_candidates = db.query(PdaUser).filter(PdaUser.is_member == False).order_by(PdaUser.created_at.desc()).all()
+    pending = [user for user in pending_candidates if _extract_recruitment_state(user)[1]]
     wb = Workbook()
     ws = wb.active
     ws.title = "Recruitments"
@@ -520,9 +543,7 @@ def export_recruitments(
         "Department", "Preferred Team", "Created At"
     ])
     for user in pending:
-        preferred_team = None
-        if isinstance(user.json_content, dict):
-            preferred_team = user.json_content.get("preferred_team")
+        preferred_team, _ = _extract_recruitment_state(user)
         ws.append([
             user.name,
             user.regno,
@@ -571,9 +592,9 @@ def approve_recruitments(
         user = db.query(PdaUser).filter(PdaUser.id == user_id).first()
         if not user or user.is_member:
             continue
-        preferred_team = None
-        if isinstance(user.json_content, dict):
-            preferred_team = user.json_content.get("preferred_team")
+        preferred_team, is_applied = _extract_recruitment_state(user)
+        if not is_applied:
+            continue
         team_to_assign = assigned_team or preferred_team
         if not team_to_assign:
             continue
@@ -582,9 +603,7 @@ def approve_recruitments(
         new_team = PdaTeam(
             user_id=user.id,
             team=team_to_assign,
-            designation=assigned_designation or "Member",
-            instagram_url=None,
-            linkedin_url=None
+            designation=assigned_designation or "Member"
         )
         db.add(new_team)
         user.is_member = True

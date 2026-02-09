@@ -115,6 +115,9 @@ class PdaUser(Base):
     gender = Column(String(10), nullable=True)
     phno = Column(String(20), nullable=True)
     dept = Column(String(150), nullable=True)
+    instagram_url = Column(String(500), nullable=True)
+    linkedin_url = Column(String(500), nullable=True)
+    github_url = Column(String(500), nullable=True)
     image_url = Column(String(500), nullable=True)
     json_content = Column(JSON, nullable=True)
     is_member = Column(Boolean, default=False)
@@ -225,8 +228,6 @@ class PdaTeam(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     team = Column(String(120), nullable=True)
     designation = Column(String(120), nullable=True)
-    instagram_url = Column(String(500), nullable=True)
-    linkedin_url = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
