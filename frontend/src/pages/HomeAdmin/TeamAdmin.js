@@ -10,6 +10,7 @@ import AdminLayout from '@/pages/HomeAdmin/AdminLayout';
 import pdaLogo from '@/assets/pda-logo.png';
 import { API, uploadTeamImage } from '@/pages/HomeAdmin/adminApi';
 import { compressImageToWebp } from '@/utils/imageCompression';
+import { toast } from 'sonner';
 
 const PAGE_SIZE = 12;
 
@@ -182,10 +183,12 @@ export default function TeamAdmin() {
         setDeleting(true);
         try {
             await axios.delete(`${API}/pda-admin/team/${selectedMember.id}`, { headers: getAuthHeader() });
+            toast.success('Removed from PDA team.');
             setSelectedMember(null);
             fetchData();
         } catch (error) {
             console.error('Failed to delete team member:', error);
+            toast.error(error.response?.data?.detail || 'Failed to remove member.');
         } finally {
             setDeleting(false);
         }
@@ -195,11 +198,13 @@ export default function TeamAdmin() {
         if (!selectedMember?.user_id) return;
         setDeleting(true);
         try {
-            await axios.delete(`${API}/pda-admin/users/${selectedMember.user_id}`, { headers: getAuthHeader() });
+            await axios.delete(`${API}/pda-admin/users/${selectedMember.user_id}?force=true`, { headers: getAuthHeader() });
+            toast.success('User deleted successfully.');
             setSelectedMember(null);
             fetchData();
         } catch (error) {
             console.error('Failed to delete user:', error);
+            toast.error(error.response?.data?.detail || 'Failed to delete user.');
         } finally {
             setDeleting(false);
         }
@@ -666,14 +671,14 @@ export default function TeamAdmin() {
                             </p>
                         ) : (
                             <p className="text-sm text-slate-600">
-                                Type <span className="font-semibold">DELETE</span> to permanently delete{' '}
+                                Type <span className="font-semibold">DELETE ALL</span> to permanently delete{' '}
                                 <span className="font-semibold">{selectedMember?.name || 'this member'}</span>.
                             </p>
                         )}
                         <Input
                             value={confirmText}
                             onChange={(e) => setConfirmText(e.target.value)}
-                            placeholder={confirmAction === 'remove' ? 'Type REMOVE' : 'Type DELETE'}
+                            placeholder={confirmAction === 'remove' ? 'Type REMOVE' : 'Type DELETE ALL'}
                             className="w-full"
                         />
                         <div className="flex justify-end gap-2">
@@ -687,7 +692,7 @@ export default function TeamAdmin() {
                             <Button
                                 onClick={async () => {
                                     if (confirmAction === 'remove' && confirmText.trim().toUpperCase() !== 'REMOVE') return;
-                                    if (confirmAction === 'delete_user' && confirmText.trim().toUpperCase() !== 'DELETE') return;
+                                    if (confirmAction === 'delete_user' && confirmText.trim().toUpperCase() !== 'DELETE ALL') return;
                                     setConfirmOpen(false);
                                     if (confirmAction === 'remove') {
                                         await removeFromPda();
@@ -697,7 +702,7 @@ export default function TeamAdmin() {
                                 }}
                                 disabled={
                                     (confirmAction === 'remove' && confirmText.trim().toUpperCase() !== 'REMOVE')
-                                    || (confirmAction === 'delete_user' && confirmText.trim().toUpperCase() !== 'DELETE')
+                                    || (confirmAction === 'delete_user' && confirmText.trim().toUpperCase() !== 'DELETE ALL')
                                     || deleting
                                 }
                                 className="bg-red-600 text-white hover:bg-red-700"

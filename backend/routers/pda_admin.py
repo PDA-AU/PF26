@@ -23,9 +23,12 @@ from models import (
     PersohubCommunity,
     PersohubCommunityFollow,
     PersohubPost,
+    PersohubPostAttachment,
     PersohubPostLike,
     PersohubPostComment,
+    PersohubPostHashtag,
     PersohubPostMention,
+    PersohubHashtag,
 )
 from schemas import (
     ProgramCreate, ProgramUpdate, ProgramResponse,
@@ -397,6 +400,7 @@ def delete_team_member(
 @router.delete("/pda-admin/users/{user_id}")
 def delete_pda_user(
     user_id: int,
+    force: bool = False,
     admin: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db),
     request: Request = None
@@ -406,11 +410,63 @@ def delete_pda_user(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     blocking = _user_dependency_checks(db, user_id)
-    if blocking:
+    if blocking and not force:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"User has related records: {', '.join(blocking)}"
         )
+
+    if force:
+        team_ids_led = [t.id for t in db.query(PdaEventTeam).filter(PdaEventTeam.team_lead_user_id == user_id).all()]
+        team_ids_member = [t.id for t in db.query(PdaEventTeamMember).filter(PdaEventTeamMember.user_id == user_id).all()]
+        team_ids = list({*team_ids_led, *team_ids_member})
+
+        if team_ids:
+            db.query(PdaEventRegistration).filter(PdaEventRegistration.team_id.in_(team_ids)).delete(synchronize_session=False)
+            db.query(PdaEventAttendance).filter(PdaEventAttendance.team_id.in_(team_ids)).delete(synchronize_session=False)
+            db.query(PdaEventScore).filter(PdaEventScore.team_id.in_(team_ids)).delete(synchronize_session=False)
+            db.query(PdaEventBadge).filter(PdaEventBadge.team_id.in_(team_ids)).delete(synchronize_session=False)
+            db.query(PdaEventInvite).filter(PdaEventInvite.team_id.in_(team_ids)).delete(synchronize_session=False)
+            db.query(PdaEventTeamMember).filter(PdaEventTeamMember.team_id.in_(team_ids)).delete(synchronize_session=False)
+            db.query(PdaEventTeam).filter(PdaEventTeam.id.in_(team_ids_led)).delete(synchronize_session=False)
+
+        db.query(PdaEventRegistration).filter(PdaEventRegistration.user_id == user_id).delete(synchronize_session=False)
+        db.query(PdaEventTeamMember).filter(PdaEventTeamMember.user_id == user_id).delete(synchronize_session=False)
+        db.query(PdaEventAttendance).filter(
+            (PdaEventAttendance.user_id == user_id) | (PdaEventAttendance.marked_by_user_id == user_id)
+        ).delete(synchronize_session=False)
+        db.query(PdaEventScore).filter(PdaEventScore.user_id == user_id).delete(synchronize_session=False)
+        db.query(PdaEventBadge).filter(PdaEventBadge.user_id == user_id).delete(synchronize_session=False)
+        db.query(PdaEventInvite).filter(
+            (PdaEventInvite.invited_user_id == user_id) | (PdaEventInvite.invited_by_user_id == user_id)
+        ).delete(synchronize_session=False)
+
+        post_ids = [p.id for p in db.query(PersohubPost).filter(PersohubPost.admin_id == user_id).all()]
+        if post_ids:
+            db.query(PersohubPostAttachment).filter(PersohubPostAttachment.post_id.in_(post_ids)).delete(synchronize_session=False)
+            db.query(PersohubPostLike).filter(PersohubPostLike.post_id.in_(post_ids)).delete(synchronize_session=False)
+            db.query(PersohubPostComment).filter(PersohubPostComment.post_id.in_(post_ids)).delete(synchronize_session=False)
+            db.query(PersohubPostMention).filter(PersohubPostMention.post_id.in_(post_ids)).delete(synchronize_session=False)
+            db.query(PersohubPostHashtag).filter(PersohubPostHashtag.post_id.in_(post_ids)).delete(synchronize_session=False)
+            db.query(PersohubPost).filter(PersohubPost.id.in_(post_ids)).delete(synchronize_session=False)
+
+        db.query(PersohubPostLike).filter(PersohubPostLike.user_id == user_id).delete(synchronize_session=False)
+        db.query(PersohubPostComment).filter(PersohubPostComment.user_id == user_id).delete(synchronize_session=False)
+        db.query(PersohubPostMention).filter(PersohubPostMention.user_id == user_id).delete(synchronize_session=False)
+        db.query(PersohubCommunityFollow).filter(PersohubCommunityFollow.user_id == user_id).delete(synchronize_session=False)
+
+        community_ids = [c.id for c in db.query(PersohubCommunity).filter(PersohubCommunity.admin_id == user_id).all()]
+        if community_ids:
+            community_posts = [p.id for p in db.query(PersohubPost).filter(PersohubPost.community_id.in_(community_ids)).all()]
+            if community_posts:
+                db.query(PersohubPostAttachment).filter(PersohubPostAttachment.post_id.in_(community_posts)).delete(synchronize_session=False)
+                db.query(PersohubPostLike).filter(PersohubPostLike.post_id.in_(community_posts)).delete(synchronize_session=False)
+                db.query(PersohubPostComment).filter(PersohubPostComment.post_id.in_(community_posts)).delete(synchronize_session=False)
+                db.query(PersohubPostMention).filter(PersohubPostMention.post_id.in_(community_posts)).delete(synchronize_session=False)
+                db.query(PersohubPostHashtag).filter(PersohubPostHashtag.post_id.in_(community_posts)).delete(synchronize_session=False)
+                db.query(PersohubPost).filter(PersohubPost.id.in_(community_posts)).delete(synchronize_session=False)
+            db.query(PersohubCommunityFollow).filter(PersohubCommunityFollow.community_id.in_(community_ids)).delete(synchronize_session=False)
+            db.query(PersohubCommunity).filter(PersohubCommunity.id.in_(community_ids)).delete(synchronize_session=False)
 
     db.query(PdaTeam).filter(PdaTeam.user_id == user_id).delete(synchronize_session=False)
     db.query(PdaAdmin).filter(PdaAdmin.user_id == user_id).delete(synchronize_session=False)
