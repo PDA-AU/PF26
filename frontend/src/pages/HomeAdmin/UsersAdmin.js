@@ -27,6 +27,22 @@ const TEAMS = [
 
 const EXEC_DESIG = ['Chairperson', 'Vice Chairperson', 'Treasurer', 'General Secretary'];
 const TEAM_DESIG = ['Head', 'JS', 'Member', 'Volunteer'];
+const DEPARTMENTS = [
+    { value: 'Artificial Intelligence and Data Science', label: 'AI & Data Science' },
+    { value: 'Aerospace Engineering', label: 'Aerospace Engineering' },
+    { value: 'Automobile Engineering', label: 'Automobile Engineering' },
+    { value: 'Computer Technology', label: 'Computer Technology' },
+    { value: 'Electronics and Communication Engineering', label: 'ECE' },
+    { value: 'Electronics and Instrumentation Engineering', label: 'EIE' },
+    { value: 'Production Technology', label: 'Production Technology' },
+    { value: 'Robotics and Automation', label: 'Robotics & Automation' },
+    { value: 'Rubber and Plastics Technology', label: 'Rubber & Plastics' },
+    { value: 'Information Technology', label: 'Information Technology' }
+];
+const GENDERS = [
+    { value: 'Male', label: 'Male' },
+    { value: 'Female', label: 'Female' }
+];
 const DEPT_SHORT = {
     'Computer Technology': 'CT',
     'Information Technology': 'IT',
@@ -90,7 +106,8 @@ export default function UsersAdmin() {
     const fetchData = useCallback(async () => {
         try {
             const res = await axios.get(`${API}/pda-admin/users`, { headers: getAuthHeader() });
-            setUsersRows(res.data || []);
+            const rows = (res.data || []).filter((row) => String(row?.regno || '') !== '0000000000');
+            setUsersRows(rows);
         } catch (error) {
             console.error('Failed to load users:', error);
         } finally {
@@ -280,7 +297,7 @@ export default function UsersAdmin() {
         );
     }
 
-    const statsMembers = usersRows.filter((m) => String(m.regno) !== '0000000000');
+    const statsMembers = usersRows;
     const totalUsers = usersRows.length;
     const totalMembers = usersRows.filter((m) => Boolean(m.is_member)).length;
     const totalApplied = usersRows.filter((m) => Boolean(m.is_applied)).length;
@@ -671,11 +688,41 @@ export default function UsersAdmin() {
                                     </div>
                                     <div>
                                         <Label>Department</Label>
-                                        <Input value={editForm.dept} onChange={(e) => setEditForm((prev) => ({ ...prev, dept: e.target.value }))} disabled={!isEditing || !isSuperAdmin} />
+                                        <Select
+                                            value={editForm.dept || '__none__'}
+                                            onValueChange={(value) => setEditForm((prev) => ({ ...prev, dept: value === '__none__' ? '' : value }))}
+                                            disabled={!isEditing || !isSuperAdmin}
+                                        >
+                                            <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="__none__">Unassigned</SelectItem>
+                                                {DEPARTMENTS.map((dept) => (
+                                                    <SelectItem key={dept.value} value={dept.value}>{dept.label}</SelectItem>
+                                                ))}
+                                                {editForm.dept && !DEPARTMENTS.some((dept) => dept.value === editForm.dept) ? (
+                                                    <SelectItem value={editForm.dept}>{editForm.dept}</SelectItem>
+                                                ) : null}
+                                            </SelectContent>
+                                        </Select>
                                     </div>
                                     <div>
                                         <Label>Gender</Label>
-                                        <Input value={editForm.gender} onChange={(e) => setEditForm((prev) => ({ ...prev, gender: e.target.value }))} disabled={!isEditing || !isSuperAdmin} />
+                                        <Select
+                                            value={editForm.gender || '__none__'}
+                                            onValueChange={(value) => setEditForm((prev) => ({ ...prev, gender: value === '__none__' ? '' : value }))}
+                                            disabled={!isEditing || !isSuperAdmin}
+                                        >
+                                            <SelectTrigger><SelectValue placeholder="Select gender" /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="__none__">Unspecified</SelectItem>
+                                                {GENDERS.map((gender) => (
+                                                    <SelectItem key={gender.value} value={gender.value}>{gender.label}</SelectItem>
+                                                ))}
+                                                {editForm.gender && !GENDERS.some((gender) => gender.value === editForm.gender) ? (
+                                                    <SelectItem value={editForm.gender}>{editForm.gender}</SelectItem>
+                                                ) : null}
+                                            </SelectContent>
+                                        </Select>
                                     </div>
                                     <div>
                                         <Label>Member Status</Label>

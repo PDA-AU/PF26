@@ -24,6 +24,7 @@ from models import (
     PdaEventInvite,
     PdaEventInviteStatus,
     PdaEventRound,
+    PdaEventRoundState,
     PdaEventBadge,
     PdaEventAttendance,
     PdaEventScore,
@@ -585,11 +586,27 @@ def my_round_status(
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
-    registration = db.query(PdaEventRegistration).filter(
-        PdaEventRegistration.event_id == event.id,
-        PdaEventRegistration.user_id == user.id,
-        PdaEventRegistration.entity_type == PdaEventEntityType.USER,
-    ).first()
+    registration = None
+    entity_type = PdaEventEntityType.USER
+    entity_user_id = user.id
+    entity_team_id = None
+    if event.participant_mode == PdaEventParticipantMode.INDIVIDUAL:
+        registration = db.query(PdaEventRegistration).filter(
+            PdaEventRegistration.event_id == event.id,
+            PdaEventRegistration.user_id == user.id,
+            PdaEventRegistration.entity_type == PdaEventEntityType.USER,
+        ).first()
+    else:
+        team = _get_user_team_for_event(db, event.id, user.id)
+        if team:
+            entity_type = PdaEventEntityType.TEAM
+            entity_user_id = None
+            entity_team_id = team.id
+            registration = db.query(PdaEventRegistration).filter(
+                PdaEventRegistration.event_id == event.id,
+                PdaEventRegistration.team_id == team.id,
+                PdaEventRegistration.entity_type == PdaEventEntityType.TEAM,
+            ).first()
     if not registration:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration not found")
 
@@ -604,22 +621,26 @@ def my_round_status(
         score_row = db.query(PdaEventScore).filter(
             PdaEventScore.event_id == event.id,
             PdaEventScore.round_id == round_row.id,
-            PdaEventScore.entity_type == PdaEventEntityType.USER,
-            PdaEventScore.user_id == user.id,
+            PdaEventScore.entity_type == entity_type,
+            PdaEventScore.user_id == entity_user_id,
+            PdaEventScore.team_id == entity_team_id,
         ).first()
-        if registration.status == PdaEventRegistrationStatus.ELIMINATED:
-            status_label = "Eliminated"
-            is_present = bool(score_row.is_present) if score_row else None
-        elif score_row:
-            status_label = "Active" if bool(score_row.is_present) else "Absent"
-            is_present = bool(score_row.is_present)
-        else:
+        state_value = round_row.state.value if hasattr(round_row.state, "value") else str(round_row.state)
+        is_revealed = str(state_value or "").strip().lower() == "reveal"
+        if not is_revealed:
             status_label = "Pending"
             is_present = None
+        elif registration.status == PdaEventRegistrationStatus.ELIMINATED:
+            status_label = "Eliminated"
+            is_present = bool(score_row.is_present) if score_row else None
+        else:
+            status_label = "Active"
+            is_present = bool(score_row.is_present) if score_row else None
         statuses.append(
             {
                 "round_no": f"PF{int(round_row.round_no):02d}",
                 "round_name": round_row.name,
+                "round_state": state_value,
                 "status": status_label,
                 "is_present": is_present,
             }

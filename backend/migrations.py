@@ -810,6 +810,80 @@ def ensure_pda_event_tables(engine):
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pda_event_logs_slug_created ON pda_event_logs(event_slug, created_at DESC)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pda_event_logs_admin_created ON pda_event_logs(admin_id, created_at DESC)"))
 
+        # Compatibility path: older deployments may have created SQL enum type via ORM.
+        # Some environments store enum labels as uppercase names (e.g. ACTIVE),
+        # while others may use title-case values (e.g. Active). Add the missing
+        # Reveal label in whichever style the existing enum uses.
+        if conn.dialect.name == "postgresql":
+            conn.execute(
+                text(
+                    """
+                    DO $$
+                    DECLARE
+                        has_upper_style BOOLEAN := FALSE;
+                        has_title_style BOOLEAN := FALSE;
+                    BEGIN
+                        IF EXISTS (
+                            SELECT 1
+                            FROM pg_type
+                            WHERE typname = 'pdaeventroundstate'
+                        ) THEN
+                            SELECT EXISTS (
+                                SELECT 1
+                                FROM pg_enum e
+                                JOIN pg_type t ON t.oid = e.enumtypid
+                                WHERE t.typname = 'pdaeventroundstate'
+                                  AND e.enumlabel = 'ACTIVE'
+                            )
+                            INTO has_upper_style;
+
+                            SELECT EXISTS (
+                                SELECT 1
+                                FROM pg_enum e
+                                JOIN pg_type t ON t.oid = e.enumtypid
+                                WHERE t.typname = 'pdaeventroundstate'
+                                  AND e.enumlabel = 'Active'
+                            )
+                            INTO has_title_style;
+
+                            IF has_upper_style THEN
+                                IF NOT EXISTS (
+                                    SELECT 1
+                                    FROM pg_enum e
+                                    JOIN pg_type t ON t.oid = e.enumtypid
+                                    WHERE t.typname = 'pdaeventroundstate'
+                                      AND e.enumlabel = 'REVEAL'
+                                ) THEN
+                                    ALTER TYPE pdaeventroundstate ADD VALUE 'REVEAL';
+                                END IF;
+                            ELSIF has_title_style THEN
+                                IF NOT EXISTS (
+                                    SELECT 1
+                                    FROM pg_enum e
+                                    JOIN pg_type t ON t.oid = e.enumtypid
+                                    WHERE t.typname = 'pdaeventroundstate'
+                                      AND e.enumlabel = 'Reveal'
+                                ) THEN
+                                    ALTER TYPE pdaeventroundstate ADD VALUE 'Reveal';
+                                END IF;
+                            ELSE
+                                IF NOT EXISTS (
+                                    SELECT 1
+                                    FROM pg_enum e
+                                    JOIN pg_type t ON t.oid = e.enumtypid
+                                    WHERE t.typname = 'pdaeventroundstate'
+                                      AND e.enumlabel = 'REVEAL'
+                                ) THEN
+                                    ALTER TYPE pdaeventroundstate ADD VALUE 'REVEAL';
+                                END IF;
+                            END IF;
+                        END IF;
+                    END
+                    $$;
+                    """
+                )
+            )
+
 
 def ensure_persofest_pda_event(engine):
     with engine.begin() as conn:

@@ -32,6 +32,13 @@ const createCriterion = (name = '', maxMarks = 0) => ({
     max_marks: maxMarks,
 });
 
+const normalizeState = (state) => String(state || '').trim().toLowerCase();
+const isDraftState = (state) => normalizeState(state) === 'draft';
+const isPublishedState = (state) => normalizeState(state) === 'published';
+const isActiveState = (state) => normalizeState(state) === 'active';
+const isCompletedState = (state) => normalizeState(state) === 'completed';
+const isRevealState = (state) => normalizeState(state) === 'reveal';
+
 function RoundsContent() {
     const navigate = useNavigate();
     const { getAuthHeader } = useAuth();
@@ -47,6 +54,8 @@ function RoundsContent() {
     const [mode, setMode] = useState('Offline');
     const [criteria, setCriteria] = useState([createCriterion('Score', 100)]);
     const [roundStats, setRoundStats] = useState({});
+    const [revealRound, setRevealRound] = useState(null);
+    const [revealing, setRevealing] = useState(false);
 
     const getErrorMessage = (error, fallback) => (
         error?.response?.data?.detail || error?.response?.data?.message || fallback
@@ -93,8 +102,8 @@ function RoundsContent() {
     }, [eventSlug, getAuthHeader]);
 
     useEffect(() => {
-        const completedRounds = rounds.filter((round) => round.state === 'Completed');
-        completedRounds.forEach((round) => {
+        const finalizedRounds = rounds.filter((round) => isCompletedState(round.state) || isRevealState(round.state));
+        finalizedRounds.forEach((round) => {
             if (!roundStats[round.id]) {
                 fetchRoundStats(round.id);
             }
@@ -188,10 +197,28 @@ function RoundsContent() {
         }
     };
 
+    const confirmReveal = async () => {
+        if (!revealRound) return;
+        setRevealing(true);
+        try {
+            await axios.put(`${API}/pda-admin/events/${eventSlug}/rounds/${revealRound.id}`, {
+                state: 'Reveal',
+            }, { headers: getAuthHeader() });
+            toast.success(`Round ${revealRound.round_no} revealed`);
+            setRevealRound(null);
+            fetchRounds();
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to reveal round'));
+        } finally {
+            setRevealing(false);
+        }
+    };
+
     const getBadgeColor = (state) => {
-        if (state === 'Draft') return 'bg-gray-100 text-gray-800';
-        if (state === 'Published') return 'bg-blue-100 text-blue-800';
-        if (state === 'Active') return 'bg-green-100 text-green-800';
+        if (isDraftState(state)) return 'bg-gray-100 text-gray-800';
+        if (isPublishedState(state)) return 'bg-blue-100 text-blue-800';
+        if (isActiveState(state)) return 'bg-green-100 text-green-800';
+        if (isRevealState(state)) return 'bg-amber-100 text-amber-800';
         return 'bg-purple-100 text-purple-800';
     };
 
@@ -312,7 +339,7 @@ function RoundsContent() {
                                 <p className="text-primary font-bold mb-4"><Lock className="w-4 h-4 inline" /> Frozen</p>
                             ) : null}
 
-                            {round.state === 'Completed' ? <EventRoundStatsCard statsState={roundStats[round.id]} /> : null}
+                            {(isCompletedState(round.state) || isRevealState(round.state)) ? <EventRoundStatsCard statsState={roundStats[round.id]} /> : null}
 
                             <div className="flex flex-wrap gap-2">
                                 {!round.is_frozen ? (
@@ -320,7 +347,7 @@ function RoundsContent() {
                                         <Button size="sm" variant="outline" onClick={() => handleEdit(round)} className="border-2 border-black">
                                             <Edit2 className="w-4 h-4" />
                                         </Button>
-                                        {round.state === 'Draft' ? (
+                                        {isDraftState(round.state) ? (
                                             <Button size="sm" variant="outline" onClick={() => handleDelete(round.id)} className="border-2 border-black text-red-500">
                                                 <Trash2 className="w-4 h-4" />
                                             </Button>
@@ -328,26 +355,73 @@ function RoundsContent() {
                                     </>
                                 ) : null}
 
-                                {round.state === 'Draft' ? (
+                                {isDraftState(round.state) ? (
                                     <Button size="sm" onClick={() => handleStateChange(round.id, 'Published')} className="bg-blue-500 text-white border-2 border-black">Publish</Button>
                                 ) : null}
-                                {round.state === 'Published' ? (
+                                {isPublishedState(round.state) ? (
                                     <Button size="sm" onClick={() => handleStateChange(round.id, 'Active')} className="bg-green-500 text-white border-2 border-black">
                                         <Play className="w-4 h-4 mr-1" /> Activate
                                     </Button>
                                 ) : null}
-                                {round.state === 'Active' || round.state === 'Completed' ? (
+                                {(isActiveState(round.state) || isCompletedState(round.state) || isRevealState(round.state)) ? (
                                     <Link to={`/admin/events/${eventSlug}/rounds/${round.id}/scoring`}>
                                         <Button size="sm" className="bg-primary text-white border-2 border-black">
                                             <ChevronRight className="w-4 h-4" /> Scores
                                         </Button>
                                     </Link>
                                 ) : null}
+                                {(isCompletedState(round.state) || isRevealState(round.state)) ? (
+                                    <Button
+                                        size="sm"
+                                        onClick={() => {
+                                            if (isRevealState(round.state)) {
+                                                handleStateChange(round.id, 'Completed');
+                                                return;
+                                            }
+                                            setRevealRound(round);
+                                        }}
+                                        className={`border-2 border-black text-white ${isRevealState(round.state) ? 'bg-slate-700' : 'bg-amber-500'}`}
+                                    >
+                                        {isRevealState(round.state) ? 'Unreveal' : 'Reveal'}
+                                    </Button>
+                                ) : null}
                             </div>
                         </div>
                     ))}
                 </div>
             )}
+            <Dialog
+                open={Boolean(revealRound)}
+                onOpenChange={(open) => {
+                    if (!open && !revealing) setRevealRound(null);
+                }}
+            >
+                <DialogContent className="border-4 border-black">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading font-bold text-xl">Reveal Round Results</DialogTitle>
+                    </DialogHeader>
+                    <p className="text-sm text-slate-700">
+                        Reveal will make participant statuses visible for Round {revealRound?.round_no}.
+                    </p>
+                    <div className="mt-2 flex gap-2">
+                        <Button
+                            variant="outline"
+                            className="flex-1 border-2 border-black"
+                            onClick={() => setRevealRound(null)}
+                            disabled={revealing}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            className="flex-1 border-2 border-black bg-amber-500 text-white"
+                            onClick={confirmReveal}
+                            disabled={revealing}
+                        >
+                            {revealing ? 'Revealing...' : 'Confirm Reveal'}
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
         </>
     );
 }

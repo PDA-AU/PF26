@@ -810,6 +810,7 @@ class PdaManagedRoundStateEnum(str, Enum):
     PUBLISHED = "Published"
     ACTIVE = "Active"
     COMPLETED = "Completed"
+    REVEAL = "Reveal"
 
 
 class PdaManagedBadgePlaceEnum(str, Enum):

@@ -148,7 +148,7 @@ function LeaderboardContent() {
     }, [currentPage, totalPages]);
 
     const frozenNotCompletedRounds = useMemo(
-        () => rounds.filter((round) => round.is_frozen && round.state !== 'Completed'),
+        () => rounds.filter((round) => round.is_frozen && round.state !== 'Completed' && round.state !== 'Reveal'),
         [rounds]
     );
 

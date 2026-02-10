@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -62,6 +63,10 @@ const statusPillClass = (value) => (
         ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
         : 'border-rose-300 bg-rose-50 text-rose-700'
 );
+
+const normalizeRoundState = (state) => String(state || '').trim().toLowerCase();
+const isRoundCompleted = (state) => normalizeRoundState(state) === 'completed';
+const isRoundReveal = (state) => normalizeRoundState(state) === 'reveal';
 
 export default function AdminEventManage() {
     const { eventSlug, roundId } = useParams();
@@ -122,6 +127,8 @@ export default function AdminEventManage() {
         method: '',
         path_contains: ''
     });
+    const [revealConfirmOpen, setRevealConfirmOpen] = useState(false);
+    const [revealingRoundId, setRevealingRoundId] = useState(null);
     const importInputRef = useRef(null);
     const cameraRef = useRef(null);
     const streamRef = useRef(null);
@@ -490,6 +497,26 @@ export default function AdminEventManage() {
             if (selectedRoundId) fetchRoundRows(selectedRoundId);
         } catch (error) {
             toast.error(getApiErrorMessage(error, 'Failed to update round'));
+        }
+    };
+
+    const revealSelectedRound = async () => {
+        if (!selectedRound?.id) return;
+        setRevealingRoundId(selectedRound.id);
+        try {
+            await axios.put(
+                `${API}/pda-admin/events/${eventSlug}/rounds/${selectedRound.id}`,
+                { state: 'Reveal' },
+                { headers: getAuthHeader() }
+            );
+            fetchRounds();
+            if (selectedRoundId) fetchRoundRows(selectedRoundId);
+            toast.success(`Round ${selectedRound.round_no} revealed`);
+            setRevealConfirmOpen(false);
+        } catch (error) {
+            toast.error(getApiErrorMessage(error, 'Failed to update round'));
+        } finally {
+            setRevealingRoundId(null);
         }
     };
 
@@ -1027,6 +1054,21 @@ export default function AdminEventManage() {
                                                 </Button>
                                                 <Button onClick={saveScores}>Save</Button>
                                                 <Button variant="outline" className="border-black/20" onClick={() => updateRoundState(selectedRound.id, { state: 'Active' })}>Set Active</Button>
+                                                {(isRoundCompleted(selectedRound.state) || isRoundReveal(selectedRound.state)) ? (
+                                                    <Button
+                                                        variant="outline"
+                                                        className={isRoundReveal(selectedRound.state) ? 'border-slate-500 text-slate-700' : 'border-amber-400 text-amber-700'}
+                                                        onClick={() => {
+                                                            if (isRoundReveal(selectedRound.state)) {
+                                                                updateRoundState(selectedRound.id, { state: 'Completed' });
+                                                                return;
+                                                            }
+                                                            setRevealConfirmOpen(true);
+                                                        }}
+                                                    >
+                                                        {isRoundReveal(selectedRound.state) ? 'Unreveal' : 'Reveal'}
+                                                    </Button>
+                                                ) : null}
                                                 <Button className="bg-[#f6c347] text-black hover:bg-[#ffd16b]" onClick={async () => {
                                                     await axios.post(`${API}/pda-admin/events/${eventSlug}/rounds/${selectedRound.id}/freeze`, {}, { headers: getAuthHeader() });
                                                     fetchRounds();
@@ -1034,11 +1076,28 @@ export default function AdminEventManage() {
                                                 }}>Freeze</Button>
                                             </>
                                         ) : (
-                                            <Button className="bg-[#f6c347] text-black hover:bg-[#ffd16b]" onClick={async () => {
-                                                await axios.post(`${API}/pda-admin/events/${eventSlug}/rounds/${selectedRound.id}/unfreeze`, {}, { headers: getAuthHeader() });
-                                                fetchRounds();
-                                                fetchRoundRows(selectedRound.id);
-                                            }}>Unfreeze</Button>
+                                            <>
+                                                {(isRoundCompleted(selectedRound.state) || isRoundReveal(selectedRound.state)) ? (
+                                                    <Button
+                                                        variant="outline"
+                                                        className={isRoundReveal(selectedRound.state) ? 'border-slate-500 text-slate-700' : 'border-amber-400 text-amber-700'}
+                                                        onClick={() => {
+                                                            if (isRoundReveal(selectedRound.state)) {
+                                                                updateRoundState(selectedRound.id, { state: 'Completed' });
+                                                                return;
+                                                            }
+                                                            setRevealConfirmOpen(true);
+                                                        }}
+                                                    >
+                                                        {isRoundReveal(selectedRound.state) ? 'Unreveal' : 'Reveal'}
+                                                    </Button>
+                                                ) : null}
+                                                <Button className="bg-[#f6c347] text-black hover:bg-[#ffd16b]" onClick={async () => {
+                                                    await axios.post(`${API}/pda-admin/events/${eventSlug}/rounds/${selectedRound.id}/unfreeze`, {}, { headers: getAuthHeader() });
+                                                    fetchRounds();
+                                                    fetchRoundRows(selectedRound.id);
+                                                }}>Unfreeze</Button>
+                                            </>
                                         )}
                                     </div>
                                 </div>
@@ -1273,6 +1332,33 @@ export default function AdminEventManage() {
                     </div>
                 </section>
             ) : null}
+            <Dialog open={revealConfirmOpen} onOpenChange={(open) => !revealingRoundId && setRevealConfirmOpen(open)}>
+                <DialogContent className="border-4 border-black">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading font-bold text-xl">Reveal Round Results</DialogTitle>
+                    </DialogHeader>
+                    <p className="text-sm text-slate-700">
+                        Reveal will make participant statuses visible for Round {selectedRound?.round_no}.
+                    </p>
+                    <div className="mt-2 flex gap-2">
+                        <Button
+                            variant="outline"
+                            className="flex-1 border-black/20"
+                            onClick={() => setRevealConfirmOpen(false)}
+                            disabled={Boolean(revealingRoundId)}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            className="flex-1 border-2 border-black bg-amber-500 text-white hover:bg-amber-600"
+                            onClick={revealSelectedRound}
+                            disabled={Boolean(revealingRoundId)}
+                        >
+                            {revealingRoundId ? 'Revealing...' : 'Confirm Reveal'}
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
             </main>
         </div>
     );

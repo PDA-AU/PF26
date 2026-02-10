@@ -613,18 +613,6 @@ export default function PdaProfile() {
                                                 </span>
                                             </div>
 
-                                            <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                                                <p className="text-xs font-medium uppercase tracking-[0.1em] text-slate-600">
-                                                    Entity: <span className="font-bold text-black">{row.entity_type || '-'}</span>
-                                                </p>
-                                                <p className="text-xs font-medium uppercase tracking-[0.1em] text-slate-600">
-                                                    Attendance: <span className="font-bold text-black">{row.attendance_count || 0}</span>
-                                                </p>
-                                                <p className="text-xs font-medium uppercase tracking-[0.1em] text-slate-600">
-                                                    Score: <span className="font-bold text-black">{Number(row.cumulative_score || 0).toFixed(2)}</span>
-                                                </p>
-                                            </div>
-
                                             <div className="mt-4 flex flex-wrap gap-2">
                                                 {row.event?.status === 'open' ? (
                                                     <a
@@ -685,7 +673,6 @@ export default function PdaProfile() {
                                                         <p className="text-xs font-medium uppercase tracking-[0.1em] text-slate-700">
                                                             {achievement.badge_place} · {achievement.event_title}
                                                         </p>
-                                                        <p className="mt-1 text-xs font-medium text-slate-600">Score: {achievement.score ?? '-'}</p>
                                                     </div>
                                                 </div>
                                                 <div className="mt-3 flex justify-end">

@@ -308,6 +308,7 @@ class PdaEventRoundState(enum.Enum):
     PUBLISHED = "Published"
     ACTIVE = "Active"
     COMPLETED = "Completed"
+    REVEAL = "Reveal"
 
 
 class PdaEventInviteStatus(enum.Enum):

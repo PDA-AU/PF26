@@ -513,7 +513,7 @@ def event_dashboard(
         PdaEventRegistration.event_id == event.id,
         PdaEventRegistration.status == PdaEventRegistrationStatus.ELIMINATED,
     ).count()
-    rounds_completed = sum(1 for row in round_rows if row.state == PdaEventRoundState.COMPLETED)
+    rounds_completed = sum(1 for row in round_rows if row.state in {PdaEventRoundState.COMPLETED, PdaEventRoundState.REVEAL})
     current_active = next((row for row in round_rows if row.state == PdaEventRoundState.ACTIVE), None)
 
     department_distribution: Dict[str, int] = {}
@@ -1097,7 +1097,17 @@ def update_round(
     for field, value in updates.items():
         setattr(round_row, field, value)
 
-    if round_row.is_frozen and round_row.elimination_type and round_row.elimination_value is not None:
+    should_apply_shortlisting = (
+        round_row.is_frozen
+        and round_row.elimination_type
+        and round_row.elimination_value is not None
+        and (
+            "elimination_type" in updates
+            or "elimination_value" in updates
+            or eliminate_absent
+        )
+    )
+    if should_apply_shortlisting:
         entity_type = PdaEventEntityType.USER if event.participant_mode == PdaEventParticipantMode.INDIVIDUAL else PdaEventEntityType.TEAM
         active_regs = (
             db.query(PdaEventRegistration)
@@ -1314,7 +1324,7 @@ def round_participants(
     if not round_row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
     entities = _registered_entities(db, event)
-    if not (round_row.is_frozen or round_row.state == PdaEventRoundState.COMPLETED):
+    if not (round_row.is_frozen or round_row.state in {PdaEventRoundState.COMPLETED, PdaEventRoundState.REVEAL}):
         entities = [item for item in entities if _status_is_active(item.get("status"))]
     if search:
         needle = str(search).strip().lower()

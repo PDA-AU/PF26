@@ -223,9 +223,11 @@ export default function EventDashboard() {
                 return;
             }
 
-            if (nextDashboard?.is_registered && nextEvent?.participant_mode === 'individual') {
+            if (nextDashboard?.is_registered) {
                 const [profileRes, roundsRes] = await Promise.allSettled([
-                    axios.get(`${API}/pda/events/${eventSlug}/me`, { headers: getAuthHeader() }),
+                    nextEvent?.participant_mode === 'individual'
+                        ? axios.get(`${API}/pda/events/${eventSlug}/me`, { headers: getAuthHeader() })
+                        : Promise.resolve({ data: null }),
                     axios.get(`${API}/pda/events/${eventSlug}/my-rounds`, { headers: getAuthHeader() })
                 ]);
                 if (profileRes.status === 'fulfilled') {
@@ -661,35 +663,29 @@ export default function EventDashboard() {
                             <div className="lg:col-span-2">
                                 <div className="rounded-md border-4 border-black bg-white p-5 shadow-[8px_8px_0px_0px_#000000]">
                                     <h3 className="font-heading text-2xl font-black uppercase tracking-tight">Round Status</h3>
-                                    {!isTeamEvent ? (
-                                        roundStatuses.length > 0 ? (
-                                            <div className="mt-4 space-y-3">
-                                                {roundStatuses.map((round) => (
-                                                    <div key={`${round.round_no}-${round.round_name}`} className="flex flex-wrap items-center justify-between gap-3 rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
-                                                        <div className="flex items-center gap-3">
-                                                            <div className="inline-flex h-11 w-11 items-center justify-center rounded-md border-2 border-black bg-[#8B5CF6] font-heading text-sm font-black text-white shadow-neo">
-                                                                {String(round.round_no || '').slice(-2)}
-                                                            </div>
-                                                            <div>
-                                                                <p className="font-heading text-lg font-black uppercase tracking-tight">{round.round_name}</p>
-                                                                <p className="text-xs font-medium uppercase tracking-[0.1em] text-slate-600">{round.round_no}</p>
-                                                            </div>
+                                    {roundStatuses.length > 0 ? (
+                                        <div className="mt-4 space-y-3">
+                                            {roundStatuses.map((round) => (
+                                                <div key={`${round.round_no}-${round.round_name}`} className="flex flex-wrap items-center justify-between gap-3 rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="inline-flex h-11 w-11 items-center justify-center rounded-md border-2 border-black bg-[#8B5CF6] font-heading text-sm font-black text-white shadow-neo">
+                                                            {String(round.round_no || '').slice(-2)}
                                                         </div>
-                                                        <div className="flex items-center gap-2 rounded-md border-2 border-black bg-white px-3 py-2 shadow-neo">
-                                                            {statusIcon(round.status)}
-                                                            <span className="text-xs font-bold uppercase tracking-[0.12em] text-black">{round.status}</span>
+                                                        <div>
+                                                            <p className="font-heading text-lg font-black uppercase tracking-tight">{round.round_name}</p>
+                                                            <p className="text-xs font-medium uppercase tracking-[0.1em] text-slate-600">{round.round_no}</p>
                                                         </div>
                                                     </div>
-                                                ))}
-                                            </div>
-                                        ) : (
-                                            <div className="mt-4 rounded-md border-2 border-black bg-[#fffdf0] p-5 text-sm font-medium text-slate-700 shadow-neo">
-                                                Rounds are not published yet for this event.
-                                            </div>
-                                        )
+                                                    <div className="flex items-center gap-2 rounded-md border-2 border-black bg-white px-3 py-2 shadow-neo">
+                                                        {statusIcon(round.status)}
+                                                        <span className="text-xs font-bold uppercase tracking-[0.12em] text-black">{round.status}</span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
                                     ) : (
                                         <div className="mt-4 rounded-md border-2 border-black bg-[#fffdf0] p-5 text-sm font-medium text-slate-700 shadow-neo">
-                                            Team round status will be reflected through leaderboard and team progression in upcoming updates.
+                                            Rounds are not published yet for this event.
                                         </div>
                                     )}
                                 </div>
