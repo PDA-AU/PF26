@@ -216,7 +216,7 @@ export default function RecruitmentsAdmin() {
         const teamMatch = recruitTeamFilter === 'All'
             || (recruitTeamFilter === 'Unassigned' && !preferredTeam)
             || preferredTeam === recruitTeamFilter;
-        const haystack = `${recruit?.name || ''} ${recruit?.regno || ''} ${recruit?.email || ''}`.toLowerCase();
+        const haystack = `${recruit?.name || ''} ${recruit?.profile_name || ''} ${recruit?.regno || ''} ${recruit?.email || ''}`.toLowerCase();
         return teamMatch && haystack.includes(recruitSearch.trim().toLowerCase());
     });
     const allVisibleSelected = filteredRecruitments.length > 0 && filteredRecruitments.every((recruit) => selectedRecruitments.includes(recruit.id));
@@ -380,6 +380,9 @@ export default function RecruitmentsAdmin() {
                                 />
                                 <div>
                                     <p className="font-semibold">{recruit.name} ({recruit.regno})</p>
+                                    <p className="text-xs text-slate-500">
+                                        Profile: @{recruit.profile_name || 'n/a'}
+                                    </p>
                                     <p className="text-xs text-slate-500">
                                         {recruit.email} · {recruit.phno || 'No phone'} · DOB: {recruit.dob || 'N/A'}
                                     </p>

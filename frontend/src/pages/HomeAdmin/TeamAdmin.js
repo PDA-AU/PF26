@@ -99,7 +99,7 @@ export default function TeamAdmin() {
         if (!search) return filteredByTeam;
         const s = search.toLowerCase();
         return filteredByTeam.filter(m =>
-            [m.name, m.regno, m.team, m.designation, m.email, m.phno, m.dept]
+            [m.name, m.profile_name, m.regno, m.team, m.designation, m.email, m.phno, m.dept]
                 .filter(Boolean)
                 .join(' ')
                 .toLowerCase()
@@ -516,8 +516,9 @@ export default function TeamAdmin() {
                                 }
                             }}
                         >
-                            <div className="hidden sm:grid grid-cols-[1.6fr_1fr_1fr_1fr] bg-[#fff7dc] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-600">
+                            <div className="hidden sm:grid grid-cols-[1.5fr_1.2fr_1fr_1fr_1fr] bg-[#fff7dc] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-600">
                                 <span>Name</span>
+                                <span>Profile Name</span>
                                 <span>Reg No</span>
                                 <span>Team</span>
                                 <span>Designation</span>
@@ -528,12 +529,13 @@ export default function TeamAdmin() {
                                         key={member.id}
                                         type="button"
                                         onClick={() => openMember(member)}
-                                        className="w-full px-4 py-3 text-left text-sm hover:bg-[#fffaf0] sm:grid sm:grid-cols-[1.6fr_1fr_1fr_1fr] sm:items-center"
+                                        className="w-full px-4 py-3 text-left text-sm hover:bg-[#fffaf0] sm:grid sm:grid-cols-[1.5fr_1.2fr_1fr_1fr_1fr] sm:items-center"
                                     >
                                         <div className="flex flex-col gap-1 sm:block">
                                             <span className="font-medium text-[#11131a]">{member.name || 'Unnamed'}</span>
-                                            <span className="text-xs text-slate-500 sm:hidden">{member.regno || 'N/A'}</span>
+                                            <span className="text-xs text-slate-500 sm:hidden">@{member.profile_name || 'n/a'} · {member.regno || 'N/A'}</span>
                                         </div>
+                                        <span className="hidden text-slate-600 sm:inline">@{member.profile_name || 'n/a'}</span>
                                         <span className="hidden text-slate-600 sm:inline">{member.regno || 'N/A'}</span>
                                         <span className="text-slate-600">{member.team || 'Unassigned'}</span>
                                         <span className="text-slate-600">{member.designation || 'Member'}</span>
@@ -567,6 +569,7 @@ export default function TeamAdmin() {
                             <div className="grid gap-6 md:grid-cols-2">
                                 <div className="space-y-2 text-xs text-slate-500">
                                     <p><span className="font-semibold text-slate-600">Reg No:</span> {selectedMember.regno || 'N/A'}</p>
+                                    <p><span className="font-semibold text-slate-600">Profile Name:</span> @{selectedMember.profile_name || 'n/a'}</p>
                                     <p><span className="font-semibold text-slate-600">Email:</span> {selectedMember.email || 'N/A'}</p>
                                     <p><span className="font-semibold text-slate-600">Phone:</span> {selectedMember.phno || 'N/A'}</p>
                                     <p><span className="font-semibold text-slate-600">Dept:</span> {selectedMember.dept || 'N/A'}</p>

@@ -4,9 +4,11 @@ import { ArrowLeft, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useAuth } from '@/context/AuthContext';
+import PdaFooter from '@/components/layout/PdaFooter';
+import PdaHeader from '@/components/layout/PdaHeader';
 import { persohubApi } from '@/pages/persohub/api';
 import { copyTextToClipboard } from '@/utils/clipboard';
-import { EmptyState, PersohubHeader, PostCard } from '@/pages/persohub/components';
+import { EmptyState, PostCard } from '@/pages/persohub/components';
 import '@/pages/persohub/persohub.css';
 
 export default function PersohubPostPage() {
@@ -67,8 +69,14 @@ export default function PersohubPostPage() {
 
     return (
         <div className="persohub-page">
+            <PdaHeader />
             <div className="ph-layer ph-shell">
-                <PersohubHeader />
+                <header className="ph-header ph-section ph-span-all">
+                    <div className="ph-title-band">
+                        <h1 className="ph-title">POST VIEW</h1>
+                    </div>
+                    <p className="ph-sub">Focused conversation thread</p>
+                </header>
                 <div className="ph-card ph-side-card" style={{ marginBottom: '0.9rem' }}>
                     <Link to="/persohub" className="ph-action-btn" style={{ textDecoration: 'none', width: 'fit-content' }}>
                         <ArrowLeft size={14} /> Back to feed
@@ -92,6 +100,7 @@ export default function PersohubPostPage() {
                     />
                 ) : null}
             </div>
+            <PdaFooter />
 
             {shareOpen && post ? (
                 <div className="ph-modal-overlay" role="dialog" aria-modal="true">

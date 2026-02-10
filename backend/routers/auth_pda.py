@@ -112,6 +112,20 @@ def pda_register(user_data: PdaUserRegister, db: Session = Depends(get_db)):
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists")
 
+    desired_profile_name = str(user_data.profile_name or "").strip().lower() or None
+    if desired_profile_name:
+        if not is_profile_name_valid(desired_profile_name):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid profile name format")
+        existing_profile = db.query(PdaUser).filter(PdaUser.profile_name == desired_profile_name).first()
+        if existing_profile:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Profile name already in use")
+        from models import PersohubCommunity
+        community_conflict = db.query(PersohubCommunity).filter(
+            PersohubCommunity.profile_id == desired_profile_name
+        ).first()
+        if community_conflict:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Profile name reserved by community")
+
     json_content = {"is_applied": False}
     if user_data.preferred_team:
         preferred_team = user_data.preferred_team.strip()
@@ -126,7 +140,7 @@ def pda_register(user_data: PdaUserRegister, db: Session = Depends(get_db)):
         email=user_data.email,
         hashed_password=get_password_hash(user_data.password),
         name=user_data.name,
-        profile_name=generate_unique_profile_name(db, user_data.name),
+        profile_name=desired_profile_name or generate_unique_profile_name(db, user_data.name),
         dob=user_data.dob,
         gender=user_data.gender,
         phno=user_data.phno,

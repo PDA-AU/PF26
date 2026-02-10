@@ -3,8 +3,8 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, Calendar, Sparkles, ChevronLeft, ChevronRight, Instagram, Linkedin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import PdaHeader from '@/components/layout/PdaHeader';
-import PdaFooter from '@/components/layout/PdaFooter';
+import HomeHeader from '@/components/layout/HomeHeader';
+import HomeFooter from '@/components/layout/HomeFooter';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -359,7 +359,7 @@ export default function PdaHome() {
 
     return (
         <div className="min-h-screen bg-[#f3efe6] text-[#11131a] flex flex-col">
-            <PdaHeader />
+            <HomeHeader />
 
             <main className="flex-1">
                 <section className="relative overflow-hidden">
@@ -1003,7 +1003,7 @@ export default function PdaHome() {
                 </section>
             </main>
 
-            <PdaFooter />
+            <HomeFooter />
 
             <Dialog open={posterDialogOpen} onOpenChange={setPosterDialogOpen}>
                 <DialogContent className="max-w-4xl bg-white p-0">

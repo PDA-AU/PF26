@@ -142,11 +142,22 @@ const downloadCertificateArtwork = ({ participantName, eventTitle, certificateTe
     anchor.remove();
 };
 
+const TROPHY_IMAGE = 'https://images.unsplash.com/photo-1578269174936-2709b6aeb913?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTZ8MHwxfHNlYXJjaHwyfHxnb2xkJTIwdHJvcGh5JTIwbWluaW1hbGlzdHxlbnwwfHx8fDE3NzAwMTcxMDB8MA&ixlib=rb-4.1.0&q=85';
+const panelClass = 'rounded-md border-4 border-black bg-white p-6 shadow-[8px_8px_0px_0px_#000000]';
+const tileClass = 'rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo';
+const inputClass = 'h-12 border-2 border-black bg-white text-sm shadow-neo focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2';
+const selectTriggerClass = 'h-12 border-2 border-black bg-white text-sm shadow-neo focus:ring-2 focus:ring-black focus:ring-offset-2';
+const selectContentClass = 'border-2 border-black bg-white shadow-[4px_4px_0px_0px_#000000]';
+const primaryButtonClass = 'rounded-md border-2 border-black bg-[#8B5CF6] text-xs font-bold uppercase tracking-[0.14em] text-white shadow-neo transition-[background-color,transform,box-shadow] duration-150 hover:bg-[#7C3AED] hover:-translate-x-[1px] hover:-translate-y-[1px] hover:shadow-[6px_6px_0px_0px_#000000] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none';
+const accentButtonClass = 'rounded-md border-2 border-black bg-[#FDE047] text-xs font-bold uppercase tracking-[0.14em] text-black shadow-neo transition-[transform,box-shadow,background-color] duration-150 hover:bg-[#f9d729] hover:-translate-x-[1px] hover:-translate-y-[1px] hover:shadow-[6px_6px_0px_0px_#000000] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none';
+const neutralButtonClass = 'rounded-md border-2 border-black bg-white text-xs font-bold uppercase tracking-[0.14em] text-black shadow-neo transition-[transform,box-shadow,background-color] duration-150 hover:bg-[#C4B5FD] hover:-translate-x-[1px] hover:-translate-y-[1px] hover:shadow-[6px_6px_0px_0px_#000000] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none';
+
 export default function PdaProfile() {
     const { user, getAuthHeader, updateUser } = useAuth();
 
     const [formData, setFormData] = useState({
         name: '',
+        profile_name: '',
         email: '',
         dob: '',
         gender: '',
@@ -192,6 +203,7 @@ export default function PdaProfile() {
         if (!user) return;
         setFormData({
             name: user.name || '',
+            profile_name: user.profile_name || '',
             email: user.email || '',
             dob: user.dob || '',
             gender: user.gender || '',
@@ -284,6 +296,11 @@ export default function PdaProfile() {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        const profile_name = String(formData.profile_name || '').trim().toLowerCase();
+        if (profile_name && !/^[a-z0-9_]{3,40}$/.test(profile_name)) {
+            toast.error('Profile name must be 3-40 chars: lowercase letters, numbers, underscore');
+            return;
+        }
         const instagram_url = String(formData.instagram_url || '').trim();
         const linkedin_url = String(formData.linkedin_url || '').trim();
         const github_url = String(formData.github_url || '').trim();
@@ -291,6 +308,7 @@ export default function PdaProfile() {
         try {
             const payload = {
                 name: formData.name,
+                profile_name: profile_name || null,
                 email: formData.email,
                 dob: formData.dob,
                 gender: formData.gender,
@@ -457,347 +475,483 @@ export default function PdaProfile() {
     if (!user) return null;
 
     return (
-        <div className="min-h-screen bg-[#f3efe6] text-[#11131a] flex flex-col">
+        <div className="min-h-screen bg-[#fffdf5] text-black flex flex-col">
             <PdaHeader />
-            <main className="flex-1 mx-auto w-full max-w-6xl px-5 py-10 space-y-8">
-                {!user.email_verified ? (
-                    <section className="rounded-2xl border-2 border-black bg-[#fff4d6] p-4 text-sm text-black">
-                        <p className="font-semibold">Your email is not verified.</p>
-                        <p className="mt-1 text-xs text-slate-700">Please verify your email. If you used a dummy email, update it first.</p>
-                        <div className="mt-3 flex justify-end">
-                            <Button type="button" onClick={handleResendVerification} disabled={sendingVerification} className="bg-[#11131a] text-white hover:bg-[#1f2330]">
-                                {sendingVerification ? 'Sending...' : 'Resend Verification'}
-                            </Button>
+            <main className="relative isolate flex-1 overflow-hidden">
+                <div className="pointer-events-none absolute inset-0 z-0">
+                    <div className="absolute -left-10 top-20 h-24 w-24 rotate-12 border-4 border-black bg-[#8B5CF6]" />
+                    <div className="absolute right-8 top-14 h-12 w-12 border-4 border-black bg-[#FDE047]" />
+                    <div className="absolute bottom-20 right-[8%] h-16 w-16 rotate-45 border-4 border-black bg-[#C4B5FD]" />
+                </div>
+
+                <div className="relative z-10 mx-auto w-full max-w-7xl space-y-8 px-4 py-10 sm:px-6 lg:px-8 lg:py-12">
+                    {!user.email_verified ? (
+                        <section className="rounded-md border-4 border-black bg-[#fff3c4] p-4 shadow-neo">
+                            <p className="font-heading text-lg font-black uppercase tracking-tight">Email Verification Pending</p>
+                            <p className="mt-1 text-sm font-medium text-slate-700">Please verify your email. If needed, resend verification to your inbox.</p>
+                            <div className="mt-4 flex justify-end">
+                                <Button
+                                    type="button"
+                                    onClick={handleResendVerification}
+                                    disabled={sendingVerification}
+                                    data-testid="pda-profile-resend-verification-button"
+                                    className={primaryButtonClass}
+                                >
+                                    {sendingVerification ? 'Sending...' : 'Resend Verification'}
+                                </Button>
+                            </div>
+                        </section>
+                    ) : null}
+
+                    <section className={`${panelClass} overflow-hidden`}>
+                        <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
+                            <div>
+                                <p className="font-mono text-xs font-bold uppercase tracking-[0.2em] text-[#8B5CF6]">PDA Dashboard</p>
+                                <h1 className="mt-2 font-heading text-4xl font-black uppercase tracking-tight">My Profile Control Room</h1>
+                                <p className="mt-2 max-w-xl text-sm font-medium text-slate-700">
+                                    Manage your profile, monitor event participation, and track achievements in a single dashboard.
+                                </p>
+
+                                <div className="mt-5 flex flex-wrap items-center gap-4 rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
+                                    {user.image_url ? (
+                                        <img src={user.image_url} alt={user.name} className="h-20 w-20 border-2 border-black object-cover" />
+                                    ) : (
+                                        <div className="flex h-20 w-20 items-center justify-center border-2 border-black bg-[#FDE047] font-heading text-2xl font-black">
+                                            {user.name ? user.name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase() : 'PD'}
+                                        </div>
+                                    )}
+                                    <div className="space-y-1">
+                                        <p className="font-heading text-xl font-black uppercase tracking-tight">{user.name || 'PDA Member'}</p>
+                                        <p className="font-mono text-xs font-bold uppercase tracking-[0.12em] text-[#8B5CF6]">@{user.profile_name || 'n/a'}</p>
+                                        <p className="font-mono text-xs font-bold uppercase tracking-[0.12em] text-slate-600">{user.regno}</p>
+                                        <p className="text-sm font-medium text-slate-700">{user.email}</p>
+                                    </div>
+                                    <div className="ml-auto">
+                                        <span className="inline-flex items-center rounded-md border-2 border-black bg-[#C4B5FD] px-3 py-1 text-xs font-bold uppercase tracking-[0.12em] shadow-neo">
+                                            {user.is_member ? 'Member' : user.is_applied ? 'Applied' : 'Applicant'}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                                    <div className={tileClass}>
+                                        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">Registered Events</p>
+                                        <p className="mt-1 font-heading text-3xl font-black">{sortedMyEvents.length}</p>
+                                    </div>
+                                    <div className={tileClass}>
+                                        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">Open Events</p>
+                                        <p className="mt-1 font-heading text-3xl font-black">{activeEventCount}</p>
+                                    </div>
+                                    <div className={tileClass}>
+                                        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">Achievements</p>
+                                        <p className="mt-1 font-heading text-3xl font-black">{achievements.length}</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="relative min-h-[300px] overflow-hidden border-4 border-black bg-[#11131a] shadow-[8px_8px_0px_0px_#000000]">
+                                <img src={TROPHY_IMAGE} alt="Achievement trophy" className="absolute inset-0 h-full w-full object-cover opacity-45" />
+                                <div className="relative z-10 flex h-full flex-col justify-between p-5 text-white">
+                                    <p className="inline-flex w-fit rounded-md border-2 border-black bg-[#FDE047] px-3 py-1 font-mono text-xs font-bold uppercase tracking-[0.14em] text-black">
+                                        Achievement Zone
+                                    </p>
+                                    <div>
+                                        <h2 className="font-heading text-3xl font-black uppercase tracking-tight">Compete.</h2>
+                                        <h2 className="font-heading text-3xl font-black uppercase tracking-tight text-[#FDE047]">Contribute.</h2>
+                                        <h2 className="font-heading text-3xl font-black uppercase tracking-tight text-[#C4B5FD]">Celebrate.</h2>
+                                        <p className="mt-3 text-sm font-medium text-white/90">
+                                            Keep attending open events and closing rounds to unlock badges and certificates.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </section>
-                ) : null}
 
-                <section className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
-                    <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-                        <div>
-                            <p className="text-xs uppercase tracking-[0.35em] text-[#b8890b]">PDA Profile</p>
-                            <h1 className="mt-2 text-3xl font-heading font-black">My PDA Dashboard</h1>
-                            <p className="mt-2 text-sm text-slate-600">Manage profile, track event participation, and access achievements.</p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            {user.image_url ? (
-                                <img src={user.image_url} alt={user.name} className="h-24 w-24 rounded-3xl border border-black/10 object-cover" />
+                    <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+                        <div className={panelClass}>
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                <h2 className="font-heading text-3xl font-black uppercase tracking-tight">My Events</h2>
+                                <span className="rounded-md border-2 border-black bg-[#FDE047] px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] shadow-neo">
+                                    Completed: {completedEventCount}
+                                </span>
+                            </div>
+
+                            {managedLoading ? (
+                                <p className="mt-4 text-sm font-medium text-slate-600">Loading events...</p>
+                            ) : sortedMyEvents.length === 0 ? (
+                                <p className="mt-4 rounded-md border-2 border-black bg-[#fffdf0] p-4 text-sm font-medium text-slate-700 shadow-neo">
+                                    No managed event registrations yet.
+                                </p>
                             ) : (
-                                <div className="flex h-24 w-24 items-center justify-center rounded-3xl border border-black/10 bg-slate-50 text-lg font-semibold text-slate-600">
-                                    {user.name ? user.name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase() : 'PD'}
+                                <div className="mt-4 space-y-3">
+                                    {sortedMyEvents.map((row) => (
+                                        <div key={`${row.event?.slug}-${row.entity_type}-${row.entity_id}`} className="rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
+                                            <div className="flex flex-wrap items-start justify-between gap-3">
+                                                <div>
+                                                    <p className="font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">
+                                                        {row.event?.event_code || 'Event'}
+                                                    </p>
+                                                    <h3 className="mt-1 font-heading text-xl font-black uppercase tracking-tight">
+                                                        {row.event?.title || 'Untitled Event'}
+                                                    </h3>
+                                                    <p className="mt-1 text-xs font-medium uppercase tracking-[0.1em] text-slate-700">
+                                                        {row.event?.participant_mode} {row.event?.template_option ? `· ${row.event.template_option}` : ''}
+                                                    </p>
+                                                </div>
+                                                <span className={`rounded-md border-2 border-black px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] shadow-neo ${row.event?.status === 'open' ? 'bg-[#4ADE80] text-black' : 'bg-[#11131a] text-[#FDE047]'}`}>
+                                                    {row.event?.status || 'unknown'}
+                                                </span>
+                                            </div>
+
+                                            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                                                <p className="text-xs font-medium uppercase tracking-[0.1em] text-slate-600">
+                                                    Entity: <span className="font-bold text-black">{row.entity_type || '-'}</span>
+                                                </p>
+                                                <p className="text-xs font-medium uppercase tracking-[0.1em] text-slate-600">
+                                                    Attendance: <span className="font-bold text-black">{row.attendance_count || 0}</span>
+                                                </p>
+                                                <p className="text-xs font-medium uppercase tracking-[0.1em] text-slate-600">
+                                                    Score: <span className="font-bold text-black">{Number(row.cumulative_score || 0).toFixed(2)}</span>
+                                                </p>
+                                            </div>
+
+                                            <div className="mt-4 flex flex-wrap gap-2">
+                                                {row.event?.status === 'open' ? (
+                                                    <a
+                                                        href={`/events/${row.event.slug}`}
+                                                        data-testid={`pda-profile-open-dashboard-${row.event?.slug || 'event'}`}
+                                                    >
+                                                        <Button type="button" className={neutralButtonClass}>
+                                                            Open Dashboard
+                                                            <ExternalLink className="ml-2 h-4 w-4" />
+                                                        </Button>
+                                                    </a>
+                                                ) : null}
+                                                <Button
+                                                    type="button"
+                                                    onClick={() => handleDownloadCertificate(row.event.slug)}
+                                                    disabled={certificateLoadingSlug === row.event.slug}
+                                                    data-testid={`pda-profile-download-certificate-${row.event?.slug || 'event'}`}
+                                                    className={accentButtonClass}
+                                                >
+                                                    <Download className="mr-2 h-4 w-4" />
+                                                    {certificateLoadingSlug === row.event.slug ? 'Generating...' : 'Download Certificate'}
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    ))}
                                 </div>
                             )}
-                            <div>
-                                <p className="font-semibold text-slate-900">{user.name || 'PDA Member'}</p>
-                                <p className="text-sm text-slate-600">{user.regno}</p>
-                                <p className="text-xs text-slate-500">{user.email}</p>
+                        </div>
+
+                        <div className={panelClass}>
+                            <div className="flex items-center justify-between gap-3">
+                                <h2 className="font-heading text-3xl font-black uppercase tracking-tight">Achievements</h2>
+                                <Award className="h-6 w-6 text-[#8B5CF6]" />
                             </div>
-                        </div>
-                    </div>
-
-                    <div className="mt-6 grid gap-3 sm:grid-cols-3">
-                        <div className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
-                            <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Registered Events</p>
-                            <p className="mt-1 text-2xl font-heading font-black">{sortedMyEvents.length}</p>
-                        </div>
-                        <div className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
-                            <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Open Events</p>
-                            <p className="mt-1 text-2xl font-heading font-black">{activeEventCount}</p>
-                        </div>
-                        <div className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
-                            <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Achievements</p>
-                            <p className="mt-1 text-2xl font-heading font-black">{achievements.length}</p>
-                        </div>
-                    </div>
-                </section>
-
-                <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-                    <div className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
-                        <div className="flex items-center justify-between">
-                            <h2 className="text-2xl font-heading font-black">My Events</h2>
-                            <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Completed: {completedEventCount}</span>
-                        </div>
-
-                        {managedLoading ? (
-                            <p className="mt-4 text-sm text-slate-500">Loading events...</p>
-                        ) : sortedMyEvents.length === 0 ? (
-                            <p className="mt-4 rounded-xl border border-black/10 bg-[#fffdf7] p-4 text-sm text-slate-600">No managed event registrations yet.</p>
-                        ) : (
-                            <div className="mt-4 space-y-3">
-                                {sortedMyEvents.map((row) => (
-                                    <div key={`${row.event?.slug}-${row.entity_type}-${row.entity_id}`} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
-                                        <div className="flex flex-wrap items-start justify-between gap-3">
-                                            <div>
-                                                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{row.event?.event_code}</p>
-                                                <h3 className="text-lg font-heading font-black">{row.event?.title}</h3>
-                                                <p className="mt-1 text-sm text-slate-600">{row.event?.participant_mode} · {row.event?.template_option}</p>
-                                            </div>
-                                            <span className={`rounded-full border px-3 py-1 text-xs uppercase tracking-[0.2em] ${row.event?.status === 'open' ? 'border-[#c99612] bg-[#fff3c4] text-[#7a5a00]' : 'border-black/10 bg-[#11131a] text-[#f6c347]'}`}>
-                                                {row.event?.status || 'unknown'}
-                                            </span>
-                                        </div>
-
-                                        <div className="mt-3 grid gap-2 text-sm text-slate-600 sm:grid-cols-3">
-                                            <p>Entity: <span className="font-semibold text-slate-900">{row.entity_type || '-'}</span></p>
-                                            <p>Attendance: <span className="font-semibold text-slate-900">{row.attendance_count || 0}</span></p>
-                                            <p>Score: <span className="font-semibold text-slate-900">{Number(row.cumulative_score || 0).toFixed(2)}</span></p>
-                                        </div>
-
-                                        <div className="mt-4 flex flex-wrap gap-2">
-                                            {row.event?.status === 'open' ? (
-                                                <a href={`/events/${row.event.slug}`}>
-                                                    <Button variant="outline" className="border-black/20">
-                                                        Open Dashboard
-                                                        <ExternalLink className="ml-2 h-4 w-4" />
-                                                    </Button>
-                                                </a>
-                                            ) : null}
-                                            <Button
-                                                className="bg-[#f6c347] text-black hover:bg-[#ffd16b]"
-                                                onClick={() => handleDownloadCertificate(row.event.slug)}
-                                                disabled={certificateLoadingSlug === row.event.slug}
-                                            >
-                                                <Download className="mr-2 h-4 w-4" />
-                                                {certificateLoadingSlug === row.event.slug ? 'Generating...' : 'Download Certificate'}
-                                            </Button>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
-                        <div className="flex items-center justify-between">
-                            <h2 className="text-2xl font-heading font-black">Achievements</h2>
-                            <Award className="h-5 w-5 text-[#b8890b]" />
-                        </div>
-                        {managedLoading ? (
-                            <p className="mt-4 text-sm text-slate-500">Loading achievements...</p>
-                        ) : achievements.length === 0 ? (
-                            <p className="mt-4 rounded-xl border border-black/10 bg-[#fffdf7] p-4 text-sm text-slate-600">No badges yet. Win rounds to unlock achievements.</p>
-                        ) : (
-                            <div className="mt-4 space-y-3">
-                                {achievements.map((achievement, index) => (
-                                    <div key={`${achievement.event_slug}-${achievement.badge_title}-${index}`} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
-                                        <div className="flex items-start gap-3">
-                                            {achievement.image_url ? (
-                                                <img src={achievement.image_url} alt={achievement.badge_title} className="h-14 w-14 rounded-xl border border-black/10 object-cover" />
-                                            ) : (
-                                                <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-black/10 bg-[#fff3c4] text-[#7a5a00]">
-                                                    <Award className="h-5 w-5" />
+                            {managedLoading ? (
+                                <p className="mt-4 text-sm font-medium text-slate-600">Loading achievements...</p>
+                            ) : achievements.length === 0 ? (
+                                <p className="mt-4 rounded-md border-2 border-black bg-[#fffdf0] p-4 text-sm font-medium text-slate-700 shadow-neo">
+                                    No badges yet. Win rounds to unlock achievements.
+                                </p>
+                            ) : (
+                                <div className="mt-4 space-y-3">
+                                    {achievements.map((achievement, index) => (
+                                        <div key={`${achievement.event_slug}-${achievement.badge_title}-${index}`} className="rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
+                                            <div className="flex items-start gap-3">
+                                                {achievement.image_url ? (
+                                                    <img src={achievement.image_url} alt={achievement.badge_title} className="h-14 w-14 border-2 border-black object-cover" />
+                                                ) : (
+                                                    <div className="flex h-14 w-14 items-center justify-center border-2 border-black bg-[#FDE047]">
+                                                        <Award className="h-5 w-5 text-black" />
+                                                    </div>
+                                                )}
+                                                <div className="flex-1">
+                                                    <p className="font-heading text-lg font-black uppercase tracking-tight">{achievement.badge_title}</p>
+                                                    <p className="text-xs font-medium uppercase tracking-[0.1em] text-slate-700">
+                                                        {achievement.badge_place} · {achievement.event_title}
+                                                    </p>
+                                                    <p className="mt-1 text-xs font-medium text-slate-600">Score: {achievement.score ?? '-'}</p>
                                                 </div>
-                                            )}
-                                            <div className="flex-1">
-                                                <p className="font-semibold text-slate-900">{achievement.badge_title}</p>
-                                                <p className="text-sm text-slate-600">{achievement.badge_place} · {achievement.event_title}</p>
-                                                <p className="text-xs text-slate-500">Score: {achievement.score ?? '-'}</p>
+                                            </div>
+                                            <div className="mt-3 flex justify-end">
+                                                <Button
+                                                    type="button"
+                                                    onClick={() => handleShareAchievement(achievement)}
+                                                    data-testid={`pda-profile-share-achievement-${achievement.event_slug || index}`}
+                                                    className={neutralButtonClass}
+                                                >
+                                                    <Share2 className="mr-2 h-4 w-4" />
+                                                    Share
+                                                </Button>
                                             </div>
                                         </div>
-                                        <div className="mt-3 flex justify-end">
-                                            <Button variant="outline" className="border-black/20" onClick={() => handleShareAchievement(achievement)}>
-                                                <Share2 className="mr-2 h-4 w-4" />
-                                                Share
-                                            </Button>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                </section>
-
-                <section className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
-                    <div className="flex items-center justify-between gap-3">
-                        <div>
-                            <h2 className="text-2xl font-heading font-black">Profile Settings</h2>
-                            <p className="mt-1 text-sm text-slate-600">Update personal details, social links, and password.</p>
-                        </div>
-                        {!isEditing ? (
-                            <Button type="button" onClick={() => setIsEditing(true)} className="bg-[#11131a] text-white hover:bg-[#1f2330]">
-                                Edit Profile
-                            </Button>
-                        ) : null}
-                    </div>
-
-                    <form onSubmit={handleSubmit} className="mt-6 grid gap-4 md:grid-cols-2">
-                        <div>
-                            <Label>Register Number</Label>
-                            <Input value={user.regno || ''} readOnly className="bg-slate-50" />
-                        </div>
-                        <div>
-                            <Label>Name</Label>
-                            <Input name="name" value={formData.name} onChange={handleChange} disabled={!isEditing} />
-                        </div>
-                        <div>
-                            <Label>Email</Label>
-                            <Input name="email" value={formData.email} onChange={handleChange} disabled={!isEditing} />
-                        </div>
-                        <div>
-                            <Label>Date of Birth</Label>
-                            <Input name="dob" type="date" value={formData.dob} onChange={handleChange} disabled={!isEditing} />
-                        </div>
-                        <div>
-                            <Label>Gender</Label>
-                            <Select value={formData.gender} onValueChange={(value) => setFormData((prev) => ({ ...prev, gender: value }))} disabled={!isEditing}>
-                                <SelectTrigger className="w-full"><SelectValue placeholder="Select gender" /></SelectTrigger>
-                                <SelectContent>
-                                    {GENDERS.map((gender) => (
-                                        <SelectItem key={gender.value} value={gender.value}>{gender.label}</SelectItem>
                                     ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div>
-                            <Label>Phone</Label>
-                            <Input name="phno" value={formData.phno} onChange={handleChange} disabled={!isEditing} />
-                        </div>
-                        <div>
-                            <Label>Department</Label>
-                            <Select value={formData.dept} onValueChange={(value) => setFormData((prev) => ({ ...prev, dept: value }))} disabled={!isEditing}>
-                                <SelectTrigger className="w-full"><SelectValue placeholder="Select department" /></SelectTrigger>
-                                <SelectContent>
-                                    {DEPARTMENTS.map((dept) => (
-                                        <SelectItem key={dept.value} value={dept.value}>{dept.label}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div>
-                            <Label>Membership Status</Label>
-                            <Input value={user.is_member ? 'Member' : (user.is_applied ? 'Applied' : 'Not Applied')} readOnly className="bg-slate-50" />
-                        </div>
-                        <div>
-                            <Label>Team</Label>
-                            <Input value={user.team || 'Not assigned'} readOnly className="bg-slate-50" />
-                        </div>
-                        <div>
-                            <Label>Designation</Label>
-                            <Input value={user.designation || 'Not assigned'} readOnly className="bg-slate-50" />
-                        </div>
-                        <div>
-                            <Label>Instagram</Label>
-                            <Input name="instagram_url" value={formData.instagram_url} onChange={handleChange} placeholder="https://instagram.com/username" disabled={!isEditing} />
-                        </div>
-                        <div>
-                            <Label>LinkedIn</Label>
-                            <Input name="linkedin_url" value={formData.linkedin_url} onChange={handleChange} placeholder="https://linkedin.com/in/username" disabled={!isEditing} />
-                        </div>
-                        <div>
-                            <Label>GitHub</Label>
-                            <Input name="github_url" value={formData.github_url} onChange={handleChange} placeholder="https://github.com/username" disabled={!isEditing} />
-                        </div>
-                        <div className="md:col-span-2">
-                            <Label>Change Profile Picture</Label>
-                            <Input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setImageFile(e.target.files?.[0] || null)} disabled={!isEditing} />
-                            <p className="mt-2 text-xs text-slate-500">Upload a new image to replace the current one.</p>
-                        </div>
-
-                        {isEditing ? (
-                            <div className="md:col-span-2 flex justify-end gap-3">
-                                <Button type="button" variant="outline" onClick={() => {
-                                    setIsEditing(false);
-                                    resetProfileForm();
-                                }} disabled={saving}>
-                                    Cancel
-                                </Button>
-                                <Button type="submit" disabled={saving} className="bg-[#f6c347] text-black hover:bg-[#ffd16b]">
-                                    {saving ? 'Saving...' : 'Save Changes'}
-                                </Button>
-                            </div>
-                        ) : null}
-                    </form>
-
-                    {isEditing ? (
-                        <form onSubmit={handleChangePassword} className="mt-8 rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
-                            <h3 className="text-lg font-semibold text-slate-900">Change Password</h3>
-                            <p className="mt-1 text-xs text-slate-500">Use your old password to set a new one.</p>
-                            <div className="mt-4 grid gap-4 md:grid-cols-3">
-                                <div>
-                                    <Label>Old Password</Label>
-                                    <Input name="oldPassword" type="password" value={passwordData.oldPassword} onChange={handlePasswordChange} />
                                 </div>
-                                <div>
-                                    <Label>New Password</Label>
-                                    <Input name="newPassword" type="password" value={passwordData.newPassword} onChange={handlePasswordChange} />
-                                </div>
-                                <div>
-                                    <Label>Confirm Password</Label>
-                                    <Input name="confirmPassword" type="password" value={passwordData.confirmPassword} onChange={handlePasswordChange} />
-                                </div>
+                            )}
+                        </div>
+                    </section>
+
+                    <section className={panelClass}>
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                                <h2 className="font-heading text-3xl font-black uppercase tracking-tight">Profile Settings</h2>
+                                <p className="mt-1 text-sm font-medium text-slate-700">Update personal details, social links, and password.</p>
                             </div>
-                            <div className="mt-4 flex justify-end">
-                                <Button type="submit" disabled={changingPassword} className="bg-[#11131a] text-white hover:bg-[#1f2330]">
-                                    {changingPassword ? 'Updating...' : 'Update Password'}
+                            {!isEditing ? (
+                                <Button
+                                    type="button"
+                                    onClick={() => setIsEditing(true)}
+                                    data-testid="pda-profile-edit-button"
+                                    className={primaryButtonClass}
+                                >
+                                    Edit Profile
                                 </Button>
+                            ) : null}
+                        </div>
+
+                        <form onSubmit={handleSubmit} className="mt-6 grid gap-4 md:grid-cols-2">
+                            <div>
+                                <Label htmlFor="profile-regno" className="text-xs font-bold uppercase tracking-[0.12em]">Register Number</Label>
+                                <Input id="profile-regno" value={user.regno || ''} readOnly data-testid="pda-profile-regno-input" className={`${inputClass} bg-[#f3f4f6]`} />
                             </div>
-                        </form>
-                    ) : null}
-                </section>
+                            <div>
+                                <Label htmlFor="profile-name" className="text-xs font-bold uppercase tracking-[0.12em]">Name</Label>
+                                <Input id="profile-name" name="name" value={formData.name} onChange={handleChange} disabled={!isEditing} data-testid="pda-profile-name-input" className={`${inputClass} disabled:bg-[#f3f4f6]`} />
+                            </div>
+                            <div>
+                                <Label htmlFor="profile-profile-name" className="text-xs font-bold uppercase tracking-[0.12em]">Profile Name</Label>
+                                <Input
+                                    id="profile-profile-name"
+                                    name="profile_name"
+                                    value={formData.profile_name}
+                                    onChange={handleChange}
+                                    placeholder="eg: john_doe"
+                                    disabled={!isEditing}
+                                    data-testid="pda-profile-profile-name-input"
+                                    className={`${inputClass} disabled:bg-[#f3f4f6]`}
+                                />
+                                <p className="mt-1 text-[11px] font-medium text-slate-600">3-40 chars: lowercase letters, numbers, underscore.</p>
+                            </div>
+                            <div>
+                                <Label htmlFor="profile-email" className="text-xs font-bold uppercase tracking-[0.12em]">Email</Label>
+                                <Input id="profile-email" name="email" value={formData.email} onChange={handleChange} disabled={!isEditing} data-testid="pda-profile-email-input" className={`${inputClass} disabled:bg-[#f3f4f6]`} />
+                            </div>
+                            <div>
+                                <Label htmlFor="profile-dob" className="text-xs font-bold uppercase tracking-[0.12em]">Date Of Birth</Label>
+                                <Input id="profile-dob" name="dob" type="date" value={formData.dob} onChange={handleChange} disabled={!isEditing} data-testid="pda-profile-dob-input" className={`${inputClass} disabled:bg-[#f3f4f6]`} />
+                            </div>
+                            <div>
+                                <Label htmlFor="profile-gender" className="text-xs font-bold uppercase tracking-[0.12em]">Gender</Label>
+                                <Select value={formData.gender} onValueChange={(value) => setFormData((prev) => ({ ...prev, gender: value }))} disabled={!isEditing}>
+                                    <SelectTrigger id="profile-gender" data-testid="pda-profile-gender-select" className={`${selectTriggerClass} disabled:bg-[#f3f4f6]`}>
+                                        <SelectValue placeholder="Select gender" />
+                                    </SelectTrigger>
+                                    <SelectContent className={selectContentClass}>
+                                        {GENDERS.map((gender) => (
+                                            <SelectItem data-testid={`pda-profile-gender-${gender.value.toLowerCase()}`} key={gender.value} value={gender.value}>
+                                                {gender.label}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div>
+                                <Label htmlFor="profile-phone" className="text-xs font-bold uppercase tracking-[0.12em]">Phone</Label>
+                                <Input id="profile-phone" name="phno" value={formData.phno} onChange={handleChange} disabled={!isEditing} data-testid="pda-profile-phone-input" className={`${inputClass} disabled:bg-[#f3f4f6]`} />
+                            </div>
+                            <div>
+                                <Label htmlFor="profile-dept" className="text-xs font-bold uppercase tracking-[0.12em]">Department</Label>
+                                <Select value={formData.dept} onValueChange={(value) => setFormData((prev) => ({ ...prev, dept: value }))} disabled={!isEditing}>
+                                    <SelectTrigger id="profile-dept" data-testid="pda-profile-dept-select" className={`${selectTriggerClass} disabled:bg-[#f3f4f6]`}>
+                                        <SelectValue placeholder="Select department" />
+                                    </SelectTrigger>
+                                    <SelectContent className={selectContentClass}>
+                                        {DEPARTMENTS.map((dept) => (
+                                            <SelectItem data-testid={`pda-profile-dept-${dept.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`} key={dept.value} value={dept.value}>
+                                                {dept.label}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div>
+                                <Label htmlFor="profile-member-status" className="text-xs font-bold uppercase tracking-[0.12em]">Membership Status</Label>
+                                <Input id="profile-member-status" value={user.is_member ? 'Member' : (user.is_applied ? 'Applied' : 'Not Applied')} readOnly data-testid="pda-profile-membership-status-input" className={`${inputClass} bg-[#f3f4f6]`} />
+                            </div>
+                            <div>
+                                <Label htmlFor="profile-team" className="text-xs font-bold uppercase tracking-[0.12em]">Team</Label>
+                                <Input id="profile-team" value={user.team || 'Not assigned'} readOnly data-testid="pda-profile-team-input" className={`${inputClass} bg-[#f3f4f6]`} />
+                            </div>
+                            <div>
+                                <Label htmlFor="profile-designation" className="text-xs font-bold uppercase tracking-[0.12em]">Designation</Label>
+                                <Input id="profile-designation" value={user.designation || 'Not assigned'} readOnly data-testid="pda-profile-designation-input" className={`${inputClass} bg-[#f3f4f6]`} />
+                            </div>
+                            <div>
+                                <Label htmlFor="profile-instagram" className="text-xs font-bold uppercase tracking-[0.12em]">Instagram</Label>
+                                <Input id="profile-instagram" name="instagram_url" value={formData.instagram_url} onChange={handleChange} placeholder="https://instagram.com/username" disabled={!isEditing} data-testid="pda-profile-instagram-input" className={`${inputClass} disabled:bg-[#f3f4f6]`} />
+                            </div>
+                            <div>
+                                <Label htmlFor="profile-linkedin" className="text-xs font-bold uppercase tracking-[0.12em]">LinkedIn</Label>
+                                <Input id="profile-linkedin" name="linkedin_url" value={formData.linkedin_url} onChange={handleChange} placeholder="https://linkedin.com/in/username" disabled={!isEditing} data-testid="pda-profile-linkedin-input" className={`${inputClass} disabled:bg-[#f3f4f6]`} />
+                            </div>
+                            <div>
+                                <Label htmlFor="profile-github" className="text-xs font-bold uppercase tracking-[0.12em]">GitHub</Label>
+                                <Input id="profile-github" name="github_url" value={formData.github_url} onChange={handleChange} placeholder="https://github.com/username" disabled={!isEditing} data-testid="pda-profile-github-input" className={`${inputClass} disabled:bg-[#f3f4f6]`} />
+                            </div>
+                            <div className="md:col-span-2">
+                                <Label htmlFor="profile-picture" className="text-xs font-bold uppercase tracking-[0.12em]">Change Profile Picture</Label>
+                                <Input
+                                    id="profile-picture"
+                                    type="file"
+                                    accept="image/png,image/jpeg,image/webp"
+                                    onChange={(e) => setImageFile(e.target.files?.[0] || null)}
+                                    disabled={!isEditing}
+                                    data-testid="pda-profile-picture-input"
+                                    className="border-2 border-black bg-white text-sm shadow-neo file:mr-3 file:rounded-md file:border-2 file:border-black file:bg-[#FDE047] file:px-3 file:py-1 file:text-xs file:font-bold disabled:bg-[#f3f4f6]"
+                                />
+                                <p className="mt-2 text-xs font-medium text-slate-600">Upload a new image to replace the current one.</p>
+                            </div>
 
-                {!user.is_member ? (
-                    <section className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
-                        <h2 className="text-2xl font-heading font-black">Recruitment</h2>
-                        <p className="mt-1 text-sm text-slate-600">Apply to join PDA from here.</p>
-
-                        <div className="mt-5 rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
-                            <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Recruitment Status</p>
-                            {recruitmentLoading ? (
-                                <p className="mt-2 text-sm text-slate-600">Checking recruitment availability...</p>
-                            ) : recruitmentOpen ? (
-                                <div className="mt-3">
-                                    {user.is_applied ? (
-                                        <>
-                                            <p className="text-sm font-semibold text-slate-900">Application submitted. Awaiting admin review.</p>
-                                            <p className="mt-1 text-sm text-slate-600">Preferred Team: {user.preferred_team || 'Not specified'}</p>
-                                        </>
-                                    ) : (
-                                        <p className="text-sm text-slate-700">Recruitment is open. Submit your application to join PDA.</p>
-                                    )}
+                            {isEditing ? (
+                                <div className="md:col-span-2 flex justify-end gap-3 border-t-2 border-dashed border-black pt-4">
                                     <Button
                                         type="button"
-                                        onClick={() => setJoinDialogOpen(true)}
-                                        disabled={user.is_applied}
-                                        className="mt-3 bg-[#f6c347] text-black hover:bg-[#ffd16b] disabled:cursor-not-allowed disabled:opacity-60"
+                                        onClick={() => {
+                                            setIsEditing(false);
+                                            resetProfileForm();
+                                        }}
+                                        disabled={saving}
+                                        data-testid="pda-profile-cancel-edit-button"
+                                        className={neutralButtonClass}
                                     >
-                                        {user.is_applied ? 'Already Applied' : 'Join PDA'}
+                                        Cancel
+                                    </Button>
+                                    <Button
+                                        type="submit"
+                                        disabled={saving}
+                                        data-testid="pda-profile-save-button"
+                                        className={accentButtonClass}
+                                    >
+                                        {saving ? 'Saving...' : 'Save Changes'}
                                     </Button>
                                 </div>
-                            ) : (
-                                <p className="mt-2 text-sm text-slate-600">Recruitment is currently closed.</p>
-                            )}
-                        </div>
-                    </section>
-                ) : null}
+                            ) : null}
+                        </form>
 
-                <Dialog open={joinDialogOpen} onOpenChange={setJoinDialogOpen}>
-                    <DialogContent className="sm:max-w-md">
-                        <DialogHeader>
-                            <DialogTitle>Join PDA</DialogTitle>
-                        </DialogHeader>
-                        <div className="space-y-3 py-2">
-                            <Label>Preferred Team</Label>
-                            <Select value={preferredTeam} onValueChange={setPreferredTeam}>
-                                <SelectTrigger className="w-full">
-                                    <SelectValue placeholder="Select preferred team" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {RECRUITMENT_TEAMS.map((team) => (
-                                        <SelectItem key={team} value={team}>{team}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <DialogFooter>
-                            <Button type="button" variant="outline" onClick={() => setJoinDialogOpen(false)} disabled={applyingRecruitment}>
-                                Cancel
-                            </Button>
-                            <Button type="button" onClick={handleJoinPda} disabled={applyingRecruitment || !preferredTeam} className="bg-[#f6c347] text-black hover:bg-[#ffd16b]">
-                                {applyingRecruitment ? 'Submitting...' : 'Submit Application'}
-                            </Button>
-                        </DialogFooter>
-                    </DialogContent>
-                </Dialog>
+                        {isEditing ? (
+                            <form onSubmit={handleChangePassword} className="mt-8 rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
+                                <h3 className="font-heading text-xl font-black uppercase tracking-tight">Change Password</h3>
+                                <p className="mt-1 text-xs font-medium text-slate-600">Use your old password to set a new one.</p>
+                                <div className="mt-4 grid gap-4 md:grid-cols-3">
+                                    <div>
+                                        <Label htmlFor="profile-old-password" className="text-xs font-bold uppercase tracking-[0.12em]">Old Password</Label>
+                                        <Input id="profile-old-password" name="oldPassword" type="password" value={passwordData.oldPassword} onChange={handlePasswordChange} data-testid="pda-profile-old-password-input" className={inputClass} />
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="profile-new-password" className="text-xs font-bold uppercase tracking-[0.12em]">New Password</Label>
+                                        <Input id="profile-new-password" name="newPassword" type="password" value={passwordData.newPassword} onChange={handlePasswordChange} data-testid="pda-profile-new-password-input" className={inputClass} />
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="profile-confirm-password" className="text-xs font-bold uppercase tracking-[0.12em]">Confirm Password</Label>
+                                        <Input id="profile-confirm-password" name="confirmPassword" type="password" value={passwordData.confirmPassword} onChange={handlePasswordChange} data-testid="pda-profile-confirm-password-input" className={inputClass} />
+                                    </div>
+                                </div>
+                                <div className="mt-4 flex justify-end">
+                                    <Button
+                                        type="submit"
+                                        disabled={changingPassword}
+                                        data-testid="pda-profile-update-password-button"
+                                        className={primaryButtonClass}
+                                    >
+                                        {changingPassword ? 'Updating...' : 'Update Password'}
+                                    </Button>
+                                </div>
+                            </form>
+                        ) : null}
+                    </section>
+
+                    {!user.is_member ? (
+                        <section className={panelClass}>
+                            <h2 className="font-heading text-3xl font-black uppercase tracking-tight">Recruitment</h2>
+                            <p className="mt-1 text-sm font-medium text-slate-700">Apply to join PDA from here.</p>
+
+                            <div className="mt-5 rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
+                                <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-600">Recruitment Status</p>
+                                {recruitmentLoading ? (
+                                    <p className="mt-2 text-sm font-medium text-slate-700">Checking recruitment availability...</p>
+                                ) : recruitmentOpen ? (
+                                    <div className="mt-3">
+                                        {user.is_applied ? (
+                                            <>
+                                                <p className="text-sm font-bold text-black">Application submitted. Awaiting admin review.</p>
+                                                <p className="mt-1 text-sm font-medium text-slate-700">Preferred Team: {user.preferred_team || 'Not specified'}</p>
+                                            </>
+                                        ) : (
+                                            <p className="text-sm font-medium text-slate-700">Recruitment is open. Submit your application to join PDA.</p>
+                                        )}
+                                        <Button
+                                            type="button"
+                                            onClick={() => setJoinDialogOpen(true)}
+                                            disabled={user.is_applied}
+                                            data-testid="pda-profile-join-button"
+                                            className={`mt-3 ${user.is_applied ? `${neutralButtonClass} opacity-60` : accentButtonClass}`}
+                                        >
+                                            {user.is_applied ? 'Already Applied' : 'Join PDA'}
+                                        </Button>
+                                    </div>
+                                ) : (
+                                    <p className="mt-2 text-sm font-medium text-slate-700">Recruitment is currently closed.</p>
+                                )}
+                            </div>
+                        </section>
+                    ) : null}
+
+                    <Dialog open={joinDialogOpen} onOpenChange={setJoinDialogOpen}>
+                        <DialogContent className="border-4 border-black bg-white shadow-[8px_8px_0px_0px_#000000] sm:max-w-md">
+                            <DialogHeader>
+                                <DialogTitle className="font-heading text-2xl font-black uppercase tracking-tight">Join PDA</DialogTitle>
+                            </DialogHeader>
+                            <div className="space-y-3 py-2">
+                                <Label htmlFor="join-team" className="text-xs font-bold uppercase tracking-[0.12em]">Preferred Team</Label>
+                                <Select value={preferredTeam} onValueChange={setPreferredTeam}>
+                                    <SelectTrigger id="join-team" data-testid="pda-profile-join-team-select" className={selectTriggerClass}>
+                                        <SelectValue placeholder="Select preferred team" />
+                                    </SelectTrigger>
+                                    <SelectContent className={selectContentClass}>
+                                        {RECRUITMENT_TEAMS.map((team) => (
+                                            <SelectItem data-testid={`pda-profile-join-team-${team.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`} key={team} value={team}>
+                                                {team}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <DialogFooter>
+                                <Button
+                                    type="button"
+                                    onClick={() => setJoinDialogOpen(false)}
+                                    disabled={applyingRecruitment}
+                                    data-testid="pda-profile-join-cancel-button"
+                                    className={neutralButtonClass}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button
+                                    type="button"
+                                    onClick={handleJoinPda}
+                                    disabled={applyingRecruitment || !preferredTeam}
+                                    data-testid="pda-profile-join-submit-button"
+                                    className={accentButtonClass}
+                                >
+                                    {applyingRecruitment ? 'Submitting...' : 'Submit Application'}
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
+                </div>
             </main>
             <PdaFooter />
         </div>

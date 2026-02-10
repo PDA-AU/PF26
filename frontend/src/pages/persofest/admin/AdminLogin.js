@@ -34,7 +34,13 @@ export default function AdminLogin() {
         e.preventDefault();
         setLoading(true);
         try {
-            const user = await login(formData.regno, formData.password);
+            const data = await login(formData.regno, formData.password);
+            if (data?.password_reset_required && data?.reset_token) {
+                toast.info('Please reset your password to continue.');
+                navigate(`/reset-password?token=${data.reset_token}`);
+                return;
+            }
+            const user = data?.user;
             if (!user?.is_superadmin && !user?.policy?.pf) {
                 toast.error('Persofest admin access required.');
                 logout();

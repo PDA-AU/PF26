@@ -141,6 +141,7 @@ class ResetPasswordRequest(BaseModel):
 
 class PdaUserRegister(BaseModel):
     name: str = Field(..., min_length=2, max_length=255)
+    profile_name: Optional[str] = None
     regno: str = Field(..., min_length=6, max_length=20)
     email: EmailStr
     dob: date
@@ -156,6 +157,15 @@ class PdaUserRegister(BaseModel):
     def validate_regno(cls, v):
         if not str(v).strip():
             raise ValueError('Register number is required')
+        return v
+
+    @field_validator("profile_name")
+    @classmethod
+    def validate_profile_name(cls, v):
+        if v is None:
+            return v
+        if not re.fullmatch(r"[a-z0-9_]{3,40}", v):
+            raise ValueError("profile_name must match [a-z0-9_] and be 3-40 chars")
         return v
 
 
@@ -634,6 +644,7 @@ class PdaTeamResponse(BaseModel):
     id: int
     user_id: Optional[int] = None
     name: Optional[str] = None
+    profile_name: Optional[str] = None
     regno: Optional[str] = None
     dept: Optional[str] = None
     email: Optional[str] = None

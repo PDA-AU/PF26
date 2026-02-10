@@ -37,8 +37,9 @@ export default function AdminLayout({ title, subtitle, children, allowEventAdmin
         e.preventDefault();
         setLoginLoading(true);
         try {
-            const userData = await login(loginForm.register_number, loginForm.password);
-            if (!userData.is_admin && !userData.is_superadmin) {
+            const data = await login(loginForm.register_number, loginForm.password);
+            const adminUser = data?.user;
+            if (!adminUser?.is_admin && !adminUser?.is_superadmin) {
                 toast.error('Admin access required.');
                 logout();
                 return;
@@ -133,11 +134,10 @@ export default function AdminLayout({ title, subtitle, children, allowEventAdmin
                                     id="register_number"
                                     name="register_number"
                                     type="text"
-                                    placeholder="Enter your 10-digit register number"
+                                    placeholder="Enter your register number"
                                     value={loginForm.register_number}
                                     onChange={handleLoginChange}
                                     required
-                                    maxLength={10}
                                     className="neo-input"
                                 />
                             </div>

@@ -4,10 +4,12 @@ import { ArrowLeft, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useAuth } from '@/context/AuthContext';
+import PdaFooter from '@/components/layout/PdaFooter';
+import PdaHeader from '@/components/layout/PdaHeader';
 import { compressImageToWebp } from '@/utils/imageCompression';
 import { copyTextToClipboard } from '@/utils/clipboard';
 import { persohubApi } from '@/pages/persohub/api';
-import { CommunityPostEditModal, ConfirmModal, EmptyState, PersohubHeader, PostCard } from '@/pages/persohub/components';
+import { CommunityPostEditModal, ConfirmModal, EmptyState, PostCard } from '@/pages/persohub/components';
 import '@/pages/persohub/persohub.css';
 
 export default function PersohubProfilePage() {
@@ -150,12 +152,19 @@ export default function PersohubProfilePage() {
     if (loading) {
         return (
             <div className="persohub-page">
+                <PdaHeader />
                 <div className="ph-layer ph-shell">
-                    <PersohubHeader />
+                    <header className="ph-header ph-section ph-span-all">
+                        <div className="ph-title-band">
+                            <h1 className="ph-title">PROFILE</h1>
+                        </div>
+                        <p className="ph-sub">Loading Persohub profile details...</p>
+                    </header>
                     <div style={{ marginTop: '0.4rem' }}>
                         <EmptyState title="Loading profile" subtitle="Fetching Persohub profile details..." />
                     </div>
                 </div>
+                <PdaFooter />
             </div>
         );
     }
@@ -169,8 +178,14 @@ export default function PersohubProfilePage() {
 
     return (
         <div className="persohub-page">
+            <PdaHeader />
             <div className="ph-layer ph-shell">
-                <PersohubHeader />
+                <header className="ph-header ph-section ph-span-all">
+                    <div className="ph-title-band">
+                        <h1 className="ph-title">PROFILE</h1>
+                    </div>
+                    <p className="ph-sub">Community and member public timeline</p>
+                </header>
                 <div className="ph-card ph-side-card" style={{ marginTop: '0.4rem', marginBottom: '0.8rem' }}>
                     <Link to="/persohub" className="ph-action-btn" style={{ textDecoration: 'none', width: 'fit-content' }}>
                         <ArrowLeft size={14} /> Back to feed
@@ -235,6 +250,7 @@ export default function PersohubProfilePage() {
                     </div>
                 )}
             </div>
+            <PdaFooter />
 
             {sharePost ? (
                 <div className="ph-modal-overlay" role="dialog" aria-modal="true">

@@ -100,6 +100,7 @@ def _build_admin_response(db: Session, user: PdaUser) -> PdaUserResponse:
         email=user.email,
         email_verified=user.email_verified,
         name=user.name,
+        profile_name=user.profile_name,
         dob=user.dob,
         phno=user.phno,
         dept=user.dept,

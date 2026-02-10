@@ -4,6 +4,8 @@ import { Menu, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useAuth } from '@/context/AuthContext';
+import PdaFooter from '@/components/layout/PdaFooter';
+import PdaHeader from '@/components/layout/PdaHeader';
 import { compressImageToWebp } from '@/utils/imageCompression';
 import { copyTextToClipboard } from '@/utils/clipboard';
 import { persohubApi } from '@/pages/persohub/api';
@@ -13,7 +15,6 @@ import {
     ConfirmModal,
     EmptyState,
     FeaturedRail,
-    PersohubHeader,
     PostCard,
     SearchSuggestionList,
 } from '@/pages/persohub/components';
@@ -405,10 +406,11 @@ export default function PersohubFeedPage() {
 
     return (
         <div className="persohub-page">
+            <PdaHeader />
             <div className="ph-layer ph-shell">
                 <div className="ph-grid ph-grid-sections">
-                    <PersohubHeader
-                        leftSlot={(
+                    <header className="ph-header ph-section ph-span-all">
+                        <div className="ph-header-left-control">
                             <button
                                 type="button"
                                 className="ph-action-btn ph-header-toggle-btn"
@@ -418,8 +420,12 @@ export default function PersohubFeedPage() {
                             >
                                 <Menu size={14} />
                             </button>
-                        )}
-                    />
+                        </div>
+                        <div className="ph-title-band">
+                            <h1 className="ph-title">PERSOHUB FEED</h1>
+                        </div>
+                        <p className="ph-sub">Discover. Discuss. Build your public voice.</p>
+                    </header>
 
                     <section className="ph-search-wrap ph-section ph-span-all">
                         <input
@@ -640,6 +646,7 @@ export default function PersohubFeedPage() {
                 onCancel={() => setDeleteTargetPost(null)}
                 pending={deleteSubmitting}
             />
+            <PdaFooter />
         </div>
     );
 }

@@ -49,7 +49,10 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     except Exception:
         pw_bytes = str(plain_password).encode('utf-8')
     digest = hashlib.sha256(pw_bytes).digest()
-    return bcrypt.checkpw(digest, hashed_password.encode('utf-8'))
+    try:
+        return bcrypt.checkpw(digest, hashed_password.encode('utf-8'))
+    except ValueError:
+        return False
 
 
 def get_password_hash(password: str) -> str:

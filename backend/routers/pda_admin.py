@@ -49,6 +49,7 @@ def _build_team_response(member: PdaTeam, user: Optional[PdaUser]) -> PdaTeamRes
         id=member.id,
         user_id=member.user_id,
         name=user.name if user else None,
+        profile_name=user.profile_name if user else None,
         regno=user.regno if user else None,
         dept=user.dept if user else None,
         email=user.email if user else None,
