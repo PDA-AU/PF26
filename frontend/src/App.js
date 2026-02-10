@@ -1,22 +1,29 @@
 import React from "react";
 import "@/App.css";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
-import { ParticipantAuthProvider, useParticipantAuth } from "@/context/ParticipantAuthContext";
 
 // Pages
 import PersofestHome from "@/pages/persofest/PersofestHome";
 import PdaHome from "@/pages/PdaHome";
 import ItemsAdmin from "@/pages/HomeAdmin/ItemsAdmin";
+import UsersAdmin from "@/pages/HomeAdmin/UsersAdmin";
 import TeamAdmin from "@/pages/HomeAdmin/TeamAdmin";
 import GalleryAdmin from "@/pages/HomeAdmin/GalleryAdmin";
 import SuperAdmin from "@/pages/HomeAdmin/SuperAdmin";
 import LogsAdmin from "@/pages/HomeAdmin/LogsAdmin";
 import RecruitmentsAdmin from "@/pages/HomeAdmin/RecruitmentsAdmin";
 import AdminEvents from "@/pages/events/AdminEvents";
-import AdminEventManage from "@/pages/events/AdminEventManage";
 import EventDashboard from "@/pages/events/EventDashboard";
+import EventAdminDashboardPage from "@/pages/events/admin/EventAdminDashboardPage";
+import EventAdminAttendancePage from "@/pages/events/admin/EventAdminAttendancePage";
+import EventAdminRoundsPage from "@/pages/events/admin/EventAdminRoundsPage";
+import EventAdminScoringPage from "@/pages/events/admin/EventAdminScoringPage";
+import EventAdminParticipantsPage from "@/pages/events/admin/EventAdminParticipantsPage";
+import EventAdminLeaderboardPage from "@/pages/events/admin/EventAdminLeaderboardPage";
+import EventAdminLogsPage from "@/pages/events/admin/EventAdminLogsPage";
+import EventAdminBadgesPage from "@/pages/events/admin/EventAdminBadgesPage";
 import LoginPage from "@/pages/persofest/LoginPage";
 import RegisterPage from "@/pages/persofest/RegisterPage";
 import PdaLogin from "@/pages/pda/PdaLogin";
@@ -27,12 +34,6 @@ import PdaVerifyEmail from "@/pages/pda/VerifyEmail";
 import PdaForgotPassword from "@/pages/pda/ForgotPassword";
 import PdaResetPassword from "@/pages/pda/ResetPassword";
 import ParticipantDashboard from "@/pages/persofest/ParticipantDashboard";
-import AdminDashboard from "@/pages/persofest/admin/AdminDashboard";
-import AdminRounds from "@/pages/persofest/admin/AdminRounds";
-import AdminParticipants from "@/pages/persofest/admin/AdminParticipants";
-import AdminScoring from "@/pages/persofest/admin/AdminScoring";
-import AdminLeaderboard from "@/pages/persofest/admin/AdminLeaderboard";
-import AdminLogs from "@/pages/persofest/admin/AdminLogs";
 import AdminLogin from "@/pages/persofest/admin/AdminLogin";
 import ParticipantVerifyEmail from "@/pages/persofest/VerifyEmail";
 import ParticipantForgotPassword from "@/pages/persofest/ForgotPassword";
@@ -43,7 +44,7 @@ import PersohubProfilePage from "@/pages/persohub/PersohubProfilePage";
 
 // Protected Route Components
 const ProtectedParticipantRoute = ({ children }) => {
-    const { user, loading } = useParticipantAuth();
+    const { user, loading } = useAuth();
 
     if (loading) {
         return (
@@ -93,7 +94,8 @@ const ProtectedPdaRoute = ({ children, requirePf = false, requireHome = false, r
     if (requireEvents && !user.is_superadmin) {
         const eventsPolicy = (user.policy && typeof user.policy.events === 'object') ? user.policy.events : null;
         const hasAnyEventAccess = !!eventsPolicy && Object.values(eventsPolicy).some((value) => Boolean(value));
-        if (!hasAnyEventAccess) {
+        const hasLegacyPfAccess = Boolean(user.policy?.pf);
+        if (!hasAnyEventAccess && !hasLegacyPfAccess) {
             return <Navigate to="/login" replace />;
         }
     }
@@ -102,7 +104,7 @@ const ProtectedPdaRoute = ({ children, requirePf = false, requireHome = false, r
 };
 
 const PublicRoute = ({ children }) => {
-    const { user, loading } = useParticipantAuth();
+    const { user, loading } = useAuth();
 
     if (loading) {
         return (
@@ -135,7 +137,25 @@ const PersofestAdminEntry = () => {
     if (!user || (!user.is_superadmin && !user.policy?.pf)) {
         return <AdminLogin />;
     }
-    return <AdminDashboard />;
+    return <Navigate to="/admin/events/persofest-2026/dashboard" replace />;
+};
+
+const EventAdminBaseRedirect = () => {
+    const { eventSlug } = useParams();
+    if (!eventSlug) return <Navigate to="/admin/events" replace />;
+    return <Navigate to={`/admin/events/${eventSlug}/dashboard`} replace />;
+};
+
+const EventAdminBaseRedirectLegacy = () => {
+    const { eventSlug } = useParams();
+    if (!eventSlug) return <Navigate to="/admin/events" replace />;
+    return <Navigate to={`/admin/events/${eventSlug}/dashboard`} replace />;
+};
+
+const PersofestScoringRedirect = () => {
+    const { roundId } = useParams();
+    if (!roundId) return <Navigate to="/admin/events/persofest-2026/rounds" replace />;
+    return <Navigate to={`/admin/events/persofest-2026/rounds/${roundId}/scoring`} replace />;
 };
 
 function AppRoutes() {
@@ -156,6 +176,7 @@ function AppRoutes() {
             } />
             <Route path="/admin" element={<ItemsAdmin />} />
             <Route path="/admin/items" element={<ItemsAdmin />} />
+            <Route path="/admin/users" element={<UsersAdmin />} />
             <Route path="/admin/team" element={<TeamAdmin />} />
             <Route path="/admin/gallery" element={<GalleryAdmin />} />
             <Route path="/admin/events" element={
@@ -163,9 +184,46 @@ function AppRoutes() {
                     <AdminEvents />
                 </ProtectedPdaRoute>
             } />
-            <Route path="/admin/events/:eventSlug" element={
+            <Route path="/admin/event/:eventSlug" element={<EventAdminBaseRedirectLegacy />} />
+            <Route path="/admin/events/:eventSlug" element={<EventAdminBaseRedirect />} />
+            <Route path="/admin/events/:eventSlug/dashboard" element={
                 <ProtectedPdaRoute requireEvents>
-                    <AdminEventManage />
+                    <EventAdminDashboardPage />
+                </ProtectedPdaRoute>
+            } />
+            <Route path="/admin/events/:eventSlug/attendance" element={
+                <ProtectedPdaRoute requireEvents>
+                    <EventAdminAttendancePage />
+                </ProtectedPdaRoute>
+            } />
+            <Route path="/admin/events/:eventSlug/rounds" element={
+                <ProtectedPdaRoute requireEvents>
+                    <EventAdminRoundsPage />
+                </ProtectedPdaRoute>
+            } />
+            <Route path="/admin/events/:eventSlug/rounds/:roundId/scoring" element={
+                <ProtectedPdaRoute requireEvents>
+                    <EventAdminScoringPage />
+                </ProtectedPdaRoute>
+            } />
+            <Route path="/admin/events/:eventSlug/participants" element={
+                <ProtectedPdaRoute requireEvents>
+                    <EventAdminParticipantsPage />
+                </ProtectedPdaRoute>
+            } />
+            <Route path="/admin/events/:eventSlug/leaderboard" element={
+                <ProtectedPdaRoute requireEvents>
+                    <EventAdminLeaderboardPage />
+                </ProtectedPdaRoute>
+            } />
+            <Route path="/admin/events/:eventSlug/badges" element={
+                <ProtectedPdaRoute requireEvents>
+                    <EventAdminBadgesPage />
+                </ProtectedPdaRoute>
+            } />
+            <Route path="/admin/events/:eventSlug/logs" element={
+                <ProtectedPdaRoute requireEvents>
+                    <EventAdminLogsPage />
                 </ProtectedPdaRoute>
             } />
             <Route path="/admin/recruitments" element={
@@ -189,11 +247,8 @@ function AppRoutes() {
                     <RegisterPage />
                 </PublicRoute>
             } />
-            <Route path="/events/:eventSlug" element={
-                <ProtectedPdaRoute>
-                    <EventDashboard />
-                </ProtectedPdaRoute>
-            } />
+            <Route path="/event/:eventSlug" element={<EventDashboard />} />
+            <Route path="/events/:eventSlug" element={<EventDashboard />} />
             <Route path="/persohub" element={<PersohubFeedPage />} />
             <Route path="/persohub/p/:slugToken" element={<PersohubPostPage />} />
             <Route path="/persohub/:profileName" element={<PersohubProfilePage />} />
@@ -207,31 +262,13 @@ function AppRoutes() {
 
             {/* Admin Routes */}
             <Route path="/persofest/admin" element={<PersofestAdminEntry />} />
-            <Route path="/persofest/admin/rounds" element={
-                <ProtectedPdaRoute requirePf>
-                    <AdminRounds />
-                </ProtectedPdaRoute>
-            } />
-            <Route path="/persofest/admin/participants" element={
-                <ProtectedPdaRoute requirePf>
-                    <AdminParticipants />
-                </ProtectedPdaRoute>
-            } />
-            <Route path="/persofest/admin/scoring/:roundId" element={
-                <ProtectedPdaRoute requirePf>
-                    <AdminScoring />
-                </ProtectedPdaRoute>
-            } />
-            <Route path="/persofest/admin/leaderboard" element={
-                <ProtectedPdaRoute requirePf>
-                    <AdminLeaderboard />
-                </ProtectedPdaRoute>
-            } />
-            <Route path="/persofest/admin/logs" element={
-                <ProtectedPdaRoute requirePf>
-                    <AdminLogs />
-                </ProtectedPdaRoute>
-            } />
+            <Route path="/persofest/admin/rounds" element={<Navigate to="/admin/events/persofest-2026/rounds" replace />} />
+            <Route path="/persofest/admin/participants" element={<Navigate to="/admin/events/persofest-2026/participants" replace />} />
+            <Route path="/persofest/admin/attendance" element={<Navigate to="/admin/events/persofest-2026/attendance" replace />} />
+            <Route path="/persofest/admin/scoring/:roundId" element={<PersofestScoringRedirect />} />
+            <Route path="/persofest/admin/leaderboard" element={<Navigate to="/admin/events/persofest-2026/leaderboard" replace />} />
+            <Route path="/persofest/admin/badges" element={<Navigate to="/admin/events/persofest-2026/badges" replace />} />
+            <Route path="/persofest/admin/logs" element={<Navigate to="/admin/events/persofest-2026/logs" replace />} />
 
             {/* Catch all */}
             <Route path="*" element={<Navigate to="/" replace />} />
@@ -242,12 +279,10 @@ function AppRoutes() {
 function App() {
     return (
         <AuthProvider>
-            <ParticipantAuthProvider>
-                <BrowserRouter>
-                    <AppRoutes />
-                    <Toaster position="top-right" richColors />
-                </BrowserRouter>
-            </ParticipantAuthProvider>
+            <BrowserRouter>
+                <AppRoutes />
+                <Toaster position="top-right" richColors />
+            </BrowserRouter>
         </AuthProvider>
     );
 }

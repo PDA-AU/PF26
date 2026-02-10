@@ -10,6 +10,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { uploadPoster } from '@/pages/HomeAdmin/adminApi';
+import { compressImageToWebp } from '@/utils/imageCompression';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -32,6 +35,13 @@ export default function AdminEvents() {
     const [events, setEvents] = useState([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [deleting, setDeleting] = useState(false);
+    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+    const [deleteTarget, setDeleteTarget] = useState(null);
+    const [deleteConfirmText, setDeleteConfirmText] = useState('');
+    const [posterFile, setPosterFile] = useState(null);
+    const [posterPreview, setPosterPreview] = useState('');
+    const [uploadingPoster, setUploadingPoster] = useState(false);
     const [form, setForm] = useState(initialForm);
 
     const fetchEvents = useCallback(async () => {
@@ -53,13 +63,31 @@ export default function AdminEvents() {
         }
     }, [canAccessEvents, fetchEvents, isSuperAdmin]);
 
+    useEffect(() => {
+        if (!posterFile) {
+            setPosterPreview('');
+            return undefined;
+        }
+        const localUrl = URL.createObjectURL(posterFile);
+        setPosterPreview(localUrl);
+        return () => URL.revokeObjectURL(localUrl);
+    }, [posterFile]);
+
     const onSubmit = async (e) => {
         e.preventDefault();
         if (!isSuperAdmin) return;
         setSaving(true);
         try {
+            let posterUrl = form.poster_url?.trim() || null;
+            if (posterFile) {
+                setUploadingPoster(true);
+                const processedPoster = await compressImageToWebp(posterFile);
+                posterUrl = await uploadPoster(processedPoster, getAuthHeader);
+                setUploadingPoster(false);
+            }
             const payload = {
                 ...form,
+                poster_url: posterUrl,
                 round_count: Number(form.round_count || 1),
                 team_min_size: form.participant_mode === 'team' ? Number(form.team_min_size || 1) : null,
                 team_max_size: form.participant_mode === 'team' ? Number(form.team_max_size || 1) : null
@@ -67,11 +95,15 @@ export default function AdminEvents() {
             await axios.post(`${API}/pda-admin/events`, payload, { headers: getAuthHeader() });
             toast.success('Event created');
             setForm(initialForm);
+            setPosterFile(null);
+            setPosterPreview('');
             fetchEvents();
         } catch (error) {
+            setUploadingPoster(false);
             toast.error(error.response?.data?.detail || 'Failed to create event');
         } finally {
             setSaving(false);
+            setUploadingPoster(false);
         }
     };
 
@@ -84,6 +116,37 @@ export default function AdminEvents() {
             fetchEvents();
         } catch (error) {
             toast.error(error.response?.data?.detail || 'Failed to update status');
+        }
+    };
+
+    const openDeleteDialog = (eventRow) => {
+        if (!isSuperAdmin) return;
+        setDeleteTarget(eventRow);
+        setDeleteConfirmText('');
+        setDeleteDialogOpen(true);
+    };
+
+    const closeDeleteDialog = () => {
+        if (deleting) return;
+        setDeleteDialogOpen(false);
+        setDeleteTarget(null);
+        setDeleteConfirmText('');
+    };
+
+    const deleteEvent = async () => {
+        if (!deleteTarget || deleteConfirmText !== 'DELETE' || !isSuperAdmin) return;
+        setDeleting(true);
+        try {
+            await axios.delete(`${API}/pda-admin/events/${deleteTarget.slug}`, { headers: getAuthHeader() });
+            toast.success('Event deleted');
+            setDeleteDialogOpen(false);
+            setDeleteTarget(null);
+            setDeleteConfirmText('');
+            fetchEvents();
+        } catch (error) {
+            toast.error(error.response?.data?.detail || 'Failed to delete event');
+        } finally {
+            setDeleting(false);
         }
     };
 
@@ -102,8 +165,25 @@ export default function AdminEvents() {
                             <Textarea value={form.description} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} />
                         </div>
                         <div className="md:col-span-2">
-                            <Label>Poster URL</Label>
-                            <Input value={form.poster_url} onChange={(e) => setForm((prev) => ({ ...prev, poster_url: e.target.value }))} />
+                            <Label htmlFor="event-poster-upload">Poster Upload</Label>
+                            <Input
+                                id="event-poster-upload"
+                                type="file"
+                                accept="image/png,image/jpeg,image/webp"
+                                onChange={(e) => {
+                                    const nextFile = e.target.files?.[0] || null;
+                                    setPosterFile(nextFile);
+                                    if (!nextFile) {
+                                        setForm((prev) => ({ ...prev, poster_url: '' }));
+                                    }
+                                }}
+                            />
+                            <p className="mt-2 text-xs text-slate-500">Image uploads use presigned S3 URL.</p>
+                            {posterPreview ? (
+                                <div className="mt-3 rounded-xl border border-black/10 bg-[#fffdf7] p-3">
+                                    <img src={posterPreview} alt="Poster preview" className="max-h-48 w-auto rounded-lg border border-black/10" />
+                                </div>
+                            ) : null}
                         </div>
                         <div>
                             <Label>Type</Label>
@@ -181,8 +261,8 @@ export default function AdminEvents() {
                             </>
                         ) : null}
                         <div className="md:col-span-2 flex justify-end">
-                            <Button type="submit" className="bg-[#f6c347] text-black hover:bg-[#ffd16b]" disabled={saving}>
-                                {saving ? 'Creating...' : 'Create Event'}
+                            <Button type="submit" className="bg-[#f6c347] text-black hover:bg-[#ffd16b]" disabled={saving || uploadingPoster}>
+                                {uploadingPoster ? 'Uploading Poster...' : saving ? 'Creating...' : 'Create Event'}
                             </Button>
                         </div>
                     </form>
@@ -221,9 +301,18 @@ export default function AdminEvents() {
                                         <Button className="bg-[#11131a] text-white hover:bg-[#1f2330]">Manage</Button>
                                     </Link>
                                     {isSuperAdmin ? (
-                                        <Button variant="outline" className="border-black/20" onClick={() => toggleStatus(eventRow)}>
-                                            {eventRow.status === 'open' ? 'Close Event' : 'Open Event'}
-                                        </Button>
+                                        <>
+                                            <Button variant="outline" className="border-black/20" onClick={() => toggleStatus(eventRow)}>
+                                                {eventRow.status === 'open' ? 'Close Event' : 'Open Event'}
+                                            </Button>
+                                            <Button
+                                                variant="outline"
+                                                className="border-red-300 text-red-600 hover:bg-red-50"
+                                                onClick={() => openDeleteDialog(eventRow)}
+                                            >
+                                                Delete Event
+                                            </Button>
+                                        </>
                                     ) : null}
                                 </div>
                             </div>
@@ -231,6 +320,44 @@ export default function AdminEvents() {
                     </div>
                 )}
             </section>
+
+            <Dialog open={deleteDialogOpen} onOpenChange={(open) => (open ? setDeleteDialogOpen(true) : closeDeleteDialog())}>
+                <DialogContent className="border-4 border-black">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading font-bold text-2xl text-red-600">Delete Event</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <p className="text-sm text-slate-700">
+                            This will permanently delete the event and cascade all related rounds, teams, registrations, attendance, scores, badges, invites, and logs.
+                        </p>
+                        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm">
+                            <p className="font-semibold">{deleteTarget?.title || '-'}</p>
+                            <p className="text-slate-600">{deleteTarget?.slug || '-'}</p>
+                        </div>
+                        <div>
+                            <Label>Type <span className="font-bold">DELETE</span> to confirm</Label>
+                            <Input
+                                value={deleteConfirmText}
+                                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                                placeholder="DELETE"
+                                className="mt-2"
+                            />
+                        </div>
+                        <div className="flex justify-end gap-2">
+                            <Button variant="outline" className="border-black/20" onClick={closeDeleteDialog} disabled={deleting}>
+                                Cancel
+                            </Button>
+                            <Button
+                                className="bg-red-600 text-white hover:bg-red-700"
+                                onClick={deleteEvent}
+                                disabled={deleting || deleteConfirmText !== 'DELETE'}
+                            >
+                                {deleting ? 'Deleting...' : 'Delete Event'}
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
         </AdminLayout>
     );
 }

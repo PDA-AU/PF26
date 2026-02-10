@@ -11,7 +11,7 @@ import PersofestFooter from '@/components/layout/PersofestFooter';
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function ForgotPassword() {
-    const [formData, setFormData] = useState({ register_number: '', email: '' });
+    const [formData, setFormData] = useState({ regno: '', email: '' });
     const [loading, setLoading] = useState(false);
     const cooldownSeconds = Number(process.env.REACT_APP_EMAIL_RESEND_COOLDOWN_SECONDS || 30);
     const [cooldownLeft, setCooldownLeft] = useState(0);
@@ -24,8 +24,8 @@ export default function ForgotPassword() {
         e.preventDefault();
         setLoading(true);
         try {
-            await axios.post(`${API}/participant-auth/password/forgot`, {
-                register_number: formData.register_number || null,
+            await axios.post(`${API}/auth/password/forgot`, {
+                regno: formData.regno || null,
                 email: formData.email || null
             });
             toast.success('If the account exists, a reset link has been sent.');
@@ -54,8 +54,8 @@ export default function ForgotPassword() {
                 <p className="text-gray-600 mb-6">Enter your register number and email.</p>
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
-                        <Label htmlFor="register_number">Register Number</Label>
-                        <Input id="register_number" name="register_number" value={formData.register_number} onChange={handleChange} className="neo-input" required />
+                        <Label htmlFor="regno">Register Number</Label>
+                        <Input id="regno" name="regno" value={formData.regno} onChange={handleChange} className="neo-input" required />
                     </div>
                     <div>
                         <Label htmlFor="email">Email</Label>

@@ -734,6 +734,10 @@ def ensure_pda_event_tables(engine):
                     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
                     team_id INTEGER REFERENCES pda_event_teams(id) ON DELETE CASCADE,
                     entity_type VARCHAR(10) NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+                    referral_code VARCHAR(16),
+                    referred_by VARCHAR(16),
+                    referral_count INTEGER NOT NULL DEFAULT 0,
                     registered_at TIMESTAMPTZ DEFAULT now(),
                     CONSTRAINT uq_pda_event_registration_event_user UNIQUE (event_id, user_id),
                     CONSTRAINT uq_pda_event_registration_event_team UNIQUE (event_id, team_id)
@@ -757,6 +761,624 @@ def ensure_pda_event_tables(engine):
                 """
             )
         )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS pda_event_logs (
+                    id SERIAL PRIMARY KEY,
+                    event_id INTEGER REFERENCES pda_events(id) ON DELETE SET NULL,
+                    event_slug VARCHAR(120) NOT NULL,
+                    admin_id INTEGER,
+                    admin_register_number VARCHAR(20) NOT NULL,
+                    admin_name VARCHAR(255) NOT NULL,
+                    action VARCHAR(255) NOT NULL,
+                    method VARCHAR(10),
+                    path VARCHAR(255),
+                    meta JSONB,
+                    created_at TIMESTAMPTZ DEFAULT now()
+                )
+                """
+            )
+        )
+
+        if not _column_exists(conn, "pda_event_registrations", "status"):
+            conn.execute(text("ALTER TABLE pda_event_registrations ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE'"))
+        if not _column_exists(conn, "pda_event_registrations", "referral_code"):
+            conn.execute(text("ALTER TABLE pda_event_registrations ADD COLUMN referral_code VARCHAR(16)"))
+        if not _column_exists(conn, "pda_event_registrations", "referred_by"):
+            conn.execute(text("ALTER TABLE pda_event_registrations ADD COLUMN referred_by VARCHAR(16)"))
+        if not _column_exists(conn, "pda_event_registrations", "referral_count"):
+            conn.execute(text("ALTER TABLE pda_event_registrations ADD COLUMN referral_count INTEGER NOT NULL DEFAULT 0"))
+
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_pda_event_registration_referral_code
+                ON pda_event_registrations(event_id, referral_code)
+                WHERE entity_type = 'USER' AND referral_code IS NOT NULL
+                """
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pda_event_registration_event_status ON pda_event_registrations(event_id, status)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pda_event_registration_event_referred_by ON pda_event_registrations(event_id, referred_by)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pda_event_logs_event_created ON pda_event_logs(event_id, created_at DESC)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pda_event_logs_slug_created ON pda_event_logs(event_slug, created_at DESC)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pda_event_logs_admin_created ON pda_event_logs(admin_id, created_at DESC)"))
+
+
+def ensure_persofest_pda_event(engine):
+    with engine.begin() as conn:
+        row = conn.execute(
+            text("SELECT id FROM pda_events WHERE slug = 'persofest-2026' OR event_code = 'PF26'")
+        ).fetchone()
+        if row:
+            conn.execute(
+                text(
+                    """
+                    UPDATE pda_events
+                    SET slug = 'persofest-2026'
+                    WHERE id = :id
+                    """
+                ),
+                {"id": int(row[0])},
+            )
+            return
+        conn.execute(
+            text(
+                """
+                INSERT INTO pda_events (
+                    slug,
+                    event_code,
+                    club_id,
+                    title,
+                    description,
+                    event_type,
+                    format,
+                    template_option,
+                    participant_mode,
+                    round_mode,
+                    round_count,
+                    status
+                ) VALUES (
+                    'persofest-2026',
+                    'PF26',
+                    1,
+                    'Persofest 2026',
+                    'Persofest unified event',
+                    'EVENT',
+                    'OFFLINE',
+                    'ATTENDANCE_SCORING',
+                    'INDIVIDUAL',
+                    'MULTI',
+                    10,
+                    'OPEN'
+                )
+                """
+            )
+        )
+
+
+def _map_registration_status(value) -> str:
+    raw = str(value or "").strip().upper()
+    if "ELIMINATED" in raw:
+        return "ELIMINATED"
+    return "ACTIVE"
+
+
+def _map_round_mode(value) -> str:
+    raw = str(value or "").strip().upper()
+    if "ONLINE" in raw:
+        return "ONLINE"
+    return "OFFLINE"
+
+
+def _map_round_state(value) -> str:
+    raw = str(value or "").strip().upper()
+    if "COMPLETED" in raw:
+        return "COMPLETED"
+    if "ACTIVE" in raw:
+        return "ACTIVE"
+    if "PUBLISHED" in raw:
+        return "PUBLISHED"
+    return "DRAFT"
+
+
+def _parse_round_no_to_int(value, fallback: int) -> int:
+    digits = re.sub(r"[^0-9]+", "", str(value or ""))
+    if not digits:
+        return fallback
+    try:
+        parsed = int(digits)
+        return parsed if parsed > 0 else fallback
+    except Exception:
+        return fallback
+
+
+def migrate_legacy_persofest_to_pda_event(engine):
+    with engine.begin() as conn:
+        if not _table_exists(conn, "participants"):
+            return
+
+        event_row = conn.execute(
+            text("SELECT id FROM pda_events WHERE slug = 'persofest-2026'")
+        ).fetchone()
+        if not event_row:
+            return
+        event_id = int(event_row[0])
+
+        participants = conn.execute(
+            text(
+                """
+                SELECT
+                    id,
+                    register_number,
+                    email,
+                    hashed_password,
+                    name,
+                    phone,
+                    gender,
+                    department,
+                    profile_picture,
+                    status,
+                    referral_code,
+                    referred_by,
+                    referral_count
+                FROM participants
+                ORDER BY id ASC
+                """
+            )
+        ).mappings().all()
+
+        for row in participants:
+            regno = str(row.get("register_number") or "").strip()
+            email = str(row.get("email") or "").strip().lower()
+            if not regno or not email:
+                continue
+
+            user = conn.execute(
+                text("SELECT id FROM users WHERE regno = :regno"),
+                {"regno": regno},
+            ).fetchone()
+            if not user:
+                user = conn.execute(
+                    text("SELECT id FROM users WHERE email = :email"),
+                    {"email": email},
+                ).fetchone()
+
+            if not user:
+                created = conn.execute(
+                    text(
+                        """
+                        INSERT INTO users (
+                            regno,
+                            email,
+                            hashed_password,
+                            name,
+                            phno,
+                            gender,
+                            dept,
+                            image_url,
+                            json_content,
+                            is_member
+                        ) VALUES (
+                            :regno,
+                            :email,
+                            :hashed_password,
+                            :name,
+                            :phno,
+                            :gender,
+                            :dept,
+                            :image_url,
+                            :json_content,
+                            :is_member
+                        )
+                        RETURNING id
+                        """
+                    ),
+                    {
+                        "regno": regno,
+                        "email": email,
+                        "hashed_password": row.get("hashed_password"),
+                        "name": row.get("name") or f"Persofest {regno}",
+                        "phno": row.get("phone"),
+                        "gender": row.get("gender"),
+                        "dept": row.get("department"),
+                        "image_url": row.get("profile_picture"),
+                        "json_content": {},
+                        "is_member": False,
+                    },
+                ).fetchone()
+                user_id = int(created[0])
+            else:
+                user_id = int(user[0])
+                conn.execute(
+                    text(
+                        """
+                        UPDATE users
+                        SET
+                            phno = COALESCE(NULLIF(TRIM(phno), ''), :phno),
+                            gender = COALESCE(NULLIF(TRIM(gender), ''), :gender),
+                            dept = COALESCE(NULLIF(TRIM(dept), ''), :dept),
+                            image_url = COALESCE(NULLIF(TRIM(image_url), ''), :image_url)
+                        WHERE id = :id
+                        """
+                    ),
+                    {
+                        "id": user_id,
+                        "phno": row.get("phone"),
+                        "gender": row.get("gender"),
+                        "dept": row.get("department"),
+                        "image_url": row.get("profile_picture"),
+                    },
+                )
+
+            registration = conn.execute(
+                text(
+                    """
+                    SELECT id
+                    FROM pda_event_registrations
+                    WHERE event_id = :event_id AND user_id = :user_id
+                    """
+                ),
+                {"event_id": event_id, "user_id": user_id},
+            ).fetchone()
+            payload = {
+                "event_id": event_id,
+                "user_id": user_id,
+                "status": _map_registration_status(row.get("status")),
+                "referral_code": (str(row.get("referral_code") or "").strip().upper() or None),
+                "referred_by": (str(row.get("referred_by") or "").strip().upper() or None),
+                "referral_count": int(row.get("referral_count") or 0),
+            }
+            if not registration:
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO pda_event_registrations (
+                            event_id,
+                            user_id,
+                            team_id,
+                            entity_type,
+                            status,
+                            referral_code,
+                            referred_by,
+                            referral_count
+                        ) VALUES (
+                            :event_id,
+                            :user_id,
+                            NULL,
+                            'USER',
+                            :status,
+                            :referral_code,
+                            :referred_by,
+                            :referral_count
+                        )
+                        """
+                    ),
+                    payload,
+                )
+            else:
+                conn.execute(
+                    text(
+                        """
+                        UPDATE pda_event_registrations
+                        SET
+                            status = :status,
+                            referral_code = :referral_code,
+                            referred_by = :referred_by,
+                            referral_count = :referral_count
+                        WHERE id = :registration_id
+                        """
+                    ),
+                    {**payload, "registration_id": int(registration[0])},
+                )
+
+        if _table_exists(conn, "rounds"):
+            round_rows = conn.execute(
+                text(
+                    """
+                    SELECT
+                        id,
+                        round_no,
+                        name,
+                        description,
+                        date,
+                        mode,
+                        state,
+                        evaluation_criteria,
+                        elimination_type,
+                        elimination_value,
+                        is_frozen
+                    FROM rounds
+                    ORDER BY id ASC
+                    """
+                )
+            ).mappings().all()
+            round_id_map = {}
+            for idx, round_row in enumerate(round_rows, start=1):
+                round_no = _parse_round_no_to_int(round_row.get("round_no"), idx)
+                existing_round = conn.execute(
+                    text(
+                        """
+                        SELECT id
+                        FROM pda_event_rounds
+                        WHERE event_id = :event_id AND round_no = :round_no
+                        """
+                    ),
+                    {"event_id": event_id, "round_no": round_no},
+                ).fetchone()
+                if existing_round:
+                    new_round_id = int(existing_round[0])
+                    conn.execute(
+                        text(
+                            """
+                            UPDATE pda_event_rounds
+                            SET
+                                name = :name,
+                                description = :description,
+                                date = :date,
+                                mode = :mode,
+                                state = :state,
+                                evaluation_criteria = :evaluation_criteria,
+                                elimination_type = :elimination_type,
+                                elimination_value = :elimination_value,
+                                is_frozen = :is_frozen
+                            WHERE id = :id
+                            """
+                        ),
+                        {
+                            "id": new_round_id,
+                            "name": round_row.get("name"),
+                            "description": round_row.get("description"),
+                            "date": round_row.get("date"),
+                            "mode": _map_round_mode(round_row.get("mode")),
+                            "state": _map_round_state(round_row.get("state")),
+                            "evaluation_criteria": round_row.get("evaluation_criteria"),
+                            "elimination_type": round_row.get("elimination_type"),
+                            "elimination_value": round_row.get("elimination_value"),
+                            "is_frozen": bool(round_row.get("is_frozen")),
+                        },
+                    )
+                else:
+                    inserted_round = conn.execute(
+                        text(
+                            """
+                            INSERT INTO pda_event_rounds (
+                                event_id,
+                                round_no,
+                                name,
+                                description,
+                                date,
+                                mode,
+                                state,
+                                evaluation_criteria,
+                                elimination_type,
+                                elimination_value,
+                                is_frozen
+                            ) VALUES (
+                                :event_id,
+                                :round_no,
+                                :name,
+                                :description,
+                                :date,
+                                :mode,
+                                :state,
+                                :evaluation_criteria,
+                                :elimination_type,
+                                :elimination_value,
+                                :is_frozen
+                            )
+                            RETURNING id
+                            """
+                        ),
+                        {
+                            "event_id": event_id,
+                            "round_no": round_no,
+                            "name": round_row.get("name"),
+                            "description": round_row.get("description"),
+                            "date": round_row.get("date"),
+                            "mode": _map_round_mode(round_row.get("mode")),
+                            "state": _map_round_state(round_row.get("state")),
+                            "evaluation_criteria": round_row.get("evaluation_criteria"),
+                            "elimination_type": round_row.get("elimination_type"),
+                            "elimination_value": round_row.get("elimination_value"),
+                            "is_frozen": bool(round_row.get("is_frozen")),
+                        },
+                    ).fetchone()
+                    new_round_id = int(inserted_round[0])
+                round_id_map[int(round_row["id"])] = new_round_id
+
+            if _table_exists(conn, "scores"):
+                score_rows = conn.execute(
+                    text(
+                        """
+                        SELECT
+                            s.participant_id,
+                            s.round_id,
+                            s.criteria_scores,
+                            s.total_score,
+                            s.normalized_score,
+                            s.is_present,
+                            p.register_number,
+                            p.email
+                        FROM scores s
+                        JOIN participants p ON p.id = s.participant_id
+                        ORDER BY s.id ASC
+                        """
+                    )
+                ).mappings().all()
+                for score_row in score_rows:
+                    mapped_round_id = round_id_map.get(int(score_row["round_id"]))
+                    if not mapped_round_id:
+                        continue
+
+                    regno = str(score_row.get("register_number") or "").strip()
+                    email = str(score_row.get("email") or "").strip().lower()
+                    user_row = conn.execute(
+                        text("SELECT id FROM users WHERE regno = :regno"),
+                        {"regno": regno},
+                    ).fetchone()
+                    if not user_row and email:
+                        user_row = conn.execute(
+                            text("SELECT id FROM users WHERE email = :email"),
+                            {"email": email},
+                        ).fetchone()
+                    if not user_row:
+                        continue
+                    user_id = int(user_row[0])
+
+                    conn.execute(
+                        text(
+                            """
+                            INSERT INTO pda_event_registrations (
+                                event_id,
+                                user_id,
+                                team_id,
+                                entity_type,
+                                status
+                            ) VALUES (
+                                :event_id,
+                                :user_id,
+                                NULL,
+                                'USER',
+                                'ACTIVE'
+                            )
+                            ON CONFLICT (event_id, user_id) DO NOTHING
+                            """
+                        ),
+                        {"event_id": event_id, "user_id": user_id},
+                    )
+
+                    existing_score = conn.execute(
+                        text(
+                            """
+                            SELECT id
+                            FROM pda_event_scores
+                            WHERE event_id = :event_id
+                              AND round_id = :round_id
+                              AND entity_type = 'USER'
+                              AND user_id = :user_id
+                              AND team_id IS NULL
+                            """
+                        ),
+                        {"event_id": event_id, "round_id": mapped_round_id, "user_id": user_id},
+                    ).fetchone()
+                    score_payload = {
+                        "event_id": event_id,
+                        "round_id": mapped_round_id,
+                        "user_id": user_id,
+                        "criteria_scores": score_row.get("criteria_scores"),
+                        "total_score": float(score_row.get("total_score") or 0),
+                        "normalized_score": float(score_row.get("normalized_score") or 0),
+                        "is_present": bool(score_row.get("is_present")),
+                    }
+                    if existing_score:
+                        conn.execute(
+                            text(
+                                """
+                                UPDATE pda_event_scores
+                                SET
+                                    criteria_scores = :criteria_scores,
+                                    total_score = :total_score,
+                                    normalized_score = :normalized_score,
+                                    is_present = :is_present
+                                WHERE id = :id
+                                """
+                            ),
+                            {**score_payload, "id": int(existing_score[0])},
+                        )
+                    else:
+                        conn.execute(
+                            text(
+                                """
+                                INSERT INTO pda_event_scores (
+                                    event_id,
+                                    round_id,
+                                    entity_type,
+                                    user_id,
+                                    team_id,
+                                    criteria_scores,
+                                    total_score,
+                                    normalized_score,
+                                    is_present
+                                ) VALUES (
+                                    :event_id,
+                                    :round_id,
+                                    'USER',
+                                    :user_id,
+                                    NULL,
+                                    :criteria_scores,
+                                    :total_score,
+                                    :normalized_score,
+                                    :is_present
+                                )
+                                """
+                            ),
+                            score_payload,
+                        )
+
+                    existing_attendance = conn.execute(
+                        text(
+                            """
+                            SELECT id
+                            FROM pda_event_attendance
+                            WHERE event_id = :event_id
+                              AND round_id = :round_id
+                              AND entity_type = 'USER'
+                              AND user_id = :user_id
+                              AND team_id IS NULL
+                            """
+                        ),
+                        {"event_id": event_id, "round_id": mapped_round_id, "user_id": user_id},
+                    ).fetchone()
+                    attendance_payload = {
+                        "event_id": event_id,
+                        "round_id": mapped_round_id,
+                        "user_id": user_id,
+                        "is_present": bool(score_row.get("is_present")),
+                    }
+                    if existing_attendance:
+                        conn.execute(
+                            text(
+                                """
+                                UPDATE pda_event_attendance
+                                SET is_present = :is_present
+                                WHERE id = :id
+                                """
+                            ),
+                            {**attendance_payload, "id": int(existing_attendance[0])},
+                        )
+                    else:
+                        conn.execute(
+                            text(
+                                """
+                                INSERT INTO pda_event_attendance (
+                                    event_id,
+                                    round_id,
+                                    entity_type,
+                                    user_id,
+                                    team_id,
+                                    is_present
+                                ) VALUES (
+                                    :event_id,
+                                    :round_id,
+                                    'USER',
+                                    :user_id,
+                                    NULL,
+                                    :is_present
+                                )
+                                """
+                            ),
+                            attendance_payload,
+                        )
+
+
+def drop_legacy_persofest_tables(engine):
+    with engine.begin() as conn:
+        for table_name in ("scores", "rounds", "participants"):
+            if _table_exists(conn, table_name):
+                conn.execute(text(f"DROP TABLE IF EXISTS {table_name} CASCADE"))
 
         conn.execute(
             text(

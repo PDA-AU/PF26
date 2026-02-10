@@ -465,6 +465,23 @@ class AdminLogResponse(BaseModel):
         from_attributes = True
 
 
+class PdaEventLogResponse(BaseModel):
+    id: int
+    event_id: Optional[int] = None
+    event_slug: str
+    admin_id: Optional[int] = None
+    admin_register_number: str
+    admin_name: str
+    action: str
+    method: Optional[str] = None
+    path: Optional[str] = None
+    meta: Optional[Dict[str, Any]] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class PdaAdminCreate(BaseModel):
     user_id: int = Field(..., ge=1)
 
@@ -662,6 +679,51 @@ class PdaTeamResponse(BaseModel):
         from_attributes = True
 
 
+class PdaAdminUserResponse(BaseModel):
+    id: int
+    team_member_id: Optional[int] = None
+    name: str
+    profile_name: Optional[str] = None
+    regno: str
+    dept: Optional[str] = None
+    email: str
+    phno: Optional[str] = None
+    dob: Optional[date] = None
+    gender: Optional[str] = None
+    is_member: bool = False
+    is_applied: bool = False
+    preferred_team: Optional[str] = None
+    email_verified: bool = False
+    team: Optional["PdaTeamName"] = None
+    designation: Optional["PdaTeamDesignation"] = None
+    photo_url: Optional[str] = None
+    instagram_url: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    github_url: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PdaAdminUserUpdate(BaseModel):
+    name: Optional[str] = None
+    profile_name: Optional[str] = None
+    email: Optional[str] = None
+    phno: Optional[str] = None
+    dept: Optional[str] = None
+    dob: Optional[date] = None
+    gender: Optional[str] = None
+    is_member: Optional[bool] = None
+    team: Optional["PdaTeamName"] = None
+    designation: Optional["PdaTeamDesignation"] = None
+    photo_url: Optional[str] = None
+    instagram_url: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    github_url: Optional[str] = None
+    clear_team: Optional[bool] = None
+
+
 class PdaGalleryCreate(BaseModel):
     photo_url: str = Field(..., min_length=5)
     caption: Optional[str] = None
@@ -786,6 +848,10 @@ class PdaManagedEventUpdate(BaseModel):
     status: Optional[PdaManagedEventStatusEnum] = None
 
 
+class PdaManagedEventStatusUpdate(BaseModel):
+    status: PdaManagedEventStatusEnum
+
+
 class PdaManagedEventResponse(BaseModel):
     id: int
     slug: str
@@ -872,6 +938,7 @@ class PdaManagedRoundUpdate(BaseModel):
     evaluation_criteria: Optional[List[PdaManagedRoundCriteria]] = None
     elimination_type: Optional[str] = None
     elimination_value: Optional[float] = None
+    eliminate_absent: Optional[bool] = None
 
 
 class PdaManagedRoundResponse(BaseModel):

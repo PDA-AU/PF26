@@ -1,0 +1,554 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import axios from 'axios';
+import { toast } from 'sonner';
+import {
+    Save,
+    Lock,
+    ArrowLeft,
+    Search,
+    AlertTriangle,
+    Upload,
+    Download,
+    FileSpreadsheet,
+    Users,
+} from 'lucide-react';
+
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+
+import { useAuth } from '@/context/AuthContext';
+import EventAdminShell, { useEventAdminShell } from './EventAdminShell';
+
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+
+function ScoringContent() {
+    const navigate = useNavigate();
+    const { roundId } = useParams();
+    const { getAuthHeader } = useAuth();
+    const { eventSlug, eventInfo } = useEventAdminShell();
+
+    const [round, setRound] = useState(null);
+    const [rows, setRows] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [importing, setImporting] = useState(false);
+    const [search, setSearch] = useState('');
+    const [statusFilter, setStatusFilter] = useState('all');
+    const [presenceFilter, setPresenceFilter] = useState('all');
+    const [sortBy, setSortBy] = useState('register_asc');
+    const [freezeDialogOpen, setFreezeDialogOpen] = useState(false);
+    const fileInputRef = useRef(null);
+
+    const getErrorMessage = (error, fallback) => (
+        error?.response?.data?.detail || error?.response?.data?.message || fallback
+    );
+
+    const entityMode = eventInfo?.participant_mode === 'team' ? 'team' : 'user';
+
+    const normalizeRow = useCallback((row) => {
+        const entityId = row.entity_id ?? row.participant_id ?? row.id;
+        return {
+            ...row,
+            _entityType: row.entity_type || entityMode,
+            _entityId: entityId,
+            _name: row.participant_name || row.name,
+            _code: row.participant_register_number || row.regno_or_code || row.register_number,
+            _status: row.participant_status || row.status,
+        };
+    }, [entityMode]);
+
+    const fetchRoundData = useCallback(async (searchValue = '') => {
+        setLoading(true);
+        try {
+            const [roundRes, rowsRes] = await Promise.all([
+                axios.get(`${API}/pda-admin/events/${eventSlug}/rounds`, { headers: getAuthHeader() }),
+                axios.get(`${API}/pda-admin/events/${eventSlug}/rounds/${roundId}/participants${searchValue ? `?search=${encodeURIComponent(searchValue)}` : ''}`, {
+                    headers: getAuthHeader(),
+                }),
+            ]);
+
+            const currentRound = (roundRes.data || []).find((item) => Number(item.id) === Number(roundId));
+            setRound(currentRound || null);
+            setRows((rowsRes.data || []).map(normalizeRow));
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to load scoring data'));
+            setRound(null);
+            setRows([]);
+        } finally {
+            setLoading(false);
+        }
+    }, [eventSlug, getAuthHeader, normalizeRow, roundId]);
+
+    useEffect(() => {
+        fetchRoundData();
+    }, [fetchRoundData]);
+
+    const criteria = useMemo(() => round?.evaluation_criteria || [{ name: 'Score', max_marks: 100 }], [round?.evaluation_criteria]);
+
+    const getTotalScore = useCallback((row) => (
+        criteria.reduce((sum, criterion) => {
+            const parsed = Number.parseFloat(row.criteria_scores?.[criterion.name]);
+            return sum + (Number.isNaN(parsed) ? 0 : parsed);
+        }, 0)
+    ), [criteria]);
+
+    const roundRankMap = useMemo(() => {
+        if (!round?.is_frozen) return {};
+        const scored = rows
+            .filter((row) => row.is_present)
+            .slice()
+            .sort((a, b) => Number(b.normalized_score || 0) - Number(a.normalized_score || 0));
+        const map = {};
+        scored.forEach((row, index) => {
+            map[row._entityId] = index + 1;
+        });
+        return map;
+    }, [round?.is_frozen, rows]);
+
+    const displayedRows = useMemo(() => {
+        const filtered = rows.filter((row) => {
+            if (statusFilter !== 'all') {
+                if (statusFilter === 'active' && row._status !== 'Active') return false;
+                if (statusFilter === 'eliminated' && row._status !== 'Eliminated') return false;
+            }
+            if (presenceFilter !== 'all') {
+                if (presenceFilter === 'present' && !row.is_present) return false;
+                if (presenceFilter === 'absent' && row.is_present) return false;
+            }
+            return true;
+        });
+
+        return filtered.sort((a, b) => {
+            const regA = String(a._code || '');
+            const regB = String(b._code || '');
+            const nameA = String(a._name || '');
+            const nameB = String(b._name || '');
+            const scoreA = getTotalScore(a);
+            const scoreB = getTotalScore(b);
+            const rankA = Number(roundRankMap[a._entityId] || Number.MAX_SAFE_INTEGER);
+            const rankB = Number(roundRankMap[b._entityId] || Number.MAX_SAFE_INTEGER);
+
+            switch (sortBy) {
+                case 'register_desc':
+                    return regB.localeCompare(regA, undefined, { numeric: true, sensitivity: 'base' });
+                case 'name_asc':
+                    return nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
+                case 'name_desc':
+                    return nameB.localeCompare(nameA, undefined, { sensitivity: 'base' });
+                case 'score_desc':
+                    return scoreB - scoreA;
+                case 'score_asc':
+                    return scoreA - scoreB;
+                case 'rank_asc':
+                    return rankA - rankB;
+                case 'register_asc':
+                default:
+                    return regA.localeCompare(regB, undefined, { numeric: true, sensitivity: 'base' });
+            }
+        });
+    }, [getTotalScore, presenceFilter, roundRankMap, rows, sortBy, statusFilter]);
+
+    const handleSearch = async () => {
+        fetchRoundData(search);
+    };
+
+    const handlePresenceChange = (entityId, isPresent) => {
+        const present = isPresent === true;
+        setRows((prev) => prev.map((row) => {
+            if (row._entityId !== entityId) return row;
+            if (!present) {
+                const zeroed = Object.fromEntries(criteria.map((criterion) => [criterion.name, 0]));
+                return { ...row, is_present: false, criteria_scores: zeroed };
+            }
+            return { ...row, is_present: true };
+        }));
+    };
+
+    const handleScoreChange = (entityId, criteriaName, value) => {
+        if (!/^$|^\d*\.?\d*$/.test(value)) return;
+        setRows((prev) => prev.map((row) => {
+            if (row._entityId !== entityId) return row;
+            return {
+                ...row,
+                criteria_scores: { ...row.criteria_scores, [criteriaName]: value },
+            };
+        }));
+    };
+
+    const handleScoreBlur = (entityId, criteriaName) => {
+        const maxMarks = Number(criteria.find((criterion) => criterion.name === criteriaName)?.max_marks ?? 100);
+        setRows((prev) => prev.map((row) => {
+            if (row._entityId !== entityId) return row;
+            const parsed = Number.parseFloat(row.criteria_scores?.[criteriaName]);
+            const clamped = Number.isNaN(parsed) ? 0 : Math.min(Math.max(parsed, 0), maxMarks);
+            return {
+                ...row,
+                criteria_scores: { ...row.criteria_scores, [criteriaName]: clamped },
+            };
+        }));
+    };
+
+    const saveScores = async () => {
+        setSaving(true);
+        try {
+            const maxByCriteria = Object.fromEntries(criteria.map((criterion) => [criterion.name, Number(criterion.max_marks || 0)]));
+            const payload = rows.map((row) => ({
+                entity_type: row._entityType,
+                user_id: row._entityType === 'user' ? row._entityId : null,
+                team_id: row._entityType === 'team' ? row._entityId : null,
+                criteria_scores: Object.keys(maxByCriteria).reduce((acc, criteriaName) => {
+                    const max = maxByCriteria[criteriaName];
+                    const parsed = Number.parseFloat(row.criteria_scores?.[criteriaName]);
+                    const safe = Number.isNaN(parsed) ? 0 : Math.min(Math.max(parsed, 0), max);
+                    acc[criteriaName] = safe;
+                    return acc;
+                }, {}),
+                is_present: Boolean(row.is_present),
+            }));
+
+            await axios.post(`${API}/pda-admin/events/${eventSlug}/rounds/${roundId}/scores`, payload, {
+                headers: getAuthHeader(),
+            });
+            toast.success('Scores saved successfully');
+            fetchRoundData(search);
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to save scores'));
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const downloadTemplate = async () => {
+        try {
+            const response = await axios.get(`${API}/pda-admin/events/${eventSlug}/rounds/${roundId}/score-template`, {
+                headers: getAuthHeader(),
+                responseType: 'blob',
+            });
+            const url = window.URL.createObjectURL(new Blob([response.data]));
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `${round?.round_no || 'round'}_score_template.xlsx`);
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(url);
+            toast.success('Template downloaded');
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to download template'));
+        }
+    };
+
+    const handleFileUpload = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setImporting(true);
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const response = await axios.post(`${API}/pda-admin/events/${eventSlug}/rounds/${roundId}/import-scores`, formData, {
+                headers: { ...getAuthHeader(), 'Content-Type': 'multipart/form-data' },
+            });
+            toast.success(`Imported ${response.data.imported || 0} rows`);
+            if (Array.isArray(response.data.errors) && response.data.errors.length > 0) {
+                response.data.errors.forEach((msg) => toast.error(msg));
+            }
+            fetchRoundData(search);
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Import failed'));
+        } finally {
+            setImporting(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+    };
+
+    const exportRoundEvaluation = async () => {
+        try {
+            const response = await axios.get(`${API}/pda-admin/events/${eventSlug}/export/round/${roundId}?format=xlsx`, {
+                headers: getAuthHeader(),
+                responseType: 'blob',
+            });
+            const url = window.URL.createObjectURL(new Blob([response.data]));
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `${round?.round_no || 'round'}_evaluation.xlsx`);
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(url);
+            toast.success('Round evaluation exported');
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to export round evaluation'));
+        }
+    };
+
+    const freezeRound = async () => {
+        try {
+            await axios.post(`${API}/pda-admin/events/${eventSlug}/rounds/${roundId}/freeze`, {}, { headers: getAuthHeader() });
+            toast.success('Round frozen');
+            setFreezeDialogOpen(false);
+            fetchRoundData(search);
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to freeze round'));
+        }
+    };
+
+    const unfreezeRound = async () => {
+        try {
+            await axios.post(`${API}/pda-admin/events/${eventSlug}/rounds/${roundId}/unfreeze`, {}, { headers: getAuthHeader() });
+            toast.success('Round unfrozen');
+            fetchRoundData(search);
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to unfreeze round'));
+        }
+    };
+
+    if (loading) {
+        return (
+            <div className="neo-card text-center py-12">
+                <div className="loading-spinner mx-auto"></div>
+                <p className="mt-4">Loading...</p>
+            </div>
+        );
+    }
+
+    if (!round) {
+        return (
+            <div className="neo-card text-center py-12">
+                <AlertTriangle className="w-16 h-16 mx-auto mb-4 text-red-500" />
+                <h2 className="font-heading font-bold text-xl mb-4">Round Not Found</h2>
+                <Button className="bg-primary text-white border-2 border-black shadow-neo" onClick={() => navigate(`/admin/events/${eventSlug}/rounds`)}>
+                    <ArrowLeft className="w-4 h-4 mr-2" /> Back
+                </Button>
+            </div>
+        );
+    }
+
+    return (
+        <>
+            <div className="neo-card mb-6">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div className="flex items-center gap-4">
+                        <Link to={`/admin/events/${eventSlug}/rounds`}>
+                            <Button variant="outline" className="border-2 border-black">
+                                <ArrowLeft className="w-4 h-4" />
+                            </Button>
+                        </Link>
+                        <div>
+                            <div className="flex items-center gap-2">
+                                <span className="bg-primary text-white px-2 py-1 border-2 border-black font-bold text-sm">Round {round.round_no}</span>
+                                {round.is_frozen ? (
+                                    <span className="bg-orange-100 text-orange-800 px-2 py-1 border-2 border-orange-500 font-bold text-sm flex items-center gap-1">
+                                        <Lock className="w-4 h-4" /> Frozen
+                                    </span>
+                                ) : null}
+                            </div>
+                            <h1 className="font-heading font-bold text-2xl mt-2">{round.name}</h1>
+                        </div>
+                    </div>
+
+                    {!round.is_frozen ? (
+                        <div className="flex flex-wrap gap-2">
+                            <Button onClick={downloadTemplate} variant="outline" className="border-2 border-black shadow-neo">
+                                <Download className="w-4 h-4 mr-2" /> Template
+                            </Button>
+                            <input type="file" ref={fileInputRef} accept=".xlsx,.xls" onChange={handleFileUpload} className="hidden" />
+                            <Button onClick={() => fileInputRef.current?.click()} disabled={importing} variant="outline" className="border-2 border-black shadow-neo bg-green-50">
+                                <Upload className="w-4 h-4 mr-2" /> {importing ? 'Importing...' : 'Import Excel'}
+                            </Button>
+                            <Button onClick={saveScores} disabled={saving} className="bg-primary text-white border-2 border-black shadow-neo">
+                                <Save className="w-4 h-4 mr-2" /> {saving ? 'Saving...' : 'Save'}
+                            </Button>
+                            <Dialog open={freezeDialogOpen} onOpenChange={setFreezeDialogOpen}>
+                                <DialogTrigger asChild>
+                                    <Button className="bg-orange-500 text-white border-2 border-black shadow-neo">
+                                        <Lock className="w-4 h-4 mr-2" /> Freeze
+                                    </Button>
+                                </DialogTrigger>
+                                <DialogContent className="border-4 border-black">
+                                    <DialogHeader>
+                                        <DialogTitle className="font-heading font-bold text-xl flex items-center gap-2">
+                                            <AlertTriangle className="w-6 h-6 text-orange-500" /> Freeze Round
+                                        </DialogTitle>
+                                    </DialogHeader>
+                                    <div className="space-y-4">
+                                        <p className="text-gray-600">
+                                            This action freezes scores for this round. Shortlisting is handled from the leaderboard.
+                                        </p>
+                                        <div className="flex gap-2">
+                                            <Button onClick={() => setFreezeDialogOpen(false)} variant="outline" className="flex-1 border-2 border-black">Cancel</Button>
+                                            <Button onClick={freezeRound} className="flex-1 bg-orange-500 text-white border-2 border-black">
+                                                <Lock className="w-4 h-4 mr-2" /> Confirm
+                                            </Button>
+                                        </div>
+                                    </div>
+                                </DialogContent>
+                            </Dialog>
+                        </div>
+                    ) : (
+                        <div className="flex flex-wrap gap-2">
+                            <Button onClick={exportRoundEvaluation} variant="outline" className="border-2 border-black shadow-neo">
+                                <Download className="w-4 h-4 mr-2" /> Export Excel
+                            </Button>
+                            <Button onClick={unfreezeRound} className="bg-orange-500 text-white border-2 border-black shadow-neo">
+                                <Lock className="w-4 h-4 mr-2" /> Unfreeze
+                            </Button>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {!round.is_frozen ? (
+                <div className="neo-card mb-6 bg-blue-50 border-blue-500">
+                    <div className="flex items-start gap-4">
+                        <FileSpreadsheet className="w-8 h-8 text-blue-600 flex-shrink-0" />
+                        <div>
+                            <h3 className="font-heading font-bold text-lg">Bulk Score Import</h3>
+                            <p className="text-gray-600 text-sm">1. Download template -> 2. Fill scores -> 3. Upload Excel</p>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
+
+            <div className="neo-card mb-6">
+                <div className="flex gap-2 mb-4">
+                    <div className="relative flex-1">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                        <Input
+                            placeholder="Search..."
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSearch();
+                            }}
+                            className="neo-input pl-10"
+                        />
+                    </div>
+                    <Button onClick={handleSearch} className="bg-primary text-white border-2 border-black shadow-neo">Search</Button>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                        <SelectTrigger className="neo-input"><SelectValue placeholder="Filter by status" /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">All Status</SelectItem>
+                            <SelectItem value="active">Active</SelectItem>
+                            <SelectItem value="eliminated">Eliminated</SelectItem>
+                        </SelectContent>
+                    </Select>
+                    <Select value={presenceFilter} onValueChange={setPresenceFilter}>
+                        <SelectTrigger className="neo-input"><SelectValue placeholder="Filter by presence" /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">All Presence</SelectItem>
+                            <SelectItem value="present">Present</SelectItem>
+                            <SelectItem value="absent">Absent</SelectItem>
+                        </SelectContent>
+                    </Select>
+                    <Select value={sortBy} onValueChange={setSortBy}>
+                        <SelectTrigger className="neo-input"><SelectValue placeholder="Sort entries" /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="register_asc">Code (Asc)</SelectItem>
+                            <SelectItem value="register_desc">Code (Desc)</SelectItem>
+                            <SelectItem value="name_asc">Name (A-Z)</SelectItem>
+                            <SelectItem value="name_desc">Name (Z-A)</SelectItem>
+                            <SelectItem value="score_desc">Score (High-Low)</SelectItem>
+                            <SelectItem value="score_asc">Score (Low-High)</SelectItem>
+                            {round?.is_frozen ? <SelectItem value="rank_asc">Rank (Top-Down)</SelectItem> : null}
+                        </SelectContent>
+                    </Select>
+                </div>
+            </div>
+
+            {displayedRows.length === 0 ? (
+                <div className="neo-card text-center py-12">
+                    <Users className="w-16 h-16 mx-auto mb-4 text-gray-400" />
+                    <h3 className="font-heading font-bold text-xl">No Entries Match Current Filters</h3>
+                </div>
+            ) : (
+                <div className="overflow-x-auto">
+                    <table className="neo-table">
+                        <thead>
+                            <tr>
+                                <th>{entityMode === 'team' ? 'Team Code' : 'Register No'}</th>
+                                <th>{entityMode === 'team' ? 'Team Name' : 'Name'}</th>
+                                <th>Round Status</th>
+                                <th>Present</th>
+                                {criteria.map((criterion, index) => (
+                                    <th key={`${criterion.name}-${index}`}>{criterion.name} (/{criterion.max_marks})</th>
+                                ))}
+                                <th>Total</th>
+                                <th>Round Score</th>
+                                {round?.is_frozen ? <th>Round Rank</th> : null}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {displayedRows.map((row) => {
+                                const totalScore = getTotalScore(row);
+                                const maxScore = criteria.reduce((sum, criterion) => sum + Number(criterion.max_marks || 0), 0);
+                                const normalized = maxScore > 0 ? (totalScore / maxScore * 100).toFixed(2) : '0.00';
+                                const roundRank = round?.is_frozen ? (roundRankMap[row._entityId] || '—') : null;
+                                const roundStatus = !row.is_present
+                                    ? 'Absent'
+                                    : (row._status === 'Eliminated' ? 'Eliminated' : 'Active');
+                                const roundStatusClass = roundStatus === 'Active'
+                                    ? 'bg-green-100 text-green-800 border-green-500'
+                                    : (roundStatus === 'Eliminated'
+                                        ? 'bg-red-100 text-red-800 border-red-500'
+                                        : 'bg-orange-100 text-orange-800 border-orange-500');
+
+                                return (
+                                    <tr key={`${row._entityType}-${row._entityId}`}>
+                                        <td className="font-mono font-bold">{row._code || '—'}</td>
+                                        <td className="font-medium">{row._name || '—'}</td>
+                                        <td>
+                                            <span className={`tag border-2 ${roundStatusClass}`}>{roundStatus}</span>
+                                        </td>
+                                        <td>
+                                            <Checkbox
+                                                checked={Boolean(row.is_present)}
+                                                onCheckedChange={(checked) => handlePresenceChange(row._entityId, checked)}
+                                                disabled={round.is_frozen}
+                                                className="border-2 border-black data-[state=checked]:bg-primary"
+                                            />
+                                        </td>
+                                        {criteria.map((criterion, index) => (
+                                            <td key={`${criterion.name}-${index}`}>
+                                                <Input
+                                                    type="number"
+                                                    value={row.criteria_scores?.[criterion.name] ?? ''}
+                                                    onChange={(e) => handleScoreChange(row._entityId, criterion.name, e.target.value)}
+                                                    onBlur={() => handleScoreBlur(row._entityId, criterion.name)}
+                                                    disabled={round.is_frozen || !row.is_present}
+                                                    className="neo-input w-20"
+                                                    min={0}
+                                                    max={criterion.max_marks}
+                                                />
+                                            </td>
+                                        ))}
+                                        <td className="font-bold">{totalScore}</td>
+                                        <td>
+                                            <span className="bg-primary text-white px-2 py-1 border-2 border-black font-bold">{normalized}</span>
+                                        </td>
+                                        {round?.is_frozen ? <td className="font-bold">{roundRank}</td> : null}
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+        </>
+    );
+}
+
+export default function EventAdminScoringPage() {
+    return (
+        <EventAdminShell activeTab="scoring">
+            <ScoringContent />
+        </EventAdminShell>
+    );
+}

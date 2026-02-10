@@ -1,11 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import axios from 'axios';
 import { toast } from 'sonner';
-import { ArrowLeft, Camera, Download, Upload } from 'lucide-react';
+import { ArrowLeft, Calendar, Camera, Download, LayoutDashboard, ListChecks, LogOut, Sparkles, Trophy, Upload, Users } from 'lucide-react';
 
 import { useAuth } from '@/context/AuthContext';
-import AdminLayout from '@/pages/HomeAdmin/AdminLayout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,14 +13,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-
-const tabs = [
-    { id: 'dashboard', label: 'Dashboard' },
-    { id: 'attendance', label: 'Attendance' },
-    { id: 'rounds', label: 'Rounds' },
-    { id: 'participants', label: 'Participants' },
-    { id: 'leaderboard', label: 'Leaderboard' }
-];
 
 const normalizeErrorMessage = (detail, fallback) => {
     if (!detail) return fallback;
@@ -65,11 +56,29 @@ const getApiErrorMessage = (error, fallback) => (
     normalizeErrorMessage(error?.response?.data?.detail ?? error?.response?.data?.message, fallback)
 );
 
-export default function AdminEventManage() {
-    const { eventSlug } = useParams();
-    const { getAuthHeader } = useAuth();
+const statusPillClass = (value) => (
+    String(value || '').toLowerCase() === 'active'
+        ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+        : 'border-rose-300 bg-rose-50 text-rose-700'
+);
 
-    const [activeTab, setActiveTab] = useState('dashboard');
+export default function AdminEventManage() {
+    const { eventSlug, roundId } = useParams();
+    const navigate = useNavigate();
+    const location = useLocation();
+    const { user, logout, getAuthHeader, canAccessEvent } = useAuth();
+
+    const activeTab = useMemo(() => {
+        const path = location.pathname;
+        if (path.includes('/attendance')) return 'attendance';
+        if (path.includes('/participants')) return 'participants';
+        if (path.includes('/leaderboard')) return 'leaderboard';
+        if (path.includes('/logs')) return 'logs';
+        if (path.includes('/rounds/') && path.endsWith('/scoring')) return 'scoring';
+        if (path.includes('/rounds')) return 'rounds';
+        return 'dashboard';
+    }, [location.pathname]);
+
     const [eventInfo, setEventInfo] = useState(null);
     const [dashboard, setDashboard] = useState(null);
     const [participants, setParticipants] = useState([]);
@@ -98,10 +107,25 @@ export default function AdminEventManage() {
         user_id: '',
         team_id: ''
     });
+    const [shortlistForm, setShortlistForm] = useState({
+        round_id: '',
+        elimination_type: 'top_k',
+        elimination_value: '',
+        eliminate_absent: false
+    });
+    const [logs, setLogs] = useState([]);
+    const [logLimit, setLogLimit] = useState('50');
+    const [logOffset, setLogOffset] = useState(0);
+    const [logFilters, setLogFilters] = useState({
+        action: '',
+        method: '',
+        path_contains: ''
+    });
     const importInputRef = useRef(null);
     const cameraRef = useRef(null);
     const streamRef = useRef(null);
     const detectorTimerRef = useRef(null);
+    const isSuperAdmin = Boolean(user?.is_superadmin);
 
     const selectedRound = useMemo(() => rounds.find((r) => r.id === selectedRoundId) || null, [rounds, selectedRoundId]);
     const selectedCriteria = useMemo(() => {
@@ -164,6 +188,35 @@ export default function AdminEventManage() {
         setRoundRows(response.data || []);
     }, [eventSlug, getAuthHeader]);
 
+    const fetchLogs = useCallback(async () => {
+        const limit = Number(logLimit) || 50;
+        const response = await axios.get(`${API}/pda-admin/events/${eventSlug}/logs`, {
+            headers: getAuthHeader(),
+            params: {
+                limit,
+                offset: logOffset,
+                action: logFilters.action || undefined,
+                method: logFilters.method || undefined,
+                path_contains: logFilters.path_contains || undefined
+            }
+        });
+        setLogs(response.data || []);
+    }, [eventSlug, getAuthHeader, logFilters.action, logFilters.method, logFilters.path_contains, logLimit, logOffset]);
+
+    const tabPath = useCallback((tabId) => {
+        if (tabId === 'scoring') {
+            if (selectedRoundId) {
+                return `/admin/events/${eventSlug}/rounds/${selectedRoundId}/scoring`;
+            }
+            return `/admin/events/${eventSlug}/rounds`;
+        }
+        return `/admin/events/${eventSlug}/${tabId}`;
+    }, [eventSlug, selectedRoundId]);
+
+    const handleTabSelect = useCallback((tabId) => {
+        navigate(tabPath(tabId));
+    }, [navigate, tabPath]);
+
     const bootstrap = useCallback(async () => {
         setLoading(true);
         try {
@@ -185,6 +238,29 @@ export default function AdminEventManage() {
             fetchRoundRows(selectedRoundId);
         }
     }, [fetchRoundRows, selectedRoundId]);
+
+    useEffect(() => {
+        if (roundId) {
+            const parsed = Number(roundId);
+            if (!Number.isNaN(parsed) && parsed > 0) {
+                setSelectedRoundId(parsed);
+            }
+        }
+    }, [roundId]);
+
+    useEffect(() => {
+        if (!shortlistForm.round_id && rounds.length > 0) {
+            setShortlistForm((prev) => ({ ...prev, round_id: String(rounds[0].id) }));
+        }
+    }, [rounds, shortlistForm.round_id]);
+
+    useEffect(() => {
+        if (activeTab === 'logs') {
+            fetchLogs().catch(() => {
+                toast.error('Failed to load logs');
+            });
+        }
+    }, [activeTab, fetchLogs]);
 
     useEffect(() => () => {
         if (detectorTimerRef.current) clearInterval(detectorTimerRef.current);
@@ -267,6 +343,23 @@ export default function AdminEventManage() {
         }
     };
 
+    const toggleEventStatus = async () => {
+        if (!eventInfo?.status) return;
+        const nextStatus = String(eventInfo.status).toLowerCase() === 'open' ? 'closed' : 'open';
+        try {
+            const response = await axios.put(
+                `${API}/pda-admin/events/${eventSlug}/status`,
+                { status: nextStatus },
+                { headers: getAuthHeader() }
+            );
+            setEventInfo(response.data);
+            toast.success(`Event ${nextStatus === 'open' ? 'opened' : 'closed'}`);
+            fetchEventInfo();
+        } catch (error) {
+            toast.error(getApiErrorMessage(error, 'Failed to update event status'));
+        }
+    };
+
     const createRound = async (e) => {
         e.preventDefault();
         try {
@@ -291,6 +384,36 @@ export default function AdminEventManage() {
             if (selectedRoundId) fetchRoundRows(selectedRoundId);
         } catch (error) {
             toast.error(getApiErrorMessage(error, 'Failed to update round'));
+        }
+    };
+
+    const applyShortlisting = async () => {
+        const roundId = Number(shortlistForm.round_id);
+        const eliminationValue = Number(shortlistForm.elimination_value);
+        if (!roundId || Number.isNaN(roundId)) {
+            toast.error('Select a round for shortlisting');
+            return;
+        }
+        if (Number.isNaN(eliminationValue)) {
+            toast.error('Enter a valid elimination value');
+            return;
+        }
+        try {
+            await axios.put(`${API}/pda-admin/events/${eventSlug}/rounds/${roundId}`, {
+                elimination_type: shortlistForm.elimination_type,
+                elimination_value: eliminationValue,
+                eliminate_absent: Boolean(shortlistForm.eliminate_absent)
+            }, { headers: getAuthHeader() });
+            toast.success('Shortlisting applied');
+            await Promise.all([fetchRounds(), fetchLeaderboard(), fetchParticipants()]);
+            if (selectedRoundId) {
+                fetchRoundRows(selectedRoundId);
+            }
+            if (activeTab === 'logs') {
+                fetchLogs();
+            }
+        } catch (error) {
+            toast.error(getApiErrorMessage(error, 'Failed to apply shortlisting'));
         }
     };
 
@@ -417,57 +540,138 @@ export default function AdminEventManage() {
         }
     };
 
+    const navActiveTab = activeTab === 'scoring' ? 'rounds' : activeTab;
+    const navItems = [
+        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        { id: 'attendance', label: 'Attendance', icon: Camera },
+        { id: 'rounds', label: 'Rounds', icon: Calendar },
+        { id: 'participants', label: eventInfo?.participant_mode === 'team' ? 'Teams' : 'Participants', icon: Users },
+        { id: 'leaderboard', label: 'Leaderboard', icon: Trophy },
+        { id: 'logs', label: 'Logs', icon: ListChecks },
+    ];
+
     if (loading) {
         return (
-            <AdminLayout title="Event Admin" subtitle="Loading..." allowEventAdmin>
-                <div className="rounded-2xl border border-black/10 bg-white p-6">Loading event management...</div>
-            </AdminLayout>
+            <div className="min-h-screen bg-muted flex items-center justify-center">
+                <div className="neo-card animate-pulse">
+                    <p className="font-heading text-xl">Loading event admin...</p>
+                </div>
+            </div>
         );
     }
 
-    if (!eventInfo) {
+    if (!eventInfo || (!isSuperAdmin && !canAccessEvent(eventSlug))) {
         return (
-            <AdminLayout title="Event Admin" subtitle="Unavailable" allowEventAdmin>
-                <div className="rounded-2xl border border-black/10 bg-white p-6">Event not found or permission denied.</div>
-            </AdminLayout>
+            <div className="min-h-screen bg-muted">
+                <div className="max-w-7xl mx-auto px-4 py-10">
+                    <div className="neo-card">
+                        <p className="font-heading text-xl">Event not found or permission denied.</p>
+                        <Link to="/admin/events" className="inline-block mt-4">
+                            <Button variant="outline" className="border-2 border-black">
+                                <ArrowLeft className="mr-2 h-4 w-4" />
+                                Back to Events
+                            </Button>
+                        </Link>
+                    </div>
+                </div>
+            </div>
         );
     }
 
     return (
-        <AdminLayout title={eventInfo.title} subtitle={`Manage ${eventInfo.event_code} (${eventInfo.slug})`} allowEventAdmin>
-            <div className="flex items-center gap-3">
-                <Link to="/admin/events">
-                    <Button variant="outline" className="border-black/20">
-                        <ArrowLeft className="mr-2 h-4 w-4" />
-                        Back
-                    </Button>
-                </Link>
-                <span className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs uppercase tracking-[0.2em]">{eventInfo.status}</span>
-            </div>
+        <div className="min-h-screen bg-muted">
+            <header className="bg-primary text-white border-b-4 border-black sticky top-0 z-50">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <div className="flex justify-between items-center h-16">
+                        <div className="flex items-center gap-4">
+                            <Link to="/admin/events" className="flex items-center gap-2">
+                                <div className="w-10 h-10 bg-white border-2 border-black shadow-neo flex items-center justify-center">
+                                    <Sparkles className="w-6 h-6 text-primary" />
+                                </div>
+                                <div className="hidden md:block">
+                                    <div className="font-heading font-black text-lg tracking-tight leading-none">{eventInfo.title}</div>
+                                    <div className="text-xs opacity-90">{eventInfo.event_code}</div>
+                                </div>
+                            </Link>
+                            <span className="bg-accent text-black px-2 py-1 border-2 border-black text-xs font-bold uppercase">{eventInfo.status}</span>
+                        </div>
+                        <Button
+                            variant="outline"
+                            onClick={() => {
+                                logout();
+                                navigate('/');
+                            }}
+                            className="bg-white text-black border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all"
+                        >
+                            <LogOut className="w-5 h-5" />
+                        </Button>
+                    </div>
+                </div>
+            </header>
 
-            <div className="mt-4 flex flex-wrap gap-2">
-                {tabs.map((tab) => (
-                    <button
-                        key={tab.id}
-                        type="button"
-                        onClick={() => setActiveTab(tab.id)}
-                        className={`rounded-full border px-4 py-2 text-xs uppercase tracking-[0.25em] transition ${activeTab === tab.id ? 'border-[#c99612] bg-[#11131a] text-[#f6c347]' : 'border-black/10 bg-white text-slate-600 hover:border-black/30'}`}
-                    >
-                        {tab.label}
-                    </button>
-                ))}
-            </div>
+            <nav className="bg-white border-b-2 border-black">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <div className="flex gap-1 sm:gap-1 overflow-x-auto">
+                        {navItems.map((tab) => {
+                            const Icon = tab.icon;
+                            return (
+                                <button
+                                    key={tab.id}
+                                    type="button"
+                                    aria-label={tab.label}
+                                    onClick={() => handleTabSelect(tab.id)}
+                                    className={`flex-1 sm:flex-none flex items-center justify-center px-2 sm:px-4 py-3 font-bold text-xs sm:text-sm transition-colors ${navActiveTab === tab.id ? 'border-b-4 border-primary bg-secondary' : 'hover:bg-muted'}`}
+                                >
+                                    <Icon className="w-5 h-5 sm:w-4 sm:h-4 sm:mr-2" />
+                                    <span className="hidden sm:inline">{tab.label}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            </nav>
+
+            <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                <div className="mb-6 flex items-center justify-between gap-3">
+                    <Link to="/admin/events">
+                        <Button variant="outline" className="border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all">
+                            <ArrowLeft className="mr-2 h-4 w-4" />
+                            Back to Events
+                        </Button>
+                    </Link>
+                    <p className="text-xs text-gray-600 uppercase tracking-[0.2em]">{eventInfo.slug}</p>
+                </div>
 
             {activeTab === 'dashboard' ? (
-                <section className="mt-6 space-y-4">
-                    <div className="grid gap-4 md:grid-cols-5">
-                        <div className="rounded-2xl border border-black/10 bg-white p-4"><p className="text-xs text-slate-500">Registrations</p><p className="text-2xl font-black">{dashboard?.registrations || 0}</p></div>
-                        <div className="rounded-2xl border border-black/10 bg-white p-4"><p className="text-xs text-slate-500">Rounds</p><p className="text-2xl font-black">{dashboard?.rounds || 0}</p></div>
-                        <div className="rounded-2xl border border-black/10 bg-white p-4"><p className="text-xs text-slate-500">Attendance</p><p className="text-2xl font-black">{dashboard?.attendance_present || 0}</p></div>
-                        <div className="rounded-2xl border border-black/10 bg-white p-4"><p className="text-xs text-slate-500">Scores</p><p className="text-2xl font-black">{dashboard?.score_rows || 0}</p></div>
-                        <div className="rounded-2xl border border-black/10 bg-white p-4"><p className="text-xs text-slate-500">Badges</p><p className="text-2xl font-black">{dashboard?.badges || 0}</p></div>
+                <section className="space-y-4">
+                    <div className={`neo-card ${String(eventInfo.status || '').toLowerCase() === 'open' ? 'bg-green-50 border-green-500' : 'bg-red-50 border-red-500'}`}>
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                            <div>
+                                <h2 className="font-heading font-bold text-xl">Event Status: {eventInfo.status}</h2>
+                                <p className="text-gray-600 text-sm">Toggle open/closed state for registrations and participant actions.</p>
+                            </div>
+                            <Button
+                                onClick={toggleEventStatus}
+                                className={`${String(eventInfo.status || '').toLowerCase() === 'open' ? 'bg-red-500' : 'bg-green-500'} text-white border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none`}
+                            >
+                                {String(eventInfo.status || '').toLowerCase() === 'open' ? 'Close Event' : 'Open Event'}
+                            </Button>
+                        </div>
                     </div>
-                    <div className="rounded-2xl border border-black/10 bg-white p-4">
+
+                    <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+                        <div className="stat-card"><div className="stat-value text-primary">{dashboard?.registrations || 0}</div><div className="stat-label">Registrations</div></div>
+                        <div className="stat-card"><div className="stat-value text-primary">{dashboard?.rounds || 0}</div><div className="stat-label">Rounds</div></div>
+                        <div className="stat-card"><div className="stat-value text-green-500">{dashboard?.active_count || 0}</div><div className="stat-label">Active</div></div>
+                        <div className="stat-card"><div className="stat-value text-red-500">{dashboard?.eliminated_count || 0}</div><div className="stat-label">Eliminated</div></div>
+                        <div className="stat-card"><div className="stat-value text-primary">{dashboard?.rounds_completed || 0}</div><div className="stat-label">Rounds Completed</div></div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="neo-card"><p className="text-xs text-slate-500">Attendance</p><p className="text-2xl font-black">{dashboard?.attendance_present || 0}</p></div>
+                        <div className="neo-card"><p className="text-xs text-slate-500">Score Rows</p><p className="text-2xl font-black">{dashboard?.score_rows || 0}</p></div>
+                        <div className="neo-card"><p className="text-xs text-slate-500">Badges</p><p className="text-2xl font-black">{dashboard?.badges || 0}</p></div>
+                    </div>
+                    <div className="neo-card">
                         <h3 className="text-lg font-heading font-black">Badges</h3>
                         <form className="mt-3 grid gap-3 md:grid-cols-3" onSubmit={addBadge}>
                             <div className="md:col-span-2">
@@ -531,6 +735,7 @@ export default function AdminEventManage() {
                                     <th className="py-2">Name</th>
                                     <th className="py-2">Code</th>
                                     <th className="py-2">Members</th>
+                                    <th className="py-2">Status</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -540,6 +745,11 @@ export default function AdminEventManage() {
                                         <td className="py-2">{row.name}</td>
                                         <td className="py-2">{row.regno_or_code}</td>
                                         <td className="py-2">{row.members_count || 1}</td>
+                                        <td className="py-2">
+                                            <span className={`rounded-full border px-2 py-1 text-xs font-semibold ${statusPillClass(row.status)}`}>
+                                                {row.status || 'Active'}
+                                            </span>
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -605,42 +815,56 @@ export default function AdminEventManage() {
                 </section>
             ) : null}
 
-            {activeTab === 'rounds' ? (
+            {activeTab === 'rounds' || activeTab === 'scoring' ? (
                 <section className="mt-6 grid gap-4 lg:grid-cols-[320px_1fr]">
                     <div className="rounded-2xl border border-black/10 bg-white p-4">
-                        <h3 className="text-lg font-heading font-black">Add Round</h3>
-                        <form className="mt-3 space-y-3" onSubmit={createRound}>
-                            <div>
-                                <Label>Round No</Label>
-                                <Input type="number" min={1} value={newRoundForm.round_no} onChange={(e) => setNewRoundForm((prev) => ({ ...prev, round_no: e.target.value }))} required />
+                        {activeTab === 'rounds' ? (
+                            <>
+                                <h3 className="text-lg font-heading font-black">Add Round</h3>
+                                <form className="mt-3 space-y-3" onSubmit={createRound}>
+                                    <div>
+                                        <Label>Round No</Label>
+                                        <Input type="number" min={1} value={newRoundForm.round_no} onChange={(e) => setNewRoundForm((prev) => ({ ...prev, round_no: e.target.value }))} required />
+                                    </div>
+                                    <div>
+                                        <Label>Name</Label>
+                                        <Input value={newRoundForm.name} onChange={(e) => setNewRoundForm((prev) => ({ ...prev, name: e.target.value }))} required />
+                                    </div>
+                                    <div>
+                                        <Label>Description</Label>
+                                        <Textarea value={newRoundForm.description} onChange={(e) => setNewRoundForm((prev) => ({ ...prev, description: e.target.value }))} />
+                                    </div>
+                                    <div>
+                                        <Label>Mode</Label>
+                                        <Select value={newRoundForm.mode} onValueChange={(value) => setNewRoundForm((prev) => ({ ...prev, mode: value }))}>
+                                            <SelectTrigger><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="Online">Online</SelectItem>
+                                                <SelectItem value="Offline">Offline</SelectItem>
+                                                <SelectItem value="Hybrid">Hybrid</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <Button type="submit" className="w-full bg-[#11131a] text-white hover:bg-[#1f2330]">Create</Button>
+                                </form>
+                            </>
+                        ) : (
+                            <div className="rounded-xl border border-black/10 bg-[#fffdf7] p-3 text-sm text-slate-600">
+                                <p className="font-semibold text-slate-800">Scoring View</p>
+                                <p>Select a round to score, freeze, unfreeze, or import marks.</p>
                             </div>
-                            <div>
-                                <Label>Name</Label>
-                                <Input value={newRoundForm.name} onChange={(e) => setNewRoundForm((prev) => ({ ...prev, name: e.target.value }))} required />
-                            </div>
-                            <div>
-                                <Label>Description</Label>
-                                <Textarea value={newRoundForm.description} onChange={(e) => setNewRoundForm((prev) => ({ ...prev, description: e.target.value }))} />
-                            </div>
-                            <div>
-                                <Label>Mode</Label>
-                                <Select value={newRoundForm.mode} onValueChange={(value) => setNewRoundForm((prev) => ({ ...prev, mode: value }))}>
-                                    <SelectTrigger><SelectValue /></SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="Online">Online</SelectItem>
-                                        <SelectItem value="Offline">Offline</SelectItem>
-                                        <SelectItem value="Hybrid">Hybrid</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <Button type="submit" className="w-full bg-[#11131a] text-white hover:bg-[#1f2330]">Create</Button>
-                        </form>
+                        )}
                         <div className="mt-4 space-y-2">
                             {rounds.map((round) => (
                                 <button
                                     key={round.id}
                                     type="button"
-                                    onClick={() => setSelectedRoundId(round.id)}
+                                    onClick={() => {
+                                        setSelectedRoundId(round.id);
+                                        if (activeTab === 'scoring') {
+                                            navigate(`/admin/events/${eventSlug}/rounds/${round.id}/scoring`);
+                                        }
+                                    }}
                                     className={`w-full rounded-xl border p-3 text-left ${selectedRoundId === round.id ? 'border-[#c99612] bg-[#fff3c4]' : 'border-black/10 bg-[#fffdf7]'}`}
                                 >
                                     <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Round {round.round_no}</p>
@@ -656,6 +880,24 @@ export default function AdminEventManage() {
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                     <h3 className="text-lg font-heading font-black">Scores - Round {selectedRound.round_no}</h3>
                                     <div className="flex flex-wrap gap-2">
+                                        {activeTab === 'rounds' ? (
+                                            <Button
+                                                variant="outline"
+                                                className="border-black/20"
+                                                onClick={() => navigate(`/admin/events/${eventSlug}/rounds/${selectedRound.id}/scoring`)}
+                                            >
+                                                Open Scoring Page
+                                            </Button>
+                                        ) : null}
+                                        {activeTab === 'scoring' ? (
+                                            <Button
+                                                variant="outline"
+                                                className="border-black/20"
+                                                onClick={() => navigate(`/admin/events/${eventSlug}/rounds`)}
+                                            >
+                                                Back to Rounds
+                                            </Button>
+                                        ) : null}
                                         {!selectedRound.is_frozen ? (
                                             <>
                                                 <Button variant="outline" className="border-black/20" onClick={downloadTemplate}>
@@ -690,6 +932,7 @@ export default function AdminEventManage() {
                                             <tr className="border-b border-black/10 text-left text-xs uppercase tracking-[0.2em] text-slate-500">
                                                 <th className="py-2">Name</th>
                                                 <th className="py-2">Code</th>
+                                                <th className="py-2">Status</th>
                                                 <th className="py-2">Present</th>
                                                 {selectedCriteria.map((criterion) => <th key={criterion.name} className="py-2">{criterion.name} (/{criterion.max_marks})</th>)}
                                                 <th className="py-2">Total</th>
@@ -702,6 +945,11 @@ export default function AdminEventManage() {
                                                     <tr key={`${row.entity_type}-${row.entity_id}`} className="border-b border-black/5 text-sm">
                                                         <td className="py-2">{row.name}</td>
                                                         <td className="py-2">{row.regno_or_code}</td>
+                                                        <td className="py-2">
+                                                            <span className={`rounded-full border px-2 py-1 text-xs font-semibold ${statusPillClass(row.status)}`}>
+                                                                {row.status || 'Active'}
+                                                            </span>
+                                                        </td>
                                                         <td className="py-2">
                                                             <Checkbox checked={Boolean(row.is_present)} disabled={selectedRound.is_frozen} onCheckedChange={(checked) => changePresence(row.entity_id, checked === true)} />
                                                         </td>
@@ -733,42 +981,183 @@ export default function AdminEventManage() {
             ) : null}
 
             {activeTab === 'leaderboard' ? (
-                <section className="mt-6 rounded-2xl border border-black/10 bg-white p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                        <h3 className="text-lg font-heading font-black">Leaderboard</h3>
-                        <div className="flex gap-2">
-                            <Button variant="outline" className="border-black/20" onClick={() => exportData('participants')}>Export Participants</Button>
-                            <Button variant="outline" className="border-black/20" onClick={() => exportData('leaderboard')}>Export Leaderboard</Button>
+                <section className="mt-6 space-y-4">
+                    <div className="rounded-2xl border border-black/10 bg-white p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <h3 className="text-lg font-heading font-black">Leaderboard</h3>
+                            <div className="flex gap-2">
+                                <Button variant="outline" className="border-black/20" onClick={() => exportData('participants')}>Export Participants</Button>
+                                <Button variant="outline" className="border-black/20" onClick={() => exportData('leaderboard')}>Export Leaderboard</Button>
+                            </div>
+                        </div>
+                        <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-5">
+                            <div>
+                                <Label>Round</Label>
+                                <Select value={shortlistForm.round_id || 'none'} onValueChange={(value) => setShortlistForm((prev) => ({ ...prev, round_id: value === 'none' ? '' : value }))}>
+                                    <SelectTrigger><SelectValue placeholder="Select round" /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="none">Select round</SelectItem>
+                                        {rounds.map((round) => (
+                                            <SelectItem key={round.id} value={String(round.id)}>
+                                                Round {round.round_no}: {round.name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div>
+                                <Label>Elimination Type</Label>
+                                <Select value={shortlistForm.elimination_type} onValueChange={(value) => setShortlistForm((prev) => ({ ...prev, elimination_type: value }))}>
+                                    <SelectTrigger><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="top_k">Top K</SelectItem>
+                                        <SelectItem value="min_score">Min Score</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div>
+                                <Label>Value</Label>
+                                <Input
+                                    type="number"
+                                    value={shortlistForm.elimination_value}
+                                    onChange={(e) => setShortlistForm((prev) => ({ ...prev, elimination_value: e.target.value }))}
+                                    placeholder={shortlistForm.elimination_type === 'top_k' ? 'Top K' : 'Minimum score'}
+                                />
+                            </div>
+                            <div className="flex items-center gap-2 pt-6">
+                                <Checkbox
+                                    checked={Boolean(shortlistForm.eliminate_absent)}
+                                    onCheckedChange={(checked) => setShortlistForm((prev) => ({ ...prev, eliminate_absent: checked === true }))}
+                                />
+                                <Label>Eliminate absent</Label>
+                            </div>
+                            <div className="flex items-end">
+                                <Button className="w-full bg-[#11131a] text-white hover:bg-[#1f2330]" onClick={applyShortlisting}>Apply Shortlisting</Button>
+                            </div>
+                        </div>
+                        <p className="mt-2 text-xs text-slate-500">Shortlisting applies when the selected round is frozen.</p>
+                    </div>
+                    <div className="rounded-2xl border border-black/10 bg-white p-4">
+                        <div className="overflow-x-auto">
+                            <table className="w-full border-collapse">
+                                <thead>
+                                    <tr className="border-b border-black/10 text-left text-xs uppercase tracking-[0.2em] text-slate-500">
+                                        <th className="py-2">Rank</th>
+                                        <th className="py-2">Type</th>
+                                        <th className="py-2">Name</th>
+                                        <th className="py-2">Code</th>
+                                        <th className="py-2">Status</th>
+                                        <th className="py-2">Attendance</th>
+                                        <th className="py-2">Score</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {leaderboard.map((row) => (
+                                        <tr key={`${row.entity_type}-${row.entity_id}`} className="border-b border-black/5 text-sm">
+                                            <td className="py-2">{row.rank ?? '-'}</td>
+                                            <td className="py-2">{row.entity_type}</td>
+                                            <td className="py-2">{row.name}</td>
+                                            <td className="py-2">{row.regno_or_code}</td>
+                                            <td className="py-2">
+                                                <span className={`rounded-full border px-2 py-1 text-xs font-semibold ${statusPillClass(row.status)}`}>
+                                                    {row.status || 'Active'}
+                                                </span>
+                                            </td>
+                                            <td className="py-2">{row.attendance_count}</td>
+                                            <td className="py-2">{Number(row.cumulative_score || 0).toFixed(2)}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
                         </div>
                     </div>
-                    <div className="mt-3 overflow-x-auto">
+                </section>
+            ) : null}
+
+            {activeTab === 'logs' ? (
+                <section className="mt-6 rounded-2xl border border-black/10 bg-white p-4">
+                    <div className="flex flex-wrap items-end gap-3">
+                        <div>
+                            <Label>Action</Label>
+                            <Input value={logFilters.action} onChange={(e) => setLogFilters((prev) => ({ ...prev, action: e.target.value }))} placeholder="Filter action" />
+                        </div>
+                        <div>
+                            <Label>Method</Label>
+                            <Select value={logFilters.method || 'any'} onValueChange={(value) => setLogFilters((prev) => ({ ...prev, method: value === 'any' ? '' : value }))}>
+                                <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="any">Any</SelectItem>
+                                    <SelectItem value="GET">GET</SelectItem>
+                                    <SelectItem value="POST">POST</SelectItem>
+                                    <SelectItem value="PUT">PUT</SelectItem>
+                                    <SelectItem value="DELETE">DELETE</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="min-w-[220px]">
+                            <Label>Path Contains</Label>
+                            <Input value={logFilters.path_contains} onChange={(e) => setLogFilters((prev) => ({ ...prev, path_contains: e.target.value }))} placeholder="/rounds/" />
+                        </div>
+                        <div>
+                            <Label>Limit</Label>
+                            <Select value={logLimit} onValueChange={(value) => setLogLimit(value)}>
+                                <SelectTrigger className="w-[110px]"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="25">25</SelectItem>
+                                    <SelectItem value="50">50</SelectItem>
+                                    <SelectItem value="100">100</SelectItem>
+                                    <SelectItem value="200">200</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <Button variant="outline" className="border-black/20" onClick={() => { setLogOffset(0); fetchLogs(); }}>Apply</Button>
+                        <Button variant="outline" className="border-black/20" onClick={() => {
+                            setLogFilters({ action: '', method: '', path_contains: '' });
+                            setLogOffset(0);
+                        }}>Reset</Button>
+                    </div>
+                    <div className="mt-4 overflow-x-auto">
                         <table className="w-full border-collapse">
                             <thead>
                                 <tr className="border-b border-black/10 text-left text-xs uppercase tracking-[0.2em] text-slate-500">
-                                    <th className="py-2">Rank</th>
-                                    <th className="py-2">Type</th>
-                                    <th className="py-2">Name</th>
-                                    <th className="py-2">Code</th>
-                                    <th className="py-2">Attendance</th>
-                                    <th className="py-2">Score</th>
+                                    <th className="py-2">Time</th>
+                                    <th className="py-2">Admin</th>
+                                    <th className="py-2">Action</th>
+                                    <th className="py-2">Method</th>
+                                    <th className="py-2">Path</th>
+                                    <th className="py-2">Meta</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {leaderboard.map((row) => (
-                                    <tr key={`${row.entity_type}-${row.entity_id}`} className="border-b border-black/5 text-sm">
-                                        <td className="py-2">{row.rank}</td>
-                                        <td className="py-2">{row.entity_type}</td>
-                                        <td className="py-2">{row.name}</td>
-                                        <td className="py-2">{row.regno_or_code}</td>
-                                        <td className="py-2">{row.attendance_count}</td>
-                                        <td className="py-2">{Number(row.cumulative_score || 0).toFixed(2)}</td>
+                                {logs.map((log) => (
+                                    <tr key={log.id} className="border-b border-black/5 text-sm align-top">
+                                        <td className="py-2 whitespace-nowrap">{new Date(log.created_at).toLocaleString()}</td>
+                                        <td className="py-2">
+                                            <div>{log.admin_name}</div>
+                                            <div className="text-xs text-slate-500">{log.admin_register_number}</div>
+                                        </td>
+                                        <td className="py-2">{log.action}</td>
+                                        <td className="py-2">{log.method || '-'}</td>
+                                        <td className="py-2">{log.path || '-'}</td>
+                                        <td className="py-2 text-xs text-slate-600">{log.meta ? JSON.stringify(log.meta) : '-'}</td>
                                     </tr>
                                 ))}
                             </tbody>
                         </table>
+                        {logs.length === 0 ? <p className="mt-3 text-sm text-slate-500">No logs found.</p> : null}
+                    </div>
+                    <div className="mt-4 flex items-center justify-between">
+                        <Button variant="outline" className="border-black/20" disabled={logOffset === 0} onClick={() => setLogOffset((prev) => Math.max(0, prev - (Number(logLimit) || 50)))}>
+                            Previous
+                        </Button>
+                        <p className="text-xs text-slate-500">Offset {logOffset}</p>
+                        <Button variant="outline" className="border-black/20" disabled={logs.length < (Number(logLimit) || 50)} onClick={() => setLogOffset((prev) => prev + (Number(logLimit) || 50))}>
+                            Next
+                        </Button>
                     </div>
                 </section>
             ) : null}
-        </AdminLayout>
+            </main>
+        </div>
     );
 }

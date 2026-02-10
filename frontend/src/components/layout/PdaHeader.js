@@ -6,9 +6,7 @@ import pdaLogo from '@/assets/pda-logo.png';
 import { useAuth } from '@/context/AuthContext';
 
 const navItems = [
-    { to: '/', label: 'Home' },
-    { to: '/persofest', label: 'Persofest’26' },
-    { to: '/recruit', label: 'Recruitment' }
+    { to: '/', label: 'Home' }
 ];
 
 const baseNavClass = 'inline-flex items-center rounded-md border-2 border-black px-3 py-2 text-xs font-bold uppercase tracking-[0.14em] shadow-neo transition-[background-color,color,transform,box-shadow] duration-150 hover:-translate-x-[1px] hover:-translate-y-[1px] hover:shadow-[6px_6px_0px_0px_#000000] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none';
@@ -36,10 +34,10 @@ export default function PdaHeader() {
                     >
                         <img src={pdaLogo} alt="PDA logo" className="h-10 w-10 border-2 border-black bg-white object-contain p-1" />
                         <div className="leading-tight">
-                            <p className="font-heading text-[11px] font-black uppercase tracking-[0.2em] text-black sm:text-xs">
+                            <p className="font-heading text-sm font-black uppercase tracking-[0.2em] text-black sm:text-base">
                                 PERSOHUB
                             </p>
-                            <p className="font-heading text-[11px] font-black uppercase tracking-[0.2em] text-[#8B5CF6] sm:text-xs">
+                            <p className="font-heading text-sm font-black uppercase tracking-[0.2em] text-[#8B5CF6] sm:text-base">
                                PDA
                             </p>
                         </div>

@@ -183,6 +183,22 @@ class AdminLog(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class PdaEventLog(Base):
+    __tablename__ = "pda_event_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("pda_events.id", ondelete="SET NULL"), nullable=True, index=True)
+    event_slug = Column(String(120), nullable=False, index=True)
+    admin_id = Column(Integer, nullable=True, index=True)
+    admin_register_number = Column(String(20), nullable=False)
+    admin_name = Column(String(255), nullable=False)
+    action = Column(String(255), nullable=False)
+    method = Column(String(10), nullable=True)
+    path = Column(String(255), nullable=True)
+    meta = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class PdaAdmin(Base):
     __tablename__ = "pda_admins"
 
@@ -277,6 +293,11 @@ class PdaEventStatus(enum.Enum):
     CLOSED = "closed"
 
 
+class PdaEventRegistrationStatus(enum.Enum):
+    ACTIVE = "Active"
+    ELIMINATED = "Eliminated"
+
+
 class PdaEventEntityType(enum.Enum):
     USER = "user"
     TEAM = "team"
@@ -336,6 +357,10 @@ class PdaEventRegistration(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     team_id = Column(Integer, ForeignKey("pda_event_teams.id"), nullable=True, index=True)
     entity_type = Column(SQLEnum(PdaEventEntityType), nullable=False)
+    status = Column(SQLEnum(PdaEventRegistrationStatus), nullable=False, default=PdaEventRegistrationStatus.ACTIVE)
+    referral_code = Column(String(16), nullable=True)
+    referred_by = Column(String(16), nullable=True)
+    referral_count = Column(Integer, nullable=False, default=0)
     registered_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

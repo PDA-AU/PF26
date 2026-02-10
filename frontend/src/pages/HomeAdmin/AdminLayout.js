@@ -56,6 +56,7 @@ export default function AdminLayout({ title, subtitle, children, allowEventAdmin
     const baseNavItems = canAccessHome
         ? [
             { label: 'Items', path: '/admin/items' },
+            { label: 'Users', path: '/admin/users' },
             { label: 'Team', path: '/admin/team' },
             { label: 'Gallery', path: '/admin/gallery' }
         ]

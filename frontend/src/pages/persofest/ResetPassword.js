@@ -32,7 +32,7 @@ export default function ResetPassword() {
         }
         setLoading(true);
         try {
-            await axios.post(`${API}/participant-auth/password/reset`, {
+            await axios.post(`${API}/auth/password/reset`, {
                 token,
                 new_password: formData.new_password,
                 confirm_password: formData.confirm_password

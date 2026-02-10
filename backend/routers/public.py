@@ -4,11 +4,21 @@ from sqlalchemy import func
 from typing import List
 
 from database import get_db
-from models import SystemConfig, Round, RoundState, Participant
+from models import (
+    SystemConfig,
+    PdaEvent,
+    PdaEventStatus,
+    PdaEventRound,
+    PdaEventRoundState,
+    PdaEventRegistration,
+    PdaEventEntityType,
+    PdaUser,
+)
 from schemas import RoundPublicResponse, TopReferrer
 from datetime import datetime
 
 router = APIRouter()
+PERSOFEST_EVENT_SLUG = "persofest-2026"
 
 
 @router.get("/")
@@ -23,8 +33,12 @@ def health_check():
 
 @router.get("/registration-status")
 def get_registration_status(db: Session = Depends(get_db)):
-    reg_config = db.query(SystemConfig).filter(SystemConfig.key == "registration_open").first()
-    registration_open = reg_config.value == "true" if reg_config else True
+    event = db.query(PdaEvent).filter(PdaEvent.slug == PERSOFEST_EVENT_SLUG).first()
+    if event:
+        registration_open = event.status == PdaEventStatus.OPEN
+    else:
+        reg_config = db.query(SystemConfig).filter(SystemConfig.key == "registration_open").first()
+        registration_open = reg_config.value == "true" if reg_config else True
     return {"registration_open": registration_open}
 
 
@@ -37,18 +51,55 @@ def get_pda_recruitment_status(db: Session = Depends(get_db)):
 
 @router.get("/rounds/public", response_model=List[RoundPublicResponse])
 def get_public_rounds(db: Session = Depends(get_db)):
-    rounds = db.query(Round).filter(Round.state != RoundState.DRAFT).order_by(Round.id).all()
-    return [RoundPublicResponse.model_validate(r) for r in rounds]
+    event = db.query(PdaEvent).filter(PdaEvent.slug == PERSOFEST_EVENT_SLUG).first()
+    if not event:
+        return []
+    rounds = (
+        db.query(PdaEventRound)
+        .filter(
+            PdaEventRound.event_id == event.id,
+            PdaEventRound.state != PdaEventRoundState.DRAFT,
+        )
+        .order_by(PdaEventRound.round_no.asc())
+        .all()
+    )
+    payload = []
+    for row in rounds:
+        payload.append(
+            RoundPublicResponse(
+                id=row.id,
+                round_no=f"PF{int(row.round_no):02d}",
+                name=row.name,
+                description=row.description,
+                date=row.date,
+                mode=row.mode.value if hasattr(row.mode, "value") else str(row.mode),
+                description_pdf=None,
+            )
+        )
+    return payload
 
 
 @router.get("/top-referrers", response_model=List[TopReferrer])
 def get_top_referrers(db: Session = Depends(get_db)):
-    top_referrers = db.query(
-        Participant.name,
-        Participant.register_number,
-        Participant.referral_count
-    ).filter(Participant.referral_count > 0).order_by(Participant.referral_count.desc()).limit(10).all()
-
+    event = db.query(PdaEvent).filter(PdaEvent.slug == PERSOFEST_EVENT_SLUG).first()
+    if not event:
+        return []
+    top_referrers = (
+        db.query(
+            PdaUser.name,
+            PdaUser.regno,
+            PdaEventRegistration.referral_count,
+        )
+        .join(PdaUser, PdaUser.id == PdaEventRegistration.user_id)
+        .filter(
+            PdaEventRegistration.event_id == event.id,
+            PdaEventRegistration.entity_type == PdaEventEntityType.USER,
+            PdaEventRegistration.referral_count > 0,
+        )
+        .order_by(PdaEventRegistration.referral_count.desc(), PdaUser.name.asc())
+        .limit(10)
+        .all()
+    )
     return [TopReferrer(name=name, register_number=regno, referral_count=count) for name, regno, count in top_referrers]
 
 
@@ -74,20 +125,13 @@ def list_routes():
             {"method": "POST", "path": "/me/profile-picture"},
             {"method": "POST", "path": "/me/profile-picture/presign"},
             {"method": "POST", "path": "/me/profile-picture/confirm"},
-            {"method": "POST", "path": "/participant-auth/register"},
-            {"method": "POST", "path": "/participant-auth/login"},
-            {"method": "POST", "path": "/participant-auth/refresh"},
-            {"method": "GET", "path": "/participant/me"},
-            {"method": "PUT", "path": "/participant/me"},
-            {"method": "POST", "path": "/participant/me/profile-picture"},
-            {"method": "POST", "path": "/participant/me/profile-picture/presign"},
-            {"method": "POST", "path": "/participant/me/profile-picture/confirm"},
-            {"method": "GET", "path": "/participant/me/rounds"},
             {"method": "GET", "path": "/pda/programs"},
             {"method": "GET", "path": "/pda/events"},
             {"method": "GET", "path": "/pda/events/ongoing"},
             {"method": "GET", "path": "/pda/events/{slug}"},
             {"method": "GET", "path": "/pda/events/{slug}/dashboard"},
+            {"method": "GET", "path": "/pda/events/{slug}/me"},
+            {"method": "GET", "path": "/pda/events/{slug}/my-rounds"},
             {"method": "POST", "path": "/pda/events/{slug}/register"},
             {"method": "POST", "path": "/pda/events/{slug}/teams/create"},
             {"method": "POST", "path": "/pda/events/{slug}/teams/join"},
@@ -118,6 +162,9 @@ def list_routes():
             {"method": "GET", "path": "/pda-admin/events/{slug}/rounds"},
             {"method": "POST", "path": "/pda-admin/events/{slug}/rounds"},
             {"method": "PUT", "path": "/pda-admin/events/{slug}/rounds/{round_id}"},
+            {"method": "GET", "path": "/pda-admin/events/{slug}/participants/{user_id}/rounds"},
+            {"method": "GET", "path": "/pda-admin/events/{slug}/participants/{user_id}/summary"},
+            {"method": "PUT", "path": "/pda-admin/events/{slug}/participants/{user_id}/status"},
             {"method": "GET", "path": "/pda-admin/events/{slug}/rounds/{round_id}/participants"},
             {"method": "POST", "path": "/pda-admin/events/{slug}/rounds/{round_id}/scores"},
             {"method": "POST", "path": "/pda-admin/events/{slug}/rounds/{round_id}/import-scores"},
@@ -156,30 +203,6 @@ def list_routes():
             {"method": "POST", "path": "/pda-admin/superadmin/recruitment-toggle"},
             {"method": "GET", "path": "/pda-admin/recruitments"},
             {"method": "GET", "path": "/pda-admin/recruitments/export"},
-            {"method": "POST", "path": "/pda-admin/recruitments/approve"},
-            {"method": "GET", "path": "/persofest/admin/dashboard"},
-            {"method": "POST", "path": "/persofest/admin/toggle-registration"},
-            {"method": "GET", "path": "/persofest/admin/participants"},
-            {"method": "PUT", "path": "/persofest/admin/participants/{participant_id}/status"},
-            {"method": "GET", "path": "/persofest/admin/participants/{participant_id}/rounds"},
-            {"method": "GET", "path": "/persofest/admin/participants/{participant_id}/summary"},
-            {"method": "GET", "path": "/persofest/admin/rounds"},
-            {"method": "POST", "path": "/persofest/admin/rounds"},
-            {"method": "PUT", "path": "/persofest/admin/rounds/{round_id}"},
-            {"method": "POST", "path": "/persofest/admin/rounds/{round_id}/description-pdf"},
-            {"method": "POST", "path": "/persofest/admin/rounds/{round_id}/description-pdf/presign"},
-            {"method": "DELETE", "path": "/persofest/admin/rounds/{round_id}"},
-            {"method": "GET", "path": "/persofest/admin/rounds/{round_id}/stats"},
-            {"method": "POST", "path": "/persofest/admin/rounds/{round_id}/scores"},
-            {"method": "GET", "path": "/persofest/admin/rounds/{round_id}/participants"},
-            {"method": "GET", "path": "/persofest/admin/rounds/{round_id}/score-template"},
-            {"method": "POST", "path": "/persofest/admin/rounds/{round_id}/import-scores"},
-            {"method": "POST", "path": "/persofest/admin/rounds/{round_id}/freeze"},
-            {"method": "POST", "path": "/persofest/admin/rounds/{round_id}/unfreeze"},
-            {"method": "GET", "path": "/persofest/admin/leaderboard"},
-            {"method": "GET", "path": "/persofest/admin/export/participants"},
-            {"method": "GET", "path": "/persofest/admin/export/leaderboard"},
-            {"method": "GET", "path": "/persofest/admin/export/round/{round_id}"},
-            {"method": "GET", "path": "/persofest/admin/logs"}
+            {"method": "POST", "path": "/pda-admin/recruitments/approve"}
         ]
     }

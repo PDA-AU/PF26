@@ -7,11 +7,9 @@ import os
 import logging
 
 from database import engine, get_db, Base
+from sqlalchemy import text
 from models import SystemConfig
 from migrations import (
-    rename_users_to_participants,
-    ensure_events_table,
-    ensure_participants_event_column,
     ensure_pda_users_table,
     ensure_pda_users_dob_column,
     ensure_pda_users_gender_column,
@@ -25,19 +23,20 @@ from migrations import (
     ensure_email_auth_columns,
     normalize_pda_admins_schema,
     drop_admin_logs_fk,
-    seed_persofest_event,
-    assign_participants_event,
     normalize_pda_team_schema,
     migrate_pda_team_social_handles_to_users,
     normalize_pda_team,
     ensure_superadmin_policies,
     ensure_default_superadmin,
     ensure_pda_event_tables,
+    ensure_persofest_pda_event,
+    migrate_legacy_persofest_to_pda_event,
+    drop_legacy_persofest_tables,
     ensure_persohub_tables,
     ensure_persohub_defaults,
 )
 
-from routers import public, auth_pda, auth_participant, pda_public, pda_admin, persofest_admin, superadmin
+from routers import public, auth_pda, pda_public, pda_admin, superadmin
 from routers import pda_events, pda_events_admin
 from routers import persohub_public, persohub_community_auth, persohub_community_admin
 
@@ -66,13 +65,26 @@ app.add_middleware(
 # Mount static files for uploads
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
+LEGACY_PERSOFEST_MODEL_TABLES = {"pf_events", "participants", "rounds", "scores"}
+
+
+def _legacy_persofest_tables_exist() -> bool:
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_name IN ('participants', 'rounds', 'scores')
+                """
+            )
+        ).fetchall()
+    return bool(rows)
+
 
 @app.on_event("startup")
 async def startup_event():
     # Migrations / schema adjustments
-    rename_users_to_participants(engine)
-    ensure_events_table(engine)
-    ensure_participants_event_column(engine)
     ensure_pda_users_table(engine)
     ensure_pda_users_dob_column(engine)
     ensure_pda_users_gender_column(engine)
@@ -86,14 +98,23 @@ async def startup_event():
     ensure_pda_admins_table(engine)
     ensure_email_auth_columns(engine)
     ensure_pda_event_tables(engine)
+    ensure_persofest_pda_event(engine)
     ensure_persohub_tables(engine)
 
-    # Create tables based on models
-    Base.metadata.create_all(bind=engine)
+    # Create ORM tables except deprecated Persofest legacy tables.
+    managed_tables = [
+        table for table in Base.metadata.sorted_tables
+        if table.name not in LEGACY_PERSOFEST_MODEL_TABLES
+    ]
+    Base.metadata.create_all(bind=engine, tables=managed_tables)
 
-    # Seed default data
-    seed_persofest_event(engine)
-    assign_participants_event(engine)
+    # Legacy Persofest migration should run only when old tables still exist.
+    if _legacy_persofest_tables_exist():
+        migrate_legacy_persofest_to_pda_event(engine)
+        drop_legacy_persofest_tables(engine)
+        logger.info("Legacy Persofest tables detected and migrated to managed event tables.")
+    else:
+        logger.info("Legacy Persofest tables not found; skipping one-time legacy migration block.")
 
     db = next(get_db())
     try:
@@ -122,11 +143,9 @@ async def startup_event():
 # Routers
 app.include_router(public.router, prefix="/api")
 app.include_router(auth_pda.router, prefix="/api")
-app.include_router(auth_participant.router, prefix="/api")
 app.include_router(pda_public.router, prefix="/api")
 app.include_router(pda_admin.router, prefix="/api")
 app.include_router(superadmin.router, prefix="/api")
-app.include_router(persofest_admin.router, prefix="/api")
 app.include_router(pda_events.router, prefix="/api")
 app.include_router(pda_events_admin.router, prefix="/api")
 app.include_router(persohub_public.router, prefix="/api")

@@ -17,6 +17,7 @@ from models import (
     PdaEventStatus,
     PdaEventParticipantMode,
     PdaEventEntityType,
+    PdaEventRegistrationStatus,
     PdaEventRegistration,
     PdaEventTeam,
     PdaEventTeamMember,
@@ -25,6 +26,7 @@ from models import (
     PdaEventRound,
     PdaEventBadge,
     PdaEventAttendance,
+    PdaEventScore,
 )
 from schemas import (
     PdaManagedAchievement,
@@ -58,6 +60,27 @@ def _normalize_team_code(value: str) -> str:
 
 def _make_team_code() -> str:
     return "".join(random.choices(string.ascii_uppercase + string.digits, k=5))
+
+
+def _make_referral_code() -> str:
+    return "".join(random.choices(string.ascii_uppercase + string.digits, k=5))
+
+
+def _batch_from_regno(regno: str) -> Optional[str]:
+    value = str(regno or "").strip()
+    if len(value) < 4 or not value[:4].isdigit():
+        return None
+    return value[:4]
+
+
+def _next_event_referral_code(db: Session, event_id: int) -> str:
+    candidate = _make_referral_code()
+    while db.query(PdaEventRegistration).filter(
+        PdaEventRegistration.event_id == event_id,
+        PdaEventRegistration.referral_code == candidate,
+    ).first():
+        candidate = _make_referral_code()
+    return candidate
 
 
 def _build_team_response(db: Session, team: PdaEventTeam) -> PdaManagedTeamResponse:
@@ -145,8 +168,6 @@ def get_event_dashboard(
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
-    if event.status != PdaEventStatus.OPEN:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Event is closed")
 
     team = _get_user_team_for_event(db, event.id, user.id) if event.participant_mode == PdaEventParticipantMode.TEAM else None
     registration = db.query(PdaEventRegistration).filter(
@@ -201,6 +222,7 @@ def get_event_dashboard(
 @router.post("/pda/events/{slug}/register", response_model=PdaManagedEventDashboard)
 def register_individual_event(
     slug: str,
+    referral_code: Optional[str] = None,
     user: PdaUser = Depends(require_pda_user),
     db: Session = Depends(get_db),
 ):
@@ -222,8 +244,20 @@ def register_individual_event(
         user_id=user.id,
         team_id=None,
         entity_type=PdaEventEntityType.USER,
+        status=PdaEventRegistrationStatus.ACTIVE,
+        referral_code=_next_event_referral_code(db, event.id),
+        referred_by=(str(referral_code or "").strip().upper() or None),
+        referral_count=0,
     )
     db.add(row)
+    if row.referred_by:
+        referrer = db.query(PdaEventRegistration).filter(
+            PdaEventRegistration.event_id == event.id,
+            PdaEventRegistration.entity_type == PdaEventEntityType.USER,
+            PdaEventRegistration.referral_code == row.referred_by,
+        ).first()
+        if referrer:
+            referrer.referral_count = int(referrer.referral_count or 0) + 1
     db.commit()
     _send_registration_email(user, event, "Participant mode: Individual")
     return get_event_dashboard(slug=slug, user=user, db=db)
@@ -509,6 +543,88 @@ def my_events(user: PdaUser = Depends(require_pda_user), db: Session = Depends(g
             )
         )
     return results
+
+
+@router.get("/pda/events/{slug}/me")
+def event_me(
+    slug: str,
+    user: PdaUser = Depends(require_pda_user),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    registration = db.query(PdaEventRegistration).filter(
+        PdaEventRegistration.event_id == event.id,
+        PdaEventRegistration.user_id == user.id,
+        PdaEventRegistration.entity_type == PdaEventEntityType.USER,
+    ).first()
+    if not registration:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration not found")
+    return {
+        "event_slug": event.slug,
+        "event_code": event.event_code,
+        "user_id": user.id,
+        "regno": user.regno,
+        "batch": _batch_from_regno(user.regno),
+        "name": user.name,
+        "email": user.email,
+        "phone": user.phno,
+        "gender": user.gender,
+        "department": user.dept,
+        "profile_picture": user.image_url,
+        "status": registration.status.value if hasattr(registration.status, "value") else str(registration.status),
+        "referral_code": registration.referral_code,
+        "referred_by": registration.referred_by,
+        "referral_count": int(registration.referral_count or 0),
+    }
+
+
+@router.get("/pda/events/{slug}/my-rounds")
+def my_round_status(
+    slug: str,
+    user: PdaUser = Depends(require_pda_user),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    registration = db.query(PdaEventRegistration).filter(
+        PdaEventRegistration.event_id == event.id,
+        PdaEventRegistration.user_id == user.id,
+        PdaEventRegistration.entity_type == PdaEventEntityType.USER,
+    ).first()
+    if not registration:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration not found")
+
+    rounds = (
+        db.query(PdaEventRound)
+        .filter(PdaEventRound.event_id == event.id)
+        .order_by(PdaEventRound.round_no.asc())
+        .all()
+    )
+    statuses = []
+    for round_row in rounds:
+        score_row = db.query(PdaEventScore).filter(
+            PdaEventScore.event_id == event.id,
+            PdaEventScore.round_id == round_row.id,
+            PdaEventScore.entity_type == PdaEventEntityType.USER,
+            PdaEventScore.user_id == user.id,
+        ).first()
+        if registration.status == PdaEventRegistrationStatus.ELIMINATED:
+            status_label = "Eliminated"
+            is_present = bool(score_row.is_present) if score_row else None
+        elif score_row:
+            status_label = "Active" if bool(score_row.is_present) else "Absent"
+            is_present = bool(score_row.is_present)
+        else:
+            status_label = "Pending"
+            is_present = None
+        statuses.append(
+            {
+                "round_no": f"PF{int(round_row.round_no):02d}",
+                "round_name": round_row.name,
+                "status": status_label,
+                "is_present": is_present,
+            }
+        )
+    return statuses
 
 
 @router.get("/pda/me/achievements", response_model=List[PdaManagedAchievement])

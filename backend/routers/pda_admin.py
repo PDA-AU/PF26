@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 import io
 import csv
@@ -34,6 +35,7 @@ from schemas import (
     ProgramCreate, ProgramUpdate, ProgramResponse,
     EventCreate, EventUpdate, EventResponse,
     PdaTeamCreate, PdaTeamUpdate, PdaTeamResponse,
+    PdaAdminUserUpdate, PdaAdminUserResponse,
     PdaGalleryCreate, PdaGalleryUpdate, PdaGalleryResponse,
     PresignRequest, PresignResponse
 )
@@ -42,6 +44,21 @@ from utils import log_admin_action, _upload_to_s3, _generate_presigned_put_url
 from auth import get_password_hash
 
 router = APIRouter()
+
+
+def _extract_recruitment_state(user: PdaUser):
+    preferred_team = None
+    is_applied = False
+    if isinstance(user.json_content, dict):
+        raw_team = user.json_content.get("preferred_team")
+        if raw_team is not None:
+            preferred_team = str(raw_team).strip() or None
+        raw_is_applied = user.json_content.get("is_applied")
+        if isinstance(raw_is_applied, bool):
+            is_applied = raw_is_applied
+    if preferred_team and not is_applied:
+        is_applied = True
+    return preferred_team, is_applied
 
 
 def _build_team_response(member: PdaTeam, user: Optional[PdaUser]) -> PdaTeamResponse:
@@ -62,6 +79,33 @@ def _build_team_response(member: PdaTeam, user: Optional[PdaUser]) -> PdaTeamRes
         linkedin_url=user.linkedin_url if user else None,
         github_url=user.github_url if user else None,
         created_at=member.created_at
+    )
+
+
+def _build_admin_user_response(user: PdaUser, member: Optional[PdaTeam]) -> PdaAdminUserResponse:
+    preferred_team, is_applied = _extract_recruitment_state(user)
+    return PdaAdminUserResponse(
+        id=user.id,
+        team_member_id=member.id if member else None,
+        name=user.name,
+        profile_name=user.profile_name,
+        regno=user.regno,
+        dept=user.dept,
+        email=user.email,
+        phno=user.phno,
+        dob=user.dob,
+        gender=user.gender,
+        is_member=bool(user.is_member),
+        is_applied=is_applied,
+        preferred_team=preferred_team,
+        email_verified=bool(user.email_verified_at),
+        team=member.team if member else None,
+        designation=member.designation if member else None,
+        photo_url=user.image_url,
+        instagram_url=user.instagram_url,
+        linkedin_url=user.linkedin_url,
+        github_url=user.github_url,
+        created_at=user.created_at,
     )
 
 
@@ -287,6 +331,108 @@ def list_team_members(
     return [_build_team_response(m, u) for m, u in rows]
 
 
+@router.get("/pda-admin/users", response_model=List[PdaAdminUserResponse])
+def list_pda_users(
+    admin: PdaUser = Depends(require_pda_home_admin),
+    db: Session = Depends(get_db)
+):
+    users = (
+        db.query(PdaUser)
+        .order_by(PdaUser.name.asc().nullslast(), PdaUser.regno.asc())
+        .all()
+    )
+    team_rows = db.query(PdaTeam).order_by(PdaTeam.id.asc()).all()
+    team_map = {}
+    for member in team_rows:
+        if member.user_id not in team_map:
+            team_map[member.user_id] = member
+    return [_build_admin_user_response(user, team_map.get(user.id)) for user in users]
+
+
+@router.put("/pda-admin/users/{user_id}", response_model=PdaAdminUserResponse)
+def update_pda_user_admin(
+    user_id: int,
+    user_data: PdaAdminUserUpdate,
+    admin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    user = db.query(PdaUser).filter(PdaUser.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    updates = user_data.model_dump(exclude_unset=True)
+
+    incoming_email = str(updates.get("email") or "").strip().lower()
+    if incoming_email:
+        existing_email_user = db.query(PdaUser).filter(PdaUser.email == incoming_email, PdaUser.id != user_id).first()
+        if existing_email_user:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already in use")
+        updates["email"] = incoming_email
+
+    incoming_profile_name = updates.get("profile_name")
+    if incoming_profile_name:
+        existing_profile_user = db.query(PdaUser).filter(
+            PdaUser.profile_name == incoming_profile_name,
+            PdaUser.id != user_id
+        ).first()
+        if existing_profile_user:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Profile name already in use")
+
+    for field in ("name", "profile_name", "email", "phno", "dept", "dob", "gender", "is_member", "instagram_url", "linkedin_url", "github_url"):
+        if field in updates:
+            setattr(user, field, updates[field])
+    if "photo_url" in updates:
+        user.image_url = updates.get("photo_url")
+
+    member = db.query(PdaTeam).filter(PdaTeam.user_id == user_id).order_by(PdaTeam.id.asc()).first()
+    if bool(updates.get("clear_team")):
+        db.query(PdaTeam).filter(PdaTeam.user_id == user_id).delete(synchronize_session=False)
+        member = None
+    elif ("team" in updates) or ("designation" in updates):
+        next_team = updates.get("team")
+        next_designation = updates.get("designation")
+        if not member:
+            if next_team is not None or next_designation is not None:
+                member = PdaTeam(
+                    user_id=user_id,
+                    team=next_team,
+                    designation=next_designation,
+                )
+                db.add(member)
+                db.flush()
+        else:
+            if "team" in updates:
+                member.team = next_team
+            if "designation" in updates:
+                member.designation = next_designation
+            if member.team is None and member.designation is None:
+                db.delete(member)
+                member = None
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Duplicate value violates a unique constraint")
+
+    db.refresh(user)
+    if member:
+        db.refresh(member)
+    else:
+        member = db.query(PdaTeam).filter(PdaTeam.user_id == user_id).order_by(PdaTeam.id.asc()).first()
+
+    log_admin_action(
+        db,
+        admin,
+        "Update PDA user",
+        request.method if request else None,
+        request.url.path if request else None,
+        {"user_id": user_id},
+    )
+    return _build_admin_user_response(user, member)
+
+
 @router.post("/pda-admin/team", response_model=PdaTeamResponse)
 def create_team_member(
     member_data: PdaTeamCreate,
@@ -509,6 +655,86 @@ def export_team_members(
     for m, u in rows:
         writer.writerow([u.name if u else None, u.regno if u else None, m.team, m.designation, u.email if u else None, u.phno if u else None])
     headers = {"Content-Disposition": "attachment; filename=team.csv"}
+    return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers=headers)
+
+
+@router.get("/pda-admin/users/export")
+def export_pda_users(
+    format: str = "csv",
+    admin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db)
+):
+    users = (
+        db.query(PdaUser)
+        .order_by(PdaUser.name.asc().nullslast(), PdaUser.regno.asc())
+        .all()
+    )
+    team_rows = db.query(PdaTeam).order_by(PdaTeam.id.asc()).all()
+    team_map = {}
+    for member in team_rows:
+        if member.user_id not in team_map:
+            team_map[member.user_id] = member
+
+    def _row(user: PdaUser):
+        preferred_team, is_applied = _extract_recruitment_state(user)
+        member = team_map.get(user.id)
+        batch = str(user.regno or "")[:4] if user.regno else None
+        return [
+            user.name,
+            user.profile_name,
+            user.regno,
+            user.email,
+            user.phno,
+            user.dept,
+            user.gender,
+            batch,
+            "YES" if user.is_member else "NO",
+            "YES" if is_applied else "NO",
+            preferred_team,
+            member.team if member else None,
+            member.designation if member else None,
+            user.created_at.isoformat() if user.created_at else None,
+        ]
+
+    headers_row = [
+        "Name",
+        "Profile Name",
+        "Regno",
+        "Email",
+        "Phone",
+        "Department",
+        "Gender",
+        "Batch",
+        "Is Member",
+        "Is Applied",
+        "Preferred Team",
+        "Team",
+        "Designation",
+        "Created At",
+    ]
+
+    if format == "xlsx":
+        wb = Workbook()
+        ws = wb.active
+        ws.append(headers_row)
+        for user in users:
+            ws.append(_row(user))
+        stream = io.BytesIO()
+        wb.save(stream)
+        stream.seek(0)
+        headers = {"Content-Disposition": "attachment; filename=users.xlsx"}
+        return StreamingResponse(
+            stream,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers=headers,
+        )
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(headers_row)
+    for user in users:
+        writer.writerow(_row(user))
+    headers = {"Content-Disposition": "attachment; filename=users.csv"}
     return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers=headers)
 
 

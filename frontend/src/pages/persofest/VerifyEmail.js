@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useSearchParams, Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
-import { useParticipantAuth } from '@/context/ParticipantAuthContext';
+import { useAuth } from '@/context/AuthContext';
 import PersofestHeader from '@/components/layout/PersofestHeader';
 import PersofestFooter from '@/components/layout/PersofestFooter';
 
@@ -10,7 +10,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function VerifyEmail() {
     const navigate = useNavigate();
-    const { user, loading: authLoading } = useParticipantAuth();
+    const { user, loading: authLoading } = useAuth();
     const [searchParams] = useSearchParams();
     const [status, setStatus] = useState('verifying');
     const token = searchParams.get('token');
@@ -22,7 +22,7 @@ export default function VerifyEmail() {
                 return;
             }
             try {
-                await axios.post(`${API}/participant-auth/email/verify`, { token });
+                await axios.post(`${API}/auth/email/verify`, { token });
                 if (user) {
                     navigate('/persofest/dashboard', { replace: true });
                     return;

@@ -151,6 +151,7 @@ const selectContentClass = 'border-2 border-black bg-white shadow-[4px_4px_0px_0
 const primaryButtonClass = 'rounded-md border-2 border-black bg-[#8B5CF6] text-xs font-bold uppercase tracking-[0.14em] text-white shadow-neo transition-[background-color,transform,box-shadow] duration-150 hover:bg-[#7C3AED] hover:-translate-x-[1px] hover:-translate-y-[1px] hover:shadow-[6px_6px_0px_0px_#000000] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none';
 const accentButtonClass = 'rounded-md border-2 border-black bg-[#FDE047] text-xs font-bold uppercase tracking-[0.14em] text-black shadow-neo transition-[transform,box-shadow,background-color] duration-150 hover:bg-[#f9d729] hover:-translate-x-[1px] hover:-translate-y-[1px] hover:shadow-[6px_6px_0px_0px_#000000] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none';
 const neutralButtonClass = 'rounded-md border-2 border-black bg-white text-xs font-bold uppercase tracking-[0.14em] text-black shadow-neo transition-[transform,box-shadow,background-color] duration-150 hover:bg-[#C4B5FD] hover:-translate-x-[1px] hover:-translate-y-[1px] hover:shadow-[6px_6px_0px_0px_#000000] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none';
+const ENABLE_PROFILE_ACHIEVEMENTS_AND_CERTIFICATES = false;
 
 export default function PdaProfile() {
     const { user, getAuthHeader, updateUser } = useAuth();
@@ -224,14 +225,20 @@ export default function PdaProfile() {
         if (!user) return;
         setManagedLoading(true);
         try {
-            const [eventsRes, achievementsRes] = await Promise.all([
-                axios.get(`${API}/pda/me/events`, { headers: getAuthHeader() }),
-                axios.get(`${API}/pda/me/achievements`, { headers: getAuthHeader() })
-            ]);
-            setMyEvents(eventsRes.data || []);
-            setAchievements(achievementsRes.data || []);
+            if (ENABLE_PROFILE_ACHIEVEMENTS_AND_CERTIFICATES) {
+                const [eventsRes, achievementsRes] = await Promise.all([
+                    axios.get(`${API}/pda/me/events`, { headers: getAuthHeader() }),
+                    axios.get(`${API}/pda/me/achievements`, { headers: getAuthHeader() })
+                ]);
+                setMyEvents(eventsRes.data || []);
+                setAchievements(achievementsRes.data || []);
+            } else {
+                const eventsRes = await axios.get(`${API}/pda/me/events`, { headers: getAuthHeader() });
+                setMyEvents(eventsRes.data || []);
+                setAchievements([]);
+            }
         } catch (error) {
-            toast.error(getErrorMessage(error, 'Failed to load events and achievements'));
+            toast.error(getErrorMessage(error, 'Failed to load events'));
         } finally {
             setManagedLoading(false);
         }
@@ -533,7 +540,7 @@ export default function PdaProfile() {
                                     </div>
                                 </div>
 
-                                <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                                <div className={`mt-5 grid gap-3 ${ENABLE_PROFILE_ACHIEVEMENTS_AND_CERTIFICATES ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
                                     <div className={tileClass}>
                                         <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">Registered Events</p>
                                         <p className="mt-1 font-heading text-3xl font-black">{sortedMyEvents.length}</p>
@@ -542,10 +549,12 @@ export default function PdaProfile() {
                                         <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">Open Events</p>
                                         <p className="mt-1 font-heading text-3xl font-black">{activeEventCount}</p>
                                     </div>
-                                    <div className={tileClass}>
-                                        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">Achievements</p>
-                                        <p className="mt-1 font-heading text-3xl font-black">{achievements.length}</p>
-                                    </div>
+                                    {ENABLE_PROFILE_ACHIEVEMENTS_AND_CERTIFICATES ? (
+                                        <div className={tileClass}>
+                                            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">Achievements</p>
+                                            <p className="mt-1 font-heading text-3xl font-black">{achievements.length}</p>
+                                        </div>
+                                    ) : null}
                                 </div>
                             </div>
 
@@ -568,7 +577,7 @@ export default function PdaProfile() {
                         </div>
                     </section>
 
-                    <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+                    <section className={ENABLE_PROFILE_ACHIEVEMENTS_AND_CERTIFICATES ? 'grid gap-6 lg:grid-cols-[1.1fr_0.9fr]' : 'grid gap-6'}>
                         <div className={panelClass}>
                             <div className="flex flex-wrap items-center justify-between gap-3">
                                 <h2 className="font-heading text-3xl font-black uppercase tracking-tight">My Events</h2>
@@ -619,7 +628,7 @@ export default function PdaProfile() {
                                             <div className="mt-4 flex flex-wrap gap-2">
                                                 {row.event?.status === 'open' ? (
                                                     <a
-                                                        href={`/events/${row.event.slug}`}
+                                                        href={`/event/${row.event.slug}`}
                                                         data-testid={`pda-profile-open-dashboard-${row.event?.slug || 'event'}`}
                                                     >
                                                         <Button type="button" className={neutralButtonClass}>
@@ -628,16 +637,18 @@ export default function PdaProfile() {
                                                         </Button>
                                                     </a>
                                                 ) : null}
-                                                <Button
-                                                    type="button"
-                                                    onClick={() => handleDownloadCertificate(row.event.slug)}
-                                                    disabled={certificateLoadingSlug === row.event.slug}
-                                                    data-testid={`pda-profile-download-certificate-${row.event?.slug || 'event'}`}
-                                                    className={accentButtonClass}
-                                                >
-                                                    <Download className="mr-2 h-4 w-4" />
-                                                    {certificateLoadingSlug === row.event.slug ? 'Generating...' : 'Download Certificate'}
-                                                </Button>
+                                                {ENABLE_PROFILE_ACHIEVEMENTS_AND_CERTIFICATES ? (
+                                                    <Button
+                                                        type="button"
+                                                        onClick={() => handleDownloadCertificate(row.event.slug)}
+                                                        disabled={certificateLoadingSlug === row.event.slug}
+                                                        data-testid={`pda-profile-download-certificate-${row.event?.slug || 'event'}`}
+                                                        className={accentButtonClass}
+                                                    >
+                                                        <Download className="mr-2 h-4 w-4" />
+                                                        {certificateLoadingSlug === row.event.slug ? 'Generating...' : 'Download Certificate'}
+                                                    </Button>
+                                                ) : null}
                                             </div>
                                         </div>
                                     ))}
@@ -645,53 +656,55 @@ export default function PdaProfile() {
                             )}
                         </div>
 
-                        <div className={panelClass}>
-                            <div className="flex items-center justify-between gap-3">
-                                <h2 className="font-heading text-3xl font-black uppercase tracking-tight">Achievements</h2>
-                                <Award className="h-6 w-6 text-[#8B5CF6]" />
-                            </div>
-                            {managedLoading ? (
-                                <p className="mt-4 text-sm font-medium text-slate-600">Loading achievements...</p>
-                            ) : achievements.length === 0 ? (
-                                <p className="mt-4 rounded-md border-2 border-black bg-[#fffdf0] p-4 text-sm font-medium text-slate-700 shadow-neo">
-                                    No badges yet. Win rounds to unlock achievements.
-                                </p>
-                            ) : (
-                                <div className="mt-4 space-y-3">
-                                    {achievements.map((achievement, index) => (
-                                        <div key={`${achievement.event_slug}-${achievement.badge_title}-${index}`} className="rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
-                                            <div className="flex items-start gap-3">
-                                                {achievement.image_url ? (
-                                                    <img src={achievement.image_url} alt={achievement.badge_title} className="h-14 w-14 border-2 border-black object-cover" />
-                                                ) : (
-                                                    <div className="flex h-14 w-14 items-center justify-center border-2 border-black bg-[#FDE047]">
-                                                        <Award className="h-5 w-5 text-black" />
+                        {ENABLE_PROFILE_ACHIEVEMENTS_AND_CERTIFICATES ? (
+                            <div className={panelClass}>
+                                <div className="flex items-center justify-between gap-3">
+                                    <h2 className="font-heading text-3xl font-black uppercase tracking-tight">Achievements</h2>
+                                    <Award className="h-6 w-6 text-[#8B5CF6]" />
+                                </div>
+                                {managedLoading ? (
+                                    <p className="mt-4 text-sm font-medium text-slate-600">Loading achievements...</p>
+                                ) : achievements.length === 0 ? (
+                                    <p className="mt-4 rounded-md border-2 border-black bg-[#fffdf0] p-4 text-sm font-medium text-slate-700 shadow-neo">
+                                        No badges yet. Win rounds to unlock achievements.
+                                    </p>
+                                ) : (
+                                    <div className="mt-4 space-y-3">
+                                        {achievements.map((achievement, index) => (
+                                            <div key={`${achievement.event_slug}-${achievement.badge_title}-${index}`} className="rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
+                                                <div className="flex items-start gap-3">
+                                                    {achievement.image_url ? (
+                                                        <img src={achievement.image_url} alt={achievement.badge_title} className="h-14 w-14 border-2 border-black object-cover" />
+                                                    ) : (
+                                                        <div className="flex h-14 w-14 items-center justify-center border-2 border-black bg-[#FDE047]">
+                                                            <Award className="h-5 w-5 text-black" />
+                                                        </div>
+                                                    )}
+                                                    <div className="flex-1">
+                                                        <p className="font-heading text-lg font-black uppercase tracking-tight">{achievement.badge_title}</p>
+                                                        <p className="text-xs font-medium uppercase tracking-[0.1em] text-slate-700">
+                                                            {achievement.badge_place} · {achievement.event_title}
+                                                        </p>
+                                                        <p className="mt-1 text-xs font-medium text-slate-600">Score: {achievement.score ?? '-'}</p>
                                                     </div>
-                                                )}
-                                                <div className="flex-1">
-                                                    <p className="font-heading text-lg font-black uppercase tracking-tight">{achievement.badge_title}</p>
-                                                    <p className="text-xs font-medium uppercase tracking-[0.1em] text-slate-700">
-                                                        {achievement.badge_place} · {achievement.event_title}
-                                                    </p>
-                                                    <p className="mt-1 text-xs font-medium text-slate-600">Score: {achievement.score ?? '-'}</p>
+                                                </div>
+                                                <div className="mt-3 flex justify-end">
+                                                    <Button
+                                                        type="button"
+                                                        onClick={() => handleShareAchievement(achievement)}
+                                                        data-testid={`pda-profile-share-achievement-${achievement.event_slug || index}`}
+                                                        className={neutralButtonClass}
+                                                    >
+                                                        <Share2 className="mr-2 h-4 w-4" />
+                                                        Share
+                                                    </Button>
                                                 </div>
                                             </div>
-                                            <div className="mt-3 flex justify-end">
-                                                <Button
-                                                    type="button"
-                                                    onClick={() => handleShareAchievement(achievement)}
-                                                    data-testid={`pda-profile-share-achievement-${achievement.event_slug || index}`}
-                                                    className={neutralButtonClass}
-                                                >
-                                                    <Share2 className="mr-2 h-4 w-4" />
-                                                    Share
-                                                </Button>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        ) : null}
                     </section>
 
                     <section className={panelClass}>

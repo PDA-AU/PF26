@@ -2,12 +2,13 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Menu, X, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useParticipantAuth } from '@/context/ParticipantAuthContext';
+import { useAuth } from '@/context/AuthContext';
 
 export default function PersofestHeader({ logoClassName }) {
-    const { user, logout } = useParticipantAuth();
+    const { user, logout } = useAuth();
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const logoSizeClass = logoClassName || 'w-10 h-10';
+    const isPfAdmin = !!(user?.is_superadmin || user?.policy?.pf);
 
     return (
         <nav className="sticky top-0 z-50 bg-white border-b-2 border-black">
@@ -27,7 +28,7 @@ export default function PersofestHeader({ logoClassName }) {
                         <a href="#referrers" className="font-bold hover:text-primary transition-colors">Top Referrers</a>
                         {user ? (
                             <div className="flex items-center gap-2">
-                                <Link to={user.role === 'admin' ? '/persofest/admin' : '/persofest/dashboard'}>
+                                <Link to={isPfAdmin ? '/persofest/admin' : '/persofest/dashboard'}>
                                     <Button data-testid="nav-dashboard-btn" className="bg-primary text-white border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all">
                                         Dashboard
                                     </Button>
@@ -71,7 +72,7 @@ export default function PersofestHeader({ logoClassName }) {
                             <a href="#referrers" className="font-bold py-2" onClick={() => setMobileMenuOpen(false)}>Top Referrers</a>
                             {user ? (
                                 <div className="flex flex-col gap-2">
-                                    <Link to={user.role === 'admin' ? '/persofest/admin' : '/persofest/dashboard'} onClick={() => setMobileMenuOpen(false)}>
+                                    <Link to={isPfAdmin ? '/persofest/admin' : '/persofest/dashboard'} onClick={() => setMobileMenuOpen(false)}>
                                         <Button className="w-full bg-primary text-white border-2 border-black shadow-neo">Dashboard</Button>
                                     </Link>
                                     <Button

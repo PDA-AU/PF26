@@ -40,6 +40,7 @@ required = {
     'pda_event_scores',
     'pda_event_badges',
     'pda_event_invites',
+    'pda_event_logs',
 }
 existing = set(inspector.get_table_names())
 missing = sorted(required - existing)

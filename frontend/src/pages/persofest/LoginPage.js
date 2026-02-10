@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useParticipantAuth } from '@/context/ParticipantAuthContext';
+import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
 import { Eye, EyeOff, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,7 @@ import PersofestHeader from '@/components/layout/PersofestHeader';
 
 export default function LoginPage() {
     const navigate = useNavigate();
-    const { login } = useParticipantAuth();
+    const { login } = useAuth();
     const [formData, setFormData] = useState({
         register_number: '',
         password: ''
@@ -31,7 +31,7 @@ export default function LoginPage() {
         setLoading(true);
 
         try {
-            const user = await login(formData.register_number, formData.password);
+            await login(formData.register_number, formData.password);
             toast.success('Login successful!');
             navigate('/persofest/dashboard');
         } catch (error) {
