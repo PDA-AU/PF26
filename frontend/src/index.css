@@ -49,6 +49,11 @@
     box-sizing: border-box;
 }
 
+html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
+
 body {
     margin: 0;
     font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -56,6 +61,14 @@ body {
     -moz-osx-font-smoothing: grayscale;
     background-color: #FFFFFF;
     color: #000000;
+}
+
+@supports (-webkit-touch-callout: none) {
+    input,
+    textarea,
+    select {
+        font-size: 16px !important;
+    }
 }
 
 h1, h2, h3, h4, h5, h6 {

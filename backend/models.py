@@ -331,6 +331,8 @@ class PdaEvent(Base):
     club_id = Column(Integer, default=1, nullable=False)
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
+    start_date = Column(Date, nullable=True)
+    end_date = Column(Date, nullable=True)
     poster_url = Column(String(500), nullable=True)
     event_type = Column(SQLEnum(PdaEventType), nullable=False)
     format = Column(SQLEnum(PdaEventFormat), nullable=False)

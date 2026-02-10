@@ -39,6 +39,110 @@ const statusIcon = (value) => {
     return <Clock3 className="h-5 w-5 text-slate-500" />;
 };
 
+const renderInlineDescription = (text, keyPrefix) => {
+    const tokens = String(text || '').split(/(\*[^*]+\*)/g);
+    return tokens.filter(Boolean).map((token, index) => {
+        if (token.startsWith('*') && token.endsWith('*') && token.length > 2) {
+            return (
+                <strong key={`${keyPrefix}-b-${index}`} className="font-extrabold text-black">
+                    {token.slice(1, -1)}
+                </strong>
+            );
+        }
+        return <React.Fragment key={`${keyPrefix}-t-${index}`}>{token}</React.Fragment>;
+    });
+};
+
+const splitSentences = (value) => {
+    const normalized = String(value || '').trim();
+    if (!normalized) return [];
+    const chunks = [];
+    let segmentStart = 0;
+
+    const isAlphaNum = (char) => /[A-Za-z0-9]/.test(char);
+    const isWhitespace = (char) => /\s/.test(char);
+
+    for (let index = 0; index < normalized.length; index += 1) {
+        const char = normalized[index];
+        if (!/[.!?]/.test(char)) continue;
+
+        let cursor = index + 1;
+        let sawWhitespace = false;
+        while (cursor < normalized.length) {
+            const lookAheadChar = normalized[cursor];
+            if (isWhitespace(lookAheadChar)) {
+                sawWhitespace = true;
+                cursor += 1;
+                continue;
+            }
+            if (isAlphaNum(lookAheadChar) && sawWhitespace) {
+                const part = normalized.slice(segmentStart, cursor).trim();
+                if (part) chunks.push(part);
+                segmentStart = cursor;
+            }
+            break;
+        }
+    }
+
+    const tail = normalized.slice(segmentStart).trim();
+    if (tail) chunks.push(tail);
+    return chunks;
+};
+
+const parseDescriptionBlocks = (description) => {
+    const source = String(description || '').replace(/\r/g, '');
+    const rawLines = source.split('\n');
+    const blocks = [];
+    let listBuffer = [];
+
+    const flushList = () => {
+        if (!listBuffer.length) return;
+        blocks.push({ type: 'list', items: [...listBuffer] });
+        listBuffer = [];
+    };
+
+    rawLines.forEach((rawLine) => {
+        const line = rawLine.trim();
+        if (!line) {
+            flushList();
+            return;
+        }
+        if (line.startsWith('-')) {
+            const cleaned = line.replace(/^-+\s*/, '').trim();
+            if (cleaned) listBuffer.push(cleaned);
+            return;
+        }
+        flushList();
+        splitSentences(line).forEach((sentence) => {
+            blocks.push({ type: 'text', text: sentence });
+        });
+    });
+
+    flushList();
+    return blocks;
+};
+
+const formatEventDate = (value) => {
+    if (!value) return '';
+    const dateValue = String(value).trim().slice(0, 10);
+    if (!dateValue) return '';
+    const parsed = new Date(`${dateValue}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return dateValue;
+    return parsed.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
+const getEventDateLabel = (startDate, endDate) => {
+    const start = formatEventDate(startDate);
+    const end = formatEventDate(endDate);
+    if (start && end) {
+        if (start === end) return `Date: ${start}`;
+        return `${start} - ${end}`;
+    }
+    if (start) return `Starts: ${start}`;
+    if (end) return `Ends: ${end}`;
+    return 'Date: TBA';
+};
+
 export default function EventDashboard() {
     const { eventSlug } = useParams();
     const { user, getAuthHeader } = useAuth();
@@ -82,6 +186,12 @@ export default function EventDashboard() {
         if (!isRegistered) return 'Not Registered';
         return eventProfile?.status || 'Active';
     }, [eventProfile?.status, isRegistered]);
+
+    const descriptionBlocks = useMemo(() => parseDescriptionBlocks(eventInfo?.description || ''), [eventInfo?.description]);
+    const eventDateLabel = useMemo(
+        () => getEventDateLabel(eventInfo?.start_date, eventInfo?.end_date),
+        [eventInfo?.start_date, eventInfo?.end_date]
+    );
 
     const fetchData = useCallback(async () => {
         setLoading(true);
@@ -293,9 +403,30 @@ export default function EventDashboard() {
                         <div className="p-6 sm:p-8">
                             <p className="font-mono text-xs font-bold uppercase tracking-[0.2em] text-[#8B5CF6]">{eventInfo.event_code}</p>
                             <h1 className="mt-2 font-heading text-4xl font-black uppercase tracking-tight sm:text-5xl">{eventInfo.title}</h1>
-                            <p className="mt-3 max-w-2xl text-sm font-medium text-slate-700 sm:text-base">
-                                {eventInfo.description || 'No description provided for this event yet.'}
-                            </p>
+                            <div className="mt-3 max-w-2xl space-y-2 text-sm font-medium text-slate-700 sm:text-base">
+                                {descriptionBlocks.length > 0 ? (
+                                    descriptionBlocks.map((block, index) => {
+                                        if (block.type === 'list') {
+                                            return (
+                                                <ul key={`desc-list-${index}`} className="list-disc space-y-1 pl-5">
+                                                    {block.items.map((item, itemIndex) => (
+                                                        <li key={`desc-list-${index}-${itemIndex}`}>
+                                                            {renderInlineDescription(item, `desc-list-${index}-${itemIndex}`)}
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            );
+                                        }
+                                        return (
+                                            <p key={`desc-text-${index}`}>
+                                                {renderInlineDescription(block.text, `desc-text-${index}`)}
+                                            </p>
+                                        );
+                                    })
+                                ) : (
+                                    <p>No description provided for this event yet.</p>
+                                )}
+                            </div>
                             <div className="mt-5 flex flex-wrap gap-2">
                                 <span className="rounded-md border-2 border-black bg-[#FDE047] px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] shadow-neo">
                                     {eventInfo.event_type}
@@ -310,21 +441,27 @@ export default function EventDashboard() {
                                     {eventInfo.round_count} rounds
                                 </span>
                             </div>
+                            <div className="mt-3 inline-flex items-center gap-2 rounded-md border-2 border-black bg-white px-3 py-2 text-xs font-bold uppercase tracking-[0.1em] text-slate-700 shadow-neo">
+                                <Calendar className="h-4 w-4 text-[#8B5CF6]" />
+                                <span>{eventDateLabel}</span>
+                            </div>
                         </div>
-                        <div className="relative border-t-4 border-black bg-[#11131a] lg:border-l-4 lg:border-t-0">
-                            {eventInfo.poster_url ? (
-                                <img
-                                    src={resolveImageUrl(eventInfo.poster_url)}
-                                    alt={`${eventInfo.title} poster`}
-                                    className="h-full min-h-[230px] w-full object-cover opacity-70"
-                                />
-                            ) : (
-                                <div className="flex h-full min-h-[230px] items-center justify-center bg-[#1b1f2a] p-6 text-center">
-                                    <p className="font-heading text-2xl font-black uppercase tracking-tight text-white">{eventInfo.title}</p>
+                        <div className="border-t-4 border-black bg-[#11131a] lg:self-start lg:border-l-4 lg:border-t-0">
+                            <div className="relative aspect-[4/5] w-full">
+                                {eventInfo.poster_url ? (
+                                    <img
+                                        src={resolveImageUrl(eventInfo.poster_url)}
+                                        alt={`${eventInfo.title} poster`}
+                                        className="h-full w-full object-cover opacity-70"
+                                    />
+                                ) : (
+                                    <div className="flex h-full items-center justify-center bg-[#1b1f2a] p-6 text-center">
+                                        <p className="font-heading text-2xl font-black uppercase tracking-tight text-white">{eventInfo.title}</p>
+                                    </div>
+                                )}
+                                <div className="absolute right-4 top-4 rounded-md border-2 border-black bg-white px-3 py-1 font-mono text-xs font-bold uppercase tracking-[0.14em] shadow-neo">
+                                    {eventInfo.status}
                                 </div>
-                            )}
-                            <div className="absolute right-4 top-4 rounded-md border-2 border-black bg-white px-3 py-1 font-mono text-xs font-bold uppercase tracking-[0.14em] shadow-neo">
-                                {eventInfo.status}
                             </div>
                         </div>
                     </div>

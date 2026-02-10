@@ -821,6 +821,8 @@ class PdaManagedBadgePlaceEnum(str, Enum):
 class PdaManagedEventCreate(BaseModel):
     title: str = Field(..., min_length=2)
     description: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
     poster_url: Optional[str] = None
     event_type: PdaManagedEventTypeEnum
     format: PdaManagedEventFormatEnum
@@ -836,6 +838,8 @@ class PdaManagedEventCreate(BaseModel):
 class PdaManagedEventUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
     poster_url: Optional[str] = None
     event_type: Optional[PdaManagedEventTypeEnum] = None
     format: Optional[PdaManagedEventFormatEnum] = None
@@ -859,6 +863,8 @@ class PdaManagedEventResponse(BaseModel):
     club_id: int
     title: str
     description: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
     poster_url: Optional[str] = None
     event_type: PdaManagedEventTypeEnum
     format: PdaManagedEventFormatEnum

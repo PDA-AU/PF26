@@ -126,6 +126,11 @@ def _to_round_state(value) -> PdaEventRoundState:
     return PdaEventRoundState[value.name] if hasattr(value, "name") else PdaEventRoundState(value)
 
 
+def _validate_event_dates(start_date, end_date) -> None:
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="start_date cannot be after end_date")
+
+
 def _entity_from_payload(event: PdaEvent, row: dict) -> Tuple[PdaEventEntityType, Optional[int], Optional[int]]:
     if event.participant_mode == PdaEventParticipantMode.INDIVIDUAL:
         user_id = row.get("user_id")
@@ -266,6 +271,8 @@ def create_managed_event(
     admin: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db),
 ):
+    _validate_event_dates(payload.start_date, payload.end_date)
+
     if payload.participant_mode.value == "team":
         if payload.team_min_size is None or payload.team_max_size is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="team_min_size and team_max_size are required for team events")
@@ -285,6 +292,8 @@ def create_managed_event(
         club_id=payload.club_id,
         title=payload.title.strip(),
         description=payload.description,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
         poster_url=payload.poster_url,
         event_type=_to_event_type(payload.event_type),
         format=_to_event_format(payload.format),
@@ -345,6 +354,9 @@ def update_managed_event(
 ):
     event = _get_event_or_404(db, slug)
     updates = payload.model_dump(exclude_unset=True)
+    next_start_date = updates.get("start_date", event.start_date)
+    next_end_date = updates.get("end_date", event.end_date)
+    _validate_event_dates(next_start_date, next_end_date)
     if "participant_mode" in updates and updates["participant_mode"] == PdaEventParticipantMode.TEAM:
         min_size = updates.get("team_min_size", event.team_min_size)
         max_size = updates.get("team_max_size", event.team_max_size)

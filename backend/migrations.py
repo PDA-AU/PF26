@@ -691,6 +691,8 @@ def ensure_pda_event_tables(engine):
                     club_id INTEGER NOT NULL DEFAULT 1,
                     title VARCHAR(255) NOT NULL,
                     description TEXT,
+                    start_date DATE,
+                    end_date DATE,
                     poster_url VARCHAR(500),
                     event_type VARCHAR(30) NOT NULL,
                     format VARCHAR(30) NOT NULL,
@@ -707,6 +709,8 @@ def ensure_pda_event_tables(engine):
                 """
             )
         )
+        conn.execute(text("ALTER TABLE pda_events ADD COLUMN IF NOT EXISTS start_date DATE"))
+        conn.execute(text("ALTER TABLE pda_events ADD COLUMN IF NOT EXISTS end_date DATE"))
 
         conn.execute(
             text(

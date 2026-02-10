@@ -28,7 +28,7 @@ const GENDERS = [
     { value: 'Female', label: 'Female' }
 ];
 
-const SHOWCASE_IMAGE = 'https://images.unsplash.com/photo-1575426254893-06d2712a655d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NjV8MHwxfHNlYXJjaHwxfHxtaWNyb3Bob25lJTIwc3RhZ2UlMjBzcG90bGlnaHR8ZW58MHx8fHwxNzcwMDE3MDk2fDA&ixlib=rb-4.1.0&q=85';
+const SHOWCASE_IMAGE = 'https://images.unsplash.com/photo-1569173675610-42c361a86e37?q=80&w=2067&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D';
 const inputClass = 'h-12 border-2 border-black bg-white text-sm shadow-neo focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2';
 const selectTriggerClass = 'h-12 border-2 border-black bg-white text-sm shadow-neo focus:ring-2 focus:ring-black focus:ring-offset-2';
 const selectContentClass = 'border-2 border-black bg-white shadow-[4px_4px_0px_0px_#000000]';
@@ -321,7 +321,7 @@ export default function PdaSignup() {
                         </form>
                     </section>
 
-                    <section className="order-1 overflow-hidden rounded-md border-4 border-black bg-[#11131a] shadow-[8px_8px_0px_0px_#000000] lg:order-2">
+                    <section className="hidden overflow-hidden rounded-md border-4 border-black bg-[#11131a] shadow-[8px_8px_0px_0px_#000000] lg:order-2 lg:block">
                         <div className="relative h-full min-h-[320px]">
                             <img src={SHOWCASE_IMAGE} alt="PDA event stage" className="absolute inset-0 h-full w-full object-cover opacity-35" />
                             <div className="relative z-10 flex h-full flex-col justify-between p-7 text-white">
@@ -346,12 +346,12 @@ export default function PdaSignup() {
                                         <p className="text-[10px] font-bold uppercase tracking-[0.12em]">Teams</p>
                                     </div>
                                     <div className="border-2 border-black bg-[#FDE047] px-3 py-2 text-black shadow-neo">
-                                        <p className="font-heading text-2xl font-black">20+</p>
-                                        <p className="text-[10px] font-bold uppercase tracking-[0.12em]">Events</p>
+                                        <p className="font-heading text-2xl font-black">150+</p>
+                                        <p className="text-[10px] font-bold uppercase tracking-[0.12em]">Members</p>
                                     </div>
                                     <div className="border-2 border-black bg-[#C4B5FD] px-3 py-2 text-black shadow-neo">
-                                        <p className="font-heading text-2xl font-black">8000+</p>
-                                        <p className="text-[10px] font-bold uppercase tracking-[0.12em]">Books</p>
+                                        <p className="font-heading text-2xl font-black">1</p>
+                                        <p className="text-[10px] font-bold uppercase tracking-[0.12em]">Soul</p>
                                     </div>
                                 </div>
                             </div>

@@ -19,6 +19,8 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const initialForm = {
     title: '',
     description: '',
+    start_date: '',
+    end_date: '',
     poster_url: '',
     event_type: 'Event',
     format: 'Offline',
@@ -30,19 +32,200 @@ const initialForm = {
     team_max_size: ''
 };
 
+const resolveImageUrl = (url) => {
+    if (!url) return '';
+    if (String(url).startsWith('http')) return url;
+    return `${process.env.REACT_APP_BACKEND_URL}${String(url).startsWith('/') ? '' : '/'}${url}`;
+};
+
+const toDateInputValue = (value) => {
+    if (!value) return '';
+    const raw = String(value).trim();
+    if (!raw) return '';
+    return raw.slice(0, 10);
+};
+
+const toEventForm = (eventRow = {}) => ({
+    title: eventRow.title || '',
+    description: eventRow.description || '',
+    start_date: toDateInputValue(eventRow.start_date),
+    end_date: toDateInputValue(eventRow.end_date),
+    poster_url: eventRow.poster_url || '',
+    event_type: eventRow.event_type || 'Event',
+    format: eventRow.format || 'Offline',
+    template_option: eventRow.template_option || 'attendance_scoring',
+    participant_mode: eventRow.participant_mode || 'individual',
+    round_mode: eventRow.round_mode || 'single',
+    round_count: Number(eventRow.round_count || 1),
+    team_min_size: eventRow.team_min_size ?? '',
+    team_max_size: eventRow.team_max_size ?? ''
+});
+
+const formatDateLabel = (value) => {
+    const dateValue = toDateInputValue(value);
+    if (!dateValue) return 'TBD';
+    const parsed = new Date(`${dateValue}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return dateValue;
+    return parsed.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
+const buildEventPayload = (formState, posterUrl) => ({
+    title: formState.title.trim(),
+    description: formState.description?.trim() || '',
+    start_date: formState.start_date || null,
+    end_date: formState.end_date || null,
+    poster_url: posterUrl,
+    event_type: formState.event_type,
+    format: formState.format,
+    template_option: formState.template_option,
+    participant_mode: formState.participant_mode,
+    round_mode: formState.round_mode,
+    round_count: Number(formState.round_count || 1),
+    team_min_size: formState.participant_mode === 'team' ? Number(formState.team_min_size || 1) : null,
+    team_max_size: formState.participant_mode === 'team' ? Number(formState.team_max_size || 1) : null
+});
+
+function EventFormFields({
+    form,
+    setForm,
+    posterInputId,
+    posterPreview,
+    onPosterFileChange
+}) {
+    return (
+        <>
+            <div className="md:col-span-2">
+                <Label>Title</Label>
+                <Input value={form.title} onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))} required />
+            </div>
+            <div className="md:col-span-2">
+                <Label>Description</Label>
+                <Textarea value={form.description} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} />
+            </div>
+            <div>
+                <Label>Start Date</Label>
+                <Input type="date" value={form.start_date} onChange={(e) => setForm((prev) => ({ ...prev, start_date: e.target.value }))} />
+            </div>
+            <div>
+                <Label>End Date</Label>
+                <Input type="date" value={form.end_date} onChange={(e) => setForm((prev) => ({ ...prev, end_date: e.target.value }))} />
+            </div>
+            <div className="md:col-span-2">
+                <Label htmlFor={posterInputId}>Poster Upload</Label>
+                <Input
+                    id={posterInputId}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    onChange={(e) => {
+                        onPosterFileChange(e.target.files?.[0] || null);
+                    }}
+                />
+                <p className="mt-2 text-xs text-slate-500">Image uploads use presigned S3 URL.</p>
+                {posterPreview ? (
+                    <div className="mt-3 rounded-xl border border-black/10 bg-[#fffdf7] p-3">
+                        <img src={posterPreview} alt="Poster preview" className="max-h-48 w-auto rounded-lg border border-black/10" />
+                    </div>
+                ) : null}
+            </div>
+            <div>
+                <Label>Type</Label>
+                <Select value={form.event_type} onValueChange={(value) => setForm((prev) => ({ ...prev, event_type: value }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="Session">Session</SelectItem>
+                        <SelectItem value="Workshop">Workshop</SelectItem>
+                        <SelectItem value="Event">Event</SelectItem>
+                    </SelectContent>
+                </Select>
+            </div>
+            <div>
+                <Label>Format</Label>
+                <Select value={form.format} onValueChange={(value) => setForm((prev) => ({ ...prev, format: value }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="Online">Online</SelectItem>
+                        <SelectItem value="Offline">Offline</SelectItem>
+                        <SelectItem value="Hybrid">Hybrid</SelectItem>
+                    </SelectContent>
+                </Select>
+            </div>
+            <div>
+                <Label>Template</Label>
+                <Select value={form.template_option} onValueChange={(value) => setForm((prev) => ({ ...prev, template_option: value }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="attendance_only">Only Attendance</SelectItem>
+                        <SelectItem value="attendance_scoring">Attendance + Scoring</SelectItem>
+                    </SelectContent>
+                </Select>
+            </div>
+            <div>
+                <Label>Participant Mode</Label>
+                <Select value={form.participant_mode} onValueChange={(value) => setForm((prev) => ({ ...prev, participant_mode: value }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="individual">Individual</SelectItem>
+                        <SelectItem value="team">Team</SelectItem>
+                    </SelectContent>
+                </Select>
+            </div>
+            <div>
+                <Label>Round Mode</Label>
+                <Select value={form.round_mode} onValueChange={(value) => setForm((prev) => ({ ...prev, round_mode: value }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="single">Single Round</SelectItem>
+                        <SelectItem value="multi">Multi Round</SelectItem>
+                    </SelectContent>
+                </Select>
+            </div>
+            <div>
+                <Label>Round Count</Label>
+                <Input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={form.round_count}
+                    disabled={form.round_mode === 'single'}
+                    onChange={(e) => setForm((prev) => ({ ...prev, round_count: e.target.value }))}
+                />
+            </div>
+            {form.participant_mode === 'team' ? (
+                <>
+                    <div>
+                        <Label>Team Min Size</Label>
+                        <Input type="number" min={1} value={form.team_min_size} onChange={(e) => setForm((prev) => ({ ...prev, team_min_size: e.target.value }))} required />
+                    </div>
+                    <div>
+                        <Label>Team Max Size</Label>
+                        <Input type="number" min={1} value={form.team_max_size} onChange={(e) => setForm((prev) => ({ ...prev, team_max_size: e.target.value }))} required />
+                    </div>
+                </>
+            ) : null}
+        </>
+    );
+}
+
 export default function AdminEvents() {
     const { getAuthHeader, isSuperAdmin, canAccessEvents } = useAuth();
     const [events, setEvents] = useState([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [savingEdit, setSavingEdit] = useState(false);
     const [deleting, setDeleting] = useState(false);
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState(null);
     const [deleteConfirmText, setDeleteConfirmText] = useState('');
+    const [editDialogOpen, setEditDialogOpen] = useState(false);
+    const [editTarget, setEditTarget] = useState(null);
     const [posterFile, setPosterFile] = useState(null);
     const [posterPreview, setPosterPreview] = useState('');
+    const [editPosterFile, setEditPosterFile] = useState(null);
+    const [editPosterPreview, setEditPosterPreview] = useState('');
     const [uploadingPoster, setUploadingPoster] = useState(false);
+    const [uploadingEditPoster, setUploadingEditPoster] = useState(false);
     const [form, setForm] = useState(initialForm);
+    const [editForm, setEditForm] = useState(initialForm);
 
     const fetchEvents = useCallback(async () => {
         try {
@@ -73,9 +256,28 @@ export default function AdminEvents() {
         return () => URL.revokeObjectURL(localUrl);
     }, [posterFile]);
 
+    useEffect(() => {
+        if (!editPosterFile) {
+            setEditPosterPreview('');
+            return undefined;
+        }
+        const localUrl = URL.createObjectURL(editPosterFile);
+        setEditPosterPreview(localUrl);
+        return () => URL.revokeObjectURL(localUrl);
+    }, [editPosterFile]);
+
+    const validateDateRange = (formState) => {
+        if (formState.start_date && formState.end_date && formState.start_date > formState.end_date) {
+            toast.error('Start date cannot be after end date');
+            return false;
+        }
+        return true;
+    };
+
     const onSubmit = async (e) => {
         e.preventDefault();
         if (!isSuperAdmin) return;
+        if (!validateDateRange(form)) return;
         setSaving(true);
         try {
             let posterUrl = form.poster_url?.trim() || null;
@@ -85,13 +287,7 @@ export default function AdminEvents() {
                 posterUrl = await uploadPoster(processedPoster, getAuthHeader);
                 setUploadingPoster(false);
             }
-            const payload = {
-                ...form,
-                poster_url: posterUrl,
-                round_count: Number(form.round_count || 1),
-                team_min_size: form.participant_mode === 'team' ? Number(form.team_min_size || 1) : null,
-                team_max_size: form.participant_mode === 'team' ? Number(form.team_max_size || 1) : null
-            };
+            const payload = buildEventPayload(form, posterUrl);
             await axios.post(`${API}/pda-admin/events`, payload, { headers: getAuthHeader() });
             toast.success('Event created');
             setForm(initialForm);
@@ -104,6 +300,51 @@ export default function AdminEvents() {
         } finally {
             setSaving(false);
             setUploadingPoster(false);
+        }
+    };
+
+    const openEditDialog = (eventRow) => {
+        if (!isSuperAdmin) return;
+        setEditTarget(eventRow);
+        setEditForm(toEventForm(eventRow));
+        setEditPosterFile(null);
+        setEditPosterPreview('');
+        setEditDialogOpen(true);
+    };
+
+    const closeEditDialog = (force = false) => {
+        if (!force && (savingEdit || uploadingEditPoster)) return;
+        setEditDialogOpen(false);
+        setEditTarget(null);
+        setEditForm(initialForm);
+        setEditPosterFile(null);
+        setEditPosterPreview('');
+    };
+
+    const updateEvent = async (e) => {
+        e.preventDefault();
+        if (!isSuperAdmin || !editTarget) return;
+        if (!validateDateRange(editForm)) return;
+        setSavingEdit(true);
+        try {
+            let posterUrl = editForm.poster_url?.trim() || null;
+            if (editPosterFile) {
+                setUploadingEditPoster(true);
+                const processedPoster = await compressImageToWebp(editPosterFile);
+                posterUrl = await uploadPoster(processedPoster, getAuthHeader);
+                setUploadingEditPoster(false);
+            }
+            const payload = buildEventPayload(editForm, posterUrl);
+            await axios.put(`${API}/pda-admin/events/${editTarget.slug}`, payload, { headers: getAuthHeader() });
+            toast.success('Event updated');
+            closeEditDialog(true);
+            fetchEvents();
+        } catch (error) {
+            setUploadingEditPoster(false);
+            toast.error(error.response?.data?.detail || 'Failed to update event');
+        } finally {
+            setSavingEdit(false);
+            setUploadingEditPoster(false);
         }
     };
 
@@ -156,110 +397,13 @@ export default function AdminEvents() {
                 <section className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
                     <h2 className="text-2xl font-heading font-black">Create Event</h2>
                     <form className="mt-4 grid gap-4 md:grid-cols-2" onSubmit={onSubmit}>
-                        <div className="md:col-span-2">
-                            <Label>Title</Label>
-                            <Input value={form.title} onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))} required />
-                        </div>
-                        <div className="md:col-span-2">
-                            <Label>Description</Label>
-                            <Textarea value={form.description} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} />
-                        </div>
-                        <div className="md:col-span-2">
-                            <Label htmlFor="event-poster-upload">Poster Upload</Label>
-                            <Input
-                                id="event-poster-upload"
-                                type="file"
-                                accept="image/png,image/jpeg,image/webp"
-                                onChange={(e) => {
-                                    const nextFile = e.target.files?.[0] || null;
-                                    setPosterFile(nextFile);
-                                    if (!nextFile) {
-                                        setForm((prev) => ({ ...prev, poster_url: '' }));
-                                    }
-                                }}
-                            />
-                            <p className="mt-2 text-xs text-slate-500">Image uploads use presigned S3 URL.</p>
-                            {posterPreview ? (
-                                <div className="mt-3 rounded-xl border border-black/10 bg-[#fffdf7] p-3">
-                                    <img src={posterPreview} alt="Poster preview" className="max-h-48 w-auto rounded-lg border border-black/10" />
-                                </div>
-                            ) : null}
-                        </div>
-                        <div>
-                            <Label>Type</Label>
-                            <Select value={form.event_type} onValueChange={(value) => setForm((prev) => ({ ...prev, event_type: value }))}>
-                                <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="Session">Session</SelectItem>
-                                    <SelectItem value="Workshop">Workshop</SelectItem>
-                                    <SelectItem value="Event">Event</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div>
-                            <Label>Format</Label>
-                            <Select value={form.format} onValueChange={(value) => setForm((prev) => ({ ...prev, format: value }))}>
-                                <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="Online">Online</SelectItem>
-                                    <SelectItem value="Offline">Offline</SelectItem>
-                                    <SelectItem value="Hybrid">Hybrid</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div>
-                            <Label>Template</Label>
-                            <Select value={form.template_option} onValueChange={(value) => setForm((prev) => ({ ...prev, template_option: value }))}>
-                                <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="attendance_only">Only Attendance</SelectItem>
-                                    <SelectItem value="attendance_scoring">Attendance + Scoring</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div>
-                            <Label>Participant Mode</Label>
-                            <Select value={form.participant_mode} onValueChange={(value) => setForm((prev) => ({ ...prev, participant_mode: value }))}>
-                                <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="individual">Individual</SelectItem>
-                                    <SelectItem value="team">Team</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div>
-                            <Label>Round Mode</Label>
-                            <Select value={form.round_mode} onValueChange={(value) => setForm((prev) => ({ ...prev, round_mode: value }))}>
-                                <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="single">Single Round</SelectItem>
-                                    <SelectItem value="multi">Multi Round</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div>
-                            <Label>Round Count</Label>
-                            <Input
-                                type="number"
-                                min={1}
-                                max={20}
-                                value={form.round_count}
-                                disabled={form.round_mode === 'single'}
-                                onChange={(e) => setForm((prev) => ({ ...prev, round_count: e.target.value }))}
-                            />
-                        </div>
-                        {form.participant_mode === 'team' ? (
-                            <>
-                                <div>
-                                    <Label>Team Min Size</Label>
-                                    <Input type="number" min={1} value={form.team_min_size} onChange={(e) => setForm((prev) => ({ ...prev, team_min_size: e.target.value }))} required />
-                                </div>
-                                <div>
-                                    <Label>Team Max Size</Label>
-                                    <Input type="number" min={1} value={form.team_max_size} onChange={(e) => setForm((prev) => ({ ...prev, team_max_size: e.target.value }))} required />
-                                </div>
-                            </>
-                        ) : null}
+                        <EventFormFields
+                            form={form}
+                            setForm={setForm}
+                            posterInputId="event-poster-upload"
+                            onPosterFileChange={setPosterFile}
+                            posterPreview={posterPreview}
+                        />
                         <div className="md:col-span-2 flex justify-end">
                             <Button type="submit" className="bg-[#f6c347] text-black hover:bg-[#ffd16b]" disabled={saving || uploadingPoster}>
                                 {uploadingPoster ? 'Uploading Poster...' : saving ? 'Creating...' : 'Create Event'}
@@ -290,6 +434,9 @@ export default function AdminEvents() {
                                     </span>
                                 </div>
                                 <p className="mt-3 text-sm text-slate-600">{eventRow.description || 'No description provided.'}</p>
+                                <p className="mt-2 text-xs font-medium text-slate-500">
+                                    Start: {formatDateLabel(eventRow.start_date)} · End: {formatDateLabel(eventRow.end_date)}
+                                </p>
                                 <div className="mt-4 flex flex-wrap gap-2 text-xs">
                                     <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.event_type}</span>
                                     <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.format}</span>
@@ -302,6 +449,9 @@ export default function AdminEvents() {
                                     </Link>
                                     {isSuperAdmin ? (
                                         <>
+                                            <Button variant="outline" className="border-black/20" onClick={() => openEditDialog(eventRow)}>
+                                                Edit Event
+                                            </Button>
                                             <Button variant="outline" className="border-black/20" onClick={() => toggleStatus(eventRow)}>
                                                 {eventRow.status === 'open' ? 'Close Event' : 'Open Event'}
                                             </Button>
@@ -320,6 +470,31 @@ export default function AdminEvents() {
                     </div>
                 )}
             </section>
+
+            <Dialog open={editDialogOpen} onOpenChange={(open) => (open ? setEditDialogOpen(true) : closeEditDialog())}>
+                <DialogContent className="max-h-[90vh] overflow-y-auto border-4 border-black">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading text-2xl font-black">Edit Event</DialogTitle>
+                    </DialogHeader>
+                    <form className="mt-2 grid gap-4 md:grid-cols-2" onSubmit={updateEvent}>
+                        <EventFormFields
+                            form={editForm}
+                            setForm={setEditForm}
+                            posterInputId="event-poster-upload-edit"
+                            onPosterFileChange={setEditPosterFile}
+                            posterPreview={editPosterPreview || resolveImageUrl(editForm.poster_url)}
+                        />
+                        <div className="md:col-span-2 flex justify-end gap-2">
+                            <Button type="button" variant="outline" className="border-black/20" onClick={() => closeEditDialog()} disabled={savingEdit || uploadingEditPoster}>
+                                Cancel
+                            </Button>
+                            <Button type="submit" className="bg-[#11131a] text-white hover:bg-[#1f2330]" disabled={savingEdit || uploadingEditPoster}>
+                                {uploadingEditPoster ? 'Uploading Poster...' : savingEdit ? 'Saving...' : 'Save Changes'}
+                            </Button>
+                        </div>
+                    </form>
+                </DialogContent>
+            </Dialog>
 
             <Dialog open={deleteDialogOpen} onOpenChange={(open) => (open ? setDeleteDialogOpen(true) : closeDeleteDialog())}>
                 <DialogContent className="border-4 border-black">

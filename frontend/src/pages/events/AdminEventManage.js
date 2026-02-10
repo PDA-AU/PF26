@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import axios from 'axios';
+import jsQR from 'jsqr';
 import { toast } from 'sonner';
 import { ArrowLeft, Calendar, Camera, Download, LayoutDashboard, ListChecks, LogOut, Sparkles, Trophy, Upload, Users } from 'lucide-react';
 
@@ -125,6 +126,11 @@ export default function AdminEventManage() {
     const cameraRef = useRef(null);
     const streamRef = useRef(null);
     const detectorTimerRef = useRef(null);
+    const detectorRef = useRef(null);
+    const canvasRef = useRef(null);
+    const canvasCtxRef = useRef(null);
+    const detectingRef = useRef(false);
+    const qrImageInputRef = useRef(null);
     const isSuperAdmin = Boolean(user?.is_superadmin);
 
     const selectedRound = useMemo(() => rounds.find((r) => r.id === selectedRoundId) || null, [rounds, selectedRoundId]);
@@ -309,37 +315,137 @@ export default function AdminEventManage() {
             streamRef.current.getTracks().forEach((track) => track.stop());
             streamRef.current = null;
         }
+        detectorRef.current = null;
+        detectingRef.current = false;
+        if (cameraRef.current) {
+            cameraRef.current.srcObject = null;
+        }
         setIsScanning(false);
     };
 
+    const decodeWithJsQr = () => {
+        const video = cameraRef.current;
+        if (!video || video.readyState < 2) return null;
+
+        const width = video.videoWidth;
+        const height = video.videoHeight;
+        if (!width || !height) return null;
+
+        if (!canvasRef.current) {
+            canvasRef.current = document.createElement('canvas');
+        }
+        const canvas = canvasRef.current;
+        canvas.width = width;
+        canvas.height = height;
+
+        if (!canvasCtxRef.current) {
+            canvasCtxRef.current = canvas.getContext('2d', { willReadFrequently: true });
+        }
+        const ctx = canvasCtxRef.current;
+        if (!ctx) return null;
+
+        ctx.drawImage(video, 0, 0, width, height);
+        const imageData = ctx.getImageData(0, 0, width, height);
+        const decoded = jsQR(imageData.data, width, height, { inversionAttempts: 'dontInvert' });
+        return decoded?.data || null;
+    };
+
+    const detectQrToken = async () => {
+        if (detectorRef.current && cameraRef.current) {
+            const codes = await detectorRef.current.detect(cameraRef.current);
+            if (codes?.length && codes[0]?.rawValue) {
+                return codes[0].rawValue;
+            }
+        }
+        return decodeWithJsQr();
+    };
+
+    const decodeFromImageFile = async (file) => {
+        if (!file) return null;
+        const dataUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+        const image = await new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = reject;
+            img.src = String(dataUrl || '');
+        });
+
+        const canvas = document.createElement('canvas');
+        canvas.width = image.width;
+        canvas.height = image.height;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) return null;
+        ctx.drawImage(image, 0, 0);
+        const imageData = ctx.getImageData(0, 0, image.width, image.height);
+        const decoded = jsQR(imageData.data, image.width, image.height, { inversionAttempts: 'dontInvert' });
+        return decoded?.data || null;
+    };
+
     const startScanner = async () => {
-        if (!window.BarcodeDetector) {
-            toast.error('QR scanning not supported in this browser');
+        if (!navigator?.mediaDevices?.getUserMedia) {
+            toast.error('Camera scanning unavailable. Use Upload QR Image or manual token.');
             return;
         }
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+            let stream;
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+            } catch (cameraError) {
+                stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            }
             streamRef.current = stream;
+            detectorRef.current = null;
+            if (window.BarcodeDetector) {
+                try {
+                    detectorRef.current = new window.BarcodeDetector({ formats: ['qr_code'] });
+                } catch (detectorError) {
+                    detectorRef.current = null;
+                }
+            }
             if (cameraRef.current) {
+                cameraRef.current.setAttribute('playsinline', 'true');
                 cameraRef.current.srcObject = stream;
                 await cameraRef.current.play();
             }
-            const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
             detectorTimerRef.current = setInterval(async () => {
-                if (!cameraRef.current) return;
+                if (!cameraRef.current || detectingRef.current) return;
+                detectingRef.current = true;
                 try {
-                    const codes = await detector.detect(cameraRef.current);
-                    if (codes?.length && codes[0]?.rawValue) {
+                    const token = await detectQrToken();
+                    if (token) {
                         stopScanner();
-                        markFromToken(codes[0].rawValue);
+                        markFromToken(token);
                     }
                 } catch (error) {
                     // no-op
+                } finally {
+                    detectingRef.current = false;
                 }
-            }, 700);
+            }, 500);
             setIsScanning(true);
         } catch (error) {
-            toast.error('Unable to access camera');
+            toast.error(window.isSecureContext ? 'Unable to access camera' : 'Camera scanning requires HTTPS');
+        }
+    };
+
+    const handleQrImageUpload = async (e) => {
+        const file = e.target.files?.[0];
+        e.target.value = '';
+        if (!file) return;
+        try {
+            const token = await decodeFromImageFile(file);
+            if (!token) {
+                toast.error('Unable to detect QR in image');
+                return;
+            }
+            markFromToken(token);
+        } catch (error) {
+            toast.error('Failed to read QR image');
         }
     };
 
@@ -777,8 +883,18 @@ export default function AdminEventManage() {
                             <Camera className="mr-2 h-4 w-4" />
                             Scan QR
                         </Button>
+                        <Button variant="outline" className="border-black/20" onClick={() => qrImageInputRef.current?.click()}>
+                            Upload QR Image
+                        </Button>
                         {isScanning ? <Button variant="outline" className="border-red-400 text-red-600" onClick={stopScanner}>Stop</Button> : null}
                     </div>
+                    <input
+                        ref={qrImageInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleQrImageUpload}
+                    />
                     {isScanning ? (
                         <div className="mt-3 rounded-xl border border-black/10 p-3">
                             <video ref={cameraRef} className="h-64 w-full rounded-lg bg-black object-cover" muted playsInline />
