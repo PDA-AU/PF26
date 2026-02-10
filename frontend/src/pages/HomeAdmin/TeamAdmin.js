@@ -76,7 +76,8 @@ export default function TeamAdmin() {
     const fetchData = useCallback(async () => {
         try {
             const res = await axios.get(`${API}/pda-admin/team`, { headers: getAuthHeader() });
-            setTeamMembers(res.data || []);
+            const rows = (res.data || []).filter((row) => String(row?.regno || '') !== '0000000000');
+            setTeamMembers(rows);
         } catch (error) {
             console.error('Failed to load team members:', error);
         } finally {
@@ -248,7 +249,7 @@ export default function TeamAdmin() {
         );
     }
 
-    const statsMembers = teamMembers.filter((m) => String(m.regno) !== '0000000000');
+    const statsMembers = teamMembers;
     const totalMembers = statsMembers.length;
     const teamCounts = TEAMS.reduce((acc, team) => {
         acc[team] = statsMembers.filter((m) => m.team === team).length;
