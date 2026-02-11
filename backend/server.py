@@ -98,7 +98,6 @@ async def startup_event():
     ensure_pda_admins_table(engine)
     ensure_email_auth_columns(engine)
     ensure_pda_event_tables(engine)
-    ensure_persofest_pda_event(engine)
     ensure_persohub_tables(engine)
 
     # Create ORM tables except deprecated Persofest legacy tables.
@@ -110,6 +109,7 @@ async def startup_event():
 
     # Legacy Persofest migration should run only when old tables still exist.
     if _legacy_persofest_tables_exist():
+        ensure_persofest_pda_event(engine)
         migrate_legacy_persofest_to_pda_event(engine)
         drop_legacy_persofest_tables(engine)
         logger.info("Legacy Persofest tables detected and migrated to managed event tables.")

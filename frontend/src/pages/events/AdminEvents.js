@@ -22,6 +22,7 @@ const initialForm = {
     start_date: '',
     end_date: '',
     poster_url: '',
+    whatsapp_url: '',
     event_type: 'Event',
     format: 'Offline',
     template_option: 'attendance_scoring',
@@ -51,6 +52,7 @@ const toEventForm = (eventRow = {}) => ({
     start_date: toDateInputValue(eventRow.start_date),
     end_date: toDateInputValue(eventRow.end_date),
     poster_url: eventRow.poster_url || '',
+    whatsapp_url: eventRow.whatsapp_url || '',
     event_type: eventRow.event_type || 'Event',
     format: eventRow.format || 'Offline',
     template_option: eventRow.template_option || 'attendance_scoring',
@@ -75,6 +77,7 @@ const buildEventPayload = (formState, posterUrl) => ({
     start_date: formState.start_date || null,
     end_date: formState.end_date || null,
     poster_url: posterUrl,
+    whatsapp_url: formState.whatsapp_url?.trim() || null,
     event_type: formState.event_type,
     format: formState.format,
     template_option: formState.template_option,
@@ -126,6 +129,15 @@ function EventFormFields({
                         <img src={posterPreview} alt="Poster preview" className="max-h-48 w-auto rounded-lg border border-black/10" />
                     </div>
                 ) : null}
+            </div>
+            <div className="md:col-span-2">
+                <Label>WhatsApp Channel URL</Label>
+                <Input
+                    type="url"
+                    value={form.whatsapp_url}
+                    onChange={(e) => setForm((prev) => ({ ...prev, whatsapp_url: e.target.value }))}
+                    placeholder="https://chat.whatsapp.com/..."
+                />
             </div>
             <div>
                 <Label>Type</Label>

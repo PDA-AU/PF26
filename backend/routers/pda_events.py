@@ -124,18 +124,32 @@ def _get_user_team_for_event(db: Session, event_id: int, user_id: int) -> Option
 def _send_registration_email(user: PdaUser, event: PdaEvent, details: str) -> None:
     if not user.email:
         return
-    subject = f"Registration Confirmed - {event.title}"
+    subject = f"You're In! Registration Confirmed - {event.title}"
+    whatsapp_url = str(getattr(event, "whatsapp_url", "") or "").strip()
+    whatsapp_text = f"\nJoin our WhatsApp channel for updates: {whatsapp_url}\n" if whatsapp_url else ""
+    whatsapp_html = (
+        f'<p><a href="{whatsapp_url}" target="_blank" rel="noreferrer">Join our WhatsApp channel for updates</a></p>'
+        if whatsapp_url
+        else ""
+    )
     text = (
         f"Hello {user.name},\n\n"
-        f"You are registered for {event.title} ({event.event_code}).\n"
+        f"Great news! Your registration is confirmed for {event.title} ({event.event_code}).\n"
+        f"We are excited to have you with us.\n"
         f"{details}\n\n"
-        "Regards,\nPDA WEB TEAM"
+        "Get ready and give it your best.\n"
+        f"{whatsapp_text}\n"
+        "See you at the event!\n\nRegards,\nPDA WEB TEAM"
     )
     html = (
         "<html><body>"
         f"<p>Hello {user.name},</p>"
-        f"<p>You are registered for <strong>{event.title}</strong> ({event.event_code}).</p>"
+        f"<p><strong>Great news!</strong> Your registration is confirmed for <strong>{event.title}</strong> ({event.event_code}).</p>"
+        "<p>We are excited to have you with us.</p>"
         f"<p>{details}</p>"
+        "<p>Get ready and give it your best.</p>"
+        f"{whatsapp_html}"
+        "<p>See you at the event!</p>"
         "<p>Regards,<br/><strong>PDA WEB TEAM</strong></p>"
         "</body></html>"
     )

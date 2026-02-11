@@ -819,12 +819,25 @@ class PdaManagedBadgePlaceEnum(str, Enum):
     SPECIAL_MENTION = "SpecialMention"
 
 
+def _normalize_optional_http_url(value: Optional[str], field_name: str) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    if not cleaned:
+        return None
+    lowered = cleaned.lower()
+    if not (lowered.startswith("http://") or lowered.startswith("https://")):
+        raise ValueError(f"{field_name} must start with http:// or https://")
+    return cleaned
+
+
 class PdaManagedEventCreate(BaseModel):
     title: str = Field(..., min_length=2)
     description: Optional[str] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     poster_url: Optional[str] = None
+    whatsapp_url: Optional[str] = None
     event_type: PdaManagedEventTypeEnum
     format: PdaManagedEventFormatEnum
     template_option: PdaManagedEventTemplateEnum
@@ -835,6 +848,11 @@ class PdaManagedEventCreate(BaseModel):
     team_max_size: Optional[int] = Field(None, ge=1, le=100)
     club_id: int = Field(1, ge=1)
 
+    @field_validator("whatsapp_url", mode="before")
+    @classmethod
+    def validate_whatsapp_url(cls, value):
+        return _normalize_optional_http_url(value, "whatsapp_url")
+
 
 class PdaManagedEventUpdate(BaseModel):
     title: Optional[str] = None
@@ -842,6 +860,7 @@ class PdaManagedEventUpdate(BaseModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     poster_url: Optional[str] = None
+    whatsapp_url: Optional[str] = None
     event_type: Optional[PdaManagedEventTypeEnum] = None
     format: Optional[PdaManagedEventFormatEnum] = None
     template_option: Optional[PdaManagedEventTemplateEnum] = None
@@ -851,6 +870,11 @@ class PdaManagedEventUpdate(BaseModel):
     team_min_size: Optional[int] = Field(None, ge=1, le=100)
     team_max_size: Optional[int] = Field(None, ge=1, le=100)
     status: Optional[PdaManagedEventStatusEnum] = None
+
+    @field_validator("whatsapp_url", mode="before")
+    @classmethod
+    def validate_whatsapp_url(cls, value):
+        return _normalize_optional_http_url(value, "whatsapp_url")
 
 
 class PdaManagedEventStatusUpdate(BaseModel):
@@ -867,6 +891,7 @@ class PdaManagedEventResponse(BaseModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     poster_url: Optional[str] = None
+    whatsapp_url: Optional[str] = None
     event_type: PdaManagedEventTypeEnum
     format: PdaManagedEventFormatEnum
     template_option: PdaManagedEventTemplateEnum

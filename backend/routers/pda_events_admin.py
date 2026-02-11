@@ -295,6 +295,7 @@ def create_managed_event(
         start_date=payload.start_date,
         end_date=payload.end_date,
         poster_url=payload.poster_url,
+        whatsapp_url=payload.whatsapp_url,
         event_type=_to_event_type(payload.event_type),
         format=_to_event_format(payload.format),
         template_option=_to_event_template(payload.template_option),

@@ -9,6 +9,7 @@ import {
     Clock3,
     Copy,
     LogIn,
+    MessageCircle,
     QrCode,
     UserPlus,
     Users,
@@ -192,6 +193,10 @@ export default function EventDashboard() {
         () => getEventDateLabel(eventInfo?.start_date, eventInfo?.end_date),
         [eventInfo?.start_date, eventInfo?.end_date]
     );
+    const whatsappUrl = useMemo(() => {
+        const value = String(eventInfo?.whatsapp_url || '').trim();
+        return value || '';
+    }, [eventInfo?.whatsapp_url]);
 
     const fetchData = useCallback(async () => {
         setLoading(true);
@@ -447,6 +452,19 @@ export default function EventDashboard() {
                                 <Calendar className="h-4 w-4 text-[#8B5CF6]" />
                                 <span>{eventDateLabel}</span>
                             </div>
+                            {whatsappUrl ? (
+                                <div className="mt-3">
+                                    <a href={whatsappUrl} target="_blank" rel="noreferrer">
+                                        <Button
+                                            data-testid="event-overview-whatsapp-button"
+                                            className="border-2 border-black bg-[#25D366] text-black shadow-neo hover:bg-[#33df73]"
+                                        >
+                                            <MessageCircle className="mr-2 h-4 w-4" />
+                                            Join WhatsApp Channel
+                                        </Button>
+                                    </a>
+                                </div>
+                            ) : null}
                         </div>
                         <div className="border-t-4 border-black bg-[#11131a] lg:self-start lg:border-l-4 lg:border-t-0">
                             <div className="relative aspect-[4/5] w-full">
@@ -650,6 +668,17 @@ export default function EventDashboard() {
                                             <QrCode className="mr-2 h-4 w-4" />
                                             {qrLoading ? 'Generating QR...' : 'View Attendance QR'}
                                         </Button>
+                                        {whatsappUrl ? (
+                                            <a href={whatsappUrl} target="_blank" rel="noreferrer" className="block">
+                                                <Button
+                                                    data-testid="event-dashboard-whatsapp-button"
+                                                    className="w-full border-2 border-black bg-[#25D366] text-black shadow-neo hover:bg-[#33df73]"
+                                                >
+                                                    <MessageCircle className="mr-2 h-4 w-4" />
+                                                    Join WhatsApp Channel
+                                                </Button>
+                                            </a>
+                                        ) : null}
                                         <Link to="/" className="block">
                                             <Button data-testid="event-dashboard-back-home-button" variant="outline" className="w-full border-2 border-black shadow-neo">
                                                 <Calendar className="mr-2 h-4 w-4" />

@@ -335,6 +335,7 @@ class PdaEvent(Base):
     start_date = Column(Date, nullable=True)
     end_date = Column(Date, nullable=True)
     poster_url = Column(String(500), nullable=True)
+    whatsapp_url = Column(String(500), nullable=True)
     event_type = Column(SQLEnum(PdaEventType), nullable=False)
     format = Column(SQLEnum(PdaEventFormat), nullable=False)
     template_option = Column(SQLEnum(PdaEventTemplate), nullable=False)
