@@ -201,7 +201,7 @@
     }
 }
 
-/* Featured card edge glow (clockwise) */
+/* Featured card edge shine */
 .featured-glow-card {
     position: relative;
     isolation: isolate;
@@ -213,18 +213,17 @@
     inset: -1px;
     border-radius: inherit;
     padding: 2px;
-    background: conic-gradient(
-        from 0deg,
-        rgba(255, 255, 255, 0) 0deg,
-        rgba(246, 195, 71, 0.1) 90deg,
-        rgba(246, 195, 71, 0.95) 150deg,
-        rgba(255, 230, 150, 1) 170deg,
-        rgba(246, 195, 71, 0.95) 200deg,
-        rgba(255, 255, 255, 0) 260deg,
-        rgba(255, 255, 255, 0) 360deg
+    background: linear-gradient(
+        115deg,
+        rgba(255, 255, 255, 0) 0%,
+        rgba(246, 195, 71, 0.18) 35%,
+        rgba(255, 234, 170, 0.95) 50%,
+        rgba(246, 195, 71, 0.18) 65%,
+        rgba(255, 255, 255, 0) 100%
     );
-    animation: featured-edge-spin 3s linear infinite;
-    filter: drop-shadow(0 0 10px rgba(246, 195, 71, 0.35));
+    background-size: 220% 220%;
+    animation: featured-edge-shine 2.8s ease-in-out infinite;
+    filter: drop-shadow(0 0 9px rgba(246, 195, 71, 0.28));
     pointer-events: none;
     z-index: -1;
     -webkit-mask:
@@ -234,9 +233,18 @@
     mask-composite: exclude;
 }
 
-@keyframes featured-edge-spin {
-    to {
-        transform: rotate(360deg);
+@keyframes featured-edge-shine {
+    0% {
+        background-position: 0% 50%;
+        opacity: 0.55;
+    }
+    50% {
+        background-position: 100% 50%;
+        opacity: 1;
+    }
+    100% {
+        background-position: 0% 50%;
+        opacity: 0.55;
     }
 }
 
