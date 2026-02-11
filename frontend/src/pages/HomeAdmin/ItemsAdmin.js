@@ -10,6 +10,14 @@ import AdminLayout from '@/pages/HomeAdmin/AdminLayout';
 import { API, uploadPoster } from '@/pages/HomeAdmin/adminApi';
 import { compressImageToWebp } from '@/utils/imageCompression';
 import { toast } from 'sonner';
+import {
+    filterPosterAssetsByRatio,
+    parsePosterAssets,
+    pickPosterAssetByRatio,
+    POSTER_ASPECT_RATIOS,
+    resolvePosterUrl,
+    serializePosterAssets
+} from '@/utils/posterAssets';
 
 const emptyItem = {
     type: 'program',
@@ -26,17 +34,35 @@ const emptyItem = {
     is_featured: false
 };
 
+const makePosterAssetId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+const toPosterAssetRows = (rawPosterUrl) => parsePosterAssets(rawPosterUrl).map((asset) => ({
+    id: makePosterAssetId(),
+    aspect_ratio: asset.aspect_ratio || '2:1',
+    url: asset.url,
+    file: null,
+    preview_url: ''
+}));
+
+const releasePosterPreviewUrls = (rows) => {
+    (rows || []).forEach((row) => {
+        if (row?.preview_url) URL.revokeObjectURL(row.preview_url);
+    });
+};
+
+const getCardPosterSrc = (rawPosterUrl) => {
+    const assets = filterPosterAssetsByRatio(parsePosterAssets(rawPosterUrl), ['4:5', '5:4']);
+    const preferred = pickPosterAssetByRatio(assets, ['4:5', '5:4']);
+    return resolvePosterUrl(preferred?.url);
+};
+
 export default function ItemsAdmin() {
     const { canAccessHome, getAuthHeader } = useAuth();
     const [programs, setPrograms] = useState([]);
     const [events, setEvents] = useState([]);
     const [itemForm, setItemForm] = useState(emptyItem);
-    const [posterFile, setPosterFile] = useState(null);
-    const [featuredPosterFile, setFeaturedPosterFile] = useState(null);
-    const [posterPreview, setPosterPreview] = useState('');
-    const [featuredPosterPreview, setFeaturedPosterPreview] = useState('');
-    const [clearPoster, setClearPoster] = useState(false);
-    const [clearFeaturedPoster, setClearFeaturedPoster] = useState(false);
+    const [posterAssets, setPosterAssets] = useState([]);
+    const [posterUploadRatio, setPosterUploadRatio] = useState('2:1');
     const [editingItem, setEditingItem] = useState(null);
     const [loading, setLoading] = useState(true);
     const [savingProgram, setSavingProgram] = useState(false);
@@ -66,26 +92,6 @@ export default function ItemsAdmin() {
         }
     }, [canAccessHome]);
 
-    useEffect(() => {
-        if (!posterFile) {
-            setPosterPreview('');
-            return;
-        }
-        const url = URL.createObjectURL(posterFile);
-        setPosterPreview(url);
-        return () => URL.revokeObjectURL(url);
-    }, [posterFile]);
-
-    useEffect(() => {
-        if (!featuredPosterFile) {
-            setFeaturedPosterPreview('');
-            return;
-        }
-        const url = URL.createObjectURL(featuredPosterFile);
-        setFeaturedPosterPreview(url);
-        return () => URL.revokeObjectURL(url);
-    }, [featuredPosterFile]);
-
     const handleItemChange = (e) => {
         const { name, value, type, checked } = e.target;
         setItemForm(prev => ({
@@ -95,14 +101,10 @@ export default function ItemsAdmin() {
     };
 
     const resetItemForm = () => {
+        releasePosterPreviewUrls(posterAssets);
         setItemForm(emptyItem);
         setEditingItem(null);
-        setPosterFile(null);
-        setFeaturedPosterFile(null);
-        setPosterPreview('');
-        setFeaturedPosterPreview('');
-        setClearPoster(false);
-        setClearFeaturedPoster(false);
+        setPosterAssets([]);
     };
 
     const submitItem = async (e) => {
@@ -110,27 +112,25 @@ export default function ItemsAdmin() {
         const isProgram = itemForm.type === 'program';
         const setSaving = isProgram ? setSavingProgram : setSavingEvent;
         setSaving(true);
-        let posterUrl = itemForm.poster_url.trim() || null;
-        if (posterFile) {
-            const processed = await compressImageToWebp(posterFile);
-            posterUrl = await uploadPoster(processed, getAuthHeader);
+        let nextAssets = posterAssets.filter((asset) => asset.url && !asset.file).map((asset) => ({
+            url: asset.url,
+            aspect_ratio: asset.aspect_ratio
+        }));
+        const pendingAssets = posterAssets.filter((asset) => asset.file);
+        for (const asset of pendingAssets) {
+            const processed = await compressImageToWebp(asset.file);
+            const uploadedUrl = await uploadPoster(processed, getAuthHeader);
+            nextAssets.push({
+                url: uploadedUrl,
+                aspect_ratio: asset.aspect_ratio
+            });
         }
-        if (clearPoster && !posterFile) {
-            posterUrl = null;
-        }
-        let featuredPosterUrl = itemForm.featured_poster_url.trim() || null;
-        if (featuredPosterFile) {
-            const processedFeatured = await compressImageToWebp(featuredPosterFile);
-            featuredPosterUrl = await uploadPoster(processedFeatured, getAuthHeader);
-        }
-        if (clearFeaturedPoster && !featuredPosterFile) {
-            featuredPosterUrl = null;
-        }
+        const posterUrl = serializePosterAssets(nextAssets);
         const payload = {
             title: itemForm.title.trim(),
             description: itemForm.description.trim() || null,
             poster_url: posterUrl,
-            featured_poster_url: featuredPosterUrl,
+            featured_poster_url: null,
             start_date: itemForm.start_date || null,
             end_date: itemForm.end_date || null,
             is_featured: itemForm.is_featured,
@@ -171,12 +171,8 @@ export default function ItemsAdmin() {
             is_featured: Boolean(program.is_featured)
         });
         setEditingItem({ id: program.id, type: 'program' });
-        setPosterFile(null);
-        setFeaturedPosterFile(null);
-        setPosterPreview('');
-        setFeaturedPosterPreview('');
-        setClearPoster(false);
-        setClearFeaturedPoster(false);
+        releasePosterPreviewUrls(posterAssets);
+        setPosterAssets(toPosterAssetRows(program.poster_url));
         formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
 
@@ -196,12 +192,8 @@ export default function ItemsAdmin() {
             is_featured: Boolean(event.is_featured)
         });
         setEditingItem({ id: event.id, type: 'event' });
-        setPosterFile(null);
-        setFeaturedPosterFile(null);
-        setPosterPreview('');
-        setFeaturedPosterPreview('');
-        setClearPoster(false);
-        setClearFeaturedPoster(false);
+        releasePosterPreviewUrls(posterAssets);
+        setPosterAssets(toPosterAssetRows(event.poster_url));
         formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
 
@@ -338,89 +330,88 @@ export default function ItemsAdmin() {
                         />
                     </div>
                     <div className="md:col-span-2">
-                        <Label htmlFor="item-poster-file">Or Upload Poster</Label>
-                        <Input
-                            id="item-poster-file"
-                            name="poster_file"
-                            type="file"
-                            accept="image/png,image/jpeg,image/webp"
-                            onChange={(e) => {
-                                setPosterFile(e.target.files?.[0] || null);
-                                setClearPoster(false);
-                            }}
-                        />
-                    </div>
-                    <div className="md:col-span-2">
-                        <Label htmlFor="item-featured-poster-file">Or Upload Featured Poster (2:1)</Label>
-                        <Input
-                            id="item-featured-poster-file"
-                            name="featured_poster_file"
-                            type="file"
-                            accept="image/png,image/jpeg,image/webp"
-                            onChange={(e) => {
-                                setFeaturedPosterFile(e.target.files?.[0] || null);
-                                setClearFeaturedPoster(false);
-                            }}
-                        />
-                    </div>
-                    {editingItem ? (
-                        <div className="md:col-span-2 grid gap-3 sm:grid-cols-2">
-                            <div className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
-                                <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Poster Preview</p>
-                                {posterPreview || itemForm.poster_url ? (
-                                    <img
-                                        src={posterPreview || itemForm.poster_url}
-                                        alt="Poster preview"
-                                        className="mt-3 h-40 w-full rounded-xl object-cover"
-                                    />
-                                ) : (
-                                    <p className="mt-3 text-sm text-slate-500">No poster uploaded yet.</p>
-                                )}
-                                <div className="mt-3 flex flex-wrap gap-2">
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        className="border-black/10 text-xs"
-                                        onClick={() => {
-                                            setPosterFile(null);
-                                            setPosterPreview('');
-                                            setItemForm((prev) => ({ ...prev, poster_url: '' }));
-                                            setClearPoster(true);
-                                        }}
-                                    >
-                                        Clear Poster
-                                    </Button>
-                                </div>
-                            </div>
-                            <div className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
-                                <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Featured Poster Preview</p>
-                                {featuredPosterPreview || itemForm.featured_poster_url ? (
-                                    <img
-                                        src={featuredPosterPreview || itemForm.featured_poster_url}
-                                        alt="Featured poster preview"
-                                        className="mt-3 h-40 w-full rounded-xl object-cover"
-                                    />
-                                ) : (
-                                    <p className="mt-3 text-sm text-slate-500">No featured poster uploaded yet.</p>
-                                )}
-                                <div className="mt-3 flex flex-wrap gap-2">
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        className="border-black/10 text-xs"
-                                        onClick={() => {
-                                            setFeaturedPosterFile(null);
-                                            setFeaturedPosterPreview('');
-                                            setItemForm((prev) => ({ ...prev, featured_poster_url: '' }));
-                                            setClearFeaturedPoster(true);
-                                        }}
-                                    >
-                                        Clear Featured Poster
-                                    </Button>
-                                </div>
-                            </div>
+                        <Label htmlFor="item-poster-file">Poster Uploads (Multiple)</Label>
+                        <div className="mt-2 grid gap-2 sm:grid-cols-[160px_1fr]">
+                            <select
+                                value={posterUploadRatio}
+                                onChange={(e) => setPosterUploadRatio(e.target.value)}
+                                className="h-10 w-full rounded-md border border-black/10 bg-white px-3 text-sm"
+                            >
+                                {POSTER_ASPECT_RATIOS.map((ratio) => (
+                                    <option key={ratio} value={ratio}>{ratio}</option>
+                                ))}
+                            </select>
+                            <Input
+                                id="item-poster-file"
+                                name="poster_file"
+                                type="file"
+                                multiple
+                                accept="image/png,image/jpeg,image/webp"
+                                onChange={(e) => {
+                                    const files = Array.from(e.target.files || []);
+                                    if (!files.length) return;
+                                    setPosterAssets((prev) => ([
+                                        ...prev,
+                                        ...files.map((file) => ({
+                                            id: makePosterAssetId(),
+                                            aspect_ratio: posterUploadRatio,
+                                            url: '',
+                                            file,
+                                            preview_url: URL.createObjectURL(file)
+                                        }))
+                                    ]));
+                                    e.target.value = '';
+                                }}
+                            />
                         </div>
-                    ) : null}
+                        <p className="mt-2 text-xs text-slate-500">
+                            Choose an aspect ratio, then upload one or more posters for that ratio.
+                        </p>
+                        {posterAssets.length ? (
+                            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                                {posterAssets.map((asset) => (
+                                    <div key={asset.id} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-3">
+                                        <div className="mb-2 flex items-center justify-between gap-2">
+                                            <span className="rounded-full border border-black/10 bg-white px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.08em]">
+                                                {asset.aspect_ratio}
+                                            </span>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                className="h-7 border-black/10 px-2 text-xs"
+                                                onClick={() => {
+                                                    if (asset.preview_url) URL.revokeObjectURL(asset.preview_url);
+                                                    setPosterAssets((prev) => prev.filter((row) => row.id !== asset.id));
+                                                }}
+                                            >
+                                                Remove
+                                            </Button>
+                                        </div>
+                                        <img
+                                            src={asset.preview_url || asset.url}
+                                            alt="Poster preview"
+                                            className="h-40 w-full rounded-xl border border-black/10 bg-white object-contain"
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+                        ) : null}
+                        {editingItem ? (
+                            <div className="mt-3">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="border-black/10 text-xs"
+                                    onClick={() => {
+                                        releasePosterPreviewUrls(posterAssets);
+                                        setPosterAssets([]);
+                                    }}
+                                >
+                                    Clear All Posters
+                                </Button>
+                            </div>
+                        ) : null}
+                    </div>
                     <div className="md:col-span-2">
                         <Label htmlFor="item-description">Description</Label>
                         <Textarea
@@ -495,6 +486,13 @@ export default function ItemsAdmin() {
                 <div className="mt-6 grid gap-4 md:grid-cols-2">
                     {filteredPrograms.length ? filteredPrograms.map((program) => (
                         <div key={program.id} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4 min-w-0">
+                            {getCardPosterSrc(program.poster_url) ? (
+                                <img
+                                    src={getCardPosterSrc(program.poster_url)}
+                                    alt={`${program.title} poster`}
+                                    className="mb-3 aspect-[4/5] w-full rounded-xl border border-black/10 object-cover bg-white"
+                                />
+                            ) : null}
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                 <div className="min-w-0">
                                     <h3 className="text-lg font-heading font-bold break-words">{program.title}</h3>
@@ -544,6 +542,13 @@ export default function ItemsAdmin() {
                         <div className="mt-4 grid gap-3 md:grid-cols-2">
                             {programs.filter(program => program.is_featured).map((program) => (
                                 <div key={`featured-${program.id}`} className="rounded-2xl border border-black/10 bg-white p-4">
+                                    {getCardPosterSrc(program.poster_url) ? (
+                                        <img
+                                            src={getCardPosterSrc(program.poster_url)}
+                                            alt={`${program.title} poster`}
+                                            className="mb-3 aspect-[4/5] w-full rounded-xl border border-black/10 object-cover bg-white"
+                                        />
+                                    ) : null}
                                     <h3 className="text-base font-heading font-bold line-clamp-2 break-words">{program.title}</h3>
                                     {program.description ? (
                                         <p className="mt-2 text-sm text-slate-600 line-clamp-3 break-words">{program.description}</p>
@@ -577,6 +582,13 @@ export default function ItemsAdmin() {
                 <div className="mt-6 grid gap-4 md:grid-cols-2">
                     {filteredEvents.length ? filteredEvents.map((event) => (
                         <div key={event.id} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4 min-w-0">
+                            {getCardPosterSrc(event.poster_url) ? (
+                                <img
+                                    src={getCardPosterSrc(event.poster_url)}
+                                    alt={`${event.title} poster`}
+                                    className="mb-3 aspect-[4/5] w-full rounded-xl border border-black/10 object-cover bg-white"
+                                />
+                            ) : null}
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                 <div className="min-w-0">
                                     <h3 className="text-lg font-heading font-bold break-words">{event.title}</h3>
@@ -626,6 +638,13 @@ export default function ItemsAdmin() {
                         <div className="mt-4 grid gap-3 md:grid-cols-2">
                             {events.filter(event => event.is_featured).map((event) => (
                                 <div key={`featured-${event.id}`} className="rounded-2xl border border-black/10 bg-white p-4">
+                                    {getCardPosterSrc(event.poster_url) ? (
+                                        <img
+                                            src={getCardPosterSrc(event.poster_url)}
+                                            alt={`${event.title} poster`}
+                                            className="mb-3 aspect-[4/5] w-full rounded-xl border border-black/10 object-cover bg-white"
+                                        />
+                                    ) : null}
                                     <h3 className="text-base font-heading font-bold line-clamp-2 break-words">{event.title}</h3>
                                     <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
                                         {event.start_date || 'TBA'}{event.end_date ? ` → ${event.end_date}` : ''}

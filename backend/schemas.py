@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from typing import Optional, List, Dict, Any
 from enum import Enum
 from datetime import datetime, date
@@ -170,15 +170,43 @@ class PdaUserRegister(BaseModel):
 
 
 class PdaRecruitmentApplyRequest(BaseModel):
-    preferred_team: str = Field(..., min_length=2, max_length=64)
+    preferred_team_1: str = Field(..., min_length=2, max_length=64)
+    preferred_team_2: Optional[str] = Field(default=None, min_length=2, max_length=64)
+    preferred_team_3: Optional[str] = Field(default=None, min_length=2, max_length=64)
+    resume_url: Optional[str] = Field(default=None, max_length=800)
 
-    @field_validator('preferred_team')
+    @field_validator("preferred_team_1", "preferred_team_2", "preferred_team_3", "resume_url")
     @classmethod
-    def validate_preferred_team(cls, v):
+    def validate_optional_trimmed_value(cls, v):
+        if v is None:
+            return None
         value = str(v or "").strip()
-        if not value:
-            raise ValueError('Preferred team is required')
-        return value
+        return value or None
+
+    @model_validator(mode="after")
+    def validate_team_preferences(self):
+        if not self.preferred_team_1:
+            raise ValueError("preferred_team_1 is required")
+        prefs = [self.preferred_team_1, self.preferred_team_2, self.preferred_team_3]
+        filtered = [pref for pref in prefs if pref]
+        if any(pref == "Executive" for pref in filtered):
+            raise ValueError("Executive team cannot be selected")
+        if len(filtered) != len(set(filtered)):
+            raise ValueError("Team preferences must be unique")
+        return self
+
+
+class PdaRecruitmentResumeUpdateRequest(BaseModel):
+    resume_url: Optional[str] = Field(default=None, max_length=800)
+    remove: bool = False
+
+    @field_validator("resume_url")
+    @classmethod
+    def validate_optional_trimmed_resume(cls, v):
+        if v is None:
+            return None
+        value = str(v or "").strip()
+        return value or None
 
 
 class PdaUserLogin(BaseModel):
@@ -229,6 +257,10 @@ class PdaUserResponse(BaseModel):
     is_member: bool
     is_applied: bool = False
     preferred_team: Optional[str] = None
+    preferred_team_1: Optional[str] = None
+    preferred_team_2: Optional[str] = None
+    preferred_team_3: Optional[str] = None
+    resume_url: Optional[str] = None
     team: Optional[str] = None
     designation: Optional[str] = None
     instagram_url: Optional[str] = None
@@ -693,6 +725,10 @@ class PdaAdminUserResponse(BaseModel):
     is_member: bool = False
     is_applied: bool = False
     preferred_team: Optional[str] = None
+    preferred_team_1: Optional[str] = None
+    preferred_team_2: Optional[str] = None
+    preferred_team_3: Optional[str] = None
+    resume_url: Optional[str] = None
     email_verified: bool = False
     team: Optional["PdaTeamName"] = None
     designation: Optional["PdaTeamDesignation"] = None

@@ -456,14 +456,6 @@ export default function SuperAdmin() {
                                     <label className="flex items-center gap-2 text-sm">
                                         <input
                                             type="checkbox"
-                                            checked={policyEdits[admin.id]?.pf || false}
-                                            onChange={(e) => updatePolicyEdit(admin.id, "pf", e.target.checked)}
-                                        />
-                                        Persofest
-                                    </label>
-                                    <label className="flex items-center gap-2 text-sm">
-                                        <input
-                                            type="checkbox"
                                             checked={policyEdits[admin.id]?.superAdmin || false}
                                             onChange={(e) => updatePolicyEdit(admin.id, "superAdmin", e.target.checked)}
                                         />

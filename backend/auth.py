@@ -11,7 +11,7 @@ import os
 from dotenv import load_dotenv
 from pathlib import Path
 from database import get_db
-from models import Participant, PdaUser
+from models import PdaUser
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -95,42 +95,6 @@ def decode_token(token: str) -> dict:
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
-
-async def get_current_participant(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
-) -> Participant:
-    token = credentials.credentials
-    payload = decode_token(token)
-    
-    if payload.get("type") != "access":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token type"
-        )
-
-    if payload.get("user_type") != "participant":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token user type"
-        )
-    
-    register_number: str = payload.get("sub")
-    if register_number is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials"
-        )
-    
-    participant = db.query(Participant).filter(Participant.register_number == register_number).first()
-    if participant is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found"
-        )
-    
-    return participant
 
 
 async def get_current_pda_user(

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import os
 import random
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
@@ -12,22 +12,12 @@ from auth import get_password_hash
 from models import (
     AdminLog,
     Department,
-    Event,
-    Gender,
-    Participant,
-    ParticipantStatus,
     PdaAdmin,
     PdaGallery,
     PdaItem,
     PdaTeam,
     PdaUser,
-    Round,
-    RoundMode,
-    RoundState,
-    Score,
     SystemConfig,
-    UserRole,
-    YearOfStudy,
 )
 
 
@@ -94,93 +84,11 @@ def seed() -> None:
 
     db = SessionLocal()
     try:
-        event = Event(name="PERSOFEST", is_active=True)
-        db.add(event)
-        db.flush()
-
         db.add(SystemConfig(key="registration_open", value="true"))
         db.add(SystemConfig(key="pda_recruitment_open", value="true"))
 
         now = datetime.now(timezone.utc)
-        base_date = datetime(2026, 2, 1, tzinfo=timezone.utc)
-        criteria = [
-            {"name": "Communication", "max_marks": 30},
-            {"name": "Aptitude", "max_marks": 30},
-            {"name": "Creativity", "max_marks": 40},
-        ]
-
-        rounds = []
-        round_states = [
-            RoundState.PUBLISHED,
-            RoundState.ACTIVE,
-            RoundState.COMPLETED,
-            RoundState.COMPLETED,
-            RoundState.PUBLISHED,
-            RoundState.DRAFT,
-        ]
-        for i in range(6):
-            r = Round(
-                round_no=f"PF{i+1:02d}",
-                name=f"Round {i+1}",
-                description=f"Mock round {i+1}",
-                tags=["Persofest", "Mock"],
-                date=base_date + timedelta(days=i * 7),
-                mode=RoundMode.ONLINE if i % 2 == 0 else RoundMode.OFFLINE,
-                conducted_by=f"Panel {i+1}",
-                state=round_states[i],
-                evaluation_criteria=criteria,
-                elimination_type="top_k" if i in (2, 3) else None,
-                elimination_value=40 if i in (2, 3) else None,
-                is_frozen=(round_states[i] == RoundState.COMPLETED),
-            )
-            rounds.append(r)
-        db.add_all(rounds)
-        db.flush()
-
         depts = list(Department)
-        years = list(YearOfStudy)
-        genders = list(Gender)
-
-        participants = []
-        for i in range(60):
-            reg = f"2026{i+1:06d}"[-10:]
-            p = Participant(
-                register_number=reg,
-                email=f"participant{i+1}@example.com",
-                hashed_password=get_password_hash("participant123"),
-                name=f"Participant {i+1}",
-                phone=f"9{(i+1):09d}"[-10:],
-                gender=genders[i % len(genders)],
-                department=depts[i % len(depts)],
-                year_of_study=years[i % len(years)],
-                role=UserRole.PARTICIPANT,
-                referral_code=f"R{i+1:04d}",
-                referred_by=f"R{i:04d}" if i > 0 and i % 5 == 0 else None,
-                referral_count=1 if i % 7 == 0 else 0,
-                status=ParticipantStatus.ACTIVE,
-                event_id=event.id,
-            )
-            participants.append(p)
-        db.add_all(participants)
-        db.flush()
-
-        for ridx in (0, 1, 2, 3):
-            for pidx, p in enumerate(participants):
-                if pidx % 11 == 0 and ridx >= 2:
-                    continue
-                comm = (pidx * 3 + ridx * 5) % 30
-                apt = (pidx * 5 + ridx * 7) % 30
-                cre = (pidx * 7 + ridx * 11) % 40
-                total = float(comm + apt + cre)
-                score = Score(
-                    participant_id=p.id,
-                    round_id=rounds[ridx].id,
-                    criteria_scores={"Communication": comm, "Aptitude": apt, "Creativity": cre},
-                    total_score=total,
-                    normalized_score=total,
-                    is_present=(pidx % 9 != 0),
-                )
-                db.add(score)
 
         users = []
         for i in range(20):
@@ -290,9 +198,9 @@ def seed() -> None:
 
         db.add_all(
             [
-                PdaAdmin(user_id=super_user.id, policy={"home": True, "pf": True}),
-                PdaAdmin(user_id=pf_admin_user.id, policy={"home": False, "pf": True}),
-                PdaAdmin(user_id=users[0].id, policy={"home": True, "pf": False}),
+                PdaAdmin(user_id=super_user.id, policy={"home": True, "superAdmin": True, "events": {}}),
+                PdaAdmin(user_id=pf_admin_user.id, policy={"home": False, "events": {}}),
+                PdaAdmin(user_id=users[0].id, policy={"home": True, "events": {}}),
             ]
         )
 
@@ -353,8 +261,6 @@ def seed() -> None:
 
         db.commit()
         print("Truncate + deterministic medium seed completed.")
-        print("Participant creds: regno=2026000001 password=participant123")
-        print("PF admin creds: regno=1111111111 password=admin123")
         print("Superadmin creds: regno=0000000000 password=admin123")
     finally:
         db.close()

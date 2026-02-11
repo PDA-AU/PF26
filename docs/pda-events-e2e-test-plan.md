@@ -1,7 +1,7 @@
 # PDA Events E2E Test Plan
 
 ## Goal
-Validate the isolated PDA managed-event system end-to-end for individual and team events, without regressions in Persofest and existing PDA content flows.
+Validate the PDA managed-event system end-to-end for individual and team events, without regressions in existing PDA content flows.
 
 ## Environment
 - Backend running at `BASE_URL` (default: `http://127.0.0.1:8001`)
@@ -44,7 +44,6 @@ python3 backend/scripts/seed_pda_events_mock.py
   - certificate eligibility after close + attendance
 
 ### 4) Regression guardrails
-- Script: `tests/persofest_control_flow.sh`
 - Script: `tests/pda_home_smoke.sh`
 
 ## Recommended command sequence
@@ -52,11 +51,10 @@ python3 backend/scripts/seed_pda_events_mock.py
 tests/pda_events_schema_smoke.sh
 tests/pda_events_registration_flow.sh
 tests/pda_events_admin_control_flow.sh
-tests/persofest_control_flow.sh
 tests/pda_home_smoke.sh
 ```
 
 ## Success Criteria
 - All scripts exit `0`.
 - Managed-event flows work for both entity modes (`user`, `team`).
-- Persofest and existing PDA home/admin flows continue to pass smoke checks.
+- Existing PDA home/admin flows continue to pass smoke checks.

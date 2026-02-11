@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from typing import List, Optional
+from typing import Dict, List, Optional
 import io
 import csv
 from fastapi.responses import StreamingResponse
@@ -42,24 +42,9 @@ from schemas import (
 from security import require_pda_home_admin, require_superadmin
 from utils import log_admin_action, _upload_to_s3, _generate_presigned_put_url
 from auth import get_password_hash
+from recruitment_state import get_recruitment_state, get_recruitment_state_map
 
 router = APIRouter()
-
-
-def _extract_recruitment_state(user: PdaUser):
-    preferred_team = None
-    is_applied = False
-    if isinstance(user.json_content, dict):
-        raw_team = user.json_content.get("preferred_team")
-        if raw_team is not None:
-            preferred_team = str(raw_team).strip() or None
-        raw_is_applied = user.json_content.get("is_applied")
-        if isinstance(raw_is_applied, bool):
-            is_applied = raw_is_applied
-    if preferred_team and not is_applied:
-        is_applied = True
-    return preferred_team, is_applied
-
 
 def _build_team_response(member: PdaTeam, user: Optional[PdaUser]) -> PdaTeamResponse:
     return PdaTeamResponse(
@@ -82,8 +67,12 @@ def _build_team_response(member: PdaTeam, user: Optional[PdaUser]) -> PdaTeamRes
     )
 
 
-def _build_admin_user_response(user: PdaUser, member: Optional[PdaTeam]) -> PdaAdminUserResponse:
-    preferred_team, is_applied = _extract_recruitment_state(user)
+def _build_admin_user_response(
+    user: PdaUser,
+    member: Optional[PdaTeam],
+    recruit: Optional[Dict[str, Optional[str]]] = None,
+) -> PdaAdminUserResponse:
+    recruit_state = recruit or {}
     return PdaAdminUserResponse(
         id=user.id,
         team_member_id=member.id if member else None,
@@ -96,8 +85,12 @@ def _build_admin_user_response(user: PdaUser, member: Optional[PdaTeam]) -> PdaA
         dob=user.dob,
         gender=user.gender,
         is_member=bool(user.is_member),
-        is_applied=is_applied,
-        preferred_team=preferred_team,
+        is_applied=bool(recruit_state.get("is_applied")),
+        preferred_team=recruit_state.get("preferred_team"),
+        preferred_team_1=recruit_state.get("preferred_team_1"),
+        preferred_team_2=recruit_state.get("preferred_team_2"),
+        preferred_team_3=recruit_state.get("preferred_team_3"),
+        resume_url=recruit_state.get("resume_url"),
         email_verified=bool(user.email_verified_at),
         team=member.team if member else None,
         designation=member.designation if member else None,
@@ -107,6 +100,14 @@ def _build_admin_user_response(user: PdaUser, member: Optional[PdaTeam]) -> PdaA
         github_url=user.github_url,
         created_at=user.created_at,
     )
+
+
+def _sync_member_status_from_team(user: Optional[PdaUser], member: Optional[PdaTeam]) -> None:
+    if not user or not member:
+        return
+    # Team assignment is considered complete only when both values exist.
+    if member.team and member.designation:
+        user.is_member = True
 
 
 def _user_dependency_checks(db: Session, user_id: int) -> List[str]:
@@ -334,19 +335,27 @@ def list_team_members(
 @router.get("/pda-admin/users", response_model=List[PdaAdminUserResponse])
 def list_pda_users(
     admin: PdaUser = Depends(require_pda_home_admin),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     users = (
         db.query(PdaUser)
         .order_by(PdaUser.name.asc().nullslast(), PdaUser.regno.asc())
         .all()
     )
-    team_rows = db.query(PdaTeam).order_by(PdaTeam.id.asc()).all()
+    user_ids = [user.id for user in users]
+    team_rows = (
+        db.query(PdaTeam)
+        .filter(PdaTeam.user_id.in_(user_ids))
+        .order_by(PdaTeam.id.asc())
+        .all()
+        if user_ids else []
+    )
     team_map = {}
     for member in team_rows:
         if member.user_id not in team_map:
             team_map[member.user_id] = member
-    return [_build_admin_user_response(user, team_map.get(user.id)) for user in users]
+    recruit_map = get_recruitment_state_map(db, users)
+    return [_build_admin_user_response(user, team_map.get(user.id), recruit_map.get(user.id)) for user in users]
 
 
 @router.put("/pda-admin/users/{user_id}", response_model=PdaAdminUserResponse)
@@ -410,6 +419,8 @@ def update_pda_user_admin(
                 db.delete(member)
                 member = None
 
+    _sync_member_status_from_team(user, member)
+
     try:
         db.commit()
     except IntegrityError:
@@ -430,7 +441,8 @@ def update_pda_user_admin(
         request.url.path if request else None,
         {"user_id": user_id},
     )
-    return _build_admin_user_response(user, member)
+    recruit_state = get_recruitment_state(db, user.id, user=user)
+    return _build_admin_user_response(user, member, recruit_state)
 
 
 @router.post("/pda-admin/team", response_model=PdaTeamResponse)
@@ -480,6 +492,7 @@ def create_team_member(
         team=payload.get("team"),
         designation=payload.get("designation")
     )
+    _sync_member_status_from_team(user, new_member)
     if payload.get("photo_url") and (not user.image_url or user.image_url != payload["photo_url"]):
         user.image_url = payload["photo_url"]
     db.add(new_member)
@@ -522,6 +535,8 @@ def update_team_member(
             if user.image_url != updates["photo_url"]:
                 user.image_url = updates["photo_url"]
 
+    _sync_member_status_from_team(user, member)
+
     db.commit()
     db.refresh(member)
     if not user and member.user_id:
@@ -540,7 +555,14 @@ def delete_team_member(
     member = db.query(PdaTeam).filter(PdaTeam.id == member_id).first()
     if not member:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team member not found")
+    user_id = member.user_id
     db.delete(member)
+    if user_id:
+        remaining = db.query(PdaTeam).filter(PdaTeam.user_id == user_id).first()
+        if not remaining:
+            user = db.query(PdaUser).filter(PdaUser.id == user_id).first()
+            if user:
+                user.is_member = False
     db.commit()
     log_admin_action(db, admin, "Delete team member", request.method if request else None, request.url.path if request else None, {"member_id": member_id})
     return {"message": "Team member deleted successfully"}
@@ -662,21 +684,29 @@ def export_team_members(
 def export_pda_users(
     format: str = "csv",
     admin: PdaUser = Depends(require_superadmin),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     users = (
         db.query(PdaUser)
         .order_by(PdaUser.name.asc().nullslast(), PdaUser.regno.asc())
         .all()
     )
-    team_rows = db.query(PdaTeam).order_by(PdaTeam.id.asc()).all()
+    user_ids = [user.id for user in users]
+    team_rows = (
+        db.query(PdaTeam)
+        .filter(PdaTeam.user_id.in_(user_ids))
+        .order_by(PdaTeam.id.asc())
+        .all()
+        if user_ids else []
+    )
     team_map = {}
     for member in team_rows:
         if member.user_id not in team_map:
             team_map[member.user_id] = member
+    recruit_map = get_recruitment_state_map(db, users)
 
     def _row(user: PdaUser):
-        preferred_team, is_applied = _extract_recruitment_state(user)
+        recruit = recruit_map.get(user.id, {})
         member = team_map.get(user.id)
         batch = str(user.regno or "")[:4] if user.regno else None
         return [
@@ -689,8 +719,8 @@ def export_pda_users(
             user.gender,
             batch,
             "YES" if user.is_member else "NO",
-            "YES" if is_applied else "NO",
-            preferred_team,
+            "YES" if recruit.get("is_applied") else "NO",
+            recruit.get("preferred_team"),
             member.team if member else None,
             member.designation if member else None,
             user.created_at.isoformat() if user.created_at else None,

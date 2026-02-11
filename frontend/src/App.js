@@ -5,7 +5,6 @@ import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 
 // Pages
-import PersofestHome from "@/pages/persofest/PersofestHome";
 import PdaHome from "@/pages/PdaHome";
 import ItemsAdmin from "@/pages/HomeAdmin/ItemsAdmin";
 import UsersAdmin from "@/pages/HomeAdmin/UsersAdmin";
@@ -24,8 +23,6 @@ import EventAdminParticipantsPage from "@/pages/events/admin/EventAdminParticipa
 import EventAdminLeaderboardPage from "@/pages/events/admin/EventAdminLeaderboardPage";
 import EventAdminLogsPage from "@/pages/events/admin/EventAdminLogsPage";
 import EventAdminBadgesPage from "@/pages/events/admin/EventAdminBadgesPage";
-import LoginPage from "@/pages/persofest/LoginPage";
-import RegisterPage from "@/pages/persofest/RegisterPage";
 import PdaLogin from "@/pages/pda/PdaLogin";
 import PdaRecruit from "@/pages/pda/PdaRecruit";
 import PdaSignup from "@/pages/pda/PdaSignup";
@@ -33,36 +30,11 @@ import PdaProfile from "@/pages/pda/PdaProfile";
 import PdaVerifyEmail from "@/pages/pda/VerifyEmail";
 import PdaForgotPassword from "@/pages/pda/ForgotPassword";
 import PdaResetPassword from "@/pages/pda/ResetPassword";
-import ParticipantDashboard from "@/pages/persofest/ParticipantDashboard";
-import AdminLogin from "@/pages/persofest/admin/AdminLogin";
-import ParticipantVerifyEmail from "@/pages/persofest/VerifyEmail";
-import ParticipantForgotPassword from "@/pages/persofest/ForgotPassword";
-import ParticipantResetPassword from "@/pages/persofest/ResetPassword";
 import PersohubFeedPage from "@/pages/persohub/PersohubFeedPage";
 import PersohubPostPage from "@/pages/persohub/PersohubPostPage";
 import PersohubProfilePage from "@/pages/persohub/PersohubProfilePage";
 
 // Protected Route Components
-const ProtectedParticipantRoute = ({ children }) => {
-    const { user, loading } = useAuth();
-
-    if (loading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-white">
-                <div className="neo-card animate-pulse">
-                    <p className="font-heading text-xl">Loading...</p>
-                </div>
-            </div>
-        );
-    }
-
-    if (!user) {
-        return <Navigate to="/persofest/login" replace />;
-    }
-
-    return children;
-};
-
 const ProtectedPdaRoute = ({ children, requirePf = false, requireHome = false, requireSuperAdmin = false, requireEvents = false }) => {
     const { user, loading } = useAuth();
 
@@ -77,67 +49,24 @@ const ProtectedPdaRoute = ({ children, requirePf = false, requireHome = false, r
     }
 
     if (!user) {
-        if (requirePf) {
-            return <Navigate to="/persofest/admin" replace />;
-        }
         return <Navigate to="/login" replace />;
     }
     if (requireSuperAdmin && !user.is_superadmin) {
         return <Navigate to="/admin" replace />;
     }
-    if (requirePf && !user.is_superadmin && !user.policy?.pf) {
-        return <Navigate to="/persofest/admin" replace />;
-    }
+    if (requirePf && !user.is_superadmin) return <Navigate to="/login" replace />;
     if (requireHome && !user.is_superadmin && !user.policy?.home) {
         return <Navigate to="/login" replace />;
     }
     if (requireEvents && !user.is_superadmin) {
         const eventsPolicy = (user.policy && typeof user.policy.events === 'object') ? user.policy.events : null;
         const hasAnyEventAccess = !!eventsPolicy && Object.values(eventsPolicy).some((value) => Boolean(value));
-        const hasLegacyPfAccess = Boolean(user.policy?.pf);
-        if (!hasAnyEventAccess && !hasLegacyPfAccess) {
+        if (!hasAnyEventAccess) {
             return <Navigate to="/login" replace />;
         }
     }
 
     return children;
-};
-
-const PublicRoute = ({ children }) => {
-    const { user, loading } = useAuth();
-
-    if (loading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-white">
-                <div className="neo-card animate-pulse">
-                    <p className="font-heading text-xl">Loading...</p>
-                </div>
-            </div>
-        );
-    }
-
-    if (user) {
-        return <Navigate to="/persofest/dashboard" replace />;
-    }
-
-    return children;
-};
-
-const PersofestAdminEntry = () => {
-    const { user, loading } = useAuth();
-    if (loading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-white">
-                <div className="neo-card animate-pulse">
-                    <p className="font-heading text-xl">Loading...</p>
-                </div>
-            </div>
-        );
-    }
-    if (!user || (!user.is_superadmin && !user.policy?.pf)) {
-        return <AdminLogin />;
-    }
-    return <Navigate to="/admin/events/persofest-2026/dashboard" replace />;
 };
 
 const EventAdminBaseRedirect = () => {
@@ -150,12 +79,6 @@ const EventAdminBaseRedirectLegacy = () => {
     const { eventSlug } = useParams();
     if (!eventSlug) return <Navigate to="/admin/events" replace />;
     return <Navigate to={`/admin/events/${eventSlug}/dashboard`} replace />;
-};
-
-const PersofestScoringRedirect = () => {
-    const { roundId } = useParams();
-    if (!roundId) return <Navigate to="/admin/events/persofest-2026/rounds" replace />;
-    return <Navigate to={`/admin/events/persofest-2026/rounds/${roundId}/scoring`} replace />;
 };
 
 function AppRoutes() {
@@ -233,42 +156,13 @@ function AppRoutes() {
             } />
             <Route path="/admin/logs" element={<LogsAdmin />} />
             <Route path="/admin/superadmin" element={<SuperAdmin />} />
-            <Route path="/persofest" element={<PersofestHome />} />
-            <Route path="/persofest/login" element={
-                <PublicRoute>
-                    <LoginPage />
-                </PublicRoute>
-            } />
-            <Route path="/persofest/verify-email" element={<ParticipantVerifyEmail />} />
-            <Route path="/persofest/forgot-password" element={<ParticipantForgotPassword />} />
-            <Route path="/persofest/reset-password" element={<ParticipantResetPassword />} />
-            <Route path="/persofest/register" element={
-                <PublicRoute>
-                    <RegisterPage />
-                </PublicRoute>
-            } />
             <Route path="/event/:eventSlug" element={<EventDashboard />} />
+            <Route path="/event/:eventSlug/:profileName" element={<EventDashboard />} />
             <Route path="/events/:eventSlug" element={<EventDashboard />} />
+            <Route path="/events/:eventSlug/:profileName" element={<EventDashboard />} />
             <Route path="/persohub" element={<PersohubFeedPage />} />
             <Route path="/persohub/p/:slugToken" element={<PersohubPostPage />} />
             <Route path="/persohub/:profileName" element={<PersohubProfilePage />} />
-
-            {/* Participant Routes */}
-            <Route path="/persofest/dashboard" element={
-                <ProtectedParticipantRoute>
-                    <ParticipantDashboard />
-                </ProtectedParticipantRoute>
-            } />
-
-            {/* Admin Routes */}
-            <Route path="/persofest/admin" element={<PersofestAdminEntry />} />
-            <Route path="/persofest/admin/rounds" element={<Navigate to="/admin/events/persofest-2026/rounds" replace />} />
-            <Route path="/persofest/admin/participants" element={<Navigate to="/admin/events/persofest-2026/participants" replace />} />
-            <Route path="/persofest/admin/attendance" element={<Navigate to="/admin/events/persofest-2026/attendance" replace />} />
-            <Route path="/persofest/admin/scoring/:roundId" element={<PersofestScoringRedirect />} />
-            <Route path="/persofest/admin/leaderboard" element={<Navigate to="/admin/events/persofest-2026/leaderboard" replace />} />
-            <Route path="/persofest/admin/badges" element={<Navigate to="/admin/events/persofest-2026/badges" replace />} />
-            <Route path="/persofest/admin/logs" element={<Navigate to="/admin/events/persofest-2026/logs" replace />} />
 
             {/* Catch all */}
             <Route path="*" element={<Navigate to="/" replace />} />

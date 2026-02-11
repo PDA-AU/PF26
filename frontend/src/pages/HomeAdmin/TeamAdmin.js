@@ -186,6 +186,13 @@ export default function TeamAdmin() {
         setDeleting(true);
         try {
             await axios.delete(`${API}/pda-admin/team/${selectedMember.id}`, { headers: getAuthHeader() });
+            if (selectedMember.user_id) {
+                await axios.put(
+                    `${API}/pda-admin/users/${selectedMember.user_id}`,
+                    { is_member: false, clear_team: true },
+                    { headers: getAuthHeader() }
+                );
+            }
             toast.success('Removed from PDA team.');
             setSelectedMember(null);
             fetchData();
@@ -344,7 +351,7 @@ export default function TeamAdmin() {
 
                     <div className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
                         <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Department Distribution</p>
-                        <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center">
+                        <div className="mt-4 flex flex-col items-center gap-4">
                             <div className="relative mx-auto h-36 w-36 flex-shrink-0 sm:mx-0 sm:h-40 sm:w-40">
                                 <svg viewBox="0 0 160 160" className="h-36 w-36 sm:h-40 sm:w-40">
                                     <circle cx="80" cy="80" r="78" fill="#f1f2f4" stroke="#e5e7eb" strokeWidth="2" />
@@ -375,12 +382,12 @@ export default function TeamAdmin() {
                                     </div>
                                 )}
                             </div>
-                            <div className="space-y-2 text-xs text-slate-600 sm:max-h-40 sm:overflow-auto">
+                            <div className="grid w-full max-w-md grid-cols-1 gap-2 text-xs text-slate-600 sm:grid-cols-2">
                                 {deptData.map(([label, count], idx) => (
                                     <button
                                         key={label}
                                         type="button"
-                                        className="flex items-center gap-2 text-left"
+                                        className="flex items-center gap-2 rounded-md border border-black/5 bg-white px-2 py-1.5 text-left"
                                         onClick={() => setSearch(label)}
                                         title="Click to filter list by department"
                                     >
@@ -395,8 +402,8 @@ export default function TeamAdmin() {
 
                     <div className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
                         <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Batch Distribution</p>
-                        <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                            <div>
+                        <div className="mt-4 space-y-4">
+                            <div className="sm:max-w-xs">
                                 <Label>Batch</Label>
                                 <select
                                     value={batchFilter}
@@ -416,7 +423,7 @@ export default function TeamAdmin() {
                                 <Label>Dept wise members</Label>
                                 <div className="mt-2 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
                                     {batchDeptEntries.length ? batchDeptEntries.map(([dept, count]) => (
-                                        <div key={dept} className="flex items-center justify-between rounded-lg border border-black/10 bg-white px-3 py-2">
+                                        <div key={dept} className="flex items-center justify-between rounded-md border border-black/5 bg-white px-2 py-1.5">
                                             <span className="font-semibold text-slate-700">{dept}</span>
                                             <span className="text-slate-500">{count}</span>
                                         </div>

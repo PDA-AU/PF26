@@ -51,50 +51,6 @@ class RoundMode(enum.Enum):
     OFFLINE = "Offline"
 
 
-class Event(Base):
-    __tablename__ = "pf_events"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), unique=True, nullable=False)
-    is_active = Column(Boolean, default=True)
-
-
-class Participant(Base):
-    __tablename__ = "participants"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    register_number = Column(String(10), unique=True, index=True, nullable=False)
-    email = Column(String(255), unique=True, index=True, nullable=False)
-    hashed_password = Column(String(255), nullable=False)
-    email_verified_at = Column(DateTime(timezone=True), nullable=True)
-    email_verification_token_hash = Column(String(255), nullable=True)
-    email_verification_expires_at = Column(DateTime(timezone=True), nullable=True)
-    email_verification_sent_at = Column(DateTime(timezone=True), nullable=True)
-    password_reset_token_hash = Column(String(255), nullable=True)
-    password_reset_expires_at = Column(DateTime(timezone=True), nullable=True)
-    password_reset_sent_at = Column(DateTime(timezone=True), nullable=True)
-    name = Column(String(255), nullable=False)
-    phone = Column(String(10), nullable=False)
-    gender = Column(SQLEnum(Gender), nullable=False)
-    department = Column(SQLEnum(Department), nullable=False)
-    year_of_study = Column(SQLEnum(YearOfStudy), nullable=False)
-    role = Column(SQLEnum(UserRole), default=UserRole.PARTICIPANT, nullable=False)
-    referral_code = Column(String(5), unique=True, index=True, nullable=False)
-    referred_by = Column(String(5), nullable=True)
-    referral_count = Column(Integer, default=0)
-    profile_picture = Column(String(500), nullable=True)
-    status = Column(SQLEnum(ParticipantStatus), default=ParticipantStatus.ACTIVE, nullable=False)
-    event_id = Column(Integer, ForeignKey("pf_events.id"), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
-    scores = relationship("Score", back_populates="participant")
-
-    @property
-    def email_verified(self) -> bool:
-        return self.email_verified_at is not None
-
-
 class PdaUser(Base):
     __tablename__ = "users"
 
@@ -127,46 +83,6 @@ class PdaUser(Base):
     @property
     def email_verified(self) -> bool:
         return self.email_verified_at is not None
-
-
-class Round(Base):
-    __tablename__ = "rounds"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    round_no = Column(String(10), unique=True, nullable=False)  # PF01, PF02, etc.
-    name = Column(String(255), nullable=False)
-    description = Column(Text, nullable=True)
-    tags = Column(JSON, nullable=True)  # ["Creative", "Aptitude", "Communication"]
-    date = Column(DateTime(timezone=True), nullable=True)
-    mode = Column(SQLEnum(RoundMode), nullable=False)
-    conducted_by = Column(String(255), nullable=True)
-    state = Column(SQLEnum(RoundState), default=RoundState.DRAFT, nullable=False)
-    evaluation_criteria = Column(JSON, nullable=True)  # [{"name": "Creativity", "max_marks": 25}, ...]
-    description_pdf = Column(String(500), nullable=True)
-    elimination_type = Column(String(20), nullable=True)  # "top_k" or "min_score"
-    elimination_value = Column(Float, nullable=True)  # K value or minimum score
-    is_frozen = Column(Boolean, default=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
-    scores = relationship("Score", back_populates="round")
-
-
-class Score(Base):
-    __tablename__ = "scores"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    participant_id = Column(Integer, ForeignKey("participants.id"), nullable=False)
-    round_id = Column(Integer, ForeignKey("rounds.id"), nullable=False)
-    criteria_scores = Column(JSON, nullable=True)  # {"Creativity": 20, "Aptitude": 25, ...}
-    total_score = Column(Float, default=0)
-    normalized_score = Column(Float, default=0)  # Normalized to 100
-    is_present = Column(Boolean, default=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
-    participant = relationship("Participant", back_populates="scores")
-    round = relationship("Round", back_populates="scores")
 
 
 class AdminLog(Base):
@@ -225,13 +141,13 @@ class PdaItem(Base):
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     tag = Column(String(100), nullable=True)
-    poster_url = Column(String(500), nullable=True)
+    poster_url = Column(Text, nullable=True)
     start_date = Column(Date, nullable=True)
     end_date = Column(Date, nullable=True)
     format = Column(String(150), nullable=True)
     hero_caption = Column(Text, nullable=True)
     hero_url = Column(String(500), nullable=True)
-    featured_poster_url = Column(String(500), nullable=True)
+    featured_poster_url = Column(Text, nullable=True)
     is_featured = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -244,6 +160,16 @@ class PdaTeam(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     team = Column(String(120), nullable=True)
     designation = Column(String(120), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PdaResume(Base):
+    __tablename__ = "pda_resume"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    s3_url = Column(String(800), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -334,7 +260,7 @@ class PdaEvent(Base):
     description = Column(Text, nullable=True)
     start_date = Column(Date, nullable=True)
     end_date = Column(Date, nullable=True)
-    poster_url = Column(String(500), nullable=True)
+    poster_url = Column(Text, nullable=True)
     whatsapp_url = Column(String(500), nullable=True)
     event_type = Column(SQLEnum(PdaEventType), nullable=False)
     format = Column(SQLEnum(PdaEventFormat), nullable=False)

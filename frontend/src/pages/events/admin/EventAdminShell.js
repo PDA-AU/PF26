@@ -39,7 +39,6 @@ export default function EventAdminShell({
     const [loading, setLoading] = useState(true);
 
     const isSuperAdmin = Boolean(user?.is_superadmin);
-    const hasLegacyPfAccess = eventSlug === 'persofest-2026' && Boolean(user?.policy?.pf);
 
     const refreshEventInfo = useCallback(async () => {
         if (!eventSlug) return;
@@ -99,7 +98,7 @@ export default function EventAdminShell({
         );
     }
 
-    if (!eventInfo || (!isSuperAdmin && !canAccessEvent(eventSlug) && !hasLegacyPfAccess)) {
+    if (!eventInfo || (!isSuperAdmin && !canAccessEvent(eventSlug))) {
         return (
             <div className="min-h-screen bg-muted">
                 <div className="max-w-7xl mx-auto px-4 py-10">

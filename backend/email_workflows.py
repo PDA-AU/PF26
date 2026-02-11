@@ -24,8 +24,6 @@ def _build_url(path: str, token: str) -> str:
 
 def _send_verification_email(to_email: str, user_kind: str, token: str) -> None:
     path = "/verify-email"
-    if user_kind == "participant":
-        path = "/persofest/verify-email"
     url = _build_url(path, token)
     subject, html, text = build_verification_email(url, validity_hours=24)
     send_email(to_email, subject, html, text)
@@ -33,8 +31,6 @@ def _send_verification_email(to_email: str, user_kind: str, token: str) -> None:
 
 def _send_reset_email(to_email: str, user_kind: str, token: str) -> None:
     path = "/reset-password"
-    if user_kind == "participant":
-        path = "/persofest/reset-password"
     url = _build_url(path, token)
     subject, html, text = build_reset_email(url, validity_minutes=30)
     send_email(to_email, subject, html, text)

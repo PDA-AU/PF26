@@ -1,4 +1,5 @@
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
+import json
 import re
 import secrets
 from sqlalchemy import text
@@ -46,39 +47,6 @@ def _column_exists(conn, table_name: str, column_name: str) -> bool:
         {"table": table_name, "column": column_name}
     ).fetchone()
     return bool(result)
-
-
-def rename_users_to_participants(engine):
-    with engine.begin() as conn:
-        participants_exists = _table_exists(conn, "participants")
-        users_exists = _table_exists(conn, "users")
-        if not participants_exists and users_exists:
-            conn.execute(text("ALTER TABLE users RENAME TO participants"))
-
-
-def ensure_events_table(engine):
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                """
-                CREATE TABLE IF NOT EXISTS pf_events (
-                    id SERIAL PRIMARY KEY,
-                    name VARCHAR(100) UNIQUE NOT NULL,
-                    is_active BOOLEAN DEFAULT TRUE
-                )
-                """
-            )
-        )
-        if not _column_exists(conn, "pf_events", "name"):
-            conn.execute(text("ALTER TABLE pf_events ADD COLUMN name VARCHAR(100)"))
-        if not _column_exists(conn, "pf_events", "is_active"):
-            conn.execute(text("ALTER TABLE pf_events ADD COLUMN is_active BOOLEAN DEFAULT TRUE"))
-
-
-def ensure_participants_event_column(engine):
-    with engine.begin() as conn:
-        if _table_exists(conn, "participants") and not _column_exists(conn, "participants", "event_id"):
-            conn.execute(text("ALTER TABLE participants ADD COLUMN event_id INTEGER"))
 
 
 def ensure_pda_users_table(engine):
@@ -162,6 +130,215 @@ def ensure_pda_user_social_columns(engine):
             conn.execute(text("ALTER TABLE users ADD COLUMN github_url VARCHAR(500)"))
 
 
+def ensure_pda_recruitment_tables(engine):
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS pda_resume (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+                    s3_url VARCHAR(800) NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ
+                )
+                """
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pda_resume_user_id ON pda_resume(user_id)"))
+
+
+def migrate_legacy_recruitment_json_once(engine):
+    marker_key = "migration_recruitment_table_to_json_v1"
+    with engine.begin() as conn:
+        if not _table_exists(conn, "users"):
+            return
+
+        marker_exists = False
+        if _table_exists(conn, "system_config"):
+            marker_exists = bool(
+                conn.execute(
+                    text("SELECT 1 FROM system_config WHERE key = :key"),
+                    {"key": marker_key},
+                ).fetchone()
+            )
+        if marker_exists:
+            return
+
+        if _table_exists(conn, "pda_recruit"):
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT user_id, preferred_team_1, preferred_team_2, preferred_team_3, resume_url
+                    FROM pda_recruit
+                    ORDER BY user_id ASC
+                    """
+                )
+            ).mappings().all()
+            for row in rows:
+                user_row = conn.execute(
+                    text("SELECT is_member, json_content FROM users WHERE id = :user_id"),
+                    {"user_id": row["user_id"]},
+                ).mappings().first()
+                if not user_row or bool(user_row.get("is_member")):
+                    continue
+
+                payload = dict(user_row["json_content"]) if isinstance(user_row["json_content"], dict) else {}
+                preferred_team_1 = str(row.get("preferred_team_1") or "").strip()
+                preferred_team_2 = str(row.get("preferred_team_2") or "").strip() or None
+                preferred_team_3 = str(row.get("preferred_team_3") or "").strip() or None
+                resume_url = str(row.get("resume_url") or "").strip() or None
+                if not preferred_team_1:
+                    continue
+
+                payload["is_applied"] = True
+                payload["preferred_team"] = preferred_team_1
+                payload["preferred_team_1"] = preferred_team_1
+                if preferred_team_2:
+                    payload["preferred_team_2"] = preferred_team_2
+                else:
+                    payload.pop("preferred_team_2", None)
+                if preferred_team_3:
+                    payload["preferred_team_3"] = preferred_team_3
+                else:
+                    payload.pop("preferred_team_3", None)
+
+                conn.execute(
+                    text("UPDATE users SET json_content = CAST(:payload AS JSON) WHERE id = :user_id"),
+                    {"user_id": row["user_id"], "payload": json.dumps(payload)},
+                )
+
+                if resume_url and _table_exists(conn, "pda_resume"):
+                    conn.execute(
+                        text(
+                            """
+                            INSERT INTO pda_resume (user_id, s3_url)
+                            VALUES (:user_id, :s3_url)
+                            ON CONFLICT (user_id) DO UPDATE SET s3_url = EXCLUDED.s3_url
+                            """
+                        ),
+                        {"user_id": row["user_id"], "s3_url": resume_url},
+                    )
+
+            # Keep legacy table around to avoid lock contention on busy databases.
+            # Runtime no longer depends on pda_recruit after this migration.
+
+        if _table_exists(conn, "system_config"):
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO system_config (key, value)
+                    VALUES (:key, 'done')
+                    ON CONFLICT (key) DO UPDATE SET value = 'done'
+                    """
+                ),
+                {"key": marker_key},
+            )
+
+
+def remove_legacy_persofest_once(engine):
+    marker_key = "migration_remove_legacy_persofest_v1"
+    with engine.begin() as conn:
+        if _table_exists(conn, "system_config"):
+            marker_exists = conn.execute(
+                text("SELECT 1 FROM system_config WHERE key = :key"),
+                {"key": marker_key},
+            ).fetchone()
+            if marker_exists:
+                return
+
+        event_row = None
+        if _table_exists(conn, "pda_events"):
+            event_row = conn.execute(
+                text("SELECT id FROM pda_events WHERE slug = 'persofest-2026' LIMIT 1")
+            ).fetchone()
+
+        if event_row:
+            event_id = int(event_row[0])
+            if _table_exists(conn, "pda_event_scores"):
+                conn.execute(text("DELETE FROM pda_event_scores WHERE event_id = :event_id"), {"event_id": event_id})
+            if _table_exists(conn, "pda_event_attendance"):
+                conn.execute(text("DELETE FROM pda_event_attendance WHERE event_id = :event_id"), {"event_id": event_id})
+            if _table_exists(conn, "pda_event_badges"):
+                conn.execute(text("DELETE FROM pda_event_badges WHERE event_id = :event_id"), {"event_id": event_id})
+            if _table_exists(conn, "pda_event_invites"):
+                conn.execute(text("DELETE FROM pda_event_invites WHERE event_id = :event_id"), {"event_id": event_id})
+            if _table_exists(conn, "pda_event_team_members") and _table_exists(conn, "pda_event_teams"):
+                conn.execute(
+                    text(
+                        """
+                        DELETE FROM pda_event_team_members
+                        WHERE team_id IN (
+                            SELECT id FROM pda_event_teams WHERE event_id = :event_id
+                        )
+                        """
+                    ),
+                    {"event_id": event_id},
+                )
+            if _table_exists(conn, "pda_event_registrations"):
+                conn.execute(text("DELETE FROM pda_event_registrations WHERE event_id = :event_id"), {"event_id": event_id})
+            if _table_exists(conn, "pda_event_rounds"):
+                conn.execute(text("DELETE FROM pda_event_rounds WHERE event_id = :event_id"), {"event_id": event_id})
+            if _table_exists(conn, "pda_event_teams"):
+                conn.execute(text("DELETE FROM pda_event_teams WHERE event_id = :event_id"), {"event_id": event_id})
+            if _table_exists(conn, "pda_event_logs"):
+                conn.execute(
+                    text("DELETE FROM pda_event_logs WHERE event_id = :event_id OR event_slug = 'persofest-2026'"),
+                    {"event_id": event_id},
+                )
+            conn.execute(text("DELETE FROM pda_events WHERE id = :event_id"), {"event_id": event_id})
+        elif _table_exists(conn, "pda_event_logs"):
+            conn.execute(text("DELETE FROM pda_event_logs WHERE event_slug = 'persofest-2026'"))
+
+        for table_name in ("scores", "rounds", "participants", "pf_events"):
+            if _table_exists(conn, table_name):
+                conn.execute(text(f"DROP TABLE IF EXISTS {table_name} CASCADE"))
+
+        if _table_exists(conn, "system_config"):
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO system_config (key, value)
+                    VALUES (:key, 'done')
+                    ON CONFLICT (key) DO UPDATE SET value = 'done'
+                    """
+                ),
+                {"key": marker_key},
+            )
+
+
+def clear_legacy_poster_urls_once(engine):
+    marker_key = "migration_clear_legacy_poster_urls_v1"
+    with engine.begin() as conn:
+        if not _table_exists(conn, "system_config"):
+            return
+
+        marker_exists = bool(
+            conn.execute(
+                text("SELECT 1 FROM system_config WHERE key = :key"),
+                {"key": marker_key},
+            ).fetchone()
+        )
+        if marker_exists:
+            return
+
+        if _table_exists(conn, "pda_items"):
+            conn.execute(text("UPDATE pda_items SET poster_url = NULL, featured_poster_url = NULL"))
+        if _table_exists(conn, "pda_events"):
+            conn.execute(text("UPDATE pda_events SET poster_url = NULL"))
+
+        conn.execute(
+            text(
+                """
+                INSERT INTO system_config (key, value)
+                VALUES (:key, 'done')
+                ON CONFLICT (key) DO UPDATE SET value = 'done'
+                """
+            ),
+            {"key": marker_key},
+        )
+
+
 def ensure_pda_team_columns(engine):
     with engine.begin() as conn:
         if not _table_exists(conn, "pda_team"):
@@ -180,6 +357,9 @@ def ensure_pda_items_columns(engine):
     with engine.begin() as conn:
         if _table_exists(conn, "pda_items") and not _column_exists(conn, "pda_items", "featured_poster_url"):
             conn.execute(text("ALTER TABLE pda_items ADD COLUMN featured_poster_url VARCHAR(500)"))
+        if _table_exists(conn, "pda_items"):
+            conn.execute(text("ALTER TABLE pda_items ALTER COLUMN poster_url TYPE TEXT"))
+            conn.execute(text("ALTER TABLE pda_items ALTER COLUMN featured_poster_url TYPE TEXT"))
 
 
 def ensure_pda_team_constraints(engine):
@@ -386,42 +566,8 @@ def drop_admin_logs_fk(engine):
             conn.execute(text(f"ALTER TABLE admin_logs DROP CONSTRAINT IF EXISTS {constraint_name}"))
 
 
-def seed_persofest_event(engine):
-    with engine.begin() as conn:
-        existing = conn.execute(text("SELECT id FROM pf_events WHERE name = 'PERSOFEST'")) .fetchone()
-        if not existing:
-            conn.execute(text("INSERT INTO pf_events (name, is_active) VALUES ('PERSOFEST', true)"))
-
-
-def assign_participants_event(engine):
-    with engine.begin() as conn:
-        event = conn.execute(text("SELECT id FROM pf_events WHERE name = 'PERSOFEST'")) .fetchone()
-        if not event:
-            return
-        conn.execute(
-            text("UPDATE participants SET event_id = :event_id WHERE event_id IS NULL"),
-            {"event_id": event[0]}
-        )
-
-
 def ensure_email_auth_columns(engine):
     with engine.begin() as conn:
-        if _table_exists(conn, "participants"):
-            if not _column_exists(conn, "participants", "email_verified_at"):
-                conn.execute(text("ALTER TABLE participants ADD COLUMN email_verified_at TIMESTAMPTZ"))
-            if not _column_exists(conn, "participants", "email_verification_token_hash"):
-                conn.execute(text("ALTER TABLE participants ADD COLUMN email_verification_token_hash VARCHAR(255)"))
-            if not _column_exists(conn, "participants", "email_verification_expires_at"):
-                conn.execute(text("ALTER TABLE participants ADD COLUMN email_verification_expires_at TIMESTAMPTZ"))
-            if not _column_exists(conn, "participants", "email_verification_sent_at"):
-                conn.execute(text("ALTER TABLE participants ADD COLUMN email_verification_sent_at TIMESTAMPTZ"))
-            if not _column_exists(conn, "participants", "password_reset_token_hash"):
-                conn.execute(text("ALTER TABLE participants ADD COLUMN password_reset_token_hash VARCHAR(255)"))
-            if not _column_exists(conn, "participants", "password_reset_expires_at"):
-                conn.execute(text("ALTER TABLE participants ADD COLUMN password_reset_expires_at TIMESTAMPTZ"))
-            if not _column_exists(conn, "participants", "password_reset_sent_at"):
-                conn.execute(text("ALTER TABLE participants ADD COLUMN password_reset_sent_at TIMESTAMPTZ"))
-
         if _table_exists(conn, "users"):
             if not _column_exists(conn, "users", "email_verified_at"):
                 conn.execute(text("ALTER TABLE users ADD COLUMN email_verified_at TIMESTAMPTZ"))
@@ -604,6 +750,54 @@ def normalize_pda_team(db: Session):
     db.commit()
 
 
+def backfill_is_member_from_team_once(db: Session):
+    marker_key = "migration_backfill_is_member_from_team_v1"
+    conn = db.connection()
+
+    if not _table_exists(conn, "users") or not _table_exists(conn, "pda_team"):
+        return
+
+    marker_exists = False
+    if _table_exists(conn, "system_config"):
+        marker_exists = bool(
+            db.execute(
+                text("SELECT 1 FROM system_config WHERE key = :key"),
+                {"key": marker_key},
+            ).fetchone()
+        )
+    if marker_exists:
+        return
+
+    db.execute(
+        text(
+            """
+            UPDATE users AS u
+            SET is_member = TRUE
+            FROM pda_team AS t
+            WHERE t.user_id = u.id
+              AND t.team IS NOT NULL
+              AND TRIM(t.team) <> ''
+              AND t.designation IS NOT NULL
+              AND TRIM(t.designation) <> ''
+            """
+        )
+    )
+
+    if _table_exists(conn, "system_config"):
+        db.execute(
+            text(
+                """
+                INSERT INTO system_config (key, value)
+                VALUES (:key, 'done')
+                ON CONFLICT (key) DO UPDATE SET value = 'done'
+                """
+            ),
+            {"key": marker_key},
+        )
+
+    db.commit()
+
+
 def ensure_superadmin_policies(db: Session):
     superadmins = (
         db.query(PdaTeam, PdaUser)
@@ -614,14 +808,14 @@ def ensure_superadmin_policies(db: Session):
     for member, user in superadmins:
         admin_row = db.query(PdaAdmin).filter(PdaAdmin.user_id == user.id).first()
         if not admin_row:
-            admin_row = PdaAdmin(user_id=user.id, policy={"home": True, "pf": True, "superAdmin": True, "events": {}})
+            admin_row = PdaAdmin(user_id=user.id, policy={"home": True, "superAdmin": True, "events": {}})
             db.add(admin_row)
         elif not admin_row.policy:
-            admin_row.policy = {"home": True, "pf": True, "superAdmin": True, "events": {}}
+            admin_row.policy = {"home": True, "superAdmin": True, "events": {}}
         else:
             policy = dict(admin_row.policy)
             policy["home"] = True
-            policy["pf"] = True
+            policy.pop("pf", None)
             policy["superAdmin"] = True
             if not isinstance(policy.get("events"), dict):
                 policy["events"] = {}
@@ -665,13 +859,13 @@ def ensure_default_superadmin(db: Session):
 
     admin_row = db.query(PdaAdmin).filter(PdaAdmin.user_id == user.id).first()
     if not admin_row:
-        admin_row = PdaAdmin(user_id=user.id, policy={"home": True, "pf": True, "superAdmin": True, "events": {}})
+        admin_row = PdaAdmin(user_id=user.id, policy={"home": True, "superAdmin": True, "events": {}})
         db.add(admin_row)
         db.commit()
     else:
         policy = dict(admin_row.policy or {})
         policy.setdefault("home", True)
-        policy.setdefault("pf", True)
+        policy.pop("pf", None)
         policy.setdefault("superAdmin", True)
         if not isinstance(policy.get("events"), dict):
             policy["events"] = {}
@@ -693,7 +887,7 @@ def ensure_pda_event_tables(engine):
                     description TEXT,
                     start_date DATE,
                     end_date DATE,
-                    poster_url VARCHAR(500),
+                    poster_url TEXT,
                     whatsapp_url VARCHAR(500),
                     event_type VARCHAR(30) NOT NULL,
                     format VARCHAR(30) NOT NULL,
@@ -713,6 +907,7 @@ def ensure_pda_event_tables(engine):
         conn.execute(text("ALTER TABLE pda_events ADD COLUMN IF NOT EXISTS start_date DATE"))
         conn.execute(text("ALTER TABLE pda_events ADD COLUMN IF NOT EXISTS end_date DATE"))
         conn.execute(text("ALTER TABLE pda_events ADD COLUMN IF NOT EXISTS whatsapp_url VARCHAR(500)"))
+        conn.execute(text("ALTER TABLE pda_events ALTER COLUMN poster_url TYPE TEXT"))
 
         conn.execute(
             text(
@@ -885,682 +1080,6 @@ def ensure_pda_event_tables(engine):
                     """
                 )
             )
-
-
-def ensure_persofest_pda_event(engine):
-    with engine.begin() as conn:
-        row = conn.execute(
-            text("SELECT id FROM pda_events WHERE slug = 'persofest-2026' OR event_code = 'PF26'")
-        ).fetchone()
-        if row:
-            conn.execute(
-                text(
-                    """
-                    UPDATE pda_events
-                    SET slug = 'persofest-2026'
-                    WHERE id = :id
-                    """
-                ),
-                {"id": int(row[0])},
-            )
-            return
-        conn.execute(
-            text(
-                """
-                INSERT INTO pda_events (
-                    slug,
-                    event_code,
-                    club_id,
-                    title,
-                    description,
-                    event_type,
-                    format,
-                    template_option,
-                    participant_mode,
-                    round_mode,
-                    round_count,
-                    status
-                ) VALUES (
-                    'persofest-2026',
-                    'PF26',
-                    1,
-                    'Persofest 2026',
-                    'Persofest unified event',
-                    'EVENT',
-                    'OFFLINE',
-                    'ATTENDANCE_SCORING',
-                    'INDIVIDUAL',
-                    'MULTI',
-                    10,
-                    'OPEN'
-                )
-                """
-            )
-        )
-
-
-def _map_registration_status(value) -> str:
-    raw = str(value or "").strip().upper()
-    if "ELIMINATED" in raw:
-        return "ELIMINATED"
-    return "ACTIVE"
-
-
-def _map_round_mode(value) -> str:
-    raw = str(value or "").strip().upper()
-    if "ONLINE" in raw:
-        return "ONLINE"
-    return "OFFLINE"
-
-
-def _map_round_state(value) -> str:
-    raw = str(value or "").strip().upper()
-    if "COMPLETED" in raw:
-        return "COMPLETED"
-    if "ACTIVE" in raw:
-        return "ACTIVE"
-    if "PUBLISHED" in raw:
-        return "PUBLISHED"
-    return "DRAFT"
-
-
-def _parse_round_no_to_int(value, fallback: int) -> int:
-    digits = re.sub(r"[^0-9]+", "", str(value or ""))
-    if not digits:
-        return fallback
-    try:
-        parsed = int(digits)
-        return parsed if parsed > 0 else fallback
-    except Exception:
-        return fallback
-
-
-def migrate_legacy_persofest_to_pda_event(engine):
-    with engine.begin() as conn:
-        if not _table_exists(conn, "participants"):
-            return
-
-        event_row = conn.execute(
-            text("SELECT id FROM pda_events WHERE slug = 'persofest-2026'")
-        ).fetchone()
-        if not event_row:
-            return
-        event_id = int(event_row[0])
-
-        participants = conn.execute(
-            text(
-                """
-                SELECT
-                    id,
-                    register_number,
-                    email,
-                    hashed_password,
-                    name,
-                    phone,
-                    gender,
-                    department,
-                    profile_picture,
-                    status,
-                    referral_code,
-                    referred_by,
-                    referral_count
-                FROM participants
-                ORDER BY id ASC
-                """
-            )
-        ).mappings().all()
-
-        for row in participants:
-            regno = str(row.get("register_number") or "").strip()
-            email = str(row.get("email") or "").strip().lower()
-            if not regno or not email:
-                continue
-
-            user = conn.execute(
-                text("SELECT id FROM users WHERE regno = :regno"),
-                {"regno": regno},
-            ).fetchone()
-            if not user:
-                user = conn.execute(
-                    text("SELECT id FROM users WHERE email = :email"),
-                    {"email": email},
-                ).fetchone()
-
-            if not user:
-                created = conn.execute(
-                    text(
-                        """
-                        INSERT INTO users (
-                            regno,
-                            email,
-                            hashed_password,
-                            name,
-                            phno,
-                            gender,
-                            dept,
-                            image_url,
-                            json_content,
-                            is_member
-                        ) VALUES (
-                            :regno,
-                            :email,
-                            :hashed_password,
-                            :name,
-                            :phno,
-                            :gender,
-                            :dept,
-                            :image_url,
-                            :json_content,
-                            :is_member
-                        )
-                        RETURNING id
-                        """
-                    ),
-                    {
-                        "regno": regno,
-                        "email": email,
-                        "hashed_password": row.get("hashed_password"),
-                        "name": row.get("name") or f"Persofest {regno}",
-                        "phno": row.get("phone"),
-                        "gender": row.get("gender"),
-                        "dept": row.get("department"),
-                        "image_url": row.get("profile_picture"),
-                        "json_content": {},
-                        "is_member": False,
-                    },
-                ).fetchone()
-                user_id = int(created[0])
-            else:
-                user_id = int(user[0])
-                conn.execute(
-                    text(
-                        """
-                        UPDATE users
-                        SET
-                            phno = COALESCE(NULLIF(TRIM(phno), ''), :phno),
-                            gender = COALESCE(NULLIF(TRIM(gender), ''), :gender),
-                            dept = COALESCE(NULLIF(TRIM(dept), ''), :dept),
-                            image_url = COALESCE(NULLIF(TRIM(image_url), ''), :image_url)
-                        WHERE id = :id
-                        """
-                    ),
-                    {
-                        "id": user_id,
-                        "phno": row.get("phone"),
-                        "gender": row.get("gender"),
-                        "dept": row.get("department"),
-                        "image_url": row.get("profile_picture"),
-                    },
-                )
-
-            registration = conn.execute(
-                text(
-                    """
-                    SELECT id
-                    FROM pda_event_registrations
-                    WHERE event_id = :event_id AND user_id = :user_id
-                    """
-                ),
-                {"event_id": event_id, "user_id": user_id},
-            ).fetchone()
-            payload = {
-                "event_id": event_id,
-                "user_id": user_id,
-                "status": _map_registration_status(row.get("status")),
-                "referral_code": (str(row.get("referral_code") or "").strip().upper() or None),
-                "referred_by": (str(row.get("referred_by") or "").strip().upper() or None),
-                "referral_count": int(row.get("referral_count") or 0),
-            }
-            if not registration:
-                conn.execute(
-                    text(
-                        """
-                        INSERT INTO pda_event_registrations (
-                            event_id,
-                            user_id,
-                            team_id,
-                            entity_type,
-                            status,
-                            referral_code,
-                            referred_by,
-                            referral_count
-                        ) VALUES (
-                            :event_id,
-                            :user_id,
-                            NULL,
-                            'USER',
-                            :status,
-                            :referral_code,
-                            :referred_by,
-                            :referral_count
-                        )
-                        """
-                    ),
-                    payload,
-                )
-            else:
-                conn.execute(
-                    text(
-                        """
-                        UPDATE pda_event_registrations
-                        SET
-                            status = :status,
-                            referral_code = :referral_code,
-                            referred_by = :referred_by,
-                            referral_count = :referral_count
-                        WHERE id = :registration_id
-                        """
-                    ),
-                    {**payload, "registration_id": int(registration[0])},
-                )
-
-        if _table_exists(conn, "rounds"):
-            round_rows = conn.execute(
-                text(
-                    """
-                    SELECT
-                        id,
-                        round_no,
-                        name,
-                        description,
-                        date,
-                        mode,
-                        state,
-                        evaluation_criteria,
-                        elimination_type,
-                        elimination_value,
-                        is_frozen
-                    FROM rounds
-                    ORDER BY id ASC
-                    """
-                )
-            ).mappings().all()
-            round_id_map = {}
-            for idx, round_row in enumerate(round_rows, start=1):
-                round_no = _parse_round_no_to_int(round_row.get("round_no"), idx)
-                existing_round = conn.execute(
-                    text(
-                        """
-                        SELECT id
-                        FROM pda_event_rounds
-                        WHERE event_id = :event_id AND round_no = :round_no
-                        """
-                    ),
-                    {"event_id": event_id, "round_no": round_no},
-                ).fetchone()
-                if existing_round:
-                    new_round_id = int(existing_round[0])
-                    conn.execute(
-                        text(
-                            """
-                            UPDATE pda_event_rounds
-                            SET
-                                name = :name,
-                                description = :description,
-                                date = :date,
-                                mode = :mode,
-                                state = :state,
-                                evaluation_criteria = :evaluation_criteria,
-                                elimination_type = :elimination_type,
-                                elimination_value = :elimination_value,
-                                is_frozen = :is_frozen
-                            WHERE id = :id
-                            """
-                        ),
-                        {
-                            "id": new_round_id,
-                            "name": round_row.get("name"),
-                            "description": round_row.get("description"),
-                            "date": round_row.get("date"),
-                            "mode": _map_round_mode(round_row.get("mode")),
-                            "state": _map_round_state(round_row.get("state")),
-                            "evaluation_criteria": round_row.get("evaluation_criteria"),
-                            "elimination_type": round_row.get("elimination_type"),
-                            "elimination_value": round_row.get("elimination_value"),
-                            "is_frozen": bool(round_row.get("is_frozen")),
-                        },
-                    )
-                else:
-                    inserted_round = conn.execute(
-                        text(
-                            """
-                            INSERT INTO pda_event_rounds (
-                                event_id,
-                                round_no,
-                                name,
-                                description,
-                                date,
-                                mode,
-                                state,
-                                evaluation_criteria,
-                                elimination_type,
-                                elimination_value,
-                                is_frozen
-                            ) VALUES (
-                                :event_id,
-                                :round_no,
-                                :name,
-                                :description,
-                                :date,
-                                :mode,
-                                :state,
-                                :evaluation_criteria,
-                                :elimination_type,
-                                :elimination_value,
-                                :is_frozen
-                            )
-                            RETURNING id
-                            """
-                        ),
-                        {
-                            "event_id": event_id,
-                            "round_no": round_no,
-                            "name": round_row.get("name"),
-                            "description": round_row.get("description"),
-                            "date": round_row.get("date"),
-                            "mode": _map_round_mode(round_row.get("mode")),
-                            "state": _map_round_state(round_row.get("state")),
-                            "evaluation_criteria": round_row.get("evaluation_criteria"),
-                            "elimination_type": round_row.get("elimination_type"),
-                            "elimination_value": round_row.get("elimination_value"),
-                            "is_frozen": bool(round_row.get("is_frozen")),
-                        },
-                    ).fetchone()
-                    new_round_id = int(inserted_round[0])
-                round_id_map[int(round_row["id"])] = new_round_id
-
-            if _table_exists(conn, "scores"):
-                score_rows = conn.execute(
-                    text(
-                        """
-                        SELECT
-                            s.participant_id,
-                            s.round_id,
-                            s.criteria_scores,
-                            s.total_score,
-                            s.normalized_score,
-                            s.is_present,
-                            p.register_number,
-                            p.email
-                        FROM scores s
-                        JOIN participants p ON p.id = s.participant_id
-                        ORDER BY s.id ASC
-                        """
-                    )
-                ).mappings().all()
-                for score_row in score_rows:
-                    mapped_round_id = round_id_map.get(int(score_row["round_id"]))
-                    if not mapped_round_id:
-                        continue
-
-                    regno = str(score_row.get("register_number") or "").strip()
-                    email = str(score_row.get("email") or "").strip().lower()
-                    user_row = conn.execute(
-                        text("SELECT id FROM users WHERE regno = :regno"),
-                        {"regno": regno},
-                    ).fetchone()
-                    if not user_row and email:
-                        user_row = conn.execute(
-                            text("SELECT id FROM users WHERE email = :email"),
-                            {"email": email},
-                        ).fetchone()
-                    if not user_row:
-                        continue
-                    user_id = int(user_row[0])
-
-                    conn.execute(
-                        text(
-                            """
-                            INSERT INTO pda_event_registrations (
-                                event_id,
-                                user_id,
-                                team_id,
-                                entity_type,
-                                status
-                            ) VALUES (
-                                :event_id,
-                                :user_id,
-                                NULL,
-                                'USER',
-                                'ACTIVE'
-                            )
-                            ON CONFLICT (event_id, user_id) DO NOTHING
-                            """
-                        ),
-                        {"event_id": event_id, "user_id": user_id},
-                    )
-
-                    existing_score = conn.execute(
-                        text(
-                            """
-                            SELECT id
-                            FROM pda_event_scores
-                            WHERE event_id = :event_id
-                              AND round_id = :round_id
-                              AND entity_type = 'USER'
-                              AND user_id = :user_id
-                              AND team_id IS NULL
-                            """
-                        ),
-                        {"event_id": event_id, "round_id": mapped_round_id, "user_id": user_id},
-                    ).fetchone()
-                    score_payload = {
-                        "event_id": event_id,
-                        "round_id": mapped_round_id,
-                        "user_id": user_id,
-                        "criteria_scores": score_row.get("criteria_scores"),
-                        "total_score": float(score_row.get("total_score") or 0),
-                        "normalized_score": float(score_row.get("normalized_score") or 0),
-                        "is_present": bool(score_row.get("is_present")),
-                    }
-                    if existing_score:
-                        conn.execute(
-                            text(
-                                """
-                                UPDATE pda_event_scores
-                                SET
-                                    criteria_scores = :criteria_scores,
-                                    total_score = :total_score,
-                                    normalized_score = :normalized_score,
-                                    is_present = :is_present
-                                WHERE id = :id
-                                """
-                            ),
-                            {**score_payload, "id": int(existing_score[0])},
-                        )
-                    else:
-                        conn.execute(
-                            text(
-                                """
-                                INSERT INTO pda_event_scores (
-                                    event_id,
-                                    round_id,
-                                    entity_type,
-                                    user_id,
-                                    team_id,
-                                    criteria_scores,
-                                    total_score,
-                                    normalized_score,
-                                    is_present
-                                ) VALUES (
-                                    :event_id,
-                                    :round_id,
-                                    'USER',
-                                    :user_id,
-                                    NULL,
-                                    :criteria_scores,
-                                    :total_score,
-                                    :normalized_score,
-                                    :is_present
-                                )
-                                """
-                            ),
-                            score_payload,
-                        )
-
-                    existing_attendance = conn.execute(
-                        text(
-                            """
-                            SELECT id
-                            FROM pda_event_attendance
-                            WHERE event_id = :event_id
-                              AND round_id = :round_id
-                              AND entity_type = 'USER'
-                              AND user_id = :user_id
-                              AND team_id IS NULL
-                            """
-                        ),
-                        {"event_id": event_id, "round_id": mapped_round_id, "user_id": user_id},
-                    ).fetchone()
-                    attendance_payload = {
-                        "event_id": event_id,
-                        "round_id": mapped_round_id,
-                        "user_id": user_id,
-                        "is_present": bool(score_row.get("is_present")),
-                    }
-                    if existing_attendance:
-                        conn.execute(
-                            text(
-                                """
-                                UPDATE pda_event_attendance
-                                SET is_present = :is_present
-                                WHERE id = :id
-                                """
-                            ),
-                            {**attendance_payload, "id": int(existing_attendance[0])},
-                        )
-                    else:
-                        conn.execute(
-                            text(
-                                """
-                                INSERT INTO pda_event_attendance (
-                                    event_id,
-                                    round_id,
-                                    entity_type,
-                                    user_id,
-                                    team_id,
-                                    is_present
-                                ) VALUES (
-                                    :event_id,
-                                    :round_id,
-                                    'USER',
-                                    :user_id,
-                                    NULL,
-                                    :is_present
-                                )
-                                """
-                            ),
-                            attendance_payload,
-                        )
-
-
-def drop_legacy_persofest_tables(engine):
-    with engine.begin() as conn:
-        for table_name in ("scores", "rounds", "participants"):
-            if _table_exists(conn, table_name):
-                conn.execute(text(f"DROP TABLE IF EXISTS {table_name} CASCADE"))
-
-        conn.execute(
-            text(
-                """
-                CREATE TABLE IF NOT EXISTS pda_event_rounds (
-                    id SERIAL PRIMARY KEY,
-                    event_id INTEGER NOT NULL REFERENCES pda_events(id) ON DELETE CASCADE,
-                    round_no INTEGER NOT NULL,
-                    name VARCHAR(255) NOT NULL,
-                    description TEXT,
-                    date TIMESTAMPTZ,
-                    mode VARCHAR(30) NOT NULL DEFAULT 'Offline',
-                    state VARCHAR(30) NOT NULL DEFAULT 'Draft',
-                    evaluation_criteria JSON,
-                    elimination_type VARCHAR(20),
-                    elimination_value FLOAT,
-                    is_frozen BOOLEAN DEFAULT FALSE,
-                    created_at TIMESTAMPTZ DEFAULT now(),
-                    updated_at TIMESTAMPTZ,
-                    CONSTRAINT uq_pda_event_round_event_round_no UNIQUE (event_id, round_no)
-                )
-                """
-            )
-        )
-
-        conn.execute(
-            text(
-                """
-                CREATE TABLE IF NOT EXISTS pda_event_attendance (
-                    id SERIAL PRIMARY KEY,
-                    event_id INTEGER NOT NULL REFERENCES pda_events(id) ON DELETE CASCADE,
-                    round_id INTEGER REFERENCES pda_event_rounds(id) ON DELETE CASCADE,
-                    entity_type VARCHAR(10) NOT NULL,
-                    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-                    team_id INTEGER REFERENCES pda_event_teams(id) ON DELETE CASCADE,
-                    is_present BOOLEAN NOT NULL DEFAULT FALSE,
-                    marked_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-                    marked_at TIMESTAMPTZ DEFAULT now(),
-                    CONSTRAINT uq_pda_event_attendance_entity UNIQUE (event_id, round_id, entity_type, user_id, team_id)
-                )
-                """
-            )
-        )
-
-        conn.execute(
-            text(
-                """
-                CREATE TABLE IF NOT EXISTS pda_event_scores (
-                    id SERIAL PRIMARY KEY,
-                    event_id INTEGER NOT NULL REFERENCES pda_events(id) ON DELETE CASCADE,
-                    round_id INTEGER NOT NULL REFERENCES pda_event_rounds(id) ON DELETE CASCADE,
-                    entity_type VARCHAR(10) NOT NULL,
-                    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-                    team_id INTEGER REFERENCES pda_event_teams(id) ON DELETE CASCADE,
-                    criteria_scores JSON,
-                    total_score FLOAT NOT NULL DEFAULT 0,
-                    normalized_score FLOAT NOT NULL DEFAULT 0,
-                    is_present BOOLEAN NOT NULL DEFAULT FALSE,
-                    created_at TIMESTAMPTZ DEFAULT now(),
-                    updated_at TIMESTAMPTZ,
-                    CONSTRAINT uq_pda_event_score_entity UNIQUE (event_id, round_id, entity_type, user_id, team_id)
-                )
-                """
-            )
-        )
-
-        conn.execute(
-            text(
-                """
-                CREATE TABLE IF NOT EXISTS pda_event_badges (
-                    id SERIAL PRIMARY KEY,
-                    event_id INTEGER NOT NULL REFERENCES pda_events(id) ON DELETE CASCADE,
-                    title VARCHAR(255) NOT NULL,
-                    image_url VARCHAR(500),
-                    place VARCHAR(30) NOT NULL,
-                    score FLOAT,
-                    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-                    team_id INTEGER REFERENCES pda_event_teams(id) ON DELETE SET NULL,
-                    created_at TIMESTAMPTZ DEFAULT now(),
-                    updated_at TIMESTAMPTZ
-                )
-                """
-            )
-        )
-
-        conn.execute(
-            text(
-                """
-                CREATE TABLE IF NOT EXISTS pda_event_invites (
-                    id SERIAL PRIMARY KEY,
-                    event_id INTEGER NOT NULL REFERENCES pda_events(id) ON DELETE CASCADE,
-                    team_id INTEGER NOT NULL REFERENCES pda_event_teams(id) ON DELETE CASCADE,
-                    invited_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    invited_by_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
-                    created_at TIMESTAMPTZ DEFAULT now(),
-                    updated_at TIMESTAMPTZ,
-                    CONSTRAINT uq_pda_event_invite_unique UNIQUE (event_id, team_id, invited_user_id)
-                )
-                """
-            )
-        )
 
 
 def ensure_persohub_tables(engine):

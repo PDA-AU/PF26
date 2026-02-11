@@ -103,7 +103,6 @@ export const AuthProvider = ({ children }) => {
     const isSuperAdmin = user?.is_superadmin;
     const isAdmin = user?.is_admin || isSuperAdmin;
     const canAccessHome = isSuperAdmin || user?.policy?.home;
-    const canAccessPf = isSuperAdmin || user?.policy?.pf;
     const eventPolicyMap = (user?.policy && typeof user.policy.events === 'object' && user.policy.events) ? user.policy.events : {};
     const canAccessEvents = isSuperAdmin || Object.values(eventPolicyMap).some((value) => Boolean(value));
     const canAccessEvent = (slug) => isSuperAdmin || Boolean(eventPolicyMap?.[slug]);
@@ -121,7 +120,6 @@ export const AuthProvider = ({ children }) => {
             isAdmin,
             isSuperAdmin,
             canAccessHome,
-            canAccessPf,
             canAccessEvents,
             canAccessEvent,
             eventPolicyMap,

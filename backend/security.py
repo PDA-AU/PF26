@@ -5,7 +5,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
 from database import get_db
-from auth import decode_token, get_current_pda_user, get_current_participant
+from auth import decode_token, get_current_pda_user
 from models import PdaUser, PdaAdmin, PdaTeam, PersohubCommunity
 
 
@@ -30,10 +30,6 @@ def require_pda_user(user: PdaUser = Depends(get_current_pda_user)) -> PdaUser:
     return user
 
 
-def require_participant(participant=Depends(get_current_participant)):
-    return participant
-
-
 def require_pda_admin_policy(policy_key: str):
     def _checker(
         user: PdaUser = Depends(get_current_pda_user),
@@ -50,10 +46,6 @@ def require_pda_admin_policy(policy_key: str):
 
 
 def require_pda_home_admin(user: PdaUser = Depends(require_pda_admin_policy("home"))) -> PdaUser:
-    return user
-
-
-def require_pda_pf_admin(user: PdaUser = Depends(require_pda_admin_policy("pf"))) -> PdaUser:
     return user
 
 

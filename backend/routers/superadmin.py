@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from sqlalchemy.orm import Session
-from typing import List
+from typing import Dict, List, Optional
 from sqlalchemy.engine import make_url
 import os
 import tempfile
@@ -17,27 +17,11 @@ from models import PdaAdmin, PdaUser, PdaTeam, AdminLog, SystemConfig
 from schemas import PdaAdminCreate, PdaAdminPolicyUpdate, PdaUserResponse, AdminLogResponse, RecruitmentApprovalItem
 from security import require_superadmin
 from utils import log_admin_action, _upload_bytes_to_s3, S3_CLIENT, S3_BUCKET_NAME
+from recruitment_state import clear_legacy_recruitment_json, get_recruitment_state, get_recruitment_state_map
 
 router = APIRouter()
 DATABASE_URL = os.environ.get("DATABASE_URL")
 DB_RESTORE_CONFIRM_TEXT = "CONFIRM RESTORE"
-
-
-def _extract_recruitment_state(user: PdaUser):
-    preferred_team = None
-    is_applied = False
-    if isinstance(user.json_content, dict):
-        raw_team = user.json_content.get("preferred_team")
-        if isinstance(raw_team, str):
-            raw_team = raw_team.strip()
-        preferred_team = raw_team or None
-        raw_is_applied = user.json_content.get("is_applied")
-        if isinstance(raw_is_applied, bool):
-            is_applied = raw_is_applied
-    if preferred_team and not is_applied:
-        is_applied = True
-    return preferred_team, is_applied
-
 
 def _resolve_pg_binary(kind: str) -> str:
     # Allow explicit override first for production/runtime control.
@@ -88,12 +72,15 @@ def _resolve_pg_binary(kind: str) -> str:
     return candidates[-1]
 
 
-def _build_admin_response(db: Session, user: PdaUser) -> PdaUserResponse:
-    team = db.query(PdaTeam).filter(PdaTeam.user_id == user.id).first()
-    admin_row = db.query(PdaAdmin).filter(PdaAdmin.user_id == user.id).first()
+def _build_admin_response(
+    user: PdaUser,
+    team: Optional[PdaTeam] = None,
+    admin_row: Optional[PdaAdmin] = None,
+    recruit: Optional[Dict[str, Optional[str]]] = None,
+) -> PdaUserResponse:
     policy = admin_row.policy if admin_row else None
     is_superadmin = bool(admin_row and policy and policy.get("superAdmin"))
-    preferred_team, is_applied = _extract_recruitment_state(user)
+    recruit_state = recruit or {}
     return PdaUserResponse(
         id=user.id,
         regno=user.regno,
@@ -106,8 +93,12 @@ def _build_admin_response(db: Session, user: PdaUser) -> PdaUserResponse:
         dept=user.dept,
         image_url=user.image_url,
         is_member=user.is_member,
-        is_applied=is_applied,
-        preferred_team=preferred_team,
+        is_applied=bool(recruit_state.get("is_applied")),
+        preferred_team=recruit_state.get("preferred_team"),
+        preferred_team_1=recruit_state.get("preferred_team_1"),
+        preferred_team_2=recruit_state.get("preferred_team_2"),
+        preferred_team_3=recruit_state.get("preferred_team_3"),
+        resume_url=recruit_state.get("resume_url"),
         team=team.team if team else None,
         designation=team.designation if team else None,
         instagram_url=user.instagram_url,
@@ -302,7 +293,7 @@ def _restore_pg_dump(dump_bytes: bytes) -> None:
 @router.get("/pda-admin/superadmin/admins", response_model=List[PdaUserResponse])
 def list_pda_admins(
     _: PdaUser = Depends(require_superadmin),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     admin_users = (
         db.query(PdaUser)
@@ -310,7 +301,14 @@ def list_pda_admins(
         .order_by(PdaAdmin.created_at.desc())
         .all()
     )
-    return [_build_admin_response(db, u) for u in admin_users]
+    if not admin_users:
+        return []
+
+    user_ids = [u.id for u in admin_users]
+    team_map = {row.user_id: row for row in db.query(PdaTeam).filter(PdaTeam.user_id.in_(user_ids)).all()}
+    admin_map = {row.user_id: row for row in db.query(PdaAdmin).filter(PdaAdmin.user_id.in_(user_ids)).all()}
+    recruit_map = get_recruitment_state_map(db, admin_users)
+    return [_build_admin_response(u, team_map.get(u.id), admin_map.get(u.id), recruit_map.get(u.id)) for u in admin_users]
 
 
 @router.post("/pda-admin/superadmin/admins", response_model=PdaUserResponse)
@@ -334,13 +332,14 @@ def create_pda_admin(
 
     admin_row = PdaAdmin(
         user_id=user.id,
-        policy={"home": True, "pf": False, "superAdmin": False, "events": {}}
+        policy={"home": True, "superAdmin": False, "events": {}}
     )
     db.add(admin_row)
     db.commit()
 
     log_admin_action(db, superadmin, "Create admin user", request.method if request else None, request.url.path if request else None, {"admin_id": user.id})
-    return _build_admin_response(db, user)
+    recruit_state = get_recruitment_state(db, user.id, user=user)
+    return _build_admin_response(user, team, admin_row, recruit_state)
 
 
 @router.delete("/pda-admin/superadmin/admins/{user_id}")
@@ -383,14 +382,16 @@ def update_admin_policy(
     user = db.query(PdaUser).filter(PdaUser.id == user_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    return _build_admin_response(db, user)
+    team = db.query(PdaTeam).filter(PdaTeam.user_id == user.id).first()
+    recruit_state = get_recruitment_state(db, user.id, user=user)
+    return _build_admin_response(user, team, admin_row, recruit_state)
 
 
 @router.get("/pda-admin/superadmin/logs", response_model=List[AdminLogResponse])
 def get_homeadmin_logs(
     _: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db),
-    limit: int = 50
+    limit: int = Query(default=100, ge=1, le=1000),
 ):
     logs = (
         db.query(AdminLog)
@@ -521,30 +522,47 @@ def toggle_recruitment(
 @router.get("/pda-admin/recruitments", response_model=List[PdaUserResponse])
 def list_recruitments(
     _: PdaUser = Depends(require_superadmin),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    pending_candidates = db.query(PdaUser).filter(PdaUser.is_member == False).order_by(PdaUser.created_at.desc()).all()
-    pending = [user for user in pending_candidates if _extract_recruitment_state(user)[1]]
-    return [_build_admin_response(db, u) for u in pending]
+    pending_candidates = (
+        db.query(PdaUser)
+        .filter(PdaUser.is_member == False)
+        .order_by(PdaUser.created_at.desc())
+        .all()
+    )
+    recruit_map = get_recruitment_state_map(db, pending_candidates)
+    pending = [user for user in pending_candidates if recruit_map.get(user.id, {}).get("is_applied")]
+    if not pending:
+        return []
+    pending_ids = [u.id for u in pending]
+    team_map = {row.user_id: row for row in db.query(PdaTeam).filter(PdaTeam.user_id.in_(pending_ids)).all()}
+    admin_map = {row.user_id: row for row in db.query(PdaAdmin).filter(PdaAdmin.user_id.in_(pending_ids)).all()}
+    return [_build_admin_response(u, team_map.get(u.id), admin_map.get(u.id), recruit_map.get(u.id)) for u in pending]
 
 
 @router.get("/pda-admin/recruitments/export")
 def export_recruitments(
     superadmin: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db),
-    request: Request = None
+    request: Request = None,
 ):
-    pending_candidates = db.query(PdaUser).filter(PdaUser.is_member == False).order_by(PdaUser.created_at.desc()).all()
-    pending = [user for user in pending_candidates if _extract_recruitment_state(user)[1]]
+    pending_candidates = (
+        db.query(PdaUser)
+        .filter(PdaUser.is_member == False)
+        .order_by(PdaUser.created_at.desc())
+        .all()
+    )
+    recruit_map = get_recruitment_state_map(db, pending_candidates)
+    pending = [user for user in pending_candidates if recruit_map.get(user.id, {}).get("is_applied")]
     wb = Workbook()
     ws = wb.active
     ws.title = "Recruitments"
     ws.append([
         "Name", "Register Number", "Email", "Phone", "DOB", "Gender",
-        "Department", "Preferred Team", "Created At"
+        "Department", "Preferred Team 1", "Preferred Team 2", "Preferred Team 3", "Resume URL", "Created At"
     ])
     for user in pending:
-        preferred_team, _ = _extract_recruitment_state(user)
+        recruit = recruit_map.get(user.id, {})
         ws.append([
             user.name,
             user.regno,
@@ -553,7 +571,10 @@ def export_recruitments(
             user.dob.isoformat() if user.dob else "",
             user.gender or "",
             user.dept or "",
-            preferred_team or "",
+            recruit.get("preferred_team_1") or "",
+            recruit.get("preferred_team_2") or "",
+            recruit.get("preferred_team_3") or "",
+            recruit.get("resume_url") or "",
             user.created_at.isoformat() if user.created_at else ""
         ])
     output = io.BytesIO()
@@ -576,6 +597,7 @@ def approve_recruitments(
     request: Request = None
 ):
     approved = []
+    parsed_items = []
     for item in payload:
         if isinstance(item, int):
             user_id = item
@@ -589,27 +611,77 @@ def approve_recruitments(
             user_id = parsed.id
             assigned_team = parsed.team
             assigned_designation = parsed.designation
+        parsed_items.append((user_id, assigned_team, assigned_designation))
 
-        user = db.query(PdaUser).filter(PdaUser.id == user_id).first()
+    user_ids = list({user_id for user_id, _, _ in parsed_items})
+    user_map = {u.id: u for u in db.query(PdaUser).filter(PdaUser.id.in_(user_ids)).all()} if user_ids else {}
+    recruit_map = get_recruitment_state_map(db, user_map.values())
+
+    for user_id, assigned_team, assigned_designation in parsed_items:
+        user = user_map.get(user_id)
         if not user or user.is_member:
             continue
-        preferred_team, is_applied = _extract_recruitment_state(user)
-        if not is_applied:
+        recruit_state = recruit_map.get(user.id, {})
+        if not recruit_state.get("is_applied"):
             continue
-        team_to_assign = assigned_team or preferred_team
+        team_to_assign = assigned_team or recruit_state.get("preferred_team_1") or recruit_state.get("preferred_team_2") or recruit_state.get("preferred_team_3")
         if not team_to_assign:
             continue
         if team_to_assign == "Executive" and assigned_designation not in {"Chairperson", "Vice Chairperson", "General Secretary", "Treasurer"}:
             continue
-        new_team = PdaTeam(
-            user_id=user.id,
-            team=team_to_assign,
-            designation=assigned_designation or "Member"
-        )
-        db.add(new_team)
+        team_row = db.query(PdaTeam).filter(PdaTeam.user_id == user.id).first()
+        if not team_row:
+            team_row = PdaTeam(
+                user_id=user.id,
+                team=team_to_assign,
+                designation=assigned_designation or "Member"
+            )
+            db.add(team_row)
+        else:
+            team_row.team = team_to_assign
+            team_row.designation = assigned_designation or team_row.designation or "Member"
         user.is_member = True
+        clear_legacy_recruitment_json(user)
         approved.append(user.id)
 
     db.commit()
     log_admin_action(db, superadmin, "Approve recruitments", request.method if request else None, request.url.path if request else None, {"approved": approved})
     return {"approved": approved}
+
+
+@router.post("/pda-admin/recruitments/reject")
+def reject_recruitments(
+    payload: List[object],
+    superadmin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    rejected = []
+    user_ids = []
+    for item in payload:
+        if isinstance(item, int):
+            user_id = item
+        else:
+            try:
+                user_id = int(getattr(item, "id", None) or item.get("id"))
+            except Exception:
+                continue
+        user_ids.append(user_id)
+
+    user_map = {u.id: u for u in db.query(PdaUser).filter(PdaUser.id.in_(list(set(user_ids)))).all()} if user_ids else {}
+    recruit_map = get_recruitment_state_map(db, user_map.values())
+    for user_id in user_ids:
+        user = user_map.get(user_id)
+        if not user:
+            continue
+        if user.is_member:
+            continue
+        recruit_state = recruit_map.get(user.id, {})
+        if not recruit_state.get("is_applied"):
+            continue
+        clear_legacy_recruitment_json(user)
+        rejected.append(user.id)
+
+    db.commit()
+    log_admin_action(db, superadmin, "Reject recruitments", request.method if request else None, request.url.path if request else None, {"rejected": rejected})
+    return {"rejected": rejected}

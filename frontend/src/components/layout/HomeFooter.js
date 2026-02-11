@@ -1,5 +1,4 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
 import { Instagram, Linkedin, Mail } from 'lucide-react';
 import pdaLogo from '@/assets/pda-logo.png';
 
@@ -28,11 +27,6 @@ export default function HomeFooter() {
                     </div>
                 </div>
                 <div className="flex flex-col gap-3 md:items-end">
-                    <div className="flex flex-wrap gap-4">
-                        <Link to="/persofest" className="font-semibold text-slate-700 hover:text-[#0f1115]">
-                            Persofest’26
-                        </Link>
-                    </div>
                     <div className="flex flex-wrap gap-4 text-slate-700">
                         <a
                             href="https://www.instagram.com/pda_mit/"

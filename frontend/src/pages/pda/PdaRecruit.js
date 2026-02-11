@@ -56,12 +56,38 @@ const getRecruitmentTeamMeta = (teamValue) => {
     return PDA_RECRUITMENT_TEAMS.find((team) => team.value === teamValue) || null;
 };
 
+const getFilteredTeams = (blockedValues = []) =>
+    PDA_RECRUITMENT_TEAMS.filter((team) => !blockedValues.includes(team.value));
+
+const inferRecruitmentDocContentType = (file) => {
+    const filename = String(file?.name || '').toLowerCase();
+    const rawType = String(file?.type || '').toLowerCase().trim();
+    const allowed = new Set([
+        'application/pdf',
+        'application/vnd.ms-powerpoint',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    ]);
+
+    if (allowed.has(rawType)) return rawType;
+    if (filename.endsWith('.pdf')) return 'application/pdf';
+    if (filename.endsWith('.pptx')) return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    if (filename.endsWith('.ppt')) return 'application/vnd.ms-powerpoint';
+    return rawType || 'application/pdf';
+};
+
 export default function PdaRecruit() {
     const { user, loading: authLoading, getAuthHeader, updateUser } = useAuth();
 
     const [recruitmentOpen, setRecruitmentOpen] = useState(true);
     const [statusLoading, setStatusLoading] = useState(true);
-    const [preferredTeam, setPreferredTeam] = useState('');
+    const [preferredTeam1, setPreferredTeam1] = useState('');
+    const [preferredTeam2, setPreferredTeam2] = useState('');
+    const [preferredTeam3, setPreferredTeam3] = useState('');
+    const [resumeUrl, setResumeUrl] = useState('');
+    const [recruitmentDocFile, setRecruitmentDocFile] = useState(null);
+    const [selectedDocPreviewUrl, setSelectedDocPreviewUrl] = useState('');
+    const [docInputKey, setDocInputKey] = useState(0);
+    const [uploadingRecruitmentDoc, setUploadingRecruitmentDoc] = useState(false);
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [confirmText, setConfirmText] = useState('');
     const [submitting, setSubmitting] = useState(false);
@@ -85,10 +111,21 @@ export default function PdaRecruit() {
     }, []);
 
     useEffect(() => {
-        if (user?.preferred_team) {
-            setPreferredTeam(user.preferred_team);
+        setPreferredTeam1(user?.preferred_team_1 || user?.preferred_team || '');
+        setPreferredTeam2(user?.preferred_team_2 || '');
+        setPreferredTeam3(user?.preferred_team_3 || '');
+        setResumeUrl(user?.resume_url || '');
+    }, [user?.preferred_team, user?.preferred_team_1, user?.preferred_team_2, user?.preferred_team_3, user?.resume_url]);
+
+    useEffect(() => {
+        if (!recruitmentDocFile) {
+            setSelectedDocPreviewUrl('');
+            return undefined;
         }
-    }, [user?.preferred_team]);
+        const previewUrl = URL.createObjectURL(recruitmentDocFile);
+        setSelectedDocPreviewUrl(previewUrl);
+        return () => URL.revokeObjectURL(previewUrl);
+    }, [recruitmentDocFile]);
 
     const getErrorMessage = (error, fallback) => {
         const detail = error?.response?.data?.detail;
@@ -101,9 +138,65 @@ export default function PdaRecruit() {
         return detail || fallback;
     };
 
+    const uploadRecruitmentDocToS3 = async (file) => {
+        if (!file) return;
+        const allowedTypes = new Set([
+            'application/pdf',
+            'application/vnd.ms-powerpoint',
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        ]);
+        const filename = String(file.name || '').toLowerCase();
+        const isValidExtension = filename.endsWith('.pdf') || filename.endsWith('.ppt') || filename.endsWith('.pptx');
+        if (!allowedTypes.has(file.type) && !isValidExtension) {
+            toast.error('Upload PDF, PPT, or PPTX only');
+            return;
+        }
+        if (file.size > 12 * 1024 * 1024) {
+            toast.error('File size exceeds 12MB');
+            return;
+        }
+        if (!user) {
+            toast.error('Please login to upload');
+            return;
+        }
+        setUploadingRecruitmentDoc(true);
+        try {
+            const contentType = inferRecruitmentDocContentType(file);
+            const presignRes = await axios.post(
+                `${API}/me/recruitment-doc/presign`,
+                { filename: file.name, content_type: contentType },
+                { headers: getAuthHeader() }
+            );
+            const { upload_url, public_url, content_type } = presignRes.data || {};
+            await axios.put(upload_url, file, {
+                headers: { 'Content-Type': content_type || contentType }
+            });
+            setResumeUrl(public_url);
+            return public_url;
+        } catch (error) {
+            console.error('Recruitment doc upload failed:', error);
+            toast.error(getErrorMessage(error, 'Failed to upload file'));
+            throw error;
+        } finally {
+            setUploadingRecruitmentDoc(false);
+        }
+    };
+
+    const clearSelectedRecruitmentDoc = () => {
+        setRecruitmentDocFile(null);
+        setDocInputKey((prev) => prev + 1);
+    };
+
     const openConfirm = () => {
-        if (!preferredTeam) {
-            toast.error('Please select a preferred team');
+        if (!preferredTeam1) {
+            toast.error('Please select your first preferred team');
+            return;
+        }
+        if (
+            (preferredTeam2 && preferredTeam2 === preferredTeam1) ||
+            (preferredTeam3 && (preferredTeam3 === preferredTeam1 || preferredTeam3 === preferredTeam2))
+        ) {
+            toast.error('Each team preference must be unique');
             return;
         }
         setConfirmText('');
@@ -119,8 +212,15 @@ export default function PdaRecruit() {
             toast.error('Recruitment is currently paused');
             return;
         }
-        if (!preferredTeam) {
-            toast.error('Please select a preferred team');
+        if (!preferredTeam1) {
+            toast.error('Please select your first preferred team');
+            return;
+        }
+        if (
+            (preferredTeam2 && preferredTeam2 === preferredTeam1) ||
+            (preferredTeam3 && (preferredTeam3 === preferredTeam1 || preferredTeam3 === preferredTeam2))
+        ) {
+            toast.error('Each team preference must be unique');
             return;
         }
         if (confirmText.trim().toUpperCase() !== 'CONFIRM') {
@@ -130,17 +230,27 @@ export default function PdaRecruit() {
 
         setSubmitting(true);
         try {
+            let effectiveResumeUrl = resumeUrl || null;
+            if (recruitmentDocFile) {
+                effectiveResumeUrl = await uploadRecruitmentDocToS3(recruitmentDocFile);
+            }
             const response = await axios.post(
                 `${API}/pda/recruitment/apply`,
-                { preferred_team: preferredTeam },
+                {
+                    preferred_team_1: preferredTeam1,
+                    preferred_team_2: preferredTeam2 || null,
+                    preferred_team_3: preferredTeam3 || null,
+                    resume_url: effectiveResumeUrl || null
+                },
                 { headers: getAuthHeader() }
             );
             const appliedUser = response?.data && typeof response.data === 'object'
-                ? { ...response.data, is_applied: true, preferred_team: response.data.preferred_team || preferredTeam }
-                : { is_applied: true, preferred_team: preferredTeam };
+                ? { ...response.data, is_applied: true, preferred_team: response.data.preferred_team || preferredTeam1 }
+                : { is_applied: true, preferred_team: preferredTeam1, preferred_team_1: preferredTeam1, preferred_team_2: preferredTeam2 || null, preferred_team_3: preferredTeam3 || null, resume_url: effectiveResumeUrl || null };
             updateUser(appliedUser);
             toast.success('Application submitted successfully');
             setConfirmOpen(false);
+            clearSelectedRecruitmentDoc();
         } catch (error) {
             console.error('Recruitment apply failed:', error);
             toast.error(getErrorMessage(error, 'Failed to submit application'));
@@ -152,8 +262,8 @@ export default function PdaRecruit() {
         }
     };
 
-    const selectedTeamMeta = getRecruitmentTeamMeta(preferredTeam);
-    const appliedTeamMeta = getRecruitmentTeamMeta(user?.preferred_team);
+    const selectedTeamMeta = getRecruitmentTeamMeta(preferredTeam1);
+    const appliedTeamMeta = getRecruitmentTeamMeta(user?.preferred_team_1 || user?.preferred_team);
 
     return (
         <div className="min-h-screen bg-[#fffdf5] text-black flex flex-col">
@@ -223,9 +333,15 @@ export default function PdaRecruit() {
                                 ) : user.is_applied ? (
                                     <div className="rounded-md border-2 border-black bg-[#FFF5CC] p-4 shadow-neo">
                                         <p className="text-sm font-bold text-black">Application already submitted.</p>
-                                        <p className="mt-1 text-sm text-slate-700">
-                                            Preferred Team: {appliedTeamMeta?.label || user.preferred_team || 'Not specified'}
-                                        </p>
+                                        <p className="mt-1 text-sm text-slate-700">Preferred Team 1: {appliedTeamMeta?.label || user.preferred_team_1 || user.preferred_team || 'Not specified'}</p>
+                                        <p className="mt-1 text-sm text-slate-700">Preferred Team 2: {user.preferred_team_2 || 'Not specified'}</p>
+                                        <p className="mt-1 text-sm text-slate-700">Preferred Team 3: {user.preferred_team_3 || 'Not specified'}</p>
+                                        <p className="mt-1 text-sm text-slate-700">Resume: {user.resume_url ? 'Uploaded' : 'Not provided'}</p>
+                                        {user.resume_url ? (
+                                            <a href={user.resume_url} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs font-semibold text-[#6D28D9] underline">
+                                                Preview uploaded resume
+                                            </a>
+                                        ) : null}
                                         {appliedTeamMeta?.description ? (
                                             <p className="mt-2 text-xs text-slate-700">{appliedTeamMeta.description}</p>
                                         ) : null}
@@ -233,10 +349,17 @@ export default function PdaRecruit() {
                                 ) : recruitmentOpen ? (
                                     <div className="grid gap-4 rounded-md border-2 border-black bg-white p-4 shadow-neo">
                                         <div>
-                                            <Label htmlFor="recruit-preferred-team" className="text-xs font-bold uppercase tracking-[0.12em]">Preferred Team</Label>
-                                            <Select value={preferredTeam} onValueChange={setPreferredTeam}>
-                                                <SelectTrigger id="recruit-preferred-team" className="mt-2 h-11 w-full border-2 border-black bg-white text-sm shadow-neo">
-                                                    <SelectValue placeholder="Select preferred team" />
+                                            <Label htmlFor="recruit-preferred-team-1" className="text-xs font-bold uppercase tracking-[0.12em]">Preferred Team 1</Label>
+                                            <Select
+                                                value={preferredTeam1}
+                                                onValueChange={(value) => {
+                                                    setPreferredTeam1(value);
+                                                    if (preferredTeam2 === value) setPreferredTeam2('');
+                                                    if (preferredTeam3 === value) setPreferredTeam3('');
+                                                }}
+                                            >
+                                                <SelectTrigger id="recruit-preferred-team-1" className="mt-2 h-11 w-full border-2 border-black bg-white text-sm shadow-neo">
+                                                    <SelectValue placeholder="Select first preferred team" />
                                                 </SelectTrigger>
                                                 <SelectContent className="border-2 border-black bg-white shadow-neo">
                                                     {PDA_RECRUITMENT_TEAMS.map((team) => (
@@ -244,6 +367,72 @@ export default function PdaRecruit() {
                                                     ))}
                                                 </SelectContent>
                                             </Select>
+                                        </div>
+                                        <div>
+                                            <Label htmlFor="recruit-preferred-team-2" className="text-xs font-bold uppercase tracking-[0.12em]">Preferred Team 2 (Optional)</Label>
+                                            <Select
+                                                value={preferredTeam2}
+                                                onValueChange={(value) => {
+                                                    setPreferredTeam2(value);
+                                                    if (preferredTeam3 === value) setPreferredTeam3('');
+                                                }}
+                                            >
+                                                <SelectTrigger id="recruit-preferred-team-2" className="mt-2 h-11 w-full border-2 border-black bg-white text-sm shadow-neo">
+                                                    <SelectValue placeholder="Select second preferred team" />
+                                                </SelectTrigger>
+                                                <SelectContent className="border-2 border-black bg-white shadow-neo">
+                                                    {getFilteredTeams([preferredTeam1]).map((team) => (
+                                                        <SelectItem key={team.value} value={team.value}>{team.label}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div>
+                                            <Label htmlFor="recruit-preferred-team-3" className="text-xs font-bold uppercase tracking-[0.12em]">Preferred Team 3 (Optional)</Label>
+                                            <Select value={preferredTeam3} onValueChange={setPreferredTeam3}>
+                                                <SelectTrigger id="recruit-preferred-team-3" className="mt-2 h-11 w-full border-2 border-black bg-white text-sm shadow-neo">
+                                                    <SelectValue placeholder="Select third preferred team" />
+                                                </SelectTrigger>
+                                                <SelectContent className="border-2 border-black bg-white shadow-neo">
+                                                    {getFilteredTeams([preferredTeam1, preferredTeam2]).map((team) => (
+                                                        <SelectItem key={team.value} value={team.value}>{team.label}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div>
+                                            <div className="space-y-2">
+                                                <Label htmlFor="recruitment-doc-file" className="text-xs font-bold uppercase tracking-[0.12em]">Upload Resume / About Yourself PPT [max 5 slides](Optional)</Label>
+                                                <Input
+                                                    key={docInputKey}
+                                                    id="recruitment-doc-file"
+                                                    type="file"
+                                                    accept=".pdf,.ppt,.pptx,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                                                    onChange={(e) => setRecruitmentDocFile(e.target.files?.[0] || null)}
+                                                    className="h-11 border-2 border-black bg-white text-sm shadow-neo"
+                                                />
+                                                <p className="text-[11px] text-slate-600">
+                                                    File uploads automatically when you confirm submission.
+                                                </p>
+                                                <p className="text-[11px] text-slate-600">PPT uploads should contain up to 5 slides.</p>
+                                                {recruitmentDocFile ? (
+                                                    <div className="space-y-1 text-[11px] font-medium text-slate-700">
+                                                        <p>Selected: {recruitmentDocFile.name}</p>
+                                                        {selectedDocPreviewUrl ? (
+                                                            <a href={selectedDocPreviewUrl} target="_blank" rel="noreferrer" className="inline-block text-[#6D28D9] underline">
+                                                                Preview selected file
+                                                            </a>
+                                                        ) : null}
+                                                        <button
+                                                            type="button"
+                                                            onClick={clearSelectedRecruitmentDoc}
+                                                            className="block text-left font-semibold text-rose-600 underline"
+                                                        >
+                                                            Remove selected file
+                                                        </button>
+                                                    </div>
+                                                ) : null}
+                                            </div>
                                             {selectedTeamMeta?.description ? (
                                                 <div className="mt-3 rounded-md border-2 border-black bg-[#F7F0FF] p-3">
                                                     <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#6D28D9]">
@@ -258,10 +447,10 @@ export default function PdaRecruit() {
                                             <Button
                                                 type="button"
                                                 onClick={openConfirm}
-                                                disabled={!preferredTeam || submitting}
+                                                disabled={!preferredTeam1 || submitting || uploadingRecruitmentDoc}
                                                 className="border-2 border-black bg-[#FDE047] text-black shadow-neo hover:bg-[#facc15]"
                                             >
-                                                Continue
+                                                {uploadingRecruitmentDoc ? 'Uploading...' : 'Continue'}
                                             </Button>
                                         </div>
                                     </div>
@@ -301,7 +490,16 @@ export default function PdaRecruit() {
                     </DialogHeader>
                     <div className="space-y-3">
                         <p className="text-sm text-slate-700">
-                            Preferred Team: <span className="font-semibold">{selectedTeamMeta?.label || preferredTeam || '-'}</span>
+                            Preferred Team 1: <span className="font-semibold">{selectedTeamMeta?.label || preferredTeam1 || '-'}</span>
+                        </p>
+                        <p className="text-sm text-slate-700">
+                            Preferred Team 2: <span className="font-semibold">{preferredTeam2 || '-'}</span>
+                        </p>
+                        <p className="text-sm text-slate-700">
+                            Preferred Team 3: <span className="font-semibold">{preferredTeam3 || '-'}</span>
+                        </p>
+                        <p className="text-sm text-slate-700">
+                            Resume File: <span className="font-semibold">{recruitmentDocFile ? recruitmentDocFile.name : (resumeUrl ? 'Uploaded' : 'Not provided')}</span>
                         </p>
                         {selectedTeamMeta?.description ? (
                             <p className="rounded-md border-2 border-black bg-[#F7F0FF] p-3 text-xs text-slate-700">

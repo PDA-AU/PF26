@@ -12,6 +12,7 @@ from models import PdaUser, PdaTeam, PdaAdmin, SystemConfig
 from schemas import (
     PdaUserRegister,
     PdaRecruitmentApplyRequest,
+    PdaRecruitmentResumeUpdateRequest,
     PdaUserLogin,
     PdaTokenResponse,
     RefreshTokenRequest,
@@ -35,26 +36,10 @@ from persohub_service import (
     generate_unique_profile_name,
     is_profile_name_valid,
 )
+from recruitment_state import create_recruitment_application, get_recruitment_state, update_recruitment_resume
 import os
 
 router = APIRouter()
-
-
-def _extract_recruitment_state(user: PdaUser):
-    preferred_team = None
-    is_applied = False
-    if isinstance(user.json_content, dict):
-        raw_team = user.json_content.get("preferred_team")
-        if isinstance(raw_team, str):
-            raw_team = raw_team.strip()
-        preferred_team = raw_team or None
-        raw_is_applied = user.json_content.get("is_applied")
-        if isinstance(raw_is_applied, bool):
-            is_applied = raw_is_applied
-    if preferred_team and not is_applied:
-        is_applied = True
-    return preferred_team, is_applied
-
 
 def _build_pda_user_response(db: Session, user: PdaUser) -> PdaUserResponse:
     team = db.query(PdaTeam).filter(PdaTeam.user_id == user.id).first()
@@ -62,7 +47,7 @@ def _build_pda_user_response(db: Session, user: PdaUser) -> PdaUserResponse:
     policy = admin_row.policy if admin_row else None
     is_superadmin = bool(admin_row and policy and policy.get("superAdmin"))
     is_admin = bool(admin_row)
-    preferred_team, is_applied = _extract_recruitment_state(user)
+    recruit = get_recruitment_state(db, user.id, user=user)
     return PdaUserResponse(
         id=user.id,
         regno=user.regno,
@@ -76,8 +61,12 @@ def _build_pda_user_response(db: Session, user: PdaUser) -> PdaUserResponse:
         dept=user.dept,
         image_url=user.image_url,
         is_member=user.is_member,
-        is_applied=is_applied,
-        preferred_team=preferred_team,
+        is_applied=bool(recruit["is_applied"]),
+        preferred_team=recruit["preferred_team"],
+        preferred_team_1=recruit["preferred_team_1"],
+        preferred_team_2=recruit["preferred_team_2"],
+        preferred_team_3=recruit["preferred_team_3"],
+        resume_url=recruit["resume_url"],
         team=team.team if team else None,
         designation=team.designation if team else None,
         instagram_url=user.instagram_url,
@@ -101,11 +90,6 @@ def _issue_inline_password_reset(db: Session, user: PdaUser) -> str:
 
 @router.post("/auth/register")
 def pda_register(user_data: PdaUserRegister, db: Session = Depends(get_db)):
-    if user_data.preferred_team:
-        reg_config = db.query(SystemConfig).filter(SystemConfig.key == "pda_recruitment_open").first()
-        if reg_config and reg_config.value == "false":
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Recruitment is closed")
-
     existing = db.query(PdaUser).filter(
         (PdaUser.regno == user_data.regno) | (PdaUser.email == user_data.email)
     ).first()
@@ -126,15 +110,6 @@ def pda_register(user_data: PdaUserRegister, db: Session = Depends(get_db)):
         if community_conflict:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Profile name reserved by community")
 
-    json_content = {"is_applied": False}
-    if user_data.preferred_team:
-        preferred_team = user_data.preferred_team.strip()
-        if preferred_team == "Executive":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Executive team cannot be selected")
-        json_content["preferred_team"] = preferred_team
-        json_content["is_applied"] = True
-        json_content["applied_at"] = now_tz().isoformat()
-
     new_user = PdaUser(
         regno=user_data.regno,
         email=user_data.email,
@@ -146,7 +121,7 @@ def pda_register(user_data: PdaUserRegister, db: Session = Depends(get_db)):
         phno=user_data.phno,
         dept=user_data.dept,
         image_url=user_data.image_url,
-        json_content=json_content,
+        json_content={},
         is_member=False
     )
     db.add(new_user)
@@ -185,20 +160,38 @@ def apply_for_pda_recruitment(
     if reg_config and reg_config.value == "false":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Recruitment is closed")
 
-    preferred_team, is_applied = _extract_recruitment_state(user)
-    if is_applied:
+    recruit_state = get_recruitment_state(db, user.id, user=user)
+    if recruit_state["is_applied"]:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Recruitment application already submitted")
 
-    preferred_team = payload.preferred_team.strip()
-    if preferred_team == "Executive":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Executive team cannot be selected")
+    create_recruitment_application(
+        db=db,
+        user=user,
+        preferred_team_1=payload.preferred_team_1,
+        preferred_team_2=payload.preferred_team_2,
+        preferred_team_3=payload.preferred_team_3,
+        resume_url=payload.resume_url,
+    )
+    db.commit()
+    db.refresh(user)
+    return _build_pda_user_response(db, user)
 
-    # JSON columns don't reliably detect in-place dict mutation; assign a fresh object.
-    json_content = dict(user.json_content) if isinstance(user.json_content, dict) else {}
-    json_content["preferred_team"] = preferred_team
-    json_content["is_applied"] = True
-    json_content["applied_at"] = now_tz().isoformat()
-    user.json_content = json_content
+
+@router.put("/pda/recruitment/resume", response_model=PdaUserResponse)
+def update_pda_recruitment_resume(
+    payload: PdaRecruitmentResumeUpdateRequest,
+    user: PdaUser = Depends(require_pda_user),
+    db: Session = Depends(get_db),
+):
+    if not payload.remove and not payload.resume_url:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="resume_url is required")
+
+    update_recruitment_resume(
+        db=db,
+        user=user,
+        resume_url=payload.resume_url,
+        remove=bool(payload.remove),
+    )
     db.commit()
     db.refresh(user)
     return _build_pda_user_response(db, user)
@@ -409,6 +402,23 @@ def presign_pda_profile_picture(
         payload.filename,
         payload.content_type,
         allowed_types=["image/png", "image/jpeg", "image/webp"]
+    )
+
+
+@router.post("/me/recruitment-doc/presign", response_model=PresignResponse)
+def presign_pda_recruitment_doc(
+    payload: PresignRequest,
+    user: PdaUser = Depends(require_pda_user)
+):
+    return _generate_presigned_put_url(
+        "recruitment-docs",
+        payload.filename,
+        payload.content_type,
+        allowed_types=[
+            "application/pdf",
+            "application/vnd.ms-powerpoint",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ],
     )
 
 

@@ -1,15 +1,18 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Calendar, Sparkles, ChevronLeft, ChevronRight, Instagram, Linkedin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import HomeHeader from '@/components/layout/HomeHeader';
 import HomeFooter from '@/components/layout/HomeFooter';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import PosterCarousel from '@/components/common/PosterCarousel';
+import ParsedDescription from '@/components/common/ParsedDescription';
 import axios from 'axios';
 import pdaLogo from '@/assets/pda-logo.png';
 import pdaGroupPhoto from '@/assets/pda-group-photo.png';
 import founderPhoto from '@/assets/founder.png';
 import { useAuth } from '@/context/AuthContext';
+import { filterPosterAssetsByRatio, parsePosterAssets, pickPosterAssetByRatio, resolvePosterUrl } from '@/utils/posterAssets';
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 const highlightStats = [
@@ -69,6 +72,14 @@ const formatDateRange = (event) => {
     return formatDate(start);
 };
 
+const extractEventSlug = (item) => {
+    if (item?.slug) return String(item.slug).trim().toLowerCase();
+    const heroUrl = String(item?.hero_url || '').trim();
+    if (!heroUrl) return '';
+    const match = heroUrl.match(/^\/events?\/([^/?#]+)/i);
+    return match?.[1] ? String(match[1]).trim().toLowerCase() : '';
+};
+
 export default function PdaHome() {
     const { user } = useAuth();
     const revealObserverRef = useRef(null);
@@ -126,17 +137,46 @@ export default function PdaHome() {
     useEffect(() => {
         const fetchPdaContent = async () => {
             try {
-                const [programsRes, eventsRes, teamRes, galleryRes, managedRes] = await Promise.all([
+                const [programsRes, eventsRes, teamRes, galleryRes, managedRes, allManagedRes] = await Promise.all([
                     axios.get(`${API}/pda/programs`, { params: { limit: PROGRAMS_FETCH_LIMIT } }),
                     axios.get(`${API}/pda/events`, { params: { limit: EVENTS_FETCH_LIMIT } }),
                     axios.get(`${API}/pda/team`),
                     axios.get(`${API}/pda/gallery`, { params: { limit: GALLERY_FETCH_LIMIT } }),
-                    axios.get(`${API}/pda/events/ongoing`)
+                    axios.get(`${API}/pda/events/ongoing`),
+                    axios.get(`${API}/pda/events/all`)
                 ]);
                 const programData = programsRes.data || [];
                 const eventData = eventsRes.data || [];
+                const managedAllData = allManagedRes.data || [];
+                const managedHomeCards = managedAllData.map((event) => ({
+                    id: `managed-${event.slug || event.id}`,
+                    type: 'event',
+                    title: event.title,
+                    description: event.description,
+                    poster_url: event.poster_url,
+                    start_date: event.start_date,
+                    end_date: event.end_date,
+                    format: event.format,
+                    hero_caption: null,
+                    hero_url: `/events/${event.slug}`,
+                    featured_poster_url: null,
+                    is_featured: false,
+                    created_at: event.created_at,
+                    slug: event.slug
+                }));
+                const mergedEventsMap = new Map();
+                [...eventData, ...managedHomeCards].forEach((event) => {
+                    const slug = extractEventSlug(event);
+                    const key = slug
+                        ? `slug:${slug}`
+                        : `${String(event.title || '').toLowerCase()}|${event.start_date || ''}|${event.end_date || ''}`;
+                    if (!mergedEventsMap.has(key)) {
+                        mergedEventsMap.set(key, event);
+                    }
+                });
+                const mergedEvents = Array.from(mergedEventsMap.values());
                 const sortedPrograms = sortByDateDesc(programData);
-                const sortedEvents = sortByDateDesc(eventData);
+                const sortedEvents = sortByDateDesc(mergedEvents);
                 setPrograms(sortedPrograms);
                 setEvents(sortedEvents);
                 const featuredList = [
@@ -190,7 +230,21 @@ export default function PdaHome() {
         return combined;
     })();
 
+    const getItemPosterAssets = (item) => {
+        const baseAssets = parsePosterAssets(item?.poster_url);
+        const featuredUrl = String(item?.featured_poster_url || '').trim();
+        if (featuredUrl && !baseAssets.some((asset) => asset.url === featuredUrl)) {
+            return [{ url: featuredUrl, aspect_ratio: '2:1' }, ...baseAssets];
+        }
+        return baseAssets;
+    };
+
     const activeFeaturedItem = combinedFeaturedItems[activeFeaturedIndex] || null;
+    const activeFeaturedPosterAssets = useMemo(() => {
+        const allAssets = getItemPosterAssets(activeFeaturedItem);
+        const filtered = filterPosterAssetsByRatio(allAssets, ['2:1', '1:1']);
+        return filtered.length ? filtered : allAssets;
+    }, [activeFeaturedItem]);
 
     useEffect(() => {
         if (combinedFeaturedItems.length <= 1) return;
@@ -269,8 +323,11 @@ export default function PdaHome() {
         });
 
     const openPoster = (poster) => {
-        if (!poster?.src) return;
-        setSelectedPoster(poster);
+        if (!poster?.assets?.length) return;
+        setSelectedPoster({
+            ...poster,
+            activeIndex: Number(poster.activeIndex || 0)
+        });
         setPosterDialogOpen(true);
     };
 
@@ -289,25 +346,31 @@ export default function PdaHome() {
         const meta = buildCardMeta(item);
         const cardKey = `${type}-${item.id || item.title}`;
         const description = item.description || '';
+        const eventSlug = extractEventSlug(item);
+        const cardAssets = filterPosterAssetsByRatio(getItemPosterAssets(item), ['4:5', '5:4']);
+        const preferredAsset = pickPosterAssetByRatio(cardAssets, ['4:5', '5:4']);
+        const preferredSrc = resolvePosterUrl(preferredAsset?.url);
         return (
             <button
                 key={cardKey}
                 type="button"
                 onClick={() =>
                     openPoster({
-                        src: item.poster_url,
+                        assets: cardAssets,
+                        activeIndex: preferredAsset ? cardAssets.findIndex((asset) => asset.url === preferredAsset.url) : 0,
                         title: item.title,
                         meta,
-                        description
+                        description,
+                        eventSlug
                     })
                 }
                 className={`flex h-full min-h-[360px] w-full flex-col rounded-2xl border border-black/10 bg-white p-5 text-left transition hover:-translate-y-1 hover:border-black/25 hover:shadow-md ${
-                    item.poster_url ? 'cursor-pointer' : 'cursor-default'
+                    cardAssets.length ? 'cursor-pointer' : 'cursor-default'
                 }`}
             >
-                {item.poster_url ? (
+                {preferredSrc ? (
                     <img
-                        src={item.poster_url}
+                        src={preferredSrc}
                         alt={item.title}
                         loading="lazy"
                         className="mb-4 aspect-[4/5] w-full rounded-xl object-cover"
@@ -321,8 +384,8 @@ export default function PdaHome() {
                 ) : null}
                 <h3 className="mt-4 text-xl font-heading font-bold line-clamp-2">{item.title}</h3>
                 {description ? (
-                    <div className="mt-2 max-h-24 overflow-y-auto pr-2 text-sm text-slate-700">
-                        {description}
+                    <div className="mt-2 max-h-24 space-y-1 overflow-y-auto pr-2 text-sm text-slate-700">
+                        <ParsedDescription description={description} />
                     </div>
                 ) : null}
                 <span className="mt-auto" />
@@ -387,7 +450,7 @@ export default function PdaHome() {
                                     </div>
                                 </div>
                                 <div className="mt-5 rounded-2xl border border-black/10 bg-[#11131a] px-4 py-3 text-[11px] uppercase tracking-[0.25em] text-[#f6c347]">
-                                    Stars Behind Crestora'25, PERSOFEST'26
+                                    Stars Behind PDA Initiatives
                                 </div>
                             </div>
                         </div>
@@ -396,7 +459,7 @@ export default function PdaHome() {
 
                 {combinedFeaturedItems.length > 0 ? (
                     <section className="mx-auto w-full max-w-6xl px-5 pb-8">
-                        <div className="grid gap-6 rounded-3xl border border-black/10 bg-gradient-to-r from-[#fff1c7] via-[#fff8e8] to-white p-6 md:grid-cols-2 md:min-h-[320px] lg:grid-cols-[1.2fr_0.8fr]" data-reveal>
+                        <div className="featured-glow-card grid gap-6 rounded-3xl border border-black/10 bg-gradient-to-r from-[#fff1c7] via-[#fff8e8] to-white p-6 md:grid-cols-2 md:min-h-[320px] lg:grid-cols-[1.2fr_0.8fr]" data-reveal>
                             <div className={`transition-opacity duration-700 ease-in-out ${isFeaturedFading ? 'opacity-0' : 'opacity-100'} flex flex-col min-h-[220px]`}>
                                 <p className="text-xs uppercase tracking-[0.4em] text-[#8b6a00]">Featured & Ongoing</p>
                                 <h2 className="mt-3 text-3xl font-heading font-black text-[#0f1115]">
@@ -439,32 +502,25 @@ export default function PdaHome() {
                                 ) : null}
                             </div>
                             <div className={`flex items-center justify-center transition-opacity duration-700 ease-in-out ${isFeaturedFading ? 'opacity-0' : 'opacity-100'}`}>
-                                {activeFeaturedItem?.featured_poster_url || activeFeaturedItem?.poster_url ? (
-                                    <button
-                                        type="button"
-                                        onClick={() =>
-                                            openPoster({
-                                                src: activeFeaturedItem?.featured_poster_url || activeFeaturedItem?.poster_url,
-                                                title: activeFeaturedItem?.title,
-                                                meta: `${formatDateRange(activeFeaturedItem)}${
-                                                    activeFeaturedItem?.format ? ` · ${activeFeaturedItem?.format}` : ''
-                                                }`,
-                                                description: activeFeaturedItem?.description || ''
-                                            })
-                                        }
-                                        className="w-full"
-                                    >
-                                        <img
-                                            src={activeFeaturedItem?.featured_poster_url || activeFeaturedItem?.poster_url}
-                                            alt={activeFeaturedItem?.title}
-                                            className="aspect-[2/1] w-full rounded-2xl border border-black/10 object-cover"
-                                        />
-                                    </button>
-                                ) : (
-                                    <div className="flex aspect-[2/1] w-full items-center justify-center rounded-2xl border border-dashed border-black/20 bg-white text-sm text-slate-500">
-                                        Poster coming soon
-                                    </div>
-                                )}
+                                <PosterCarousel
+                                    assets={activeFeaturedPosterAssets}
+                                    title={activeFeaturedItem?.title || 'Featured'}
+                                    className="aspect-[2/1] w-full overflow-hidden rounded-2xl border border-black/10"
+                                    imageClassName="h-full w-full object-cover"
+                                    emptyClassName="flex aspect-[2/1] w-full items-center justify-center rounded-2xl border border-dashed border-black/20 bg-white text-sm text-slate-500"
+                                    onClick={(_asset, posterIndex) =>
+                                        openPoster({
+                                            assets: activeFeaturedPosterAssets,
+                                            activeIndex: posterIndex,
+                                            title: activeFeaturedItem?.title,
+                                            meta: `${formatDateRange(activeFeaturedItem)}${
+                                                activeFeaturedItem?.format ? ` · ${activeFeaturedItem?.format}` : ''
+                                            }`,
+                                            description: activeFeaturedItem?.description || '',
+                                            eventSlug: extractEventSlug(activeFeaturedItem)
+                                        })
+                                    }
+                                />
                             </div>
                             {combinedFeaturedItems.length > 1 ? (
                                 <div className="md:col-span-2 flex items-center justify-center gap-2 pt-2">
@@ -696,20 +752,6 @@ export default function PdaHome() {
                     </div>
                 </section>
 
-                <section className="mx-auto w-full max-w-6xl px-5 py-10 md:py-14" data-reveal>
-                    <div className="rounded-3xl border border-black/10 bg-gradient-to-r from-[#11131a] via-[#1a1d26] to-[#11131a] p-8 text-white md:p-12">
-                        <p className="text-xs uppercase tracking-[0.4em] text-[#f6c347]">Flagship Festival</p>
-                        <h2 className="mt-3 text-2xl font-heading font-black text-white sm:text-3xl">Ready to explore Persofest’26?</h2>
-                        <p className="mt-3 max-w-2xl text-slate-200">
-                            Discover our flagship personality development festival, its rounds, and the opportunities waiting for you.
-                        </p>
-                        <Link to="/persofest" className="mt-6 inline-flex items-center gap-2 rounded-md bg-[#f6c347] px-4 py-2 text-sm font-semibold text-black hover:bg-[#ffd16b]">
-                            Go to Persofest’26
-                            <ArrowRight className="h-4 w-4" />
-                        </Link>
-                    </div>
-                </section>
-
                 <section className="mx-auto w-full max-w-6xl px-5 py-10 md:py-14">
                     <div className="flex flex-col gap-4" data-reveal>
                         <div>
@@ -930,27 +972,40 @@ export default function PdaHome() {
             <HomeFooter />
 
             <Dialog open={posterDialogOpen} onOpenChange={setPosterDialogOpen}>
-                <DialogContent className="max-w-4xl bg-white p-0">
+                <DialogContent className="max-h-[82vh] h-[82vh] max-w-4xl bg-white p-0">
                     <DialogHeader className="px-6 pb-4 pt-6">
                         <DialogTitle className="text-xl font-heading font-black">{selectedPoster?.title}</DialogTitle>
                         {selectedPoster?.meta ? (
                             <p className="mt-1 text-xs uppercase tracking-[0.2em] text-slate-500">{selectedPoster.meta}</p>
                         ) : null}
                     </DialogHeader>
-                    <div className="flex flex-col gap-6 px-6 pb-6 md:flex-row">
-                        {selectedPoster?.src ? (
-                            <div className="w-full md:w-1/2">
-                                <img
-                                    src={selectedPoster.src}
-                                    alt={selectedPoster.title || 'Poster'}
-                                    className="max-h-[70vh] w-full rounded-2xl object-contain"
+                    <div className="flex h-[calc(82vh-96px)] flex-col gap-6 overflow-hidden px-6 pb-6 md:flex-row">
+                        <div className="h-1/2 w-full md:h-full md:w-1/2">
+                            <PosterCarousel
+                                assets={selectedPoster?.assets || []}
+                                title={selectedPoster?.title || 'Poster'}
+                                initialIndex={selectedPoster?.activeIndex || 0}
+                                className="h-full w-full overflow-hidden rounded-2xl border border-black/10 bg-[#f8f8f8]"
+                                imageClassName="h-full w-full object-contain"
+                                emptyClassName="flex h-full w-full items-center justify-center rounded-2xl border border-dashed border-black/20 bg-white text-sm text-slate-500"
+                            />
+                        </div>
+                        <div className="h-1/2 w-full overflow-y-auto md:h-full md:w-1/2">
+                            <div className="text-sm leading-relaxed text-slate-700">
+                                <ParsedDescription
+                                    description={selectedPoster?.description || ''}
+                                    emptyText="No description available."
                                 />
                             </div>
-                        ) : null}
-                        <div className="w-full md:w-1/2">
-                            <p className="text-sm leading-relaxed text-slate-700">
-                                {selectedPoster?.description || 'No description available.'}
-                            </p>
+                            {selectedPoster?.eventSlug ? (
+                                <div className="mt-4">
+                                    <Link to={`/events/${selectedPoster.eventSlug}`}>
+                                        <Button className="bg-[#11131a] text-white hover:bg-[#1f2330]">
+                                            Open Event
+                                        </Button>
+                                    </Link>
+                                </div>
+                            ) : null}
                         </div>
                     </div>
                 </DialogContent>

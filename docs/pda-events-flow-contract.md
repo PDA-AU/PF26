@@ -1,8 +1,6 @@
 # PDA Managed Events Flow Contract
 
 ## Scope
-- This flow is isolated from Persofest.
-- Persofest tables, APIs, and UI remain untouched.
 - Managed events are served through:
   - User routes: `/events/:eventSlug`
   - Admin routes: `/admin/events` and `/admin/events/:eventSlug`
@@ -75,7 +73,6 @@
 ```json
 {
   "home": true,
-  "pf": true,
   "superAdmin": false,
   "events": {
     "event-slug": true
@@ -138,13 +135,11 @@
 - validates attendance, scoring, freeze/unfreeze, exports, badges, certificate eligibility
 
 ### Existing regression checks
-1. `tests/persofest_control_flow.sh`
-2. `tests/pda_home_smoke.sh`
+1. `tests/pda_home_smoke.sh`
 
 ### Recommended run order
 1. `python3 backend/scripts/seed_pda_events_mock.py`
 2. `tests/pda_events_schema_smoke.sh`
 3. `tests/pda_events_registration_flow.sh`
 4. `tests/pda_events_admin_control_flow.sh`
-5. `tests/persofest_control_flow.sh`
-6. `tests/pda_home_smoke.sh`
+5. `tests/pda_home_smoke.sh`

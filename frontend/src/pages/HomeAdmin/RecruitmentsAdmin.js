@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useAuth } from '@/context/AuthContext';
 import AdminLayout from '@/pages/HomeAdmin/AdminLayout';
 import { API, uploadTeamImage } from '@/pages/HomeAdmin/adminApi';
@@ -86,6 +87,11 @@ export default function RecruitmentsAdmin() {
     const [exporting, setExporting] = useState(false);
     const [recruitSearch, setRecruitSearch] = useState('');
     const [recruitTeamFilter, setRecruitTeamFilter] = useState('All');
+    const [approveDialogOpen, setApproveDialogOpen] = useState(false);
+    const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
+    const [approveConfirmText, setApproveConfirmText] = useState('');
+    const [rejectConfirmText, setRejectConfirmText] = useState('');
+    const [bulkActionLoading, setBulkActionLoading] = useState(false);
 
     const fetchRecruitments = useCallback(async () => {
         try {
@@ -94,7 +100,7 @@ export default function RecruitmentsAdmin() {
             const initial = {};
             (res.data || []).forEach((recruit) => {
                 initial[recruit.id] = {
-                    team: recruit.preferred_team || '',
+                    team: recruit.preferred_team_1 || recruit.preferred_team || '',
                     designation: 'Member'
                 };
             });
@@ -130,6 +136,7 @@ export default function RecruitmentsAdmin() {
 
     const approveRecruitments = async () => {
         if (selectedRecruitments.length === 0) return;
+        setBulkActionLoading(true);
         try {
             const payload = selectedRecruitments.map((id) => ({
                 id,
@@ -138,10 +145,43 @@ export default function RecruitmentsAdmin() {
             }));
             await axios.post(`${API}/pda-admin/recruitments/approve`, payload, { headers: getAuthHeader() });
             setSelectedRecruitments([]);
+            setApproveDialogOpen(false);
+            setApproveConfirmText('');
             fetchRecruitments();
         } catch (error) {
             console.error('Failed to approve recruitments:', error);
+        } finally {
+            setBulkActionLoading(false);
         }
+    };
+
+    const rejectRecruitments = async () => {
+        if (selectedRecruitments.length === 0) return;
+        setBulkActionLoading(true);
+        try {
+            const payload = selectedRecruitments.map((id) => ({ id }));
+            await axios.post(`${API}/pda-admin/recruitments/reject`, payload, { headers: getAuthHeader() });
+            setSelectedRecruitments([]);
+            setRejectDialogOpen(false);
+            setRejectConfirmText('');
+            fetchRecruitments();
+        } catch (error) {
+            console.error('Failed to reject recruitments:', error);
+        } finally {
+            setBulkActionLoading(false);
+        }
+    };
+
+    const openApproveDialog = () => {
+        if (selectedRecruitments.length === 0) return;
+        setApproveConfirmText('');
+        setApproveDialogOpen(true);
+    };
+
+    const openRejectDialog = () => {
+        if (selectedRecruitments.length === 0) return;
+        setRejectConfirmText('');
+        setRejectDialogOpen(true);
     };
 
     const handleMemberChange = (e) => {
@@ -212,7 +252,7 @@ export default function RecruitmentsAdmin() {
     }
 
     const filteredRecruitments = recruitments.filter((recruit) => {
-        const preferredTeam = recruit?.preferred_team;
+        const preferredTeam = recruit?.preferred_team_1 || recruit?.preferred_team;
         const teamMatch = recruitTeamFilter === 'All'
             || (recruitTeamFilter === 'Unassigned' && !preferredTeam)
             || preferredTeam === recruitTeamFilter;
@@ -322,8 +362,11 @@ export default function RecruitmentsAdmin() {
                         <Button onClick={exportRecruitments} variant="outline" className="border-black/10 text-sm" disabled={exporting}>
                             {exporting ? 'Exporting...' : 'Export Excel'}
                         </Button>
-                        <Button onClick={approveRecruitments} className="bg-[#f6c347] text-black hover:bg-[#ffd16b]">
+                        <Button onClick={openApproveDialog} className="bg-[#f6c347] text-black hover:bg-[#ffd16b]" disabled={selectedRecruitments.length === 0}>
                             Approve Selected
+                        </Button>
+                        <Button onClick={openRejectDialog} variant="outline" className="border-black/20 text-sm" disabled={selectedRecruitments.length === 0}>
+                            Reject Selected
                         </Button>
                     </div>
                 </div>
@@ -387,8 +430,25 @@ export default function RecruitmentsAdmin() {
                                         {recruit.email} · {recruit.phno || 'No phone'} · DOB: {recruit.dob || 'N/A'}
                                     </p>
                                     <p className="text-xs text-slate-500">
-                                        Preferred: {recruit.preferred_team || 'N/A'} · Dept: {recruit.dept || 'N/A'}
+                                        Preferred 1: {recruit.preferred_team_1 || recruit.preferred_team || 'N/A'} · Preferred 2: {recruit.preferred_team_2 || 'N/A'} · Preferred 3: {recruit.preferred_team_3 || 'N/A'}
                                     </p>
+                                    <p className="text-xs text-slate-500">
+                                        Dept: {recruit.dept || 'N/A'}
+                                    </p>
+                                    <div className="mt-2">
+                                        {recruit.resume_url ? (
+                                            <a
+                                                href={recruit.resume_url}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="inline-flex items-center rounded-md border border-black/20 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                                            >
+                                                View Resume
+                                            </a>
+                                        ) : (
+                                            <span className="text-xs text-slate-500">Resume: N/A</span>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                             <div className="grid gap-3 md:ml-auto md:min-w-[260px]">
@@ -438,6 +498,90 @@ export default function RecruitmentsAdmin() {
                     )}
                 </div>
             </section>
+
+            <Dialog open={approveDialogOpen} onOpenChange={setApproveDialogOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Confirm Approve</DialogTitle>
+                        <DialogDescription>
+                            This will approve {selectedRecruitments.length} selected application(s). Type <span className="font-semibold">APPROVE</span> to continue.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-2">
+                        <Label htmlFor="approve-confirm-input">Type APPROVE</Label>
+                        <Input
+                            id="approve-confirm-input"
+                            value={approveConfirmText}
+                            onChange={(e) => setApproveConfirmText(e.target.value)}
+                            placeholder="APPROVE"
+                            autoComplete="off"
+                        />
+                    </div>
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => {
+                                setApproveDialogOpen(false);
+                                setApproveConfirmText('');
+                            }}
+                            disabled={bulkActionLoading}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            type="button"
+                            onClick={approveRecruitments}
+                            disabled={bulkActionLoading || approveConfirmText.trim().toUpperCase() !== 'APPROVE'}
+                            className="bg-[#f6c347] text-black hover:bg-[#ffd16b]"
+                        >
+                            {bulkActionLoading ? 'Approving...' : 'Confirm Approve'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={rejectDialogOpen} onOpenChange={setRejectDialogOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Confirm Reject</DialogTitle>
+                        <DialogDescription>
+                            This will reject {selectedRecruitments.length} selected application(s). Type <span className="font-semibold">REJECT</span> to continue.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-2">
+                        <Label htmlFor="reject-confirm-input">Type REJECT</Label>
+                        <Input
+                            id="reject-confirm-input"
+                            value={rejectConfirmText}
+                            onChange={(e) => setRejectConfirmText(e.target.value)}
+                            placeholder="REJECT"
+                            autoComplete="off"
+                        />
+                    </div>
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => {
+                                setRejectDialogOpen(false);
+                                setRejectConfirmText('');
+                            }}
+                            disabled={bulkActionLoading}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            type="button"
+                            onClick={rejectRecruitments}
+                            disabled={bulkActionLoading || rejectConfirmText.trim().toUpperCase() !== 'REJECT'}
+                            variant="destructive"
+                        >
+                            {bulkActionLoading ? 'Rejecting...' : 'Confirm Reject'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </AdminLayout>
     );
 }

@@ -15,6 +15,7 @@ from database import get_db
 from models import (
     PdaAdmin,
     PdaUser,
+    PdaItem,
     PdaEvent,
     PdaEventType,
     PdaEventFormat,
@@ -129,6 +130,45 @@ def _to_round_state(value) -> PdaEventRoundState:
 def _validate_event_dates(start_date, end_date) -> None:
     if start_date and end_date and start_date > end_date:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="start_date cannot be after end_date")
+
+
+def _managed_event_home_link(slug: str) -> str:
+    return f"/events/{slug}"
+
+
+def _find_managed_home_item(db: Session, slug: str) -> Optional[PdaItem]:
+    link = _managed_event_home_link(slug)
+    return (
+        db.query(PdaItem)
+        .filter(
+            PdaItem.type == "event",
+            PdaItem.hero_url == link,
+        )
+        .first()
+    )
+
+
+def _sync_managed_event_to_home_item(db: Session, event: PdaEvent) -> None:
+    item = _find_managed_home_item(db, event.slug)
+    if not item:
+        item = PdaItem(type="event")
+        db.add(item)
+
+    item.title = event.title
+    item.description = event.description
+    item.poster_url = event.poster_url
+    item.start_date = event.start_date
+    item.end_date = event.end_date
+    item.format = event.format.value if hasattr(event.format, "value") else str(event.format)
+    item.hero_url = _managed_event_home_link(event.slug)
+    item.hero_caption = item.hero_caption or event.description
+    item.tag = item.tag or "managed-event"
+
+
+def _delete_managed_home_item(db: Session, slug: str) -> None:
+    item = _find_managed_home_item(db, slug)
+    if item:
+        db.delete(item)
 
 
 def _entity_from_payload(event: PdaEvent, row: dict) -> Tuple[PdaEventEntityType, Optional[int], Optional[int]]:
@@ -322,6 +362,8 @@ def create_managed_event(
             )
         )
 
+    _sync_managed_event_to_home_item(db, new_event)
+
     # Add dynamic event policy key for all admins.
     admin_rows = db.query(PdaAdmin).all()
     for row in admin_rows:
@@ -384,6 +426,8 @@ def update_managed_event(
 
     for field, value in updates.items():
         setattr(event, field, value)
+
+    _sync_managed_event_to_home_item(db, event)
 
     db.commit()
     db.refresh(event)
@@ -453,6 +497,7 @@ def delete_managed_event(
             del policy["events"][event_slug]
             row.policy = policy
 
+    _delete_managed_home_item(db, event_slug)
     db.delete(event)
     db.commit()
 
