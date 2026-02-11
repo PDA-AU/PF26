@@ -7,6 +7,7 @@ import {
     Filter,
     UserCheck,
     UserX,
+    Trash2,
     Download,
     ChevronLeft,
     ChevronRight,
@@ -57,6 +58,9 @@ function ParticipantsContent() {
     const [statusDialogOpen, setStatusDialogOpen] = useState(false);
     const [statusTarget, setStatusTarget] = useState(null);
     const [pendingStatus, setPendingStatus] = useState(null);
+    const [teamDeleteDialogOpen, setTeamDeleteDialogOpen] = useState(false);
+    const [teamDeleteTarget, setTeamDeleteTarget] = useState(null);
+    const [deletingTeam, setDeletingTeam] = useState(false);
     const [filters, setFilters] = useState({
         department: '',
         gender: '',
@@ -172,10 +176,33 @@ function ParticipantsContent() {
         }
     };
 
+    const handleTeamDelete = async (teamId) => {
+        setDeletingTeam(true);
+        try {
+            await axios.delete(`${API}/pda-admin/events/${eventSlug}/teams/${teamId}`, {
+                headers: getAuthHeader(),
+            });
+            toast.success('Team deleted');
+            if (selectedEntity?.entity_id === teamId) {
+                setSelectedEntity(null);
+            }
+            fetchRows();
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to delete team'));
+        } finally {
+            setDeletingTeam(false);
+        }
+    };
+
     const openStatusDialog = (row, newStatus) => {
         setStatusTarget(row);
         setPendingStatus(newStatus);
         setStatusDialogOpen(true);
+    };
+
+    const openTeamDeleteDialog = (row) => {
+        setTeamDeleteTarget(row);
+        setTeamDeleteDialogOpen(true);
     };
 
     const openEntityModal = async (row) => {
@@ -401,7 +428,18 @@ function ParticipantsContent() {
                                                 </Button>
                                             )
                                         ) : (
-                                            <span className="text-xs text-gray-500">Details</span>
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    openTeamDeleteDialog(row);
+                                                }}
+                                                className="border-2 border-black text-red-500"
+                                                title="Delete team with cascade"
+                                            >
+                                                <Trash2 className="w-4 h-4" />
+                                            </Button>
                                         )}
                                     </td>
                                 </tr>
@@ -438,6 +476,46 @@ function ParticipantsContent() {
                                 }}
                             >
                                 Confirm
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={teamDeleteDialogOpen} onOpenChange={setTeamDeleteDialogOpen}>
+                <DialogContent className="border-4 border-black">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading font-bold text-xl">Delete Team</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <p className="text-gray-600">
+                            Delete <span className="font-semibold">{teamDeleteTarget?.name || 'this team'}</span> ({teamDeleteTarget?.regno_or_code || '-'})?
+                            This will cascade-remove registration, members, scores, attendance, badges, and invites for this event.
+                        </p>
+                        <div className="flex gap-2">
+                            <Button
+                                variant="outline"
+                                className="flex-1 border-2 border-black"
+                                onClick={() => {
+                                    if (deletingTeam) return;
+                                    setTeamDeleteDialogOpen(false);
+                                    setTeamDeleteTarget(null);
+                                }}
+                                disabled={deletingTeam}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                className="flex-1 bg-red-500 text-white border-2 border-black"
+                                disabled={!teamDeleteTarget || deletingTeam}
+                                onClick={async () => {
+                                    if (!teamDeleteTarget) return;
+                                    await handleTeamDelete(teamDeleteTarget.entity_id);
+                                    setTeamDeleteDialogOpen(false);
+                                    setTeamDeleteTarget(null);
+                                }}
+                            >
+                                {deletingTeam ? 'Deleting...' : 'Delete Team'}
                             </Button>
                         </div>
                     </div>

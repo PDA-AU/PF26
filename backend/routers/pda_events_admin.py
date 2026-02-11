@@ -908,6 +908,65 @@ def team_details(
     )
 
 
+@router.delete("/pda-admin/events/{slug}/teams/{team_id}")
+def delete_team_with_cascade(
+    slug: str,
+    team_id: int,
+    admin: PdaUser = Depends(require_pda_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    if event.participant_mode != PdaEventParticipantMode.TEAM:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Team deletion is only available for team events")
+
+    team = db.query(PdaEventTeam).filter(PdaEventTeam.event_id == event.id, PdaEventTeam.id == team_id).first()
+    if not team:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+
+    team_name = str(team.team_name)
+    team_code = str(team.team_code)
+
+    db.query(PdaEventInvite).filter(
+        PdaEventInvite.event_id == event.id,
+        PdaEventInvite.team_id == team_id,
+    ).delete(synchronize_session=False)
+    db.query(PdaEventBadge).filter(
+        PdaEventBadge.event_id == event.id,
+        PdaEventBadge.team_id == team_id,
+    ).delete(synchronize_session=False)
+    db.query(PdaEventScore).filter(
+        PdaEventScore.event_id == event.id,
+        PdaEventScore.team_id == team_id,
+    ).delete(synchronize_session=False)
+    db.query(PdaEventAttendance).filter(
+        PdaEventAttendance.event_id == event.id,
+        PdaEventAttendance.team_id == team_id,
+    ).delete(synchronize_session=False)
+    db.query(PdaEventRegistration).filter(
+        PdaEventRegistration.event_id == event.id,
+        PdaEventRegistration.team_id == team_id,
+    ).delete(synchronize_session=False)
+    db.query(PdaEventTeamMember).filter(
+        PdaEventTeamMember.team_id == team_id
+    ).delete(synchronize_session=False)
+    db.query(PdaEventTeam).filter(
+        PdaEventTeam.event_id == event.id,
+        PdaEventTeam.id == team_id,
+    ).delete(synchronize_session=False)
+    db.commit()
+
+    _log_event_admin_action(
+        db,
+        admin,
+        event,
+        "delete_pda_event_team",
+        method="DELETE",
+        path=f"/pda-admin/events/{slug}/teams/{team_id}",
+        meta={"team_id": team_id, "team_code": team_code, "team_name": team_name},
+    )
+    return {"message": "Team deleted", "team_id": team_id}
+
+
 @router.get("/pda-admin/events/{slug}/attendance")
 def event_attendance(
     slug: str,

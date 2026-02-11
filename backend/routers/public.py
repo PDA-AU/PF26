@@ -165,6 +165,8 @@ def list_routes():
             {"method": "GET", "path": "/pda-admin/events/{slug}/participants/{user_id}/rounds"},
             {"method": "GET", "path": "/pda-admin/events/{slug}/participants/{user_id}/summary"},
             {"method": "PUT", "path": "/pda-admin/events/{slug}/participants/{user_id}/status"},
+            {"method": "GET", "path": "/pda-admin/events/{slug}/teams/{team_id}"},
+            {"method": "DELETE", "path": "/pda-admin/events/{slug}/teams/{team_id}"},
             {"method": "GET", "path": "/pda-admin/events/{slug}/rounds/{round_id}/participants"},
             {"method": "POST", "path": "/pda-admin/events/{slug}/rounds/{round_id}/scores"},
             {"method": "POST", "path": "/pda-admin/events/{slug}/rounds/{round_id}/import-scores"},
