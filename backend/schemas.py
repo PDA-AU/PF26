@@ -248,6 +248,14 @@ class PdaUserUpdate(BaseModel):
             raise ValueError("profile_name must match [a-z0-9_] and be 3-40 chars")
         return v
 
+    @field_validator("gender", "dept")
+    @classmethod
+    def normalize_optional_profile_fields(cls, v):
+        if v is None:
+            return None
+        value = str(v).strip()
+        return value or None
+
 
 class PdaForgotPasswordRequest(BaseModel):
     email: Optional[EmailStr] = None
@@ -770,6 +778,14 @@ class PdaAdminUserUpdate(BaseModel):
     linkedin_url: Optional[str] = None
     github_url: Optional[str] = None
     clear_team: Optional[bool] = None
+
+    @field_validator("dept", "gender")
+    @classmethod
+    def normalize_optional_admin_profile_fields(cls, v):
+        if v is None:
+            return None
+        value = str(v).strip()
+        return value or None
 
 
 class PdaGalleryCreate(BaseModel):

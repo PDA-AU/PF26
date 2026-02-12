@@ -324,6 +324,8 @@ export default function PdaProfile() {
             toast.error('Profile name must be 3-40 chars: lowercase letters, numbers, underscore');
             return;
         }
+        const normalizedGender = String(formData.gender || '').trim();
+        const normalizedDept = String(formData.dept || '').trim();
         const instagram_url = String(formData.instagram_url || '').trim();
         const linkedin_url = String(formData.linkedin_url || '').trim();
         const github_url = String(formData.github_url || '').trim();
@@ -334,13 +336,17 @@ export default function PdaProfile() {
                 profile_name: profile_name || null,
                 email: formData.email,
                 dob: formData.dob,
-                gender: formData.gender,
                 phno: formData.phno,
-                dept: formData.dept,
                 instagram_url: instagram_url || null,
                 linkedin_url: linkedin_url || null,
                 github_url: github_url || null
             };
+            if (normalizedGender) {
+                payload.gender = normalizedGender;
+            }
+            if (normalizedDept) {
+                payload.dept = normalizedDept;
+            }
 
             const response = await axios.put(`${API}/me`, payload, { headers: getAuthHeader() });
             let updatedUser = response.data;
