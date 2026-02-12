@@ -10,6 +10,8 @@ import io
 from database import get_db
 from models import PdaUser, PdaTeam, PdaAdmin, SystemConfig
 from schemas import (
+    DepartmentEnum,
+    GenderEnum,
     PdaUserRegister,
     PdaRecruitmentApplyRequest,
     PdaRecruitmentResumeUpdateRequest,
@@ -42,6 +44,13 @@ import os
 
 router = APIRouter()
 DEFAULT_PDA_RECRUIT_URL = "https://chat.whatsapp.com/ErThvhBS77kGJEApiABP2z"
+ALLOWED_PDA_GENDERS = {choice.value for choice in GenderEnum}
+ALLOWED_PDA_DEPARTMENTS = {choice.value for choice in DepartmentEnum}
+
+
+def _normalize_optional_choice(value: Optional[str], allowed_values: set[str]) -> Optional[str]:
+    normalized = str(value or "").strip()
+    return normalized if normalized in allowed_values else None
 
 
 def _get_recruitment_config(db: Session) -> SystemConfig:
@@ -72,9 +81,9 @@ def _build_pda_user_response(db: Session, user: PdaUser) -> PdaUserResponse:
         name=user.name,
         profile_name=user.profile_name,
         dob=user.dob,
-        gender=user.gender,
+        gender=_normalize_optional_choice(user.gender, ALLOWED_PDA_GENDERS),
         phno=user.phno,
-        dept=user.dept,
+        dept=_normalize_optional_choice(user.dept, ALLOWED_PDA_DEPARTMENTS),
         image_url=user.image_url,
         is_member=user.is_member,
         is_applied=bool(recruit["is_applied"]),
@@ -133,9 +142,9 @@ def pda_register(user_data: PdaUserRegister, db: Session = Depends(get_db)):
         name=user_data.name,
         profile_name=desired_profile_name or generate_unique_profile_name(db, user_data.name),
         dob=user_data.dob,
-        gender=user_data.gender,
+        gender=user_data.gender.value if user_data.gender else None,
         phno=user_data.phno,
-        dept=user_data.dept,
+        dept=user_data.dept.value if user_data.dept else None,
         image_url=user_data.image_url,
         json_content={},
         is_member=False
@@ -299,11 +308,11 @@ def update_pda_me(
     if update_data.dob is not None:
         user.dob = update_data.dob
     if update_data.gender is not None:
-        user.gender = update_data.gender
+        user.gender = update_data.gender.value
     if update_data.phno is not None:
         user.phno = update_data.phno
     if update_data.dept is not None:
-        user.dept = update_data.dept
+        user.dept = update_data.dept.value
     if update_data.image_url is not None:
         user.image_url = update_data.image_url
     if "instagram_url" in update_data.model_fields_set:

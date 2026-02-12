@@ -145,9 +145,9 @@ class PdaUserRegister(BaseModel):
     regno: str = Field(..., min_length=6, max_length=20)
     email: EmailStr
     dob: date
-    gender: Optional[str] = None
+    gender: Optional[GenderEnum] = None
     phno: Optional[str] = None
-    dept: Optional[str] = None
+    dept: Optional[DepartmentEnum] = None
     password: str = Field(..., min_length=6)
     image_url: Optional[str] = None
     preferred_team: Optional[str] = None
@@ -167,6 +167,14 @@ class PdaUserRegister(BaseModel):
         if not re.fullmatch(r"[a-z0-9_]{3,40}", v):
             raise ValueError("profile_name must match [a-z0-9_] and be 3-40 chars")
         return v
+
+    @field_validator("gender", "dept", mode="before")
+    @classmethod
+    def normalize_optional_profile_enum_fields(cls, v):
+        if v is None:
+            return None
+        value = str(v).strip()
+        return value or None
 
 
 class PdaRecruitmentApplyRequest(BaseModel):
@@ -231,9 +239,9 @@ class PdaUserUpdate(BaseModel):
     profile_name: Optional[str] = None
     email: Optional[EmailStr] = None
     dob: Optional[date] = None
-    gender: Optional[str] = None
+    gender: Optional[GenderEnum] = None
     phno: Optional[str] = None
-    dept: Optional[str] = None
+    dept: Optional[DepartmentEnum] = None
     image_url: Optional[str] = None
     instagram_url: Optional[str] = None
     linkedin_url: Optional[str] = None
@@ -248,7 +256,7 @@ class PdaUserUpdate(BaseModel):
             raise ValueError("profile_name must match [a-z0-9_] and be 3-40 chars")
         return v
 
-    @field_validator("gender", "dept")
+    @field_validator("gender", "dept", mode="before")
     @classmethod
     def normalize_optional_profile_fields(cls, v):
         if v is None:
@@ -270,9 +278,9 @@ class PdaUserResponse(BaseModel):
     name: str
     profile_name: Optional[str] = None
     dob: Optional[date] = None
-    gender: Optional[str] = None
+    gender: Optional[GenderEnum] = None
     phno: Optional[str] = None
-    dept: Optional[str] = None
+    dept: Optional[DepartmentEnum] = None
     image_url: Optional[str] = None
     is_member: bool
     is_applied: bool = False
@@ -682,7 +690,7 @@ class PdaTeamCreate(BaseModel):
     user_id: Optional[int] = None
     regno: Optional[str] = None
     name: Optional[str] = None
-    dept: Optional[str] = None
+    dept: Optional[DepartmentEnum] = None
     email: Optional[str] = None
     phno: Optional[str] = None
     team: Optional["PdaTeamName"] = None
@@ -692,12 +700,20 @@ class PdaTeamCreate(BaseModel):
     linkedin_url: Optional[str] = None
     github_url: Optional[str] = None
 
+    @field_validator("dept", mode="before")
+    @classmethod
+    def normalize_optional_team_dept(cls, v):
+        if v is None:
+            return None
+        value = str(v).strip()
+        return value or None
+
 
 class PdaTeamUpdate(BaseModel):
     user_id: Optional[int] = None
     regno: Optional[str] = None
     name: Optional[str] = None
-    dept: Optional[str] = None
+    dept: Optional[DepartmentEnum] = None
     email: Optional[str] = None
     phno: Optional[str] = None
     dob: Optional[date] = None
@@ -707,6 +723,14 @@ class PdaTeamUpdate(BaseModel):
     instagram_url: Optional[str] = None
     linkedin_url: Optional[str] = None
     github_url: Optional[str] = None
+
+    @field_validator("dept", mode="before")
+    @classmethod
+    def normalize_optional_team_dept(cls, v):
+        if v is None:
+            return None
+        value = str(v).strip()
+        return value or None
 
 
 class PdaTeamResponse(BaseModel):
@@ -767,9 +791,9 @@ class PdaAdminUserUpdate(BaseModel):
     profile_name: Optional[str] = None
     email: Optional[str] = None
     phno: Optional[str] = None
-    dept: Optional[str] = None
+    dept: Optional[DepartmentEnum] = None
     dob: Optional[date] = None
-    gender: Optional[str] = None
+    gender: Optional[GenderEnum] = None
     is_member: Optional[bool] = None
     team: Optional["PdaTeamName"] = None
     designation: Optional["PdaTeamDesignation"] = None
@@ -779,7 +803,7 @@ class PdaAdminUserUpdate(BaseModel):
     github_url: Optional[str] = None
     clear_team: Optional[bool] = None
 
-    @field_validator("dept", "gender")
+    @field_validator("dept", "gender", mode="before")
     @classmethod
     def normalize_optional_admin_profile_fields(cls, v):
         if v is None:

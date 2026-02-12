@@ -90,6 +90,47 @@ def ensure_pda_users_gender_column(engine):
             conn.execute(text("ALTER TABLE users ADD COLUMN gender VARCHAR(10)"))
 
 
+def normalize_pda_profile_enum_values(engine):
+    with engine.begin() as conn:
+        if not _table_exists(conn, "users"):
+            return
+
+        conn.execute(text("UPDATE users SET gender = NULL WHERE trim(COALESCE(gender, '')) = ''"))
+        conn.execute(text("UPDATE users SET dept = NULL WHERE trim(COALESCE(dept, '')) = ''"))
+
+        conn.execute(
+            text(
+                """
+                UPDATE users
+                SET gender = NULL
+                WHERE gender IS NOT NULL
+                  AND gender NOT IN ('Male', 'Female')
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                UPDATE users
+                SET dept = NULL
+                WHERE dept IS NOT NULL
+                  AND dept NOT IN (
+                    'Artificial Intelligence and Data Science',
+                    'Aerospace Engineering',
+                    'Automobile Engineering',
+                    'Computer Technology',
+                    'Electronics and Communication Engineering',
+                    'Electronics and Instrumentation Engineering',
+                    'Production Technology',
+                    'Robotics and Automation',
+                    'Rubber and Plastics Technology',
+                    'Information Technology'
+                  )
+                """
+            )
+        )
+
+
 def _normalize_profile_seed(name: str) -> str:
     value = re.sub(r"[^a-z0-9_]+", "", str(name or "").strip().lower().replace(" ", "_"))
     value = re.sub(r"_+", "_", value).strip("_")

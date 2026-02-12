@@ -370,7 +370,7 @@ def update_pda_user_admin(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    updates = user_data.model_dump(exclude_unset=True)
+    updates = user_data.model_dump(exclude_unset=True, mode="json")
 
     incoming_email = str(updates.get("email") or "").strip().lower()
     if incoming_email:
@@ -452,7 +452,7 @@ def create_team_member(
     db: Session = Depends(get_db),
     request: Request = None
 ):
-    payload = member_data.model_dump()
+    payload = member_data.model_dump(mode="json")
     user = None
     if payload.get("user_id"):
         user = db.query(PdaUser).filter(PdaUser.id == payload["user_id"]).first()
@@ -514,7 +514,7 @@ def update_team_member(
     if not member:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team member not found")
 
-    updates = member_data.model_dump(exclude_unset=True)
+    updates = member_data.model_dump(exclude_unset=True, mode="json")
     for field in ("team", "designation"):
         if field in updates:
             setattr(member, field, updates[field])

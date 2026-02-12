@@ -12,6 +12,7 @@ from migrations import (
     ensure_pda_users_table,
     ensure_pda_users_dob_column,
     ensure_pda_users_gender_column,
+    normalize_pda_profile_enum_values,
     ensure_pda_users_profile_name_column,
     ensure_pda_user_social_columns,
     ensure_pda_recruitment_tables,
@@ -74,6 +75,7 @@ async def startup_event():
     ensure_pda_users_table(engine)
     ensure_pda_users_dob_column(engine)
     ensure_pda_users_gender_column(engine)
+    normalize_pda_profile_enum_values(engine)
     ensure_pda_users_profile_name_column(engine)
     ensure_pda_user_social_columns(engine)
     ensure_pda_team_columns(engine)
