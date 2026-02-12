@@ -8,8 +8,8 @@ import {
     CheckCircle2,
     Clock3,
     Copy,
+    ExternalLink,
     LogIn,
-    MessageCircle,
     QrCode,
     UserPlus,
     Users,
@@ -64,6 +64,7 @@ export default function EventDashboard() {
     const { user, getAuthHeader } = useAuth();
 
     const [eventInfo, setEventInfo] = useState(null);
+    const [publishedRounds, setPublishedRounds] = useState([]);
     const [dashboard, setDashboard] = useState(null);
     const [eventProfile, setEventProfile] = useState(null);
     const [roundStatuses, setRoundStatuses] = useState([]);
@@ -84,6 +85,7 @@ export default function EventDashboard() {
     const [qrDialogOpen, setQrDialogOpen] = useState(false);
     const [qrImageUrl, setQrImageUrl] = useState('');
     const [qrLoading, setQrLoading] = useState(false);
+    const [selectedRound, setSelectedRound] = useState(null);
 
     const [copiedReferral, setCopiedReferral] = useState(false);
 
@@ -128,6 +130,7 @@ export default function EventDashboard() {
         () => getEventDateLabel(eventInfo?.start_date, eventInfo?.end_date),
         [eventInfo?.start_date, eventInfo?.end_date]
     );
+    const showParticipantDashboardTab = Boolean(participantPath) && eventIsOpen;
     const eventPosterAssets = useMemo(
         () => filterPosterAssetsByRatio(parsePosterAssets(eventInfo?.poster_url), ['4:5', '5:4']),
         [eventInfo?.poster_url]
@@ -136,6 +139,18 @@ export default function EventDashboard() {
         const value = String(eventInfo?.whatsapp_url || '').trim();
         return value || '';
     }, [eventInfo?.whatsapp_url]);
+    const externalUrlLabel = useMemo(() => {
+        const value = String(eventInfo?.external_url_name || '').trim();
+        return value || 'Join whatsapp channel';
+    }, [eventInfo?.external_url_name]);
+    const selectedRoundPosterAssets = useMemo(
+        () => parsePosterAssets(selectedRound?.round_poster),
+        [selectedRound?.round_poster]
+    );
+    const selectedRoundDateLabel = useMemo(
+        () => formatEventDate(selectedRound?.date),
+        [selectedRound?.date]
+    );
 
     const fetchData = useCallback(async () => {
         setParticipantAccessClosed(false);
@@ -143,6 +158,12 @@ export default function EventDashboard() {
             const eventRes = await axios.get(`${API}/pda/events/${eventSlug}`);
             const nextEvent = eventRes.data;
             setEventInfo(nextEvent);
+            try {
+                const roundsRes = await axios.get(`${API}/pda/events/${eventSlug}/rounds`);
+                setPublishedRounds(Array.isArray(roundsRes?.data) ? roundsRes.data : []);
+            } catch {
+                setPublishedRounds([]);
+            }
 
             if (!shouldFetchParticipantData) {
                 setDashboard(null);
@@ -207,6 +228,7 @@ export default function EventDashboard() {
             }
         } catch (error) {
             setEventInfo(null);
+            setPublishedRounds([]);
             setDashboard(null);
             setEventProfile(null);
             setRoundStatuses([]);
@@ -365,6 +387,10 @@ export default function EventDashboard() {
         );
     }
 
+    if (isParticipantRoute && !eventIsOpen) {
+        return <Navigate to={infoPath} replace />;
+    }
+
     return (
         <div className="min-h-screen bg-[#fffdf5] flex flex-col">
             <PdaHeader />
@@ -379,7 +405,7 @@ export default function EventDashboard() {
                                 Event Info
                             </Button>
                         </Link>
-                        {participantPath ? (
+                        {showParticipantDashboardTab ? (
                             <Link to={participantPath} className="flex-1 min-w-[220px]">
                                 <Button
                                     variant="outline"
@@ -388,11 +414,7 @@ export default function EventDashboard() {
                                     Participant Dashboard
                                 </Button>
                             </Link>
-                        ) : (
-                            <Button variant="outline" className="flex-1 min-w-[220px] border-2 border-black shadow-neo" disabled>
-                                Participant Dashboard
-                            </Button>
-                        )}
+                        ) : null}
                     </div>
                 </section>
 
@@ -436,10 +458,10 @@ export default function EventDashboard() {
                                         <a href={whatsappUrl} target="_blank" rel="noreferrer">
                                             <Button
                                                 data-testid="event-overview-whatsapp-button"
-                                                className="border-2 border-black bg-[#25D366] text-black shadow-neo hover:bg-[#33df73]"
+                                                className="border-2 border-black bg-[#DC2626] text-white shadow-neo hover:bg-[#B91C1C]"
                                             >
-                                                <MessageCircle className="mr-2 h-4 w-4" />
-                                                Join WhatsApp Channel
+                                                <ExternalLink className="mr-2 h-4 w-4" />
+                                                {externalUrlLabel}
                                             </Button>
                                         </a>
                                     </div>
@@ -462,6 +484,66 @@ export default function EventDashboard() {
                                 </div>
                             </div>
                         </div>
+                    </section>
+                ) : null}
+
+                {!isParticipantRoute ? (
+                    <section className="mt-7 rounded-md border-4 border-black bg-white p-6 shadow-[8px_8px_0px_0px_#000000]">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                                <p className="font-mono text-xs font-bold uppercase tracking-[0.16em] text-[#8B5CF6]">PDA</p>
+                                <h2 className="mt-1 font-heading text-3xl font-black uppercase tracking-tight">EXPLORE EVENT</h2>
+                            </div>
+                        </div>
+                        {publishedRounds.length === 0 ? (
+                            <p className="mt-4 rounded-md border-2 border-black bg-[#fffdf0] px-4 py-3 text-sm font-medium text-slate-700 shadow-neo">
+                                No published rounds yet.
+                            </p>
+                        ) : (
+                            <div className="mt-5 grid gap-5 lg:grid-cols-2">
+                                {publishedRounds.map((round) => {
+                                    const roundPosterAssets = parsePosterAssets(round?.round_poster);
+                                    const roundDateLabel = formatEventDate(round?.date);
+                                    return (
+                                        <button
+                                            type="button"
+                                            key={round.id}
+                                            className="flex h-[34rem] w-full flex-col overflow-hidden rounded-md border-4 border-black bg-[#fffdf9] p-5 text-left shadow-[6px_6px_0px_0px_#000000] transition-transform duration-150 hover:-translate-y-[2px]"
+                                            onClick={() => setSelectedRound(round)}
+                                        >
+                                            <h3 className="inline-flex w-fit rounded-md border-2 border-black bg-[#FDE047] px-3 py-1 font-heading text-lg font-black uppercase tracking-tight text-black">
+                                                {round.name}
+                                            </h3>
+                                            {roundPosterAssets.length ? (
+                                                <div className="mt-3 overflow-hidden rounded-md border-2 border-black bg-[#11131a]">
+                                                    <PosterCarousel
+                                                        assets={roundPosterAssets}
+                                                        title={round.name || `Round ${round.round_no}`}
+                                                        className="h-52 w-full"
+                                                        imageClassName="h-52 w-full object-cover"
+                                                    />
+                                                </div>
+                                            ) : null}
+                                            <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700">
+                                                <span className="rounded-md border-2 border-black bg-white px-2 py-1 shadow-neo">{round.mode}</span>
+                                                {roundDateLabel ? (
+                                                    <span className="rounded-md border-2 border-black bg-white px-2 py-1 shadow-neo">{roundDateLabel}</span>
+                                                ) : null}
+                                            </div>
+                                            <div className="mt-3 flex-1 overflow-y-auto rounded-md border-2 border-black bg-white p-3 text-sm text-slate-700">
+                                                <ParsedDescription
+                                                    description={round?.description || ''}
+                                                    emptyText="No description provided."
+                                                />
+                                            </div>
+                                            <p className="mt-3 text-center text-xs font-bold uppercase tracking-[0.12em] text-slate-600">
+                                                Click to view full details
+                                            </p>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
                     </section>
                 ) : null}
 
@@ -497,20 +579,6 @@ export default function EventDashboard() {
                             </section>
                         ) : null}
 
-                        {isLoggedIn && participantPath ? (
-                            <section className="mt-7 rounded-md border-4 border-black bg-white p-6 shadow-[8px_8px_0px_0px_#000000]">
-                                <div className="flex flex-wrap items-center justify-between gap-4">
-                                    <div>
-                                        <p className="font-mono text-xs font-bold uppercase tracking-[0.16em] text-[#8B5CF6]">Participant Dashboard</p>
-                                        <h2 className="mt-1 font-heading text-3xl font-black uppercase tracking-tight">Manage your event participation</h2>
-                                        <p className="mt-2 text-sm font-medium text-slate-700">Open your participant dashboard to register, view status, and access attendance QR.</p>
-                                    </div>
-                                    <Link to={participantPath}>
-                                        <Button className="border-2 border-black bg-[#8B5CF6] text-white shadow-neo">Open Dashboard</Button>
-                                    </Link>
-                                </div>
-                            </section>
-                        ) : null}
                     </>
                 ) : null}
 
@@ -709,10 +777,10 @@ export default function EventDashboard() {
                                                     <a href={whatsappUrl} target="_blank" rel="noreferrer" className="block">
                                                         <Button
                                                             data-testid="event-dashboard-whatsapp-button"
-                                                            className="w-full border-2 border-black bg-[#25D366] text-black shadow-neo hover:bg-[#33df73]"
+                                                            className="w-full border-2 border-black bg-[#DC2626] text-white shadow-neo hover:bg-[#B91C1C]"
                                                         >
-                                                            <MessageCircle className="mr-2 h-4 w-4" />
-                                                            Join WhatsApp Channel
+                                                            <ExternalLink className="mr-2 h-4 w-4" />
+                                                            {externalUrlLabel}
                                                         </Button>
                                                     </a>
                                                 ) : null}
@@ -861,6 +929,80 @@ export default function EventDashboard() {
                             </>
                         )}
                     </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={Boolean(selectedRound)} onOpenChange={(open) => (!open ? setSelectedRound(null) : null)}>
+                <DialogContent className="max-h-[94vh] max-w-5xl overflow-y-auto border-4 border-black bg-white p-6 sm:p-7">
+                    {selectedRound ? (
+                        <>
+                            <DialogHeader>
+                                <DialogTitle className="font-heading text-2xl font-black uppercase tracking-tight">
+                                    Round {selectedRound.round_no}
+                                </DialogTitle>
+                            </DialogHeader>
+                            <div className="space-y-5">
+                                <h3 className="inline-flex w-fit rounded-md border-2 border-black bg-[#FDE047] px-3 py-1 font-heading text-xl font-black uppercase tracking-tight text-black">
+                                    {selectedRound.name}
+                                </h3>
+                                <div className={`${selectedRoundPosterAssets.length ? 'grid gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:items-start' : 'space-y-4'}`}>
+                                    {selectedRoundPosterAssets.length ? (
+                                        <div className="space-y-3">
+                                            <div className="overflow-hidden rounded-md border-2 border-black bg-[#11131a]">
+                                                <div className="aspect-[1/1.4142] w-full">
+                                                    <PosterCarousel
+                                                        assets={selectedRoundPosterAssets}
+                                                        title={selectedRound.name || `Round ${selectedRound.round_no}`}
+                                                        className="h-full w-full"
+                                                        imageClassName="h-full w-full object-cover"
+                                                        autoPlay={false}
+                                                        showArrows
+                                                        showPageMeta
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div className="flex flex-wrap gap-2 text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700">
+                                                <span className="rounded-md border-2 border-black bg-white px-2 py-1 shadow-neo">{selectedRound.state}</span>
+                                                <span className="rounded-md border-2 border-black bg-white px-2 py-1 shadow-neo">{selectedRound.mode}</span>
+                                                {selectedRoundDateLabel ? (
+                                                    <span className="rounded-md border-2 border-black bg-white px-2 py-1 shadow-neo">
+                                                        {selectedRoundDateLabel}
+                                                    </span>
+                                                ) : null}
+                                            </div>
+                                        </div>
+                                    ) : null}
+                                    <div className="space-y-4">
+                                        {!selectedRoundPosterAssets.length ? (
+                                            <div className="flex flex-wrap gap-2 text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700">
+                                                <span className="rounded-md border-2 border-black bg-white px-2 py-1 shadow-neo">{selectedRound.state}</span>
+                                                <span className="rounded-md border-2 border-black bg-white px-2 py-1 shadow-neo">{selectedRound.mode}</span>
+                                                {selectedRoundDateLabel ? (
+                                                    <span className="rounded-md border-2 border-black bg-white px-2 py-1 shadow-neo">
+                                                        {selectedRoundDateLabel}
+                                                    </span>
+                                                ) : null}
+                                            </div>
+                                        ) : null}
+                                        <div className="rounded-md border-2 border-black bg-white p-4 text-base text-slate-700">
+                                            <ParsedDescription
+                                                description={selectedRound?.description || ''}
+                                                emptyText="No description provided."
+                                            />
+                                        </div>
+                                        {String(selectedRound?.external_url || '').trim() ? (
+                                            <a href={String(selectedRound?.external_url || '').trim()} target="_blank" rel="noreferrer">
+                                                <Button className="w-full border-2 border-black bg-[#DC2626] text-white shadow-neo hover:bg-[#B91C1C]">
+                                                    <ExternalLink className="mr-2 h-4 w-4" />
+                                                    {String(selectedRound?.external_url_name || '').trim() || 'Explore Round'}
+                                                </Button>
+                                            </a>
+                                        ) : null}
+                                    </div>
+                                </div>
+                            </div>
+                        </>
+                    ) : null}
                 </DialogContent>
             </Dialog>
 

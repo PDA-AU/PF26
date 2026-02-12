@@ -19,6 +19,10 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import ParsedDescription from '@/components/common/ParsedDescription';
+import { generatePosterPdfPreview, uploadPoster } from '@/pages/HomeAdmin/adminApi';
+import { compressImageToWebp } from '@/utils/imageCompression';
+import { parsePosterAssets, resolvePosterUrl, serializePosterAssets } from '@/utils/posterAssets';
 
 import { useAuth } from '@/context/AuthContext';
 import EventAdminShell, { useEventAdminShell } from './EventAdminShell';
@@ -50,16 +54,37 @@ function RoundsContent() {
     const [editingRound, setEditingRound] = useState(null);
     const [name, setName] = useState('');
     const [description, setDescription] = useState('');
+    const [roundPoster, setRoundPoster] = useState('');
+    const [roundPosterFile, setRoundPosterFile] = useState(null);
+    const [roundPosterPreview, setRoundPosterPreview] = useState('');
+    const [externalUrl, setExternalUrl] = useState('');
+    const [externalUrlName, setExternalUrlName] = useState('Explore Round');
     const [date, setDate] = useState('');
     const [mode, setMode] = useState('Offline');
     const [criteria, setCriteria] = useState([createCriterion('Score', 100)]);
     const [roundStats, setRoundStats] = useState({});
     const [revealRound, setRevealRound] = useState(null);
     const [revealing, setRevealing] = useState(false);
+    const [savingRound, setSavingRound] = useState(false);
 
     const getErrorMessage = (error, fallback) => (
         error?.response?.data?.detail || error?.response?.data?.message || fallback
     );
+
+    const clearRoundPosterPreview = useCallback(() => {
+        setRoundPosterPreview((prev) => {
+            if (String(prev || '').startsWith('blob:')) {
+                URL.revokeObjectURL(prev);
+            }
+            return '';
+        });
+    }, []);
+
+    const resetPosterPicker = useCallback((nextPosterUrl = '') => {
+        clearRoundPosterPreview();
+        setRoundPosterFile(null);
+        setRoundPoster(String(nextPosterUrl || ''));
+    }, [clearRoundPosterPreview]);
 
     const fetchRounds = useCallback(async () => {
         setLoading(true);
@@ -113,6 +138,9 @@ function RoundsContent() {
     const resetForm = () => {
         setName('');
         setDescription('');
+        resetPosterPicker('');
+        setExternalUrl('');
+        setExternalUrlName('Explore Round');
         setDate('');
         setMode('Offline');
         setCriteria([createCriterion('Score', 100)]);
@@ -123,25 +151,51 @@ function RoundsContent() {
         if (!rounds.length) return 1;
         return Math.max(...rounds.map((round) => Number(round.round_no || 0))) + 1;
     }, [rounds]);
+    const roundPosterAssets = useMemo(() => parsePosterAssets(roundPoster), [roundPoster]);
+    const existingPosterPreview = useMemo(
+        () => resolvePosterUrl((roundPosterAssets[0] || {}).url || ''),
+        [roundPosterAssets]
+    );
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        setSavingRound(true);
         const cleanedCriteria = criteria
             .map((criterion) => ({
                 name: String(criterion.name || '').trim(),
                 max_marks: parseFloat(criterion.max_marks) || 0,
             }))
             .filter((criterion) => criterion.name);
-        const payload = {
-            round_no: editingRound ? Number(editingRound.round_no) : Number(nextRoundNo),
-            name,
-            description,
-            date: date ? new Date(date).toISOString() : null,
-            mode,
-            evaluation_criteria: cleanedCriteria.length > 0 ? cleanedCriteria : [{ name: 'Score', max_marks: 100 }],
-        };
 
         try {
+            let uploadedPosterUrl = String(roundPoster || '').trim();
+            if (roundPosterFile) {
+                const isPdf = String(roundPosterFile.type || '').toLowerCase() === 'application/pdf'
+                    || String(roundPosterFile.name || '').toLowerCase().endsWith('.pdf');
+                if (isPdf) {
+                    const uploadedPdfUrl = await uploadPoster(roundPosterFile, getAuthHeader);
+                    const previewRes = await generatePosterPdfPreview(uploadedPdfUrl, getAuthHeader, 20);
+                    const previewImageUrls = Array.isArray(previewRes?.preview_image_urls) ? previewRes.preview_image_urls : [];
+                    if (!previewImageUrls.length) {
+                        throw new Error('Failed to generate preview image from PDF');
+                    }
+                    uploadedPosterUrl = serializePosterAssets(previewImageUrls.map((url) => ({ url }))) || '';
+                } else {
+                    const processedPoster = await compressImageToWebp(roundPosterFile);
+                    uploadedPosterUrl = await uploadPoster(processedPoster, getAuthHeader);
+                }
+            }
+            const payload = {
+                round_no: editingRound ? Number(editingRound.round_no) : Number(nextRoundNo),
+                name,
+                description,
+                round_poster: uploadedPosterUrl || null,
+                external_url: externalUrl || null,
+                external_url_name: String(externalUrlName || '').trim() || 'Explore Round',
+                date: date ? new Date(date).toISOString() : null,
+                mode,
+                evaluation_criteria: cleanedCriteria.length > 0 ? cleanedCriteria : [{ name: 'Score', max_marks: 100 }],
+            };
             if (editingRound) {
                 await axios.put(`${API}/pda-admin/events/${eventSlug}/rounds/${editingRound.id}`, payload, {
                     headers: getAuthHeader(),
@@ -158,6 +212,8 @@ function RoundsContent() {
             fetchRounds();
         } catch (error) {
             toast.error(getErrorMessage(error, 'Failed to save round'));
+        } finally {
+            setSavingRound(false);
         }
     };
 
@@ -165,12 +221,27 @@ function RoundsContent() {
         setEditingRound(round);
         setName(round.name || '');
         setDescription(round.description || '');
+        resetPosterPicker(round.round_poster || '');
+        setExternalUrl(round.external_url || round.whatsapp_url || '');
+        setExternalUrlName(round.external_url_name || 'Explore Round');
         setDate(round.date ? new Date(round.date).toISOString().split('T')[0] : '');
         setMode(round.mode || 'Offline');
         setCriteria((round.evaluation_criteria && round.evaluation_criteria.length > 0)
             ? round.evaluation_criteria.map((criterion) => createCriterion(criterion.name || '', criterion.max_marks || 0))
             : [createCriterion('Score', 100)]);
         setDialogOpen(true);
+    };
+
+    const handlePosterSelect = (file) => {
+        if (!file) return;
+        clearRoundPosterPreview();
+        setRoundPosterFile(file);
+        const isPdf = String(file.type || '').toLowerCase() === 'application/pdf'
+            || String(file.name || '').toLowerCase().endsWith('.pdf');
+        if (!isPdf) {
+            const preview = URL.createObjectURL(file);
+            setRoundPosterPreview(preview);
+        }
     };
 
     const handleDelete = async (roundId) => {
@@ -239,7 +310,7 @@ function RoundsContent() {
                             Create Round
                         </Button>
                     </DialogTrigger>
-                    <DialogContent className="border-4 border-black">
+                    <DialogContent className="border-4 border-black max-h-[90vh] overflow-y-auto">
                         <DialogHeader>
                             <DialogTitle className="font-heading font-bold text-2xl">{editingRound ? 'Edit Round' : 'Create Round'}</DialogTitle>
                         </DialogHeader>
@@ -255,6 +326,62 @@ function RoundsContent() {
                             <div>
                                 <Label className="font-bold">Description</Label>
                                 <Textarea value={description} onChange={(e) => setDescription(e.target.value)} className="neo-input" />
+                            </div>
+                            <div>
+                                <Label className="font-bold">Round Poster</Label>
+                                <Input
+                                    type="file"
+                                    accept="image/png,image/jpeg,image/webp,application/pdf,.pdf"
+                                    className="neo-input"
+                                    onChange={(e) => {
+                                        handlePosterSelect((e.target.files || [])[0] || null);
+                                        e.target.value = '';
+                                    }}
+                                />
+                                {(roundPosterFile && (String(roundPosterFile.type || '').toLowerCase() === 'application/pdf'
+                                    || String(roundPosterFile.name || '').toLowerCase().endsWith('.pdf'))) ? (
+                                    <div className="mt-3 rounded-md border-2 border-black bg-muted p-3 text-sm">
+                                        <p className="font-semibold">{roundPosterFile.name}</p>
+                                        <p className="text-gray-600">PDF selected. First page preview image will be generated on upload.</p>
+                                        <div className="mt-2 flex gap-2">
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                className="border-2 border-black"
+                                                onClick={() => resetPosterPicker('')}
+                                            >
+                                                Remove File
+                                            </Button>
+                                        </div>
+                                    </div>
+                                ) : null}
+                                {(roundPosterPreview || existingPosterPreview) ? (
+                                    <div className="mt-3 rounded-md border-2 border-black bg-muted p-2">
+                                        <img
+                                            src={roundPosterPreview || existingPosterPreview}
+                                            alt="Round poster preview"
+                                            className="w-full max-h-56 object-contain rounded border border-black/10 bg-white"
+                                        />
+                                        <div className="mt-2 flex gap-2">
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                className="border-2 border-black"
+                                                onClick={() => resetPosterPicker('')}
+                                            >
+                                                Remove Poster
+                                            </Button>
+                                        </div>
+                                    </div>
+                                ) : null}
+                            </div>
+                            <div>
+                                <Label className="font-bold">External URL</Label>
+                                <Input value={externalUrl} onChange={(e) => setExternalUrl(e.target.value)} placeholder="https://..." className="neo-input" />
+                            </div>
+                            <div>
+                                <Label className="font-bold">External URL Name</Label>
+                                <Input value={externalUrlName} onChange={(e) => setExternalUrlName(e.target.value)} placeholder="Explore Round" className="neo-input" />
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
@@ -309,8 +436,8 @@ function RoundsContent() {
                                     ))}
                                 </div>
                             </div>
-                            <Button type="submit" className="w-full bg-primary text-white border-2 border-black shadow-neo">
-                                {editingRound ? 'Update' : 'Create'}
+                            <Button type="submit" disabled={savingRound} className="w-full bg-primary text-white border-2 border-black shadow-neo">
+                                {savingRound ? 'Saving...' : (editingRound ? 'Update' : 'Create')}
                             </Button>
                         </form>
                     </DialogContent>
@@ -325,15 +452,28 @@ function RoundsContent() {
                     <h3 className="font-heading font-bold text-xl">No Rounds Yet</h3>
                 </div>
             ) : (
-                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="grid md:grid-cols-1 lg:grid-cols-2 gap-8">
                     {rounds.map((round) => (
-                        <div key={round.id} className="neo-card">
+                        <div key={round.id} className="neo-card p-6 min-h-[420px]">
                             <div className="flex justify-between mb-4">
                                 <span className="bg-primary text-white px-2 py-1 border-2 border-black font-bold text-sm">Round {round.round_no}</span>
                                 <span className={`tag border-2 border-black ${getBadgeColor(round.state)}`}>{round.state}</span>
                             </div>
+                            {parsePosterAssets(round.round_poster || '').length ? (
+                                <img
+                                    src={resolvePosterUrl((parsePosterAssets(round.round_poster || '')[0] || {}).url || '')}
+                                    alt={`${round.name} poster`}
+                                    className="mb-4 w-full h-56 object-cover rounded-md border-2 border-black bg-white"
+                                />
+                            ) : null}
                             <h3 className="font-heading font-bold text-xl mb-2">{round.name}</h3>
-                            <p className="text-gray-600 text-sm mb-4">{round.description || 'No description'}</p>
+                            <div className="text-gray-700 text-sm mb-4 space-y-2">
+                                <ParsedDescription
+                                    description={round.description || ''}
+                                    emptyText="No description"
+                                    listClassName="list-disc space-y-1 pl-5"
+                                />
+                            </div>
                             <p className="text-sm text-gray-500 mb-4">Mode: {round.mode} | Date: {round.date ? new Date(round.date).toLocaleDateString() : 'TBA'}</p>
                             {round.is_frozen ? (
                                 <p className="text-primary font-bold mb-4"><Lock className="w-4 h-4 inline" /> Frozen</p>
@@ -359,9 +499,14 @@ function RoundsContent() {
                                     <Button size="sm" onClick={() => handleStateChange(round.id, 'Published')} className="bg-blue-500 text-white border-2 border-black">Publish</Button>
                                 ) : null}
                                 {isPublishedState(round.state) ? (
-                                    <Button size="sm" onClick={() => handleStateChange(round.id, 'Active')} className="bg-green-500 text-white border-2 border-black">
-                                        <Play className="w-4 h-4 mr-1" /> Activate
-                                    </Button>
+                                    <>
+                                        <Button size="sm" onClick={() => handleStateChange(round.id, 'Active')} className="bg-green-500 text-white border-2 border-black">
+                                            <Play className="w-4 h-4 mr-1" /> Activate
+                                        </Button>
+                                        <Button size="sm" variant="outline" onClick={() => handleStateChange(round.id, 'Draft')} className="border-2 border-black">
+                                            Unpublish
+                                        </Button>
+                                    </>
                                 ) : null}
                                 {(isActiveState(round.state) || isCompletedState(round.state) || isRevealState(round.state)) ? (
                                     <Link to={`/admin/events/${eventSlug}/rounds/${round.id}/scoring`}>

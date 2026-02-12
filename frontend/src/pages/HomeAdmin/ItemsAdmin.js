@@ -9,6 +9,7 @@ import { useAuth } from '@/context/AuthContext';
 import AdminLayout from '@/pages/HomeAdmin/AdminLayout';
 import { API, uploadPoster } from '@/pages/HomeAdmin/adminApi';
 import { compressImageToWebp } from '@/utils/imageCompression';
+import ParsedDescription, { parseDescriptionBlocks } from '@/components/common/ParsedDescription';
 import { toast } from 'sonner';
 import {
     filterPosterAssetsByRatio,
@@ -69,7 +70,36 @@ export default function ItemsAdmin() {
     const [savingEvent, setSavingEvent] = useState(false);
     const [programSearch, setProgramSearch] = useState('');
     const [eventSearch, setEventSearch] = useState('');
+    const [expandedDescriptions, setExpandedDescriptions] = useState({});
     const formRef = useRef(null);
+
+    const toggleDescription = (key) => {
+        setExpandedDescriptions((prev) => ({ ...prev, [key]: !prev[key] }));
+    };
+
+    const DescriptionPreview = ({ description, itemKey }) => {
+        const normalized = String(description || '').trim();
+        if (!normalized) return null;
+        const blocks = parseDescriptionBlocks(normalized);
+        const shouldShowToggle = blocks.length > 2 || normalized.length > 180;
+        const isExpanded = Boolean(expandedDescriptions[itemKey]);
+        return (
+            <div className="mt-2 text-sm text-slate-600">
+                <div className={isExpanded ? 'space-y-2' : 'max-h-[5.5rem] overflow-hidden space-y-2'}>
+                    <ParsedDescription description={normalized} />
+                </div>
+                {shouldShowToggle ? (
+                    <button
+                        type="button"
+                        onClick={() => toggleDescription(itemKey)}
+                        className="mt-1 text-xs font-semibold text-[#b48900] hover:underline"
+                    >
+                        {isExpanded ? 'Read less' : 'Read more'}
+                    </button>
+                ) : null}
+            </div>
+        );
+    };
 
     const fetchData = async () => {
         try {
@@ -483,19 +513,19 @@ export default function ItemsAdmin() {
                         className="w-full md:max-w-sm"
                     />
                 </div>
-                <div className="mt-6 grid gap-4 md:grid-cols-2">
+                <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                     {filteredPrograms.length ? filteredPrograms.map((program) => (
-                        <div key={program.id} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4 min-w-0">
+                        <div key={program.id} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-3 min-w-0">
                             {getCardPosterSrc(program.poster_url) ? (
                                 <img
                                     src={getCardPosterSrc(program.poster_url)}
                                     alt={`${program.title} poster`}
-                                    className="mb-3 aspect-[4/5] w-full rounded-xl border border-black/10 object-cover bg-white"
+                                    className="mb-2 aspect-[4/5] w-full rounded-xl border border-black/10 object-cover bg-white"
                                 />
                             ) : null}
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                 <div className="min-w-0">
-                                    <h3 className="text-lg font-heading font-bold break-words">{program.title}</h3>
+                                    <h3 className="text-base font-heading font-bold break-words">{program.title}</h3>
                                     {program.tag ? (
                                         <p className="text-xs uppercase tracking-[0.3em] text-[#b48900] break-words">{program.tag}</p>
                                     ) : null}
@@ -525,9 +555,7 @@ export default function ItemsAdmin() {
                                     </Button>
                                 </div>
                             </div>
-                            {program.description ? (
-                                <p className="mt-2 text-sm text-slate-600 break-words">{program.description}</p>
-                            ) : null}
+                            <DescriptionPreview description={program.description} itemKey={`program-${program.id}`} />
                         </div>
                     )) : (
                         <div className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4 text-sm text-slate-500">
@@ -539,20 +567,18 @@ export default function ItemsAdmin() {
                 <div className="mt-8 rounded-2xl border border-dashed border-black/10 bg-white/70 p-4">
                     <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Featured Programs</p>
                     {programs.filter(program => program.is_featured).length ? (
-                        <div className="mt-4 grid gap-3 md:grid-cols-2">
+                        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                             {programs.filter(program => program.is_featured).map((program) => (
-                                <div key={`featured-${program.id}`} className="rounded-2xl border border-black/10 bg-white p-4">
+                                <div key={`featured-${program.id}`} className="rounded-2xl border border-black/10 bg-white p-3">
                                     {getCardPosterSrc(program.poster_url) ? (
                                         <img
                                             src={getCardPosterSrc(program.poster_url)}
                                             alt={`${program.title} poster`}
-                                            className="mb-3 aspect-[4/5] w-full rounded-xl border border-black/10 object-cover bg-white"
+                                            className="mb-2 aspect-[4/5] w-full rounded-xl border border-black/10 object-cover bg-white"
                                         />
                                     ) : null}
                                     <h3 className="text-base font-heading font-bold line-clamp-2 break-words">{program.title}</h3>
-                                    {program.description ? (
-                                        <p className="mt-2 text-sm text-slate-600 line-clamp-3 break-words">{program.description}</p>
-                                    ) : null}
+                                    <DescriptionPreview description={program.description} itemKey={`featured-program-${program.id}`} />
                                 </div>
                             ))}
                         </div>
@@ -579,19 +605,19 @@ export default function ItemsAdmin() {
                         className="w-full md:max-w-sm"
                     />
                 </div>
-                <div className="mt-6 grid gap-4 md:grid-cols-2">
+                <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                     {filteredEvents.length ? filteredEvents.map((event) => (
-                        <div key={event.id} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4 min-w-0">
+                        <div key={event.id} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-3 min-w-0">
                             {getCardPosterSrc(event.poster_url) ? (
                                 <img
                                     src={getCardPosterSrc(event.poster_url)}
                                     alt={`${event.title} poster`}
-                                    className="mb-3 aspect-[4/5] w-full rounded-xl border border-black/10 object-cover bg-white"
+                                    className="mb-2 aspect-[4/5] w-full rounded-xl border border-black/10 object-cover bg-white"
                                 />
                             ) : null}
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                 <div className="min-w-0">
-                                    <h3 className="text-lg font-heading font-bold break-words">{event.title}</h3>
+                                    <h3 className="text-base font-heading font-bold break-words">{event.title}</h3>
                                     <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
                                         {event.start_date || 'TBA'}{event.end_date ? ` → ${event.end_date}` : ''}
                                     </p>
@@ -621,9 +647,7 @@ export default function ItemsAdmin() {
                                     </Button>
                                 </div>
                             </div>
-                            {event.description ? (
-                                <p className="mt-2 text-sm text-slate-600 break-words">{event.description}</p>
-                            ) : null}
+                            <DescriptionPreview description={event.description} itemKey={`event-${event.id}`} />
                         </div>
                     )) : (
                         <div className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4 text-sm text-slate-500">
@@ -635,20 +659,21 @@ export default function ItemsAdmin() {
                 <div className="mt-8 rounded-2xl border border-dashed border-black/10 bg-white/70 p-4">
                     <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Featured Events</p>
                     {events.filter(event => event.is_featured).length ? (
-                        <div className="mt-4 grid gap-3 md:grid-cols-2">
+                        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                             {events.filter(event => event.is_featured).map((event) => (
-                                <div key={`featured-${event.id}`} className="rounded-2xl border border-black/10 bg-white p-4">
+                                <div key={`featured-${event.id}`} className="rounded-2xl border border-black/10 bg-white p-3">
                                     {getCardPosterSrc(event.poster_url) ? (
                                         <img
                                             src={getCardPosterSrc(event.poster_url)}
                                             alt={`${event.title} poster`}
-                                            className="mb-3 aspect-[4/5] w-full rounded-xl border border-black/10 object-cover bg-white"
+                                            className="mb-2 aspect-[4/5] w-full rounded-xl border border-black/10 object-cover bg-white"
                                         />
                                     ) : null}
                                     <h3 className="text-base font-heading font-bold line-clamp-2 break-words">{event.title}</h3>
                                     <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
                                         {event.start_date || 'TBA'}{event.end_date ? ` → ${event.end_date}` : ''}
                                     </p>
+                                    <DescriptionPreview description={event.description} itemKey={`featured-event-${event.id}`} />
                                 </div>
                             ))}
                         </div>

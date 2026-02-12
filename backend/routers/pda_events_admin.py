@@ -46,6 +46,7 @@ from schemas import (
     PdaManagedEventCreate,
     PdaManagedEventResponse,
     PdaManagedEventStatusUpdate,
+    PdaManagedEventVisibilityUpdate,
     PdaManagedEventUpdate,
     PdaManagedRoundCreate,
     PdaEventLogResponse,
@@ -336,6 +337,7 @@ def create_managed_event(
         end_date=payload.end_date,
         poster_url=payload.poster_url,
         whatsapp_url=payload.whatsapp_url,
+        external_url_name=(str(payload.external_url_name or "").strip() or "Join whatsapp channel"),
         event_type=_to_event_type(payload.event_type),
         format=_to_event_format(payload.format),
         template_option=_to_event_template(payload.template_option),
@@ -344,6 +346,7 @@ def create_managed_event(
         round_count=round_count,
         team_min_size=payload.team_min_size,
         team_max_size=payload.team_max_size,
+        is_visible=True,
         status=PdaEventStatus.CLOSED,
     )
     db.add(new_event)
@@ -423,6 +426,8 @@ def update_managed_event(
         updates["round_mode"] = _to_round_mode(payload.round_mode)
     if "status" in updates:
         updates["status"] = _to_event_status(payload.status)
+    if "external_url_name" in updates:
+        updates["external_url_name"] = str(updates.get("external_url_name") or "").strip() or "Join whatsapp channel"
 
     for field, value in updates.items():
         setattr(event, field, value)
@@ -440,6 +445,16 @@ def update_managed_event(
         path=f"/pda-admin/events/{slug}",
         meta={"slug": slug},
     )
+    return PdaManagedEventResponse.model_validate(event)
+
+
+@router.get("/pda-admin/events/{slug}", response_model=PdaManagedEventResponse)
+def get_managed_event(
+    slug: str,
+    _: PdaUser = Depends(require_pda_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
     return PdaManagedEventResponse.model_validate(event)
 
 
@@ -531,6 +546,29 @@ def update_managed_event_status(
         method="PUT",
         path=f"/pda-admin/events/{slug}/status",
         meta={"slug": slug, "status": payload.status.value},
+    )
+    return PdaManagedEventResponse.model_validate(event)
+
+
+@router.put("/pda-admin/events/{slug}/visibility", response_model=PdaManagedEventResponse)
+def update_managed_event_visibility(
+    slug: str,
+    payload: PdaManagedEventVisibilityUpdate,
+    admin: PdaUser = Depends(require_pda_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    event.is_visible = bool(payload.is_visible)
+    db.commit()
+    db.refresh(event)
+    _log_event_admin_action(
+        db,
+        admin,
+        event,
+        "update_pda_managed_event_visibility",
+        method="PUT",
+        path=f"/pda-admin/events/{slug}/visibility",
+        meta={"slug": slug, "is_visible": bool(payload.is_visible)},
     )
     return PdaManagedEventResponse.model_validate(event)
 
@@ -1160,6 +1198,9 @@ def create_round(
         round_no=payload.round_no,
         name=payload.name,
         description=payload.description,
+        round_poster=payload.round_poster,
+        external_url=payload.external_url,
+        external_url_name=(str(payload.external_url_name or "").strip() or "Explore Round"),
         date=payload.date,
         mode=_to_event_format(payload.mode),
         evaluation_criteria=[c.model_dump() for c in payload.evaluation_criteria] if payload.evaluation_criteria else [{"name": "Score", "max_marks": 100}],
@@ -1192,6 +1233,11 @@ def update_round(
     if not round_row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
     updates = payload.model_dump(exclude_unset=True)
+    if "external_url" not in updates and updates.get("whatsapp_url") is not None:
+        updates["external_url"] = updates.get("whatsapp_url")
+    updates.pop("whatsapp_url", None)
+    if "external_url_name" in updates:
+        updates["external_url_name"] = str(updates.get("external_url_name") or "").strip() or "Explore Round"
     eliminate_absent = bool(updates.pop("eliminate_absent", False))
     if "mode" in updates:
         updates["mode"] = _to_event_format(payload.mode)

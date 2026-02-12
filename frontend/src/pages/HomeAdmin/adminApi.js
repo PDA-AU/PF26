@@ -12,6 +12,15 @@ export const uploadPoster = async (file, getAuthHeader) => {
     return public_url;
 };
 
+export const generatePosterPdfPreview = async (s3Url, getAuthHeader, maxPages = 20) => {
+    const response = await axios.post(
+        `${API}/pda-admin/posters/pdf-preview`,
+        { s3_url: s3Url, max_pages: maxPages },
+        { headers: getAuthHeader() }
+    );
+    return response.data;
+};
+
 export const uploadGalleryImage = async (file, getAuthHeader) => {
     const presignRes = await axios.post(`${API}/pda-admin/gallery-uploads/presign`, {
         filename: file.name,

@@ -31,6 +31,7 @@ const initialForm = {
     end_date: '',
     poster_url: '',
     whatsapp_url: '',
+    external_url_name: 'Join whatsapp channel',
     event_type: 'Event',
     format: 'Offline',
     template_option: 'attendance_scoring',
@@ -73,6 +74,7 @@ const toEventForm = (eventRow = {}) => ({
     end_date: toDateInputValue(eventRow.end_date),
     poster_url: eventRow.poster_url || '',
     whatsapp_url: eventRow.whatsapp_url || '',
+    external_url_name: eventRow.external_url_name || 'Join whatsapp channel',
     event_type: eventRow.event_type || 'Event',
     format: eventRow.format || 'Offline',
     template_option: eventRow.template_option || 'attendance_scoring',
@@ -98,6 +100,7 @@ const buildEventPayload = (formState, posterUrl) => ({
     end_date: formState.end_date || null,
     poster_url: posterUrl,
     whatsapp_url: formState.whatsapp_url?.trim() || null,
+    external_url_name: formState.external_url_name?.trim() || 'Join whatsapp channel',
     event_type: formState.event_type,
     format: formState.format,
     template_option: formState.template_option,
@@ -215,6 +218,14 @@ function EventFormFields({
                     value={form.whatsapp_url}
                     onChange={(e) => setForm((prev) => ({ ...prev, whatsapp_url: e.target.value }))}
                     placeholder="https://chat.whatsapp.com/..."
+                />
+            </div>
+            <div className="md:col-span-2">
+                <Label>External URL Button Name</Label>
+                <Input
+                    value={form.external_url_name}
+                    onChange={(e) => setForm((prev) => ({ ...prev, external_url_name: e.target.value }))}
+                    placeholder="Join whatsapp channel"
                 />
             </div>
             <div>

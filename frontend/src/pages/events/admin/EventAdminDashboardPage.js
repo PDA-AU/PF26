@@ -11,6 +11,8 @@ import {
     Settings,
     PauseCircle,
     PlayCircle,
+    Eye,
+    EyeOff,
     ArrowLeft,
 } from 'lucide-react';
 
@@ -28,6 +30,7 @@ function DashboardContent() {
     const [topFemales, setTopFemales] = useState([]);
     const [loading, setLoading] = useState(true);
     const [actionLoading, setActionLoading] = useState(false);
+    const [hoveredDepartment, setHoveredDepartment] = useState(null);
 
     const getErrorMessage = (error, fallback) => (
         error?.response?.data?.detail || error?.response?.data?.message || fallback
@@ -104,6 +107,7 @@ function DashboardContent() {
     };
 
     const isOpen = String(eventInfo?.status || '').toLowerCase() === 'open';
+    const isVisible = Boolean(eventInfo?.is_visible);
     const totalParticipants = Number(stats?.registrations || 0);
 
     const chartRows = useMemo(() => {
@@ -114,6 +118,42 @@ function DashboardContent() {
             department: stats?.department_distribution || {},
         };
     }, [eventInfo?.participant_mode, stats?.gender_distribution, stats?.batch_distribution, stats?.department_distribution]);
+
+    const departmentPieData = useMemo(() => {
+        const entries = Object.entries(chartRows?.department || {})
+            .map(([name, value]) => ({ name, value: Number(value) || 0 }))
+            .filter((item) => item.value > 0)
+            .sort((a, b) => b.value - a.value);
+        const total = entries.reduce((sum, item) => sum + item.value, 0);
+        const palette = ['#7C3AED', '#14B8A6', '#F97316', '#2563EB', '#DC2626', '#4F46E5', '#16A34A', '#0EA5E9'];
+        let cumulative = 0;
+        const segments = entries.map((item, idx) => {
+            const pct = total > 0 ? (item.value / total) : 0;
+            const startPct = cumulative;
+            cumulative += pct;
+            const startAngle = startPct * Math.PI * 2 - Math.PI / 2;
+            const endAngle = (startPct + pct) * Math.PI * 2 - Math.PI / 2;
+            const x1 = 110 + 84 * Math.cos(startAngle);
+            const y1 = 110 + 84 * Math.sin(startAngle);
+            const x2 = 110 + 84 * Math.cos(endAngle);
+            const y2 = 110 + 84 * Math.sin(endAngle);
+            const largeArcFlag = pct > 0.5 ? 1 : 0;
+            return {
+                ...item,
+                pct,
+                startPct,
+                color: palette[idx % palette.length],
+                pathD: `M 110 110 L ${x1} ${y1} A 84 84 0 ${largeArcFlag} 1 ${x2} ${y2} Z`,
+                pctText: `${(pct * 100).toFixed(1)}%`,
+            };
+        });
+        return {
+            total,
+            segments,
+        };
+    }, [chartRows?.department]);
+    const departmentSegments = departmentPieData.segments;
+    const hasDepartmentSegments = departmentSegments.length > 0;
 
     const toggleEventStatus = async () => {
         setActionLoading(true);
@@ -126,6 +166,22 @@ function DashboardContent() {
             toast.success(`Event ${nextStatus === 'open' ? 'opened' : 'closed'}`);
         } catch (error) {
             toast.error(getErrorMessage(error, 'Failed to update event status'));
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    const toggleEventVisibility = async () => {
+        setActionLoading(true);
+        try {
+            const nextVisible = !isVisible;
+            await axios.put(`${API}/pda-admin/events/${eventSlug}/visibility`, {
+                is_visible: nextVisible,
+            }, { headers: getAuthHeader() });
+            await Promise.all([refreshEventInfo(), fetchDashboardStats()]);
+            toast.success(`Event ${nextVisible ? 'is now visible' : 'is now hidden'} on public pages`);
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to update event visibility'));
         } finally {
             setActionLoading(false);
         }
@@ -174,6 +230,35 @@ function DashboardContent() {
                             <><PauseCircle className="w-4 h-4 sm:w-5 sm:h-5 mr-2" /> Close Event</>
                         ) : (
                             <><PlayCircle className="w-4 h-4 sm:w-5 sm:h-5 mr-2" /> Open Event</>
+                        )}
+                    </Button>
+                </div>
+            </div>
+
+            <div className={`neo-card mb-8 ${isVisible ? 'bg-blue-50 border-blue-500' : 'bg-slate-100 border-slate-500'}`}>
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <div className="flex items-center gap-4">
+                        {isVisible ? (
+                            <Eye className="w-9 h-9 sm:w-10 sm:h-10 text-blue-600" />
+                        ) : (
+                            <EyeOff className="w-9 h-9 sm:w-10 sm:h-10 text-slate-600" />
+                        )}
+                        <div>
+                            <h2 className="font-heading font-bold text-lg sm:text-xl">Visibility: {isVisible ? 'VISIBLE' : 'HIDDEN'}</h2>
+                            <p className="text-gray-600 text-sm sm:text-base">
+                                {isVisible ? 'Shown on homepage and /events pages' : 'Hidden from homepage and /events pages'}
+                            </p>
+                        </div>
+                    </div>
+                    <Button
+                        onClick={toggleEventVisibility}
+                        disabled={actionLoading}
+                        className={`${isVisible ? 'bg-slate-700' : 'bg-blue-600'} text-white border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none text-sm sm:text-base`}
+                    >
+                        {isVisible ? (
+                            <><EyeOff className="w-4 h-4 sm:w-5 sm:h-5 mr-2" /> Hide Event</>
+                        ) : (
+                            <><Eye className="w-4 h-4 sm:w-5 sm:h-5 mr-2" /> Show Event</>
                         )}
                     </Button>
                 </div>
@@ -289,13 +374,62 @@ function DashboardContent() {
                     <Users className="w-4 h-4 sm:w-5 sm:h-5" /> Department Distribution
                 </h3>
                 {eventInfo?.participant_mode === 'individual' ? (
-                    <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                        {Object.entries(chartRows?.department || {}).map(([dept, count]) => (
-                            <div key={dept} className="flex items-center justify-between p-3 bg-muted border-2 border-black">
-                                <span className="font-medium text-xs sm:text-sm truncate max-w-[180px]">{dept}</span>
-                                <span className="bg-primary text-white px-2 py-1 font-bold text-xs sm:text-sm border-2 border-black ml-2">{count}</span>
-                            </div>
-                        ))}
+                    <div className="grid gap-6 md:grid-cols-[260px_1fr] items-center">
+                        {hasDepartmentSegments ? (
+                            <>
+                                <div className="mx-auto w-full max-w-[260px]">
+                                    <div className="mb-3 text-center text-xs sm:text-sm font-semibold min-h-[20px]">
+                                        {hoveredDepartment
+                                            ? `${hoveredDepartment.name}: ${hoveredDepartment.value} (${hoveredDepartment.pctText})`
+                                            : 'Hover a slice to see details'}
+                                    </div>
+                                    <svg viewBox="0 0 220 220" className="w-full h-auto">
+                                        <circle cx="110" cy="110" r="84" fill="#F3F4F6" stroke="#000" strokeWidth="4" />
+                                        {departmentSegments.map((segment) => (
+                                            <path
+                                                key={segment.name}
+                                                d={segment.pathD}
+                                                fill={segment.color}
+                                                stroke="#000"
+                                                strokeWidth="2"
+                                                className="cursor-pointer"
+                                                onMouseEnter={() => setHoveredDepartment(segment)}
+                                                onMouseLeave={() => setHoveredDepartment(null)}
+                                            >
+                                                <title>{`${segment.name}: ${segment.value} (${segment.pctText})`}</title>
+                                            </path>
+                                        ))}
+                                        <circle cx="110" cy="110" r="42" fill="#fff" stroke="#000" strokeWidth="3" />
+                                        <text x="110" y="102" textAnchor="middle" className="fill-black" style={{ fontSize: 13, fontWeight: 800 }}>
+                                            Total
+                                        </text>
+                                        <text x="110" y="122" textAnchor="middle" className="fill-black" style={{ fontSize: 16, fontWeight: 900 }}>
+                                            {departmentPieData.total}
+                                        </text>
+                                    </svg>
+                                </div>
+                                <div className="grid sm:grid-cols-2 gap-3">
+                                    {departmentSegments.map((segment) => (
+                                        <div key={segment.name} className="flex items-center justify-between gap-3 p-3 bg-muted border-2 border-black">
+                                            <div className="min-w-0">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="inline-block h-3 w-3 border border-black shrink-0" style={{ backgroundColor: segment.color }} />
+                                                    <span className="font-medium text-xs sm:text-sm truncate">{segment.name}</span>
+                                                </div>
+                                                <p className="text-[11px] sm:text-xs text-gray-600 mt-1">
+                                                    {segment.pctText}
+                                                </p>
+                                            </div>
+                                            <span className="bg-primary text-white px-2 py-1 font-bold text-xs sm:text-sm border-2 border-black shrink-0">
+                                                {segment.value}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </>
+                        ) : (
+                            <p className="text-sm text-gray-600">No department data available yet.</p>
+                        )}
                     </div>
                 ) : (
                     <p className="text-sm text-gray-600">Department charts are only available for individual-mode events.</p>

@@ -1,16 +1,91 @@
 import React, { useMemo } from 'react';
 
-const renderInlineDescription = (text, keyPrefix) => {
-    const tokens = String(text || '').split(/(\*[^*]+\*)/g);
+const splitMentionHashtagTokens = (text) => String(text || '').split(/(@[A-Za-z0-9_.-]+|#[A-Za-z0-9_.-]+)/g);
+const splitUrlTokens = (text) => String(text || '').split(/(https?:\/\/[^\s<>"']+)/g);
+
+const splitTrailingPunctuation = (value) => {
+    let core = String(value || '');
+    let suffix = '';
+    while (core && /[),.!?;:\]]/.test(core.slice(-1))) {
+        suffix = `${core.slice(-1)}${suffix}`;
+        core = core.slice(0, -1);
+    }
+    return { core, suffix };
+};
+
+const renderUrlText = (text, keyPrefix) => {
+    const tokens = splitUrlTokens(text);
     return tokens.filter(Boolean).map((token, index) => {
-        if (token.startsWith('*') && token.endsWith('*') && token.length > 2) {
+        if (!/^https?:\/\//i.test(token)) {
+            return <React.Fragment key={`${keyPrefix}-u-t-${index}`}>{token}</React.Fragment>;
+        }
+        const { core, suffix } = splitTrailingPunctuation(token);
+        if (!core) {
+            return <React.Fragment key={`${keyPrefix}-u-e-${index}`}>{token}</React.Fragment>;
+        }
+        return (
+            <React.Fragment key={`${keyPrefix}-u-l-${index}`}>
+                <a
+                    href={core}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-semibold text-sky-700 underline underline-offset-2 break-all hover:text-sky-800"
+                >
+                    {core}
+                </a>
+                {suffix ? <>{suffix}</> : null}
+            </React.Fragment>
+        );
+    });
+};
+
+const renderMentionHashtagText = (text, keyPrefix) => {
+    const tokens = splitMentionHashtagTokens(text);
+    return tokens.filter(Boolean).map((token, index) => {
+        if (token.startsWith('@')) {
             return (
-                <strong key={`${keyPrefix}-b-${index}`} className="font-extrabold text-black">
-                    {token.slice(1, -1)}
+                <span key={`${keyPrefix}-m-${index}`} className="font-semibold text-teal-700">
+                    {token}
+                </span>
+            );
+        }
+        if (token.startsWith('#')) {
+            return (
+                <span key={`${keyPrefix}-h-${index}`} className="font-semibold text-orange-700">
+                    {token}
+                </span>
+            );
+        }
+        return (
+            <React.Fragment key={`${keyPrefix}-t-${index}`}>
+                {renderUrlText(token, `${keyPrefix}-t-${index}`)}
+            </React.Fragment>
+        );
+    });
+};
+
+const renderInlineDescription = (text, keyPrefix) => {
+    const tokens = String(text || '').split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g);
+    return tokens.filter(Boolean).map((token, index) => {
+        if (token.startsWith('**') && token.endsWith('**') && token.length > 4) {
+            return (
+                <strong key={`${keyPrefix}-b2-${index}`} className="font-extrabold text-black">
+                    {renderMentionHashtagText(token.slice(2, -2), `${keyPrefix}-b2-${index}`)}
                 </strong>
             );
         }
-        return <React.Fragment key={`${keyPrefix}-t-${index}`}>{token}</React.Fragment>;
+        if (token.startsWith('*') && token.endsWith('*') && token.length > 2) {
+            return (
+                <strong key={`${keyPrefix}-b-${index}`} className="font-extrabold text-black">
+                    {renderMentionHashtagText(token.slice(1, -1), `${keyPrefix}-b-${index}`)}
+                </strong>
+            );
+        }
+        return (
+            <React.Fragment key={`${keyPrefix}-n-${index}`}>
+                {renderMentionHashtagText(token, `${keyPrefix}-n-${index}`)}
+            </React.Fragment>
+        );
     });
 };
 
@@ -51,7 +126,7 @@ const splitSentences = (value) => {
 };
 
 export const parseDescriptionBlocks = (description) => {
-    const source = String(description || '').replace(/\r/g, '');
+    const source = String(description || '').replace(/\r/g, '').replace(/\\n/g, '\n');
     const rawLines = source.split('\n');
     const blocks = [];
     let listBuffer = [];
@@ -68,8 +143,13 @@ export const parseDescriptionBlocks = (description) => {
             flushList();
             return;
         }
-        if (line.startsWith('-')) {
-            const cleaned = line.replace(/^-+\s*/, '').trim();
+        if (/^(-|\*|•)\s+/.test(line)) {
+            const cleaned = line.replace(/^(-|\*|•)\s+/, '').trim();
+            if (cleaned) listBuffer.push(cleaned);
+            return;
+        }
+        if (/^\d+\.\s+/.test(line)) {
+            const cleaned = line.replace(/^\d+\.\s+/, '').trim();
             if (cleaned) listBuffer.push(cleaned);
             return;
         }

@@ -42,7 +42,7 @@ export default function EventAdminShell({
 
     const refreshEventInfo = useCallback(async () => {
         if (!eventSlug) return;
-        const response = await axios.get(`${API}/pda/events/${eventSlug}`, { headers: getAuthHeader() });
+        const response = await axios.get(`${API}/pda-admin/events/${eventSlug}`, { headers: getAuthHeader() });
         setEventInfo(response.data);
     }, [eventSlug, getAuthHeader]);
 
@@ -51,7 +51,7 @@ export default function EventAdminShell({
         const load = async () => {
             setLoading(true);
             try {
-                const response = await axios.get(`${API}/pda/events/${eventSlug}`, { headers: getAuthHeader() });
+                const response = await axios.get(`${API}/pda-admin/events/${eventSlug}`, { headers: getAuthHeader() });
                 if (!mounted) return;
                 setEventInfo(response.data);
             } catch (error) {

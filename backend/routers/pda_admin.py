@@ -2,8 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from typing import Dict, List, Optional
+import os
 import io
 import csv
+from io import BytesIO
+from pathlib import Path
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 
@@ -37,14 +40,79 @@ from schemas import (
     PdaTeamCreate, PdaTeamUpdate, PdaTeamResponse,
     PdaAdminUserUpdate, PdaAdminUserResponse,
     PdaGalleryCreate, PdaGalleryUpdate, PdaGalleryResponse,
-    PresignRequest, PresignResponse
+    PresignRequest, PresignResponse,
+    PdaPdfPreviewGenerateRequest, PdaPdfPreviewGenerateResponse,
 )
 from security import require_pda_home_admin, require_superadmin
-from utils import log_admin_action, _upload_to_s3, _generate_presigned_put_url
+from utils import (
+    S3_BUCKET_NAME,
+    S3_CLIENT,
+    _build_s3_url,
+    _extract_s3_key_from_url,
+    _generate_presigned_put_url,
+    _upload_to_s3,
+    log_admin_action,
+)
 from auth import get_password_hash
 from recruitment_state import get_recruitment_state, get_recruitment_state_map
 
+try:
+    import pypdfium2 as pdfium
+except Exception:  # pragma: no cover
+    pdfium = None
+
 router = APIRouter()
+
+PDF_PREVIEW_MAX_PAGES = 20
+PDF_PREVIEW_RENDER_SCALE = 1.5
+
+
+def _render_pdf_preview_images(pdf_bytes: bytes, max_pages: int) -> List[bytes]:
+    if not pdfium:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="PDF preview dependency missing (install pypdfium2)",
+        )
+    try:
+        doc = pdfium.PdfDocument(pdf_bytes)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid PDF file") from exc
+
+    page_count = len(doc)
+    target_pages = min(max_pages, PDF_PREVIEW_MAX_PAGES, page_count)
+    images: List[bytes] = []
+
+    for idx in range(target_pages):
+        page = doc[idx]
+        bitmap = None
+        pil_image = None
+        output = BytesIO()
+        try:
+            bitmap = page.render(scale=PDF_PREVIEW_RENDER_SCALE)
+            pil_image = bitmap.to_pil()
+            pil_image.save(output, format="WEBP", quality=84, method=6)
+            images.append(output.getvalue())
+        finally:
+            output.close()
+            if pil_image is not None:
+                try:
+                    pil_image.close()
+                except Exception:
+                    pass
+            if bitmap is not None and hasattr(bitmap, "close"):
+                try:
+                    bitmap.close()
+                except Exception:
+                    pass
+            if hasattr(page, "close"):
+                try:
+                    page.close()
+                except Exception:
+                    pass
+
+    if hasattr(doc, "close"):
+        doc.close()
+    return images
 
 def _build_team_response(member: PdaTeam, user: Optional[PdaUser]) -> PdaTeamResponse:
     return PdaTeamResponse(
@@ -844,7 +912,56 @@ def presign_pda_poster(
         "posters",
         payload.filename,
         payload.content_type,
-        allowed_types=["image/png", "image/jpeg", "image/webp"]
+        allowed_types=["image/png", "image/jpeg", "image/webp", "application/pdf"]
+    )
+
+
+@router.post("/pda-admin/posters/pdf-preview", response_model=PdaPdfPreviewGenerateResponse)
+def generate_pda_pdf_preview_images(
+    payload: PdaPdfPreviewGenerateRequest,
+    _: PdaUser = Depends(require_pda_home_admin),
+):
+    if not S3_CLIENT or not S3_BUCKET_NAME:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="S3 not configured")
+
+    source_key = _extract_s3_key_from_url(payload.s3_url)
+    if not source_key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid S3 URL")
+    if not source_key.startswith("posters/"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="File does not belong to posters bucket path")
+    if not source_key.lower().endswith(".pdf"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only PDF files are supported")
+
+    try:
+        source_obj = S3_CLIENT.get_object(Bucket=S3_BUCKET_NAME, Key=source_key)
+        pdf_bytes = source_obj["Body"].read()
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to read source PDF") from exc
+
+    preview_bytes = _render_pdf_preview_images(pdf_bytes, max_pages=payload.max_pages)
+    if not preview_bytes:
+        return PdaPdfPreviewGenerateResponse(preview_image_urls=[], pages_generated=0)
+
+    source_stem = Path(source_key).stem
+    run_token = os.urandom(6).hex()
+    preview_urls: List[str] = []
+    for idx, image_bytes in enumerate(preview_bytes, start=1):
+        preview_key = f"posters/previews/{source_stem}-{run_token}/page_{idx:03d}.webp"
+        try:
+            S3_CLIENT.put_object(
+                Bucket=S3_BUCKET_NAME,
+                Key=preview_key,
+                Body=image_bytes,
+                ContentType="image/webp",
+                CacheControl="public, max-age=31536000, immutable",
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to upload preview image") from exc
+        preview_urls.append(_build_s3_url(preview_key))
+
+    return PdaPdfPreviewGenerateResponse(
+        preview_image_urls=preview_urls,
+        pages_generated=len(preview_urls),
     )
 
 

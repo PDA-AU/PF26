@@ -33,6 +33,7 @@ from schemas import (
     PdaManagedAchievement,
     PdaManagedCertificateResponse,
     PdaManagedEventDashboard,
+    PdaEventPublicRoundResponse,
     PdaManagedEventResponse,
     PdaManagedMyEvent,
     PdaManagedQrResponse,
@@ -53,6 +54,11 @@ def _get_event_or_404(db: Session, slug: str) -> PdaEvent:
     if not event:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
     return event
+
+
+def _ensure_event_visible_for_public_access(event: PdaEvent) -> None:
+    if not bool(getattr(event, "is_visible", True)):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
 
 
 def _normalize_team_code(value: str) -> str:
@@ -168,7 +174,7 @@ def _send_registration_email(user: PdaUser, event: PdaEvent, details: str) -> No
 def list_ongoing_events(db: Session = Depends(get_db)):
     events = (
         db.query(PdaEvent)
-        .filter(PdaEvent.status == PdaEventStatus.OPEN)
+        .filter(PdaEvent.status == PdaEventStatus.OPEN, PdaEvent.is_visible == True)  # noqa: E712
         .order_by(PdaEvent.created_at.desc())
         .all()
     )
@@ -177,14 +183,31 @@ def list_ongoing_events(db: Session = Depends(get_db)):
 
 @router.get("/pda/events/all", response_model=List[PdaManagedEventResponse])
 def list_all_managed_events(db: Session = Depends(get_db)):
-    events = db.query(PdaEvent).order_by(PdaEvent.created_at.desc()).all()
+    events = db.query(PdaEvent).filter(PdaEvent.is_visible == True).order_by(PdaEvent.created_at.desc()).all()  # noqa: E712
     return [PdaManagedEventResponse.model_validate(event) for event in events]
 
 
 @router.get("/pda/events/{slug}", response_model=PdaManagedEventResponse)
 def get_event(slug: str, db: Session = Depends(get_db)):
     event = _get_event_or_404(db, slug)
+    _ensure_event_visible_for_public_access(event)
     return PdaManagedEventResponse.model_validate(event)
+
+
+@router.get("/pda/events/{slug}/rounds", response_model=List[PdaEventPublicRoundResponse])
+def list_event_published_rounds(slug: str, db: Session = Depends(get_db)):
+    event = _get_event_or_404(db, slug)
+    _ensure_event_visible_for_public_access(event)
+    rounds = (
+        db.query(PdaEventRound)
+        .filter(
+            PdaEventRound.event_id == event.id,
+            PdaEventRound.state != PdaEventRoundState.DRAFT,
+        )
+        .order_by(PdaEventRound.round_no.asc())
+        .all()
+    )
+    return [PdaEventPublicRoundResponse.model_validate(round_row) for round_row in rounds]
 
 
 @router.get("/pda/events/{slug}/dashboard", response_model=PdaManagedEventDashboard)
@@ -194,6 +217,7 @@ def get_event_dashboard(
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
+    _ensure_event_visible_for_public_access(event)
     _ensure_event_open_for_participant_access(event)
 
     team = _get_user_team_for_event(db, event.id, user.id) if event.participant_mode == PdaEventParticipantMode.TEAM else None
@@ -254,6 +278,7 @@ def register_individual_event(
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
+    _ensure_event_visible_for_public_access(event)
     if event.status != PdaEventStatus.OPEN:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Event is closed")
     if event.participant_mode != PdaEventParticipantMode.INDIVIDUAL:
@@ -298,6 +323,7 @@ def create_team(
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
+    _ensure_event_visible_for_public_access(event)
     if event.status != PdaEventStatus.OPEN:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Event is closed")
     if event.participant_mode != PdaEventParticipantMode.TEAM:
@@ -345,6 +371,7 @@ def join_team(
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
+    _ensure_event_visible_for_public_access(event)
     if event.status != PdaEventStatus.OPEN:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Event is closed")
     if event.participant_mode != PdaEventParticipantMode.TEAM:
@@ -397,6 +424,7 @@ def get_my_team(
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
+    _ensure_event_visible_for_public_access(event)
     _ensure_event_open_for_participant_access(event)
     if event.participant_mode != PdaEventParticipantMode.TEAM:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This event is not a team event")
@@ -414,6 +442,7 @@ def invite_to_team(
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
+    _ensure_event_visible_for_public_access(event)
     _ensure_event_open_for_participant_access(event)
     if event.participant_mode != PdaEventParticipantMode.TEAM:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This event is not a team event")
@@ -479,6 +508,7 @@ def get_event_qr_token(
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
+    _ensure_event_visible_for_public_access(event)
     _ensure_event_open_for_participant_access(event)
     entity_type = PdaManagedEntityTypeEnum.USER
     entity_id = user.id
@@ -582,6 +612,7 @@ def event_me(
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
+    _ensure_event_visible_for_public_access(event)
     _ensure_event_open_for_participant_access(event)
     registration = db.query(PdaEventRegistration).filter(
         PdaEventRegistration.event_id == event.id,
@@ -616,6 +647,7 @@ def my_round_status(
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
+    _ensure_event_visible_for_public_access(event)
     _ensure_event_open_for_participant_access(event)
     registration = None
     entity_type = PdaEventEntityType.USER

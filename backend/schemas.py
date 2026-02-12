@@ -3,6 +3,7 @@ from typing import Optional, List, Dict, Any
 from enum import Enum
 from datetime import datetime, date
 from enum import Enum
+import json
 import re
 
 
@@ -323,6 +324,16 @@ class PresignResponse(BaseModel):
     public_url: str
     key: str
     content_type: str
+
+
+class PdaPdfPreviewGenerateRequest(BaseModel):
+    s3_url: str = Field(..., min_length=5)
+    max_pages: int = Field(default=20, ge=1, le=20)
+
+
+class PdaPdfPreviewGenerateResponse(BaseModel):
+    preview_image_urls: List[str] = Field(default_factory=list)
+    pages_generated: int = 0
 
 
 class ImageUrlUpdate(BaseModel):
@@ -919,6 +930,36 @@ def _normalize_optional_http_url(value: Optional[str], field_name: str) -> Optio
     return cleaned
 
 
+def _normalize_optional_http_url_or_assets_json(value: Optional[str], field_name: str) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    if not cleaned:
+        return None
+    if cleaned.startswith("["):
+        try:
+            parsed = json.loads(cleaned)
+        except Exception as exc:
+            raise ValueError(f"{field_name} must be a valid JSON array") from exc
+        if not isinstance(parsed, list):
+            raise ValueError(f"{field_name} must be a JSON array")
+        normalized_assets: List[Dict[str, str]] = []
+        for index, asset in enumerate(parsed):
+            if not isinstance(asset, dict):
+                raise ValueError(f"{field_name}[{index}] must be an object")
+            raw_url = str(asset.get("url") or asset.get("src") or "").strip()
+            if not raw_url:
+                raise ValueError(f"{field_name}[{index}].url is required")
+            normalized_url = _normalize_optional_http_url(raw_url, f"{field_name}[{index}].url")
+            normalized_asset: Dict[str, str] = {"url": normalized_url}
+            ratio = str(asset.get("aspect_ratio") or asset.get("ratio") or "").strip()
+            if ratio:
+                normalized_asset["aspect_ratio"] = ratio
+            normalized_assets.append(normalized_asset)
+        return json.dumps(normalized_assets, separators=(",", ":"))
+    return _normalize_optional_http_url(cleaned, field_name)
+
+
 class PdaManagedEventCreate(BaseModel):
     title: str = Field(..., min_length=2)
     description: Optional[str] = None
@@ -926,6 +967,7 @@ class PdaManagedEventCreate(BaseModel):
     end_date: Optional[date] = None
     poster_url: Optional[str] = None
     whatsapp_url: Optional[str] = None
+    external_url_name: Optional[str] = "Join whatsapp channel"
     event_type: PdaManagedEventTypeEnum
     format: PdaManagedEventFormatEnum
     template_option: PdaManagedEventTemplateEnum
@@ -949,6 +991,7 @@ class PdaManagedEventUpdate(BaseModel):
     end_date: Optional[date] = None
     poster_url: Optional[str] = None
     whatsapp_url: Optional[str] = None
+    external_url_name: Optional[str] = None
     event_type: Optional[PdaManagedEventTypeEnum] = None
     format: Optional[PdaManagedEventFormatEnum] = None
     template_option: Optional[PdaManagedEventTemplateEnum] = None
@@ -957,6 +1000,7 @@ class PdaManagedEventUpdate(BaseModel):
     round_count: Optional[int] = Field(None, ge=1, le=20)
     team_min_size: Optional[int] = Field(None, ge=1, le=100)
     team_max_size: Optional[int] = Field(None, ge=1, le=100)
+    is_visible: Optional[bool] = None
     status: Optional[PdaManagedEventStatusEnum] = None
 
     @field_validator("whatsapp_url", mode="before")
@@ -967,6 +1011,10 @@ class PdaManagedEventUpdate(BaseModel):
 
 class PdaManagedEventStatusUpdate(BaseModel):
     status: PdaManagedEventStatusEnum
+
+
+class PdaManagedEventVisibilityUpdate(BaseModel):
+    is_visible: bool
 
 
 class PdaManagedEventResponse(BaseModel):
@@ -980,6 +1028,7 @@ class PdaManagedEventResponse(BaseModel):
     end_date: Optional[date] = None
     poster_url: Optional[str] = None
     whatsapp_url: Optional[str] = None
+    external_url_name: Optional[str] = "Join whatsapp channel"
     event_type: PdaManagedEventTypeEnum
     format: PdaManagedEventFormatEnum
     template_option: PdaManagedEventTemplateEnum
@@ -988,6 +1037,7 @@ class PdaManagedEventResponse(BaseModel):
     round_count: int
     team_min_size: Optional[int] = None
     team_max_size: Optional[int] = None
+    is_visible: bool = True
     status: PdaManagedEventStatusEnum
     created_at: datetime
 
@@ -1044,14 +1094,41 @@ class PdaManagedRoundCreate(BaseModel):
     round_no: int = Field(..., ge=1, le=20)
     name: str = Field(..., min_length=2)
     description: Optional[str] = None
+    round_poster: Optional[str] = None
+    external_url: Optional[str] = None
+    external_url_name: Optional[str] = "Explore Round"
+    whatsapp_url: Optional[str] = None
     date: Optional[datetime] = None
     mode: PdaManagedEventFormatEnum = PdaManagedEventFormatEnum.OFFLINE
     evaluation_criteria: Optional[List[PdaManagedRoundCriteria]] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def map_legacy_whatsapp_url(cls, values):
+        if not isinstance(values, dict):
+            return values
+        if "external_url" not in values and values.get("whatsapp_url") is not None:
+            values["external_url"] = values.get("whatsapp_url")
+        return values
+
+    @field_validator("external_url", mode="before")
+    @classmethod
+    def validate_external_url(cls, value):
+        return _normalize_optional_http_url(value, "external_url")
+
+    @field_validator("round_poster", mode="before")
+    @classmethod
+    def validate_round_poster(cls, value):
+        return _normalize_optional_http_url_or_assets_json(value, "round_poster")
 
 
 class PdaManagedRoundUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    round_poster: Optional[str] = None
+    external_url: Optional[str] = None
+    external_url_name: Optional[str] = None
+    whatsapp_url: Optional[str] = None
     date: Optional[datetime] = None
     mode: Optional[PdaManagedEventFormatEnum] = None
     state: Optional[PdaManagedRoundStateEnum] = None
@@ -1060,6 +1137,25 @@ class PdaManagedRoundUpdate(BaseModel):
     elimination_value: Optional[float] = None
     eliminate_absent: Optional[bool] = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def map_legacy_whatsapp_url(cls, values):
+        if not isinstance(values, dict):
+            return values
+        if "external_url" not in values and values.get("whatsapp_url") is not None:
+            values["external_url"] = values.get("whatsapp_url")
+        return values
+
+    @field_validator("external_url", mode="before")
+    @classmethod
+    def validate_external_url(cls, value):
+        return _normalize_optional_http_url(value, "external_url")
+
+    @field_validator("round_poster", mode="before")
+    @classmethod
+    def validate_round_poster(cls, value):
+        return _normalize_optional_http_url_or_assets_json(value, "round_poster")
+
 
 class PdaManagedRoundResponse(BaseModel):
     id: int
@@ -1067,6 +1163,9 @@ class PdaManagedRoundResponse(BaseModel):
     round_no: int
     name: str
     description: Optional[str] = None
+    round_poster: Optional[str] = None
+    external_url: Optional[str] = None
+    external_url_name: Optional[str] = "Explore Round"
     date: Optional[datetime] = None
     mode: PdaManagedEventFormatEnum
     state: PdaManagedRoundStateEnum
@@ -1075,6 +1174,23 @@ class PdaManagedRoundResponse(BaseModel):
     elimination_value: Optional[float] = None
     is_frozen: bool
     created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PdaEventPublicRoundResponse(BaseModel):
+    id: int
+    event_id: int
+    round_no: int
+    name: str
+    description: Optional[str] = None
+    round_poster: Optional[str] = None
+    external_url: Optional[str] = None
+    external_url_name: Optional[str] = "Explore Round"
+    date: Optional[datetime] = None
+    mode: PdaManagedEventFormatEnum
+    state: PdaManagedRoundStateEnum
 
     class Config:
         from_attributes = True

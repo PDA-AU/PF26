@@ -936,6 +936,7 @@ def ensure_pda_event_tables(engine):
                     end_date DATE,
                     poster_url TEXT,
                     whatsapp_url VARCHAR(500),
+                    external_url_name VARCHAR(120) NOT NULL DEFAULT 'Join whatsapp channel',
                     event_type VARCHAR(30) NOT NULL,
                     format VARCHAR(30) NOT NULL,
                     template_option VARCHAR(50) NOT NULL,
@@ -944,6 +945,7 @@ def ensure_pda_event_tables(engine):
                     round_count INTEGER NOT NULL DEFAULT 1,
                     team_min_size INTEGER,
                     team_max_size INTEGER,
+                    is_visible BOOLEAN NOT NULL DEFAULT TRUE,
                     status VARCHAR(20) NOT NULL DEFAULT 'closed',
                     created_at TIMESTAMPTZ DEFAULT now(),
                     updated_at TIMESTAMPTZ
@@ -954,7 +956,38 @@ def ensure_pda_event_tables(engine):
         conn.execute(text("ALTER TABLE pda_events ADD COLUMN IF NOT EXISTS start_date DATE"))
         conn.execute(text("ALTER TABLE pda_events ADD COLUMN IF NOT EXISTS end_date DATE"))
         conn.execute(text("ALTER TABLE pda_events ADD COLUMN IF NOT EXISTS whatsapp_url VARCHAR(500)"))
+        conn.execute(
+            text(
+                "ALTER TABLE pda_events "
+                "ADD COLUMN IF NOT EXISTS external_url_name VARCHAR(120) NOT NULL DEFAULT 'Join whatsapp channel'"
+            )
+        )
+        conn.execute(
+            text(
+                "UPDATE pda_events "
+                "SET external_url_name = 'Join whatsapp channel' "
+                "WHERE external_url_name IS NULL OR btrim(external_url_name) = ''"
+            )
+        )
+        conn.execute(text("ALTER TABLE pda_events ADD COLUMN IF NOT EXISTS is_visible BOOLEAN NOT NULL DEFAULT TRUE"))
         conn.execute(text("ALTER TABLE pda_events ALTER COLUMN poster_url TYPE TEXT"))
+        if _table_exists(conn, "pda_event_rounds"):
+            conn.execute(text("ALTER TABLE pda_event_rounds ADD COLUMN IF NOT EXISTS round_poster TEXT"))
+            conn.execute(text("ALTER TABLE pda_event_rounds ADD COLUMN IF NOT EXISTS whatsapp_url VARCHAR(500)"))
+            conn.execute(text("ALTER TABLE pda_event_rounds ADD COLUMN IF NOT EXISTS external_url VARCHAR(500)"))
+            conn.execute(
+                text(
+                    "ALTER TABLE pda_event_rounds "
+                    "ADD COLUMN IF NOT EXISTS external_url_name VARCHAR(120) NOT NULL DEFAULT 'Explore Round'"
+                )
+            )
+            conn.execute(
+                text(
+                    "UPDATE pda_event_rounds "
+                    "SET external_url = whatsapp_url "
+                    "WHERE external_url IS NULL AND whatsapp_url IS NOT NULL"
+                )
+            )
 
         conn.execute(
             text(
