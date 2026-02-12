@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { toast } from 'sonner';
+import { Link } from 'react-router-dom';
 import { Award, Download, ExternalLink, Share2 } from 'lucide-react';
 
 import { useAuth } from '@/context/AuthContext';
