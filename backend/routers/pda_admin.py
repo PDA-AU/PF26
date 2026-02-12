@@ -46,6 +46,13 @@ from recruitment_state import get_recruitment_state, get_recruitment_state_map
 
 router = APIRouter()
 
+def _normalize_optional_text(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
 def _build_team_response(member: PdaTeam, user: Optional[PdaUser]) -> PdaTeamResponse:
     return PdaTeamResponse(
         id=member.id,
@@ -390,7 +397,12 @@ def update_pda_user_admin(
 
     for field in ("name", "profile_name", "email", "phno", "dept", "dob", "gender", "is_member", "instagram_url", "linkedin_url", "github_url"):
         if field in updates:
-            setattr(user, field, updates[field])
+            next_value = updates[field]
+            if field in ("dept", "gender"):
+                next_value = _normalize_optional_text(next_value)
+                if next_value is None:
+                    continue
+            setattr(user, field, next_value)
     if "photo_url" in updates:
         user.image_url = updates.get("photo_url")
 
@@ -458,8 +470,11 @@ def create_team_member(
         user = db.query(PdaUser).filter(PdaUser.id == payload["user_id"]).first()
         if user:
             for field in ("name", "email", "phno", "dept", "instagram_url", "linkedin_url", "github_url"):
-                if payload.get(field):
-                    setattr(user, field, payload[field])
+                next_value = payload.get(field)
+                if field == "dept":
+                    next_value = _normalize_optional_text(next_value)
+                if next_value:
+                    setattr(user, field, next_value)
     if not user and payload.get("regno"):
         user = db.query(PdaUser).filter(PdaUser.regno == payload["regno"]).first()
         if not user:
@@ -469,7 +484,7 @@ def create_team_member(
                 hashed_password=get_password_hash("password"),
                 name=payload.get("name") or f"PDA Member {payload['regno']}",
                 phno=payload.get("phno"),
-                dept=payload.get("dept"),
+                dept=_normalize_optional_text(payload.get("dept")),
                 instagram_url=payload.get("instagram_url"),
                 linkedin_url=payload.get("linkedin_url"),
                 github_url=payload.get("github_url"),
@@ -481,8 +496,11 @@ def create_team_member(
             db.flush()
         else:
             for field in ("name", "email", "phno", "dept", "instagram_url", "linkedin_url", "github_url"):
-                if payload.get(field):
-                    setattr(user, field, payload[field])
+                next_value = payload.get(field)
+                if field == "dept":
+                    next_value = _normalize_optional_text(next_value)
+                if next_value:
+                    setattr(user, field, next_value)
 
     if not user:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user_id or regno is required")
@@ -530,7 +548,12 @@ def update_team_member(
         member.user_id = user.id
         for field in ("name", "email", "phno", "dept", "dob", "instagram_url", "linkedin_url", "github_url"):
             if field in updates and updates[field] is not None:
-                setattr(user, field, updates[field])
+                next_value = updates[field]
+                if field == "dept":
+                    next_value = _normalize_optional_text(next_value)
+                    if next_value is None:
+                        continue
+                setattr(user, field, next_value)
         if "photo_url" in updates and updates.get("photo_url"):
             if user.image_url != updates["photo_url"]:
                 user.image_url = updates["photo_url"]

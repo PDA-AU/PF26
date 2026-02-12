@@ -44,6 +44,13 @@ router = APIRouter()
 DEFAULT_PDA_RECRUIT_URL = "https://chat.whatsapp.com/ErThvhBS77kGJEApiABP2z"
 
 
+def _normalize_optional_text(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
 def _get_recruitment_config(db: Session) -> SystemConfig:
     reg_config = db.query(SystemConfig).filter(SystemConfig.key == "pda_recruitment_open").first()
     if not reg_config:
@@ -133,9 +140,9 @@ def pda_register(user_data: PdaUserRegister, db: Session = Depends(get_db)):
         name=user_data.name,
         profile_name=desired_profile_name or generate_unique_profile_name(db, user_data.name),
         dob=user_data.dob,
-        gender=user_data.gender,
+        gender=_normalize_optional_text(user_data.gender),
         phno=user_data.phno,
-        dept=user_data.dept,
+        dept=_normalize_optional_text(user_data.dept),
         image_url=user_data.image_url,
         json_content={},
         is_member=False
@@ -298,12 +305,16 @@ def update_pda_me(
             email_changed = True
     if update_data.dob is not None:
         user.dob = update_data.dob
-    if update_data.gender is not None:
-        user.gender = update_data.gender
+    if "gender" in update_data.model_fields_set:
+        normalized_gender = _normalize_optional_text(update_data.gender)
+        if normalized_gender is not None:
+            user.gender = normalized_gender
     if update_data.phno is not None:
         user.phno = update_data.phno
-    if update_data.dept is not None:
-        user.dept = update_data.dept
+    if "dept" in update_data.model_fields_set:
+        normalized_dept = _normalize_optional_text(update_data.dept)
+        if normalized_dept is not None:
+            user.dept = normalized_dept
     if update_data.image_url is not None:
         user.image_url = update_data.image_url
     if "instagram_url" in update_data.model_fields_set:
