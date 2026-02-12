@@ -43,6 +43,18 @@ const GENDERS = [
     { value: 'Male', label: 'Male' },
     { value: 'Female', label: 'Female' }
 ];
+const DEPARTMENT_ENUM_KEY_TO_VALUE = {
+    AI_DS: 'Artificial Intelligence and Data Science',
+    AERO: 'Aerospace Engineering',
+    AUTO: 'Automobile Engineering',
+    CT: 'Computer Technology',
+    ECE: 'Electronics and Communication Engineering',
+    EIE: 'Electronics and Instrumentation Engineering',
+    PROD: 'Production Technology',
+    RAE: 'Robotics and Automation',
+    RPT: 'Rubber and Plastics Technology',
+    IT: 'Information Technology'
+};
 const DEPT_SHORT = {
     'Computer Technology': 'CT',
     'Information Technology': 'IT',
@@ -64,6 +76,24 @@ const DEPT_SHORT = {
     'Production Technology': 'PROD',
     'Robotics And Automation': 'RAE',
     'Robotics and Automation': 'RAE'
+};
+
+const normalizeGenderValue = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (GENDERS.some((item) => item.value === raw)) return raw;
+    const upper = raw.toUpperCase();
+    if (upper === 'MALE' || upper.endsWith('.MALE')) return 'Male';
+    if (upper === 'FEMALE' || upper.endsWith('.FEMALE')) return 'Female';
+    return '';
+};
+
+const normalizeDepartmentValue = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (DEPARTMENTS.some((item) => item.value === raw)) return raw;
+    const mapped = DEPARTMENT_ENUM_KEY_TO_VALUE[raw.toUpperCase()];
+    return mapped || raw;
 };
 
 export default function UsersAdmin() {
@@ -106,7 +136,13 @@ export default function UsersAdmin() {
     const fetchData = useCallback(async () => {
         try {
             const res = await axios.get(`${API}/pda-admin/users`, { headers: getAuthHeader() });
-            const rows = (res.data || []).filter((row) => String(row?.regno || '') !== '0000000000');
+            const rows = (res.data || [])
+                .filter((row) => String(row?.regno || '') !== '0000000000')
+                .map((row) => ({
+                    ...row,
+                    dept: normalizeDepartmentValue(row?.dept),
+                    gender: normalizeGenderValue(row?.gender)
+                }));
             setUsersRows(rows);
         } catch (error) {
             console.error('Failed to load users:', error);
@@ -180,8 +216,8 @@ export default function UsersAdmin() {
             profile_name: member.profile_name || '',
             email: member.email || '',
             phno: member.phno || '',
-            dept: member.dept || '',
-            gender: member.gender || '',
+            dept: normalizeDepartmentValue(member.dept),
+            gender: normalizeGenderValue(member.gender),
             is_member: Boolean(member.is_member),
             team: member.team || '',
             designation: member.designation || '',

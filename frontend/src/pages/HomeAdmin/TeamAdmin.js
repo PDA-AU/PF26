@@ -49,6 +49,25 @@ const DEPT_SHORT = {
     'Robotics And Automation': 'RAE',
     'Robotics and Automation': 'RAE'
 };
+const DEPARTMENT_ENUM_KEY_TO_VALUE = {
+    AI_DS: 'Artificial Intelligence and Data Science',
+    AERO: 'Aerospace Engineering',
+    AUTO: 'Automobile Engineering',
+    CT: 'Computer Technology',
+    ECE: 'Electronics and Communication Engineering',
+    EIE: 'Electronics and Instrumentation Engineering',
+    PROD: 'Production Technology',
+    RAE: 'Robotics and Automation',
+    RPT: 'Rubber and Plastics Technology',
+    IT: 'Information Technology'
+};
+
+const normalizeDepartmentValue = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const mapped = DEPARTMENT_ENUM_KEY_TO_VALUE[raw.toUpperCase()];
+    return mapped || raw;
+};
 
 export default function TeamAdmin() {
     const { isSuperAdmin, canAccessHome, getAuthHeader } = useAuth();
@@ -76,7 +95,12 @@ export default function TeamAdmin() {
     const fetchData = useCallback(async () => {
         try {
             const res = await axios.get(`${API}/pda-admin/team`, { headers: getAuthHeader() });
-            const rows = (res.data || []).filter((row) => String(row?.regno || '') !== '0000000000');
+            const rows = (res.data || [])
+                .filter((row) => String(row?.regno || '') !== '0000000000')
+                .map((row) => ({
+                    ...row,
+                    dept: normalizeDepartmentValue(row?.dept)
+                }));
             setTeamMembers(rows);
         } catch (error) {
             console.error('Failed to load team members:', error);

@@ -33,6 +33,40 @@ const GENDERS = [
     { value: 'Female', label: 'Female' }
 ];
 
+const DEPARTMENT_ENUM_KEY_TO_VALUE = {
+    AI_DS: 'Artificial Intelligence and Data Science',
+    AERO: 'Aerospace Engineering',
+    AUTO: 'Automobile Engineering',
+    CT: 'Computer Technology',
+    ECE: 'Electronics and Communication Engineering',
+    EIE: 'Electronics and Instrumentation Engineering',
+    PROD: 'Production Technology',
+    RAE: 'Robotics and Automation',
+    RPT: 'Rubber and Plastics Technology',
+    IT: 'Information Technology'
+};
+
+const normalizeGenderValue = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (GENDERS.some((item) => item.value === raw)) return raw;
+    const upper = raw.toUpperCase();
+    if (upper === 'MALE') return 'Male';
+    if (upper === 'FEMALE') return 'Female';
+    if (upper.endsWith('.MALE')) return 'Male';
+    if (upper.endsWith('.FEMALE')) return 'Female';
+    return '';
+};
+
+const normalizeDepartmentValue = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (DEPARTMENTS.some((item) => item.value === raw)) return raw;
+    const mapped = DEPARTMENT_ENUM_KEY_TO_VALUE[raw.toUpperCase()];
+    if (mapped) return mapped;
+    return '';
+};
+
 const inferRecruitmentDocContentType = (file) => {
     const filename = String(file?.name || '').toLowerCase();
     const rawType = String(file?.type || '').toLowerCase().trim();
@@ -215,9 +249,9 @@ export default function PdaProfile() {
             profile_name: user.profile_name || '',
             email: user.email || '',
             dob: user.dob || '',
-            gender: user.gender || '',
+            gender: normalizeGenderValue(user.gender),
             phno: user.phno || '',
-            dept: user.dept || '',
+            dept: normalizeDepartmentValue(user.dept),
             instagram_url: user.instagram_url || '',
             linkedin_url: user.linkedin_url || '',
             github_url: user.github_url || ''
