@@ -845,7 +845,9 @@ export default function PdaProfile() {
                                 <Label htmlFor="profile-gender" className="text-xs font-bold uppercase tracking-[0.12em]">Gender</Label>
                                 <Select value={formData.gender} onValueChange={(value) => setFormData((prev) => ({ ...prev, gender: value }))} disabled={!isEditing}>
                                     <SelectTrigger id="profile-gender" data-testid="pda-profile-gender-select" className={`${selectTriggerClass} disabled:bg-[#f3f4f6]`}>
-                                        <SelectValue placeholder="Select gender" />
+                                        <SelectValue placeholder="Select gender">
+                                            {formData.gender || 'Select gender'}
+                                        </SelectValue>
                                     </SelectTrigger>
                                     <SelectContent className={selectContentClass}>
                                         {GENDERS.map((gender) => (
@@ -864,7 +866,9 @@ export default function PdaProfile() {
                                 <Label htmlFor="profile-dept" className="text-xs font-bold uppercase tracking-[0.12em]">Department</Label>
                                 <Select value={formData.dept} onValueChange={(value) => setFormData((prev) => ({ ...prev, dept: value }))} disabled={!isEditing}>
                                     <SelectTrigger id="profile-dept" data-testid="pda-profile-dept-select" className={`${selectTriggerClass} disabled:bg-[#f3f4f6]`}>
-                                        <SelectValue placeholder="Select department" />
+                                        <SelectValue placeholder="Select department">
+                                            {formData.dept || 'Select department'}
+                                        </SelectValue>
                                     </SelectTrigger>
                                     <SelectContent className={selectContentClass}>
                                         {DEPARTMENTS.map((dept) => (
