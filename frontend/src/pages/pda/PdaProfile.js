@@ -46,8 +46,21 @@ const DEPARTMENT_ENUM_KEY_TO_VALUE = {
     IT: 'Information Technology'
 };
 
+const normalizeRawSelectValue = (value) => {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'object') {
+        if (typeof value.value === 'string') return normalizeRawSelectValue(value.value);
+        if (typeof value._value_ === 'string') return normalizeRawSelectValue(value._value_);
+    }
+    let raw = String(value).trim();
+    if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
+        raw = raw.slice(1, -1).trim();
+    }
+    return raw;
+};
+
 const normalizeGenderValue = (value) => {
-    const raw = String(value || '').trim();
+    const raw = normalizeRawSelectValue(value);
     if (!raw) return '';
     if (GENDERS.some((item) => item.value === raw)) return raw;
     const upper = raw.toUpperCase();
@@ -55,16 +68,19 @@ const normalizeGenderValue = (value) => {
     if (upper === 'FEMALE') return 'Female';
     if (upper.endsWith('.MALE')) return 'Male';
     if (upper.endsWith('.FEMALE')) return 'Female';
-    return '';
+    return raw;
 };
 
 const normalizeDepartmentValue = (value) => {
-    const raw = String(value || '').trim();
+    const raw = normalizeRawSelectValue(value);
     if (!raw) return '';
     if (DEPARTMENTS.some((item) => item.value === raw)) return raw;
-    const mapped = DEPARTMENT_ENUM_KEY_TO_VALUE[raw.toUpperCase()];
+    const upper = raw.toUpperCase();
+    const mapped = DEPARTMENT_ENUM_KEY_TO_VALUE[upper];
     if (mapped) return mapped;
-    return '';
+    const suffix = upper.includes('.') ? upper.split('.').pop() : '';
+    if (suffix && DEPARTMENT_ENUM_KEY_TO_VALUE[suffix]) return DEPARTMENT_ENUM_KEY_TO_VALUE[suffix];
+    return raw;
 };
 
 const inferRecruitmentDocContentType = (file) => {
@@ -578,6 +594,8 @@ export default function PdaProfile() {
     };
 
     if (!user) return null;
+    const displayGender = isEditing ? formData.gender : normalizeGenderValue(user.gender);
+    const displayDept = isEditing ? formData.dept : normalizeDepartmentValue(user.dept);
 
     return (
         <div className="min-h-screen bg-[#fffdf5] text-black flex flex-col">
@@ -801,7 +819,10 @@ export default function PdaProfile() {
                             {!isEditing ? (
                                 <Button
                                     type="button"
-                                    onClick={() => setIsEditing(true)}
+                                    onClick={() => {
+                                        resetProfileForm();
+                                        setIsEditing(true);
+                                    }}
                                     data-testid="pda-profile-edit-button"
                                     className={primaryButtonClass}
                                 >
@@ -843,10 +864,10 @@ export default function PdaProfile() {
                             </div>
                             <div>
                                 <Label htmlFor="profile-gender" className="text-xs font-bold uppercase tracking-[0.12em]">Gender</Label>
-                                <Select value={formData.gender} onValueChange={(value) => setFormData((prev) => ({ ...prev, gender: value }))} disabled={!isEditing}>
+                                <Select value={displayGender} onValueChange={(value) => setFormData((prev) => ({ ...prev, gender: value }))} disabled={!isEditing}>
                                     <SelectTrigger id="profile-gender" data-testid="pda-profile-gender-select" className={`${selectTriggerClass} disabled:bg-[#f3f4f6]`}>
                                         <SelectValue placeholder="Select gender">
-                                            {formData.gender || 'Select gender'}
+                                            {displayGender || 'Select gender'}
                                         </SelectValue>
                                     </SelectTrigger>
                                     <SelectContent className={selectContentClass}>
@@ -855,6 +876,9 @@ export default function PdaProfile() {
                                                 {gender.label}
                                             </SelectItem>
                                         ))}
+                                        {displayGender && !GENDERS.some((gender) => gender.value === displayGender) ? (
+                                            <SelectItem value={displayGender}>{displayGender}</SelectItem>
+                                        ) : null}
                                     </SelectContent>
                                 </Select>
                             </div>
@@ -864,10 +888,10 @@ export default function PdaProfile() {
                             </div>
                             <div>
                                 <Label htmlFor="profile-dept" className="text-xs font-bold uppercase tracking-[0.12em]">Department</Label>
-                                <Select value={formData.dept} onValueChange={(value) => setFormData((prev) => ({ ...prev, dept: value }))} disabled={!isEditing}>
+                                <Select value={displayDept} onValueChange={(value) => setFormData((prev) => ({ ...prev, dept: value }))} disabled={!isEditing}>
                                     <SelectTrigger id="profile-dept" data-testid="pda-profile-dept-select" className={`${selectTriggerClass} disabled:bg-[#f3f4f6]`}>
                                         <SelectValue placeholder="Select department">
-                                            {formData.dept || 'Select department'}
+                                            {displayDept || 'Select department'}
                                         </SelectValue>
                                     </SelectTrigger>
                                     <SelectContent className={selectContentClass}>
@@ -876,6 +900,9 @@ export default function PdaProfile() {
                                                 {dept.label}
                                             </SelectItem>
                                         ))}
+                                        {displayDept && !DEPARTMENTS.some((dept) => dept.value === displayDept) ? (
+                                            <SelectItem value={displayDept}>{displayDept}</SelectItem>
+                                        ) : null}
                                     </SelectContent>
                                 </Select>
                             </div>
