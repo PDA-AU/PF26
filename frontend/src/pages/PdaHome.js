@@ -464,9 +464,12 @@ export default function PdaHome() {
                                 <h2 className="mt-3 text-3xl font-heading font-black text-[#0f1115]">
                                     {activeFeaturedItem?.title}
                                 </h2>
-                                <p className="mt-4 text-sm text-slate-700 md:text-base line-clamp-3">
-                                    {activeFeaturedItem?.description || 'Event details coming soon.'}
-                                </p>
+                                <div className="mt-4 max-h-20 overflow-y-auto text-sm text-slate-700 md:text-base">
+                                    <ParsedDescription
+                                        description={activeFeaturedItem?.description || ''}
+                                        emptyText="Event details coming soon."
+                                    />
+                                </div>
                                 <div className="mt-5 flex flex-wrap items-center gap-3 text-xs uppercase tracking-[0.2em] text-slate-600">
                                     <span className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1 text-[#0f1115]">
                                         <Calendar className="h-4 w-4 text-[#f6c347]" />
