@@ -148,6 +148,12 @@ def ensure_pda_recruitment_tables(engine):
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pda_resume_user_id ON pda_resume(user_id)"))
 
 
+def ensure_system_config_recruit_url_column(engine):
+    with engine.begin() as conn:
+        if _table_exists(conn, "system_config") and not _column_exists(conn, "system_config", "recruit_url"):
+            conn.execute(text("ALTER TABLE system_config ADD COLUMN recruit_url VARCHAR(800)"))
+
+
 def migrate_legacy_recruitment_json_once(engine):
     marker_key = "migration_recruitment_table_to_json_v1"
     with engine.begin() as conn:

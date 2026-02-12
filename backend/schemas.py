@@ -209,6 +209,18 @@ class PdaRecruitmentResumeUpdateRequest(BaseModel):
         return value or None
 
 
+class PdaRecruitmentConfigUpdateRequest(BaseModel):
+    recruit_url: Optional[str] = Field(default=None, max_length=800)
+
+    @field_validator("recruit_url")
+    @classmethod
+    def validate_optional_trimmed_recruit_url(cls, v):
+        if v is None:
+            return None
+        value = str(v or "").strip()
+        return value or None
+
+
 class PdaUserLogin(BaseModel):
     regno: str
     password: str

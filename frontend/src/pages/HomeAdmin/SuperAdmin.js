@@ -44,6 +44,10 @@ export default function SuperAdmin() {
     const [restoreLoading, setRestoreLoading] = useState(false);
     const [recruitmentOpen, setRecruitmentOpen] = useState(true);
     const [recruitmentLoading, setRecruitmentLoading] = useState(false);
+    const [recruitUrl, setRecruitUrl] = useState('');
+    const [recruitUrlSaving, setRecruitUrlSaving] = useState(false);
+    const [notifyRecruitmentLoading, setNotifyRecruitmentLoading] = useState(false);
+    const [notifyAlreadySent, setNotifyAlreadySent] = useState(false);
     const [managedEvents, setManagedEvents] = useState([]);
 
     const fetchData = useCallback(async () => {
@@ -71,6 +75,8 @@ export default function SuperAdmin() {
             if (typeof recruitmentRes.data?.recruitment_open === 'boolean') {
                 setRecruitmentOpen(recruitmentRes.data.recruitment_open);
             }
+            setRecruitUrl(String(recruitmentRes.data?.recruit_url || ''));
+            setNotifyAlreadySent(Boolean(recruitmentRes.data?.notify_sent_once));
         } catch (error) {
             console.error('Failed to load superadmin data:', error);
         }
@@ -183,10 +189,60 @@ export default function SuperAdmin() {
             if (typeof response.data?.recruitment_open === 'boolean') {
                 setRecruitmentOpen(response.data.recruitment_open);
             }
+            if (typeof response.data?.recruit_url === 'string') {
+                setRecruitUrl(response.data.recruit_url);
+            }
+            if (typeof response.data?.notify_sent_once === 'boolean') {
+                setNotifyAlreadySent(response.data.notify_sent_once);
+            }
         } catch (error) {
             console.error('Failed to toggle recruitment:', error);
         } finally {
             setRecruitmentLoading(false);
+        }
+    };
+
+    const saveRecruitmentUrl = async () => {
+        setRecruitUrlSaving(true);
+        try {
+            const response = await axios.post(
+                `${API}/pda-admin/superadmin/recruitment-config`,
+                { recruit_url: recruitUrl || null },
+                { headers: getAuthHeader() }
+            );
+            setRecruitUrl(String(response.data?.recruit_url || ''));
+            if (typeof response.data?.notify_sent_once === 'boolean') {
+                setNotifyAlreadySent(response.data.notify_sent_once);
+            }
+            toast.success('Recruitment WhatsApp URL updated.');
+        } catch (error) {
+            console.error('Failed to update recruitment URL:', error);
+            toast.error(getErrorMessage(error, 'Failed to update recruitment URL.'));
+        } finally {
+            setRecruitUrlSaving(false);
+        }
+    };
+
+    const notifyExistingApplicants = async () => {
+        setNotifyRecruitmentLoading(true);
+        try {
+            const response = await axios.post(
+                `${API}/pda-admin/superadmin/recruitment-notify-existing`,
+                {},
+                { headers: getAuthHeader() }
+            );
+            if (response.data?.already_sent) {
+                setNotifyAlreadySent(true);
+                toast.message('Notification mail was already sent once.');
+            } else {
+                setNotifyAlreadySent(true);
+                toast.success(`Sent recruitment update mail to ${response.data?.sent || 0} applicant(s).`);
+            }
+        } catch (error) {
+            console.error('Failed to notify existing applicants:', error);
+            toast.error(getErrorMessage(error, 'Failed to send recruitment update emails.'));
+        } finally {
+            setNotifyRecruitmentLoading(false);
         }
     };
 
@@ -418,6 +474,36 @@ export default function SuperAdmin() {
                     >
                         {recruitmentLoading ? 'Updating...' : (recruitmentOpen ? 'Pause Recruitment' : 'Resume Recruitment')}
                     </Button>
+                </div>
+                <div className="mt-6 grid gap-3 md:max-w-2xl">
+                    <div>
+                        <Label htmlFor="recruit-url-input">Recruitment WhatsApp URL</Label>
+                        <Input
+                            id="recruit-url-input"
+                            value={recruitUrl}
+                            onChange={(e) => setRecruitUrl(e.target.value)}
+                            placeholder="https://chat.whatsapp.com/..."
+                        />
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        <Button
+                            type="button"
+                            onClick={saveRecruitmentUrl}
+                            className="bg-[#f6c347] text-black hover:bg-[#ffd16b]"
+                            disabled={recruitUrlSaving}
+                        >
+                            {recruitUrlSaving ? 'Saving...' : 'Save URL'}
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            className="border-black/20 text-sm"
+                            onClick={notifyExistingApplicants}
+                            disabled={notifyRecruitmentLoading || notifyAlreadySent}
+                        >
+                            {notifyRecruitmentLoading ? 'Sending...' : (notifyAlreadySent ? 'Mail Sent Once' : 'Send One-time Mail to Existing Applicants')}
+                        </Button>
+                    </div>
                 </div>
             </section>
 

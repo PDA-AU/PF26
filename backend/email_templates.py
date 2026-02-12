@@ -69,3 +69,42 @@ def build_reset_email(reset_url: str, validity_minutes: int = 30) -> Tuple[str, 
     </html>
     """
     return subject, html, text
+
+
+def build_recruitment_review_email(name: str, whatsapp_url: str) -> Tuple[str, str, str]:
+    safe_name = name or "Applicant"
+    subject = "Your PDA application is in review - stay updated on WhatsApp"
+    text = (
+        f"Hey {safe_name},\n\n"
+        "Thank you for applying to the Personality Development Association.\n"
+        "Your application is currently under review.\n\n"
+        "In the meantime, join our WhatsApp channel so you do not miss important updates:\n"
+        f"{whatsapp_url}\n\n"
+        "We are excited to have you on this journey.\n\n"
+        "Regards,\n"
+        "PDA WEB TEAM\n"
+        "Personality Development Association\n"
+        "Madras Institute of Technology, Chennai-600044.\n"
+    )
+    html = f"""
+    <html>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #1b1f24;">
+        <div style="max-width: 560px; margin: 0 auto; padding: 24px; border: 1px solid #e6e6e6; border-radius: 12px;">
+          <h2 style="margin-top: 0;">Your application is under review</h2>
+          <p>Hey {safe_name},</p>
+          <p>We are reviewing your PDA recruitment application right now.</p>
+          <p>While you wait, join our WhatsApp channel to get timely updates and announcements.</p>
+          <p style="text-align: center; margin: 24px 0;">
+            <a href="{whatsapp_url}" style="display:inline-block;padding:12px 18px;background:#25D366;color:#fff;text-decoration:none;border-radius:6px;font-weight:700;">
+              Join WhatsApp Channel
+            </a>
+          </p>
+          <p>If the button does not work, copy and paste this URL in your browser:</p>
+          <p style="word-break: break-all;">{whatsapp_url}</p>
+          <hr style="border: none; border-top: 1px solid #e6e6e6; margin: 24px 0;" />
+          <p style="margin-bottom: 0;">Regards,<br><strong>PDA WEB TEAM</strong><br>Personality Development Association<br>Madras Institute of Technology, Chennai-600044.</p>
+        </div>
+      </body>
+    </html>
+    """
+    return subject, html, text

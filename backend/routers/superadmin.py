@@ -14,14 +14,38 @@ from openpyxl import Workbook
 
 from database import get_db
 from models import PdaAdmin, PdaUser, PdaTeam, AdminLog, SystemConfig
-from schemas import PdaAdminCreate, PdaAdminPolicyUpdate, PdaUserResponse, AdminLogResponse, RecruitmentApprovalItem
+from schemas import (
+    PdaAdminCreate,
+    PdaAdminPolicyUpdate,
+    PdaUserResponse,
+    AdminLogResponse,
+    RecruitmentApprovalItem,
+    PdaRecruitmentConfigUpdateRequest,
+)
 from security import require_superadmin
 from utils import log_admin_action, _upload_bytes_to_s3, S3_CLIENT, S3_BUCKET_NAME
 from recruitment_state import clear_legacy_recruitment_json, get_recruitment_state, get_recruitment_state_map
+from email_workflows import send_recruitment_review_email
 
 router = APIRouter()
 DATABASE_URL = os.environ.get("DATABASE_URL")
 DB_RESTORE_CONFIRM_TEXT = "CONFIRM RESTORE"
+DEFAULT_PDA_RECRUIT_URL = "https://chat.whatsapp.com/ErThvhBS77kGJEApiABP2z"
+RECRUITMENT_NOTIFY_MARKER_KEY = "pda_recruitment_whatsapp_notified_once"
+
+
+def _get_or_create_recruitment_config(db: Session) -> SystemConfig:
+    reg_config = db.query(SystemConfig).filter(SystemConfig.key == "pda_recruitment_open").first()
+    if not reg_config:
+        reg_config = SystemConfig(key="pda_recruitment_open", value="true", recruit_url=DEFAULT_PDA_RECRUIT_URL)
+        db.add(reg_config)
+        db.commit()
+        db.refresh(reg_config)
+    elif not str(reg_config.recruit_url or "").strip():
+        reg_config.recruit_url = DEFAULT_PDA_RECRUIT_URL
+        db.commit()
+        db.refresh(reg_config)
+    return reg_config
 
 def _resolve_pg_binary(kind: str) -> str:
     # Allow explicit override first for production/runtime control.
@@ -495,9 +519,12 @@ def get_recruitment_status(
     _: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db)
 ):
-    reg_config = db.query(SystemConfig).filter(SystemConfig.key == "pda_recruitment_open").first()
-    recruitment_open = reg_config.value == "true" if reg_config else True
-    return {"recruitment_open": recruitment_open}
+    reg_config = _get_or_create_recruitment_config(db)
+    recruitment_open = reg_config.value == "true"
+    recruit_url = str(reg_config.recruit_url or "").strip() or DEFAULT_PDA_RECRUIT_URL
+    marker = db.query(SystemConfig).filter(SystemConfig.key == RECRUITMENT_NOTIFY_MARKER_KEY).first()
+    notify_sent_once = bool(marker and str(marker.value or "").strip().lower() == "done")
+    return {"recruitment_open": recruitment_open, "recruit_url": recruit_url, "notify_sent_once": notify_sent_once}
 
 
 @router.post("/pda-admin/superadmin/recruitment-toggle")
@@ -506,17 +533,87 @@ def toggle_recruitment(
     db: Session = Depends(get_db),
     request: Request = None
 ):
-    reg_config = db.query(SystemConfig).filter(SystemConfig.key == "pda_recruitment_open").first()
-    if not reg_config:
-        reg_config = SystemConfig(key="pda_recruitment_open", value="false")
-        db.add(reg_config)
-        db.commit()
-        db.refresh(reg_config)
-    else:
-        reg_config.value = "false" if reg_config.value == "true" else "true"
-        db.commit()
+    reg_config = _get_or_create_recruitment_config(db)
+    reg_config.value = "false" if reg_config.value == "true" else "true"
+    db.commit()
     log_admin_action(db, superadmin, "toggle_pda_recruitment", request.method if request else None, request.url.path if request else None, {"recruitment_open": reg_config.value})
-    return {"recruitment_open": reg_config.value == "true"}
+    marker = db.query(SystemConfig).filter(SystemConfig.key == RECRUITMENT_NOTIFY_MARKER_KEY).first()
+    notify_sent_once = bool(marker and str(marker.value or "").strip().lower() == "done")
+    return {"recruitment_open": reg_config.value == "true", "recruit_url": reg_config.recruit_url, "notify_sent_once": notify_sent_once}
+
+
+@router.post("/pda-admin/superadmin/recruitment-config")
+def update_recruitment_config(
+    payload: PdaRecruitmentConfigUpdateRequest,
+    superadmin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    reg_config = _get_or_create_recruitment_config(db)
+    reg_config.recruit_url = str(payload.recruit_url or "").strip() or DEFAULT_PDA_RECRUIT_URL
+    db.commit()
+    db.refresh(reg_config)
+    log_admin_action(
+        db,
+        superadmin,
+        "update_pda_recruitment_config",
+        request.method if request else None,
+        request.url.path if request else None,
+        {"recruit_url": reg_config.recruit_url},
+    )
+    marker = db.query(SystemConfig).filter(SystemConfig.key == RECRUITMENT_NOTIFY_MARKER_KEY).first()
+    notify_sent_once = bool(marker and str(marker.value or "").strip().lower() == "done")
+    return {"recruitment_open": reg_config.value == "true", "recruit_url": reg_config.recruit_url, "notify_sent_once": notify_sent_once}
+
+
+@router.post("/pda-admin/superadmin/recruitment-notify-existing")
+def notify_existing_recruitment_applicants(
+    superadmin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    marker = db.query(SystemConfig).filter(SystemConfig.key == RECRUITMENT_NOTIFY_MARKER_KEY).first()
+    if marker and str(marker.value or "").strip().lower() == "done":
+        return {"already_sent": True, "sent": 0, "total_candidates": 0}
+
+    reg_config = _get_or_create_recruitment_config(db)
+    recruit_url = str(reg_config.recruit_url or "").strip() or DEFAULT_PDA_RECRUIT_URL
+
+    pending_candidates = (
+        db.query(PdaUser)
+        .filter(PdaUser.is_member == False)
+        .order_by(PdaUser.created_at.desc())
+        .all()
+    )
+    recruit_map = get_recruitment_state_map(db, pending_candidates)
+    pending = [user for user in pending_candidates if recruit_map.get(user.id, {}).get("is_applied")]
+
+    sent = 0
+    for candidate in pending:
+        if not candidate.email:
+            continue
+        try:
+            send_recruitment_review_email(candidate.email, candidate.name, recruit_url)
+            sent += 1
+        except Exception:
+            continue
+
+    if not marker:
+        marker = SystemConfig(key=RECRUITMENT_NOTIFY_MARKER_KEY, value="done")
+        db.add(marker)
+    else:
+        marker.value = "done"
+    db.commit()
+
+    log_admin_action(
+        db,
+        superadmin,
+        "notify_existing_recruitment_applicants",
+        request.method if request else None,
+        request.url.path if request else None,
+        {"sent": sent, "total_candidates": len(pending)},
+    )
+    return {"already_sent": False, "sent": sent, "total_candidates": len(pending)}
 
 
 @router.get("/pda-admin/recruitments", response_model=List[PdaUserResponse])

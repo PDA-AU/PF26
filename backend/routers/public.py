@@ -6,6 +6,7 @@ from models import SystemConfig
 from datetime import datetime
 
 router = APIRouter()
+DEFAULT_PDA_RECRUIT_URL = "https://chat.whatsapp.com/ErThvhBS77kGJEApiABP2z"
 
 
 @router.get("/")
@@ -22,7 +23,8 @@ def health_check():
 def get_pda_recruitment_status(db: Session = Depends(get_db)):
     reg_config = db.query(SystemConfig).filter(SystemConfig.key == "pda_recruitment_open").first()
     recruitment_open = reg_config.value == "true" if reg_config else True
-    return {"recruitment_open": recruitment_open}
+    recruit_url = str((reg_config.recruit_url if reg_config else "") or "").strip() or DEFAULT_PDA_RECRUIT_URL
+    return {"recruitment_open": recruitment_open, "recruit_url": recruit_url}
 
 
 @router.get("/routes")

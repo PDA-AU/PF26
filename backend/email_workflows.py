@@ -5,7 +5,7 @@ from typing import Optional, Tuple
 from sqlalchemy.orm import Session
 
 from email_tokens import generate_token, hash_token, VERIFY_TOKEN_TTL_SECONDS, RESET_TOKEN_TTL_SECONDS
-from email_templates import build_verification_email, build_reset_email
+from email_templates import build_verification_email, build_reset_email, build_recruitment_review_email
 from emailer import send_email
 from time_utils import now_tz, ensure_timezone
 
@@ -33,6 +33,13 @@ def _send_reset_email(to_email: str, user_kind: str, token: str) -> None:
     path = "/reset-password"
     url = _build_url(path, token)
     subject, html, text = build_reset_email(url, validity_minutes=30)
+    send_email(to_email, subject, html, text)
+
+
+def send_recruitment_review_email(to_email: str, name: str, whatsapp_url: str) -> None:
+    if not to_email or not whatsapp_url:
+        return
+    subject, html, text = build_recruitment_review_email(name=name, whatsapp_url=whatsapp_url)
     send_email(to_email, subject, html, text)
 
 

@@ -79,6 +79,7 @@ export default function PdaRecruit() {
     const { user, loading: authLoading, getAuthHeader, updateUser } = useAuth();
 
     const [recruitmentOpen, setRecruitmentOpen] = useState(true);
+    const [recruitUrl, setRecruitUrl] = useState('');
     const [statusLoading, setStatusLoading] = useState(true);
     const [preferredTeam1, setPreferredTeam1] = useState('');
     const [preferredTeam2, setPreferredTeam2] = useState('');
@@ -100,9 +101,11 @@ export default function PdaRecruit() {
                 if (typeof res.data?.recruitment_open === 'boolean') {
                     setRecruitmentOpen(res.data.recruitment_open);
                 }
+                setRecruitUrl(String(res.data?.recruit_url || ''));
             } catch (error) {
                 console.error('Failed to load recruitment status:', error);
                 setRecruitmentOpen(false);
+                setRecruitUrl('');
             } finally {
                 setStatusLoading(false);
             }
@@ -301,6 +304,16 @@ export default function PdaRecruit() {
                                 ) : (
                                     <p className="mt-2 text-sm font-bold text-amber-700">Recruitment is currently paused.</p>
                                 )}
+                                {recruitUrl ? (
+                                    <a
+                                        href={recruitUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="mt-3 inline-flex items-center rounded-md border-2 border-black bg-[#25D366] px-3 py-2 text-xs font-bold uppercase tracking-[0.12em] text-black shadow-neo hover:bg-[#1db954]"
+                                    >
+                                        Join WhatsApp Group
+                                    </a>
+                                ) : null}
                             </div>
 
                             <div className="mt-6">

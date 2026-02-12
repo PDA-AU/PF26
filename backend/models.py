@@ -130,6 +130,7 @@ class SystemConfig(Base):
     id = Column(Integer, primary_key=True, index=True)
     key = Column(String(100), unique=True, nullable=False)
     value = Column(String(500), nullable=False)
+    recruit_url = Column(String(800), nullable=True)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 

@@ -15,6 +15,7 @@ from migrations import (
     ensure_pda_users_profile_name_column,
     ensure_pda_user_social_columns,
     ensure_pda_recruitment_tables,
+    ensure_system_config_recruit_url_column,
     migrate_legacy_recruitment_json_once,
     ensure_pda_team_columns,
     ensure_pda_items_columns,
@@ -51,6 +52,7 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+DEFAULT_PDA_RECRUIT_URL = "https://chat.whatsapp.com/ErThvhBS77kGJEApiABP2z"
 
 app = FastAPI(title="PDA API", version="1.0.0")
 
@@ -84,6 +86,7 @@ async def startup_event():
     ensure_pda_event_tables(engine)
     ensure_persohub_tables(engine)
     ensure_pda_recruitment_tables(engine)
+    ensure_system_config_recruit_url_column(engine)
 
     Base.metadata.create_all(bind=engine)
 
@@ -109,7 +112,10 @@ async def startup_event():
             db.commit()
         pda_recruit_config = db.query(SystemConfig).filter(SystemConfig.key == "pda_recruitment_open").first()
         if not pda_recruit_config:
-            db.add(SystemConfig(key="pda_recruitment_open", value="true"))
+            db.add(SystemConfig(key="pda_recruitment_open", value="true", recruit_url=DEFAULT_PDA_RECRUIT_URL))
+            db.commit()
+        elif not str(pda_recruit_config.recruit_url or "").strip():
+            pda_recruit_config.recruit_url = DEFAULT_PDA_RECRUIT_URL
             db.commit()
 
     finally:

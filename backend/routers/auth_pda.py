@@ -31,6 +31,7 @@ from auth import verify_password, get_password_hash, create_access_token, create
 from security import require_pda_user
 from utils import _upload_to_s3, _generate_presigned_put_url
 from email_workflows import issue_verification, verify_email_token, issue_password_reset, reset_password_with_token
+from email_workflows import send_recruitment_review_email
 from persohub_service import (
     ensure_user_follows_default_communities,
     generate_unique_profile_name,
@@ -40,6 +41,21 @@ from recruitment_state import create_recruitment_application, get_recruitment_st
 import os
 
 router = APIRouter()
+DEFAULT_PDA_RECRUIT_URL = "https://chat.whatsapp.com/ErThvhBS77kGJEApiABP2z"
+
+
+def _get_recruitment_config(db: Session) -> SystemConfig:
+    reg_config = db.query(SystemConfig).filter(SystemConfig.key == "pda_recruitment_open").first()
+    if not reg_config:
+        reg_config = SystemConfig(key="pda_recruitment_open", value="true", recruit_url=DEFAULT_PDA_RECRUIT_URL)
+        db.add(reg_config)
+        db.commit()
+        db.refresh(reg_config)
+    elif not str(reg_config.recruit_url or "").strip():
+        reg_config.recruit_url = DEFAULT_PDA_RECRUIT_URL
+        db.commit()
+        db.refresh(reg_config)
+    return reg_config
 
 def _build_pda_user_response(db: Session, user: PdaUser) -> PdaUserResponse:
     team = db.query(PdaTeam).filter(PdaTeam.user_id == user.id).first()
@@ -156,8 +172,8 @@ def apply_for_pda_recruitment(
     if user.is_member:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You are already a PDA member")
 
-    reg_config = db.query(SystemConfig).filter(SystemConfig.key == "pda_recruitment_open").first()
-    if reg_config and reg_config.value == "false":
+    reg_config = _get_recruitment_config(db)
+    if reg_config.value == "false":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Recruitment is closed")
 
     recruit_state = get_recruitment_state(db, user.id, user=user)
@@ -174,6 +190,11 @@ def apply_for_pda_recruitment(
     )
     db.commit()
     db.refresh(user)
+    try:
+        recruit_url = str(reg_config.recruit_url or "").strip() or DEFAULT_PDA_RECRUIT_URL
+        send_recruitment_review_email(user.email, user.name, recruit_url)
+    except Exception:
+        pass
     return _build_pda_user_response(db, user)
 
 
