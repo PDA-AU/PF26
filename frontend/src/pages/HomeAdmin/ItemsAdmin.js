@@ -30,7 +30,6 @@ const emptyItem = {
     start_date: '',
     end_date: '',
     format: '',
-    hero_caption: '',
     hero_url: '',
     is_featured: false
 };
@@ -166,7 +165,6 @@ export default function ItemsAdmin() {
             is_featured: itemForm.is_featured,
             tag: itemForm.tag.trim() || null,
             format: itemForm.format.trim() || null,
-            hero_caption: itemForm.hero_caption.trim() || null,
             hero_url: itemForm.hero_url.trim() || null
         };
         try {
@@ -196,7 +194,6 @@ export default function ItemsAdmin() {
             start_date: program.start_date || '',
             end_date: program.end_date || '',
             format: program.format || '',
-            hero_caption: program.hero_caption || '',
             hero_url: program.hero_url || '',
             is_featured: Boolean(program.is_featured)
         });
@@ -216,7 +213,6 @@ export default function ItemsAdmin() {
             description: event.description || '',
             poster_url: event.poster_url || '',
             featured_poster_url: event.featured_poster_url || '',
-            hero_caption: event.hero_caption || '',
             hero_url: event.hero_url || '',
             tag: event.tag || '',
             is_featured: Boolean(event.is_featured)
@@ -451,17 +447,6 @@ export default function ItemsAdmin() {
                             onChange={handleItemChange}
                             placeholder="Short description"
                             rows={4}
-                        />
-                    </div>
-                    <div className="md:col-span-2">
-                        <Label htmlFor="item-hero-caption">Hero Caption</Label>
-                        <Textarea
-                            id="item-hero-caption"
-                            name="hero_caption"
-                            value={itemForm.hero_caption}
-                            onChange={handleItemChange}
-                            placeholder="Caption for the homepage hero"
-                            rows={3}
                         />
                     </div>
                     <div className="md:col-span-2">

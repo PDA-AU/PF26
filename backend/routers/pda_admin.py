@@ -217,7 +217,6 @@ def create_pda_program(
         start_date=program_data.start_date,
         end_date=program_data.end_date,
         format=program_data.format,
-        hero_caption=program_data.hero_caption,
         hero_url=program_data.hero_url,
         featured_poster_url=program_data.featured_poster_url,
         is_featured=program_data.is_featured
@@ -255,8 +254,6 @@ def update_pda_program(
         program.end_date = program_data.end_date
     if program_data.format is not None:
         program.format = program_data.format
-    if program_data.hero_caption is not None:
-        program.hero_caption = program_data.hero_caption
     if program_data.hero_url is not None:
         program.hero_url = program_data.hero_url
     if program_data.featured_poster_url is not None:
@@ -301,7 +298,6 @@ def create_pda_event(
         format=event_data.format,
         description=event_data.description,
         poster_url=event_data.poster_url,
-        hero_caption=event_data.hero_caption,
         hero_url=event_data.hero_url,
         featured_poster_url=event_data.featured_poster_url,
         is_featured=event_data.is_featured
@@ -337,8 +333,6 @@ def update_pda_event(
         event.description = event_data.description
     if event_data.poster_url is not None:
         event.poster_url = event_data.poster_url
-    if event_data.hero_caption is not None:
-        event.hero_caption = event_data.hero_caption
     if event_data.hero_url is not None:
         event.hero_url = event_data.hero_url
     if event_data.featured_poster_url is not None:

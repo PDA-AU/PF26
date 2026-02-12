@@ -20,6 +20,7 @@ from migrations import (
     migrate_legacy_recruitment_json_once,
     ensure_pda_team_columns,
     ensure_pda_items_columns,
+    ensure_pda_items_no_hero_caption,
     ensure_pda_team_constraints,
     ensure_pda_gallery_tag_column,
     ensure_pda_admins_table,
@@ -80,6 +81,7 @@ async def startup_event():
     ensure_pda_user_social_columns(engine)
     ensure_pda_team_columns(engine)
     ensure_pda_items_columns(engine)
+    ensure_pda_items_no_hero_caption(engine)
     ensure_pda_team_constraints(engine)
     ensure_pda_gallery_tag_column(engine)
     drop_admin_logs_fk(engine)

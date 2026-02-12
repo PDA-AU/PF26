@@ -409,6 +409,12 @@ def ensure_pda_items_columns(engine):
             conn.execute(text("ALTER TABLE pda_items ALTER COLUMN featured_poster_url TYPE TEXT"))
 
 
+def ensure_pda_items_no_hero_caption(engine):
+    with engine.begin() as conn:
+        if _table_exists(conn, "pda_items") and _column_exists(conn, "pda_items", "hero_caption"):
+            conn.execute(text("ALTER TABLE pda_items DROP COLUMN hero_caption"))
+
+
 def ensure_pda_team_constraints(engine):
     with engine.begin() as conn:
         if not _table_exists(conn, "pda_team"):

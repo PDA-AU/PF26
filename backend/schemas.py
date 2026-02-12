@@ -589,7 +589,6 @@ class ProgramCreate(BaseModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     format: Optional[str] = None
-    hero_caption: Optional[str] = None
     hero_url: Optional[str] = None
     featured_poster_url: Optional[str] = None
     is_featured: bool = False
@@ -603,7 +602,6 @@ class ProgramUpdate(BaseModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     format: Optional[str] = None
-    hero_caption: Optional[str] = None
     hero_url: Optional[str] = None
     featured_poster_url: Optional[str] = None
     is_featured: Optional[bool] = None
@@ -619,7 +617,6 @@ class ProgramResponse(BaseModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     format: Optional[str] = None
-    hero_caption: Optional[str] = None
     hero_url: Optional[str] = None
     featured_poster_url: Optional[str] = None
     is_featured: bool
@@ -636,7 +633,6 @@ class EventCreate(BaseModel):
     format: Optional[str] = None
     description: Optional[str] = None
     poster_url: Optional[str] = None
-    hero_caption: Optional[str] = None
     hero_url: Optional[str] = None
     featured_poster_url: Optional[str] = None
     is_featured: bool = False
@@ -649,7 +645,6 @@ class EventUpdate(BaseModel):
     format: Optional[str] = None
     description: Optional[str] = None
     poster_url: Optional[str] = None
-    hero_caption: Optional[str] = None
     hero_url: Optional[str] = None
     featured_poster_url: Optional[str] = None
     is_featured: Optional[bool] = None
@@ -664,7 +659,6 @@ class EventResponse(BaseModel):
     format: Optional[str]
     description: Optional[str]
     poster_url: Optional[str]
-    hero_caption: Optional[str]
     hero_url: Optional[str]
     featured_poster_url: Optional[str]
     is_featured: bool

@@ -157,7 +157,6 @@ export default function PdaHome() {
                     start_date: event.start_date,
                     end_date: event.end_date,
                     format: event.format,
-                    hero_caption: null,
                     hero_url: `/events/${event.slug}`,
                     featured_poster_url: null,
                     is_featured: false,
@@ -466,9 +465,7 @@ export default function PdaHome() {
                                     {activeFeaturedItem?.title}
                                 </h2>
                                 <p className="mt-4 text-sm text-slate-700 md:text-base line-clamp-3">
-                                    {activeFeaturedItem?.hero_caption ||
-                                        activeFeaturedItem?.description ||
-                                        'Event details coming soon.'}
+                                    {activeFeaturedItem?.description || 'Event details coming soon.'}
                                 </p>
                                 <div className="mt-5 flex flex-wrap items-center gap-3 text-xs uppercase tracking-[0.2em] text-slate-600">
                                     <span className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1 text-[#0f1115]">

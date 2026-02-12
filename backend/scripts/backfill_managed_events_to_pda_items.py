@@ -39,7 +39,6 @@ def _build_missing_item(event: PdaEvent) -> PdaItem:
         start_date=event.start_date,
         end_date=event.end_date,
         format=event.format.value if hasattr(event.format, "value") else str(event.format),
-        hero_caption=event.description,
         hero_url=_managed_event_home_link(event.slug),
         featured_poster_url=None,
         is_featured=False,

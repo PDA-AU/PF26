@@ -162,7 +162,6 @@ def _sync_managed_event_to_home_item(db: Session, event: PdaEvent) -> None:
     item.end_date = event.end_date
     item.format = event.format.value if hasattr(event.format, "value") else str(event.format)
     item.hero_url = _managed_event_home_link(event.slug)
-    item.hero_caption = item.hero_caption or event.description
     item.tag = item.tag or "managed-event"
 
 

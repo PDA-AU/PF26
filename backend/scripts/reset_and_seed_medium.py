@@ -229,7 +229,6 @@ def seed() -> None:
                     start_date=date(2026, ((i % 12) + 1), ((i % 27) + 1)),
                     end_date=date(2026, ((i % 12) + 1), min(((i % 27) + 3), 28)),
                     format="Offline" if i % 2 == 0 else "Online",
-                    hero_caption=f"Hero caption {i+1}",
                     hero_url="https://example.com",
                     is_featured=(i < 3),
                     created_at=now,

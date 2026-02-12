@@ -146,7 +146,6 @@ class PdaItem(Base):
     start_date = Column(Date, nullable=True)
     end_date = Column(Date, nullable=True)
     format = Column(String(150), nullable=True)
-    hero_caption = Column(Text, nullable=True)
     hero_url = Column(String(500), nullable=True)
     featured_poster_url = Column(Text, nullable=True)
     is_featured = Column(Boolean, default=False)
