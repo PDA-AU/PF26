@@ -11,6 +11,8 @@ import {
     Lock,
     ChevronRight,
     X,
+    ArrowUp,
+    ArrowDown,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -66,6 +68,7 @@ function RoundsContent() {
     const [revealRound, setRevealRound] = useState(null);
     const [revealing, setRevealing] = useState(false);
     const [savingRound, setSavingRound] = useState(false);
+    const [movingRoundId, setMovingRoundId] = useState(null);
 
     const getErrorMessage = (error, fallback) => (
         error?.response?.data?.detail || error?.response?.data?.message || fallback
@@ -293,6 +296,33 @@ function RoundsContent() {
         return 'bg-purple-100 text-purple-800';
     };
 
+    const sortedRounds = useMemo(
+        () => [...rounds].sort((a, b) => Number(a.round_no || 0) - Number(b.round_no || 0)),
+        [rounds]
+    );
+
+    const moveRound = async (roundId, direction) => {
+        const current = sortedRounds;
+        const fromIndex = current.findIndex((round) => round.id === roundId);
+        if (fromIndex < 0) return;
+        const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1;
+        if (toIndex < 0 || toIndex >= current.length) return;
+        const targetRound = current[toIndex];
+        if (!targetRound) return;
+        setMovingRoundId(roundId);
+        try {
+            await axios.put(`${API}/pda-admin/events/${eventSlug}/rounds/${roundId}`, {
+                round_no: Number(targetRound.round_no),
+            }, { headers: getAuthHeader() });
+            toast.success('Round order updated');
+            fetchRounds();
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to update round order'));
+        } finally {
+            setMovingRoundId(null);
+        }
+    };
+
     return (
         <>
             <div className="flex justify-between items-center mb-8">
@@ -453,7 +483,7 @@ function RoundsContent() {
                 </div>
             ) : (
                 <div className="grid md:grid-cols-1 lg:grid-cols-2 gap-8">
-                    {rounds.map((round) => (
+                    {sortedRounds.map((round, index) => (
                         <div key={round.id} className="neo-card p-6 min-h-[420px]">
                             <div className="flex justify-between mb-4">
                                 <span className="bg-primary text-white px-2 py-1 border-2 border-black font-bold text-sm">Round {round.round_no}</span>
@@ -482,6 +512,26 @@ function RoundsContent() {
                             {(isCompletedState(round.state) || isRevealState(round.state)) ? <EventRoundStatsCard statsState={roundStats[round.id]} /> : null}
 
                             <div className="flex flex-wrap gap-2">
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="border-2 border-black"
+                                    onClick={() => moveRound(round.id, 'up')}
+                                    disabled={index === 0 || movingRoundId === round.id}
+                                    title="Move up"
+                                >
+                                    <ArrowUp className="w-4 h-4" />
+                                </Button>
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="border-2 border-black"
+                                    onClick={() => moveRound(round.id, 'down')}
+                                    disabled={index === sortedRounds.length - 1 || movingRoundId === round.id}
+                                    title="Move down"
+                                >
+                                    <ArrowDown className="w-4 h-4" />
+                                </Button>
                                 {!round.is_frozen ? (
                                     <>
                                         <Button size="sm" variant="outline" onClick={() => handleEdit(round)} className="border-2 border-black">

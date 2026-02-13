@@ -6,7 +6,7 @@ from pathlib import Path
 import os
 import logging
 
-from database import engine, get_db, Base
+from database import engine, get_db, SessionLocal, Base
 from models import SystemConfig
 from migrations import (
     ensure_pda_users_table,
@@ -34,6 +34,7 @@ from migrations import (
     ensure_superadmin_policies,
     ensure_default_superadmin,
     ensure_pda_event_tables,
+    backfill_pda_event_round_count_once,
     remove_legacy_persofest_once,
     clear_legacy_poster_urls_once,
     ensure_persohub_tables,
@@ -88,6 +89,7 @@ async def startup_event():
     ensure_pda_admins_table(engine)
     ensure_email_auth_columns(engine)
     ensure_pda_event_tables(engine)
+    backfill_pda_event_round_count_once(engine)
     ensure_persohub_tables(engine)
     ensure_pda_recruitment_tables(engine)
     ensure_system_config_recruit_url_column(engine)
@@ -98,7 +100,7 @@ async def startup_event():
     remove_legacy_persofest_once(engine)
     clear_legacy_poster_urls_once(engine)
 
-    db = next(get_db())
+    db = SessionLocal()
     try:
         normalize_pda_team(db)
         normalize_pda_team_schema(db)

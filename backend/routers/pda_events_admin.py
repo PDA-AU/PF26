@@ -201,6 +201,18 @@ def _status_is_active(value) -> bool:
     return str(value or "").strip().lower() == "active"
 
 
+def _sync_event_round_count(db: Session, event_id: int) -> None:
+    round_count = (
+        db.query(PdaEventRound)
+        .filter(PdaEventRound.event_id == event_id)
+        .count()
+    )
+    db.query(PdaEvent).filter(PdaEvent.id == event_id).update(
+        {PdaEvent.round_count: int(round_count)},
+        synchronize_session=False,
+    )
+
+
 def _log_event_admin_action(
     db: Session,
     admin: PdaUser,
@@ -1205,6 +1217,7 @@ def create_round(
         evaluation_criteria=[c.model_dump() for c in payload.evaluation_criteria] if payload.evaluation_criteria else [{"name": "Score", "max_marks": 100}],
     )
     db.add(round_row)
+    _sync_event_round_count(db, event.id)
     db.commit()
     db.refresh(round_row)
     _log_event_admin_action(
@@ -1238,12 +1251,37 @@ def update_round(
     if "external_url_name" in updates:
         updates["external_url_name"] = str(updates.get("external_url_name") or "").strip() or "Explore Round"
     eliminate_absent = bool(updates.pop("eliminate_absent", False))
+    requested_round_no = updates.pop("round_no", None)
     if "mode" in updates:
         updates["mode"] = _to_event_format(payload.mode)
     if "state" in updates:
         updates["state"] = _to_round_state(payload.state)
     if "evaluation_criteria" in updates and payload.evaluation_criteria is not None:
         updates["evaluation_criteria"] = [c.model_dump() for c in payload.evaluation_criteria]
+
+    if requested_round_no is not None:
+        next_round_no = int(requested_round_no)
+        current_round_no = int(round_row.round_no)
+        if next_round_no != current_round_no:
+            conflict_round = (
+                db.query(PdaEventRound)
+                .filter(
+                    PdaEventRound.event_id == event.id,
+                    PdaEventRound.round_no == next_round_no,
+                    PdaEventRound.id != round_row.id,
+                )
+                .first()
+            )
+            if conflict_round:
+                # Force a two-step swap to avoid uniqueness conflicts during flush.
+                conflict_round.round_no = -1
+                db.flush()
+                round_row.round_no = next_round_no
+                db.flush()
+                conflict_round.round_no = current_round_no
+            else:
+                round_row.round_no = next_round_no
+
     for field, value in updates.items():
         setattr(round_row, field, value)
 
@@ -1367,6 +1405,7 @@ def delete_round(
     if round_row.state != PdaEventRoundState.DRAFT:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only draft rounds can be deleted")
     db.delete(round_row)
+    _sync_event_round_count(db, event.id)
     db.commit()
     _log_event_admin_action(
         db,

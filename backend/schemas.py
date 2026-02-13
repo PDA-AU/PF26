@@ -1117,6 +1117,7 @@ class PdaManagedRoundCreate(BaseModel):
 
 
 class PdaManagedRoundUpdate(BaseModel):
+    round_no: Optional[int] = Field(None, ge=1, le=20)
     name: Optional[str] = None
     description: Optional[str] = None
     round_poster: Optional[str] = None

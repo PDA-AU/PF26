@@ -1168,6 +1168,62 @@ def ensure_pda_event_tables(engine):
             )
 
 
+def backfill_pda_event_round_count_once(engine):
+    marker_key = "migration_backfill_pda_event_round_count_v1"
+    with engine.begin() as conn:
+        if not _table_exists(conn, "system_config"):
+            return
+
+        marker_exists = bool(
+            conn.execute(
+                text("SELECT 1 FROM system_config WHERE key = :key"),
+                {"key": marker_key},
+            ).fetchone()
+        )
+        if marker_exists:
+            return
+
+        if _table_exists(conn, "pda_events") and _table_exists(conn, "pda_event_rounds"):
+            conn.execute(
+                text(
+                    """
+                    UPDATE pda_events e
+                    SET round_count = COALESCE(r.cnt, 0)
+                    FROM (
+                        SELECT event_id, COUNT(*)::int AS cnt
+                        FROM pda_event_rounds
+                        GROUP BY event_id
+                    ) r
+                    WHERE e.id = r.event_id
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    UPDATE pda_events e
+                    SET round_count = 0
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM pda_event_rounds r
+                        WHERE r.event_id = e.id
+                    )
+                    """
+                )
+            )
+
+        conn.execute(
+            text(
+                """
+                INSERT INTO system_config (key, value)
+                VALUES (:key, 'done')
+                ON CONFLICT (key) DO UPDATE SET value = 'done'
+                """
+            ),
+            {"key": marker_key},
+        )
+
+
 def ensure_persohub_tables(engine):
     with engine.begin() as conn:
         conn.execute(
