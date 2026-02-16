@@ -428,6 +428,15 @@ export default function EventDashboard() {
                                     <span className="rounded-md border-2 border-black bg-white px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] shadow-neo">
                                         {eventInfo.status}
                                     </span>
+                                    {eventIsOpen && !isRegistered ? (
+                                        <Button
+                                            data-testid="event-overview-register-button"
+                                            onClick={() => setRegistrationDialogOpen(true)}
+                                            className="border-2 border-black bg-[#8B5CF6] text-white shadow-neo hover:bg-[#7C3AED]"
+                                        >
+                                            Register Now
+                                        </Button>
+                                    ) : null}
                                 </div>
                                 <div className="mt-3 max-w-2xl space-y-2 text-sm font-medium text-slate-700 sm:text-base">
                                     <ParsedDescription
