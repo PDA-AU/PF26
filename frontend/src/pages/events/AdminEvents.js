@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { uploadPoster } from '@/pages/HomeAdmin/adminApi';
 import { compressImageToWebp } from '@/utils/imageCompression';
+import ParsedDescription from '@/components/common/ParsedDescription';
 import {
     filterPosterAssetsByRatio,
     parsePosterAssets,
@@ -327,6 +328,7 @@ export default function AdminEvents() {
     const [uploadingEditPoster, setUploadingEditPoster] = useState(false);
     const [form, setForm] = useState(initialForm);
     const [editForm, setEditForm] = useState(initialForm);
+    const [expandedDescriptions, setExpandedDescriptions] = useState({});
 
     const fetchEvents = useCallback(async () => {
         try {
@@ -526,65 +528,90 @@ export default function AdminEvents() {
                     <p className="mt-4 text-sm text-slate-500">No events available for your policy.</p>
                 ) : (
                     <div className="mt-4 grid gap-4 md:grid-cols-2">
-                        {events.map((eventRow) => (
-                            <div key={eventRow.id} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
-                                {getCardPosterSrc(eventRow.poster_url) ? (
-                                    <img
-                                        src={getCardPosterSrc(eventRow.poster_url)}
-                                        alt={`${eventRow.title} poster`}
-                                        className="mb-3 aspect-[4/5] w-full rounded-xl border border-black/10 object-cover bg-white"
-                                    />
-                                ) : null}
-                                <div className="flex items-center justify-between gap-3">
-                                    <div>
-                                        <p className="text-xs uppercase tracking-[0.3em] text-slate-400">{eventRow.event_code}</p>
-                                        <h3 className="font-heading text-xl font-black">{eventRow.title}</h3>
-                                        <p className="text-xs text-slate-500">{eventRow.slug}</p>
-                                    </div>
-                                    <span className={`rounded-full border px-3 py-1 text-xs uppercase tracking-[0.2em] ${eventRow.status === 'open' ? 'border-[#c99612] bg-[#fff3c4] text-[#7a5a00]' : 'border-black/10 bg-[#11131a] text-[#f6c347]'}`}>
-                                        {eventRow.status}
-                                    </span>
-                                </div>
-                                <p className="mt-3 text-sm text-slate-600">{eventRow.description || 'No description provided.'}</p>
-                                <p className="mt-2 text-xs font-medium text-slate-500">
-                                    Start: {formatDateLabel(eventRow.start_date)} · End: {formatDateLabel(eventRow.end_date)}
-                                </p>
-                                <div className="mt-4 flex flex-wrap gap-2 text-xs">
-                                    <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.event_type}</span>
-                                    <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.format}</span>
-                                    <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.participant_mode}</span>
-                                    <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.template_option}</span>
-                                </div>
-                                <div className="mt-4 flex flex-wrap gap-2">
-                                    <Link to={`/admin/events/${eventRow.slug}`}>
-                                        <Button className="bg-[#11131a] text-white hover:bg-[#1f2330]">Manage</Button>
-                                    </Link>
-                                    {isSuperAdmin ? (
-                                        <>
-                                            <Button variant="outline" className="border-black/20" onClick={() => openEditDialog(eventRow)}>
-                                                Edit Event
-                                            </Button>
-                                            <Button variant="outline" className="border-black/20" onClick={() => toggleStatus(eventRow)}>
-                                                {eventRow.status === 'open' ? 'Close Event' : 'Open Event'}
-                                            </Button>
-                                            <Button
-                                                variant="outline"
-                                                className="border-red-300 text-red-600 hover:bg-red-50"
-                                                onClick={() => openDeleteDialog(eventRow)}
-                                            >
-                                                Delete Event
-                                            </Button>
-                                        </>
+                        {events.map((eventRow) => {
+                            const description = String(eventRow.description || '').trim();
+                            const isExpanded = Boolean(expandedDescriptions[eventRow.id]);
+                            const canToggle = description.length > 160;
+                            const shouldClamp = canToggle && !isExpanded;
+
+                            return (
+                                <div key={eventRow.id} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
+                                    {getCardPosterSrc(eventRow.poster_url) ? (
+                                        <img
+                                            src={getCardPosterSrc(eventRow.poster_url)}
+                                            alt={`${eventRow.title} poster`}
+                                            className="mb-3 aspect-[4/5] w-full rounded-xl border border-black/10 object-cover bg-white"
+                                        />
                                     ) : null}
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div>
+                                            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">{eventRow.event_code}</p>
+                                            <h3 className="font-heading text-xl font-black">{eventRow.title}</h3>
+                                            <p className="text-xs text-slate-500">{eventRow.slug}</p>
+                                        </div>
+                                        <span className={`rounded-full border px-3 py-1 text-xs uppercase tracking-[0.2em] ${eventRow.status === 'open' ? 'border-[#c99612] bg-[#fff3c4] text-[#7a5a00]' : 'border-black/10 bg-[#11131a] text-[#f6c347]'}`}>
+                                            {eventRow.status}
+                                        </span>
+                                    </div>
+                                    <div className={`relative mt-3 text-sm text-slate-600 space-y-2 ${shouldClamp ? 'max-h-24 overflow-hidden' : ''}`}>
+                                        <ParsedDescription
+                                            description={eventRow.description}
+                                            emptyText="No description provided."
+                                            listClassName="list-disc space-y-1 pl-5"
+                                        />
+                                        {shouldClamp ? (
+                                            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-[#fffdf7] to-transparent" />
+                                        ) : null}
+                                    </div>
+                                    {canToggle ? (
+                                        <button
+                                            type="button"
+                                            className="mt-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 hover:text-slate-800"
+                                            onClick={() => setExpandedDescriptions((prev) => ({ ...prev, [eventRow.id]: !isExpanded }))}
+                                        >
+                                            {isExpanded ? 'Read less' : 'Read more'}
+                                        </button>
+                                    ) : null}
+                                    <p className="mt-2 text-xs font-medium text-slate-500">
+                                        Start: {formatDateLabel(eventRow.start_date)} · End: {formatDateLabel(eventRow.end_date)}
+                                    </p>
+                                    <div className="mt-4 flex flex-wrap gap-2 text-xs">
+                                        <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.event_type}</span>
+                                        <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.format}</span>
+                                        <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.participant_mode}</span>
+                                        <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.template_option}</span>
+                                    </div>
+                                    <div className="mt-4 flex flex-wrap gap-2">
+                                        <Link to={`/admin/events/${eventRow.slug}`}>
+                                            <Button className="bg-[#11131a] text-white hover:bg-[#1f2330]">Manage</Button>
+                                        </Link>
+                                        {isSuperAdmin ? (
+                                            <>
+                                                <Button variant="outline" className="border-black/20" onClick={() => openEditDialog(eventRow)}>
+                                                    Edit Event
+                                                </Button>
+                                                <Button variant="outline" className="border-black/20" onClick={() => toggleStatus(eventRow)}>
+                                                    {eventRow.status === 'open' ? 'Close Event' : 'Open Event'}
+                                                </Button>
+                                                <Button
+                                                    variant="outline"
+                                                    className="border-red-300 text-red-600 hover:bg-red-50"
+                                                    onClick={() => openDeleteDialog(eventRow)}
+                                                >
+                                                    Delete Event
+                                                </Button>
+                                            </>
+                                        ) : null}
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
             </section>
 
             <Dialog open={editDialogOpen} onOpenChange={(open) => (open ? setEditDialogOpen(true) : closeEditDialog())}>
-                <DialogContent className="max-h-[90vh] overflow-y-auto border-4 border-black">
+                <DialogContent className="max-h-[85vh] w-[92vw] max-w-[720px] overflow-y-auto border-4 border-black">
                     <DialogHeader>
                         <DialogTitle className="font-heading text-2xl font-black">Edit Event</DialogTitle>
                     </DialogHeader>
@@ -611,7 +638,7 @@ export default function AdminEvents() {
             </Dialog>
 
             <Dialog open={deleteDialogOpen} onOpenChange={(open) => (open ? setDeleteDialogOpen(true) : closeDeleteDialog())}>
-                <DialogContent className="border-4 border-black">
+                <DialogContent className="w-[92vw] max-w-[520px] border-4 border-black">
                     <DialogHeader>
                         <DialogTitle className="font-heading font-bold text-2xl text-red-600">Delete Event</DialogTitle>
                     </DialogHeader>

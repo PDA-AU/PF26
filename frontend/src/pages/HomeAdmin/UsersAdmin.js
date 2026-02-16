@@ -691,6 +691,19 @@ export default function UsersAdmin() {
                                     <p><span className="font-semibold text-slate-600">DOB:</span> {selectedMember.dob || 'N/A'}</p>
                                     <p><span className="font-semibold text-slate-600">Email Verified:</span> {selectedMember.email_verified ? 'Yes' : 'No'}</p>
                                     <p><span className="font-semibold text-slate-600">Preferred Team:</span> {selectedMember.preferred_team || 'N/A'}</p>
+                                    <p>
+                                        <span className="font-semibold text-slate-600">Resume:</span>{' '}
+                                        {selectedMember.resume_url ? (
+                                            <a
+                                                href={selectedMember.resume_url}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="text-slate-700 underline hover:text-slate-900"
+                                            >
+                                                View Resume
+                                            </a>
+                                        ) : 'N/A'}
+                                    </p>
                                     <p><span className="font-semibold text-slate-600">Team:</span> {selectedMember.team || 'Unassigned'}</p>
                                     <p><span className="font-semibold text-slate-600">Designation:</span> {selectedMember.designation || 'Member'}</p>
                                     <p><span className="font-semibold text-slate-600">LinkedIn:</span> {selectedMember.linkedin_url || 'N/A'}</p>

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from typing import Dict, List, Optional
 from sqlalchemy.engine import make_url
 import os
@@ -361,7 +362,14 @@ def create_pda_admin(
     db.add(admin_row)
     db.commit()
 
-    log_admin_action(db, superadmin, "Create admin user", request.method if request else None, request.url.path if request else None, {"admin_id": user.id})
+    log_admin_action(
+        db,
+        superadmin,
+        "Create admin user",
+        request.method if request else None,
+        request.url.path if request else None,
+        {"admin_id": user.id, "target_regno": user.regno},
+    )
     recruit_state = get_recruitment_state(db, user.id, user=user)
     return _build_admin_response(user, team, admin_row, recruit_state)
 
@@ -381,7 +389,14 @@ def delete_pda_admin(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Admin not found")
     db.delete(admin_row)
     db.commit()
-    log_admin_action(db, superadmin, "Delete admin user", request.method if request else None, request.url.path if request else None, {"admin_id": user_id})
+    log_admin_action(
+        db,
+        superadmin,
+        "Delete admin user",
+        request.method if request else None,
+        request.url.path if request else None,
+        {"admin_id": user_id, "target_regno": user.regno},
+    )
     return {"message": "Admin removed"}
 
 
@@ -401,7 +416,14 @@ def update_admin_policy(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Admin not found")
     admin_row.policy = policy_data.policy
     db.commit()
-    log_admin_action(db, superadmin, "Update admin policy", request.method if request else None, request.url.path if request else None, {"admin_id": user_id, "policy": policy_data.policy})
+    log_admin_action(
+        db,
+        superadmin,
+        "Update admin policy",
+        request.method if request else None,
+        request.url.path if request else None,
+        {"admin_id": user_id, "policy": policy_data.policy, "target_regno": user.regno},
+    )
 
     user = db.query(PdaUser).filter(PdaUser.id == user_id).first()
     if not user:
@@ -416,14 +438,19 @@ def get_homeadmin_logs(
     _: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db),
     limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    log_type: str = Query(default="any"),
 ):
-    logs = (
-        db.query(AdminLog)
-        .filter(AdminLog.path.like("/api/%"))
-        .order_by(AdminLog.id.desc())
-        .limit(limit)
-        .all()
+    query = db.query(AdminLog).filter(
+        AdminLog.path.like("/api/%"),
+        or_(AdminLog.method.is_(None), AdminLog.method.notin_(["GET", "HEAD", "OPTIONS"])),
     )
+    if log_type == "request":
+        query = query.filter(AdminLog.action == "Admin API Request")
+    elif log_type == "action":
+        query = query.filter(AdminLog.action != "Admin API Request")
+
+    logs = query.order_by(AdminLog.id.desc()).offset(offset).limit(limit).all()
     return [AdminLogResponse.model_validate(l) for l in logs]
 
 

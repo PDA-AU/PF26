@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
-import { ArrowDown, ArrowUp } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,6 +14,7 @@ const emptyEditItem = {
     caption: '',
     tag: ''
 };
+const GALLERY_PAGE_SIZE = 18;
 
 export default function GalleryAdmin() {
     const { canAccessHome, getAuthHeader } = useAuth();
@@ -27,6 +28,7 @@ export default function GalleryAdmin() {
     const [gallerySearch, setGallerySearch] = useState('');
     const [draggingId, setDraggingId] = useState(null);
     const editFormRef = useRef(null);
+    const [galleryPage, setGalleryPage] = useState(1);
 
     const fetchData = async () => {
         try {
@@ -44,6 +46,10 @@ export default function GalleryAdmin() {
             fetchData();
         }
     }, [canAccessHome]);
+
+    useEffect(() => {
+        setGalleryPage(1);
+    }, [gallerySearch, galleryItems.length]);
 
     const handleUploadsSelected = async (files) => {
         const list = Array.from(files || []);
@@ -168,6 +174,13 @@ export default function GalleryAdmin() {
             .some((value) => value.toLowerCase().includes(normalizedSearch));
     });
     const sortedGallery = [...filteredGallery].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const galleryIndexMap = new Map(sortedGallery.map((item, index) => [item.id, index]));
+    const totalGalleryPages = Math.max(1, Math.ceil(sortedGallery.length / GALLERY_PAGE_SIZE));
+    const currentGalleryPage = Math.min(galleryPage, totalGalleryPages);
+    const pagedGallery = sortedGallery.slice(
+        (currentGalleryPage - 1) * GALLERY_PAGE_SIZE,
+        currentGalleryPage * GALLERY_PAGE_SIZE
+    );
 
     const handleDragStart = (itemId) => {
         setDraggingId(itemId);
@@ -351,15 +364,41 @@ export default function GalleryAdmin() {
 
                 <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <Label className="text-sm text-slate-600">Gallery Photos</Label>
-                    <Input
-                        value={gallerySearch}
-                        onChange={(e) => setGallerySearch(e.target.value)}
-                        placeholder="Search captions..."
-                        className="md:max-w-sm"
-                    />
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                        <Input
+                            value={gallerySearch}
+                            onChange={(e) => setGallerySearch(e.target.value)}
+                            placeholder="Search captions..."
+                            className="md:max-w-sm"
+                        />
+                        {sortedGallery.length > GALLERY_PAGE_SIZE ? (
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setGalleryPage((prev) => Math.max(1, prev - 1))}
+                                    className="rounded-full border border-[#c99612] bg-[#f6c347] p-2 text-[#11131a] transition hover:bg-[#ffd16b] disabled:cursor-not-allowed disabled:opacity-50"
+                                    aria-label="Previous gallery page"
+                                    disabled={currentGalleryPage === 1}
+                                >
+                                    <ChevronLeft className="h-4 w-4" />
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setGalleryPage((prev) => Math.min(totalGalleryPages, prev + 1))}
+                                    className="rounded-full border border-[#c99612] bg-[#f6c347] p-2 text-[#11131a] transition hover:bg-[#ffd16b] disabled:cursor-not-allowed disabled:opacity-50"
+                                    aria-label="Next gallery page"
+                                    disabled={currentGalleryPage >= totalGalleryPages}
+                                >
+                                    <ChevronRight className="h-4 w-4" />
+                                </button>
+                            </div>
+                        ) : null}
+                    </div>
                 </div>
                 <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                    {sortedGallery.length ? sortedGallery.map((item, index) => (
+                    {pagedGallery.length ? pagedGallery.map((item, index) => {
+                        const itemIndex = galleryIndexMap.get(item.id) ?? index;
+                        return (
                         <div
                             key={item.id}
                             draggable
@@ -401,7 +440,7 @@ export default function GalleryAdmin() {
                                             variant="outline"
                                             className="border-black/10 text-xs"
                                             onClick={() => moveItem(item.id, 'up')}
-                                            disabled={index === 0}
+                                            disabled={itemIndex === 0}
                                             aria-label="Move up"
                                         >
                                             <ArrowUp className="h-4 w-4" />
@@ -411,7 +450,7 @@ export default function GalleryAdmin() {
                                             variant="outline"
                                             className="border-black/10 text-xs"
                                             onClick={() => moveItem(item.id, 'down')}
-                                            disabled={index === sortedGallery.length - 1}
+                                            disabled={itemIndex === sortedGallery.length - 1}
                                             aria-label="Move down"
                                         >
                                             <ArrowDown className="h-4 w-4" />
@@ -420,7 +459,8 @@ export default function GalleryAdmin() {
                                 </div>
                             </div>
                         </div>
-                    )) : (
+                        );
+                    }) : (
                         <div className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4 text-sm text-slate-500">
                             No gallery photos yet.
                         </div>

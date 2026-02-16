@@ -28,6 +28,11 @@ if AWS_REGION and S3_BUCKET_NAME and S3_ACCESS_KEY and S3_SECRET_KEY:
 
 
 def log_admin_action(db: Session, admin: PdaUser, action: str, method: Optional[str] = None, path: Optional[str] = None, meta: Optional[dict] = None):
+    if meta is None:
+        meta = {}
+    if isinstance(meta, dict):
+        meta = dict(meta)
+        meta.setdefault("kind", "action")
     db.add(AdminLog(
         admin_id=admin.id if admin else None,
         admin_register_number=admin.regno if admin else "",

@@ -25,6 +25,24 @@ const TEAMS = [
     'Library'
 ];
 
+const DEPARTMENTS = [
+    { value: "Artificial Intelligence and Data Science", label: "AI & Data Science" },
+    { value: "Aerospace Engineering", label: "Aerospace Engineering" },
+    { value: "Automobile Engineering", label: "Automobile Engineering" },
+    { value: "Computer Technology", label: "Computer Technology" },
+    { value: "Electronics and Communication Engineering", label: "ECE" },
+    { value: "Electronics and Instrumentation Engineering", label: "EIE" },
+    { value: "Production Technology", label: "Production Technology" },
+    { value: "Robotics and Automation", label: "Robotics & Automation" },
+    { value: "Rubber and Plastics Technology", label: "Rubber & Plastics" },
+    { value: "Information Technology", label: "Information Technology" }
+];
+
+const GENDERS = [
+    { value: 'Male', label: 'Male' },
+    { value: 'Female', label: 'Female' }
+];
+
 const EXEC_DESIG = ['Chairperson', 'Vice Chairperson', 'Treasurer', 'General Secretary'];
 const TEAM_DESIG = ['Head', 'JS', 'Member', 'Volunteer'];
 const DEPT_SHORT = {
@@ -69,6 +87,24 @@ const normalizeDepartmentValue = (value) => {
     return mapped || raw;
 };
 
+const emptyAddForm = {
+    name: '',
+    profile_name: '',
+    regno: '',
+    email: '',
+    dob: '',
+    gender: '',
+    phno: '',
+    dept: '',
+    password: '',
+    confirmPassword: '',
+    team: '',
+    designation: 'Member',
+    instagram_url: '',
+    linkedin_url: '',
+    github_url: '',
+};
+
 export default function TeamAdmin() {
     const { isSuperAdmin, canAccessHome, getAuthHeader } = useAuth();
     const [teamMembers, setTeamMembers] = useState([]);
@@ -91,6 +127,10 @@ export default function TeamAdmin() {
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [confirmText, setConfirmText] = useState('');
     const [confirmAction, setConfirmAction] = useState(null);
+    const [addOpen, setAddOpen] = useState(false);
+    const [addForm, setAddForm] = useState(emptyAddForm);
+    const [addPhotoFile, setAddPhotoFile] = useState(null);
+    const [adding, setAdding] = useState(false);
 
     const fetchData = useCallback(async () => {
         try {
@@ -175,6 +215,84 @@ export default function TeamAdmin() {
         });
         setPhotoFile(null);
         setIsEditing(false);
+    };
+
+    const getDesignationOptions = (team) => (
+        team === 'Executive' ? EXEC_DESIG : TEAM_DESIG
+    );
+
+    const resetAddForm = () => {
+        setAddForm(emptyAddForm);
+        setAddPhotoFile(null);
+    };
+
+    const submitNewMember = async (e) => {
+        e.preventDefault();
+        if (adding) return;
+        const missingRequired = [
+            'name',
+            'profile_name',
+            'regno',
+            'email',
+            'dob',
+            'gender',
+            'phno',
+            'dept',
+            'password',
+            'confirmPassword',
+        ].some((key) => !String(addForm[key] || '').trim());
+        if (missingRequired) {
+            toast.error('Please complete all required fields.');
+            return;
+        }
+        if (!addForm.team || !addForm.designation) {
+            toast.error('Select a team and designation.');
+            return;
+        }
+        if (addForm.password !== addForm.confirmPassword) {
+            toast.error('Passwords do not match.');
+            return;
+        }
+        const normalizedProfileName = String(addForm.profile_name || '').trim().toLowerCase();
+        if (normalizedProfileName && !/^[a-z0-9_]{3,40}$/.test(normalizedProfileName)) {
+            toast.error('Profile name must be 3-40 chars: lowercase letters, numbers, underscore.');
+            return;
+        }
+        setAdding(true);
+        try {
+            let photoUrl = null;
+            if (addPhotoFile) {
+                const processed = await compressImageToWebp(addPhotoFile);
+                photoUrl = await uploadTeamImage(processed, getAuthHeader);
+            }
+            const payload = {
+                name: addForm.name.trim(),
+                profile_name: normalizedProfileName,
+                regno: addForm.regno.trim(),
+                email: addForm.email.trim(),
+                dob: addForm.dob,
+                gender: addForm.gender,
+                phno: addForm.phno.trim(),
+                dept: addForm.dept,
+                password: addForm.password,
+                team: addForm.team,
+                designation: addForm.designation,
+                instagram_url: addForm.instagram_url.trim() || null,
+                linkedin_url: addForm.linkedin_url.trim() || null,
+                github_url: addForm.github_url.trim() || null,
+                photo_url: photoUrl,
+            };
+            await axios.post(`${API}/pda-admin/team`, payload, { headers: getAuthHeader() });
+            toast.success('Team member added.');
+            setAddOpen(false);
+            resetAddForm();
+            fetchData();
+        } catch (error) {
+            console.error('Failed to add team member:', error);
+            toast.error(error.response?.data?.detail || 'Failed to add team member.');
+        } finally {
+            setAdding(false);
+        }
     };
 
     const updateMember = async () => {
@@ -468,6 +586,11 @@ export default function TeamAdmin() {
                         <h2 className="text-2xl font-heading font-black">Members</h2>
                     </div>
                     <div className="flex flex-wrap gap-2">
+                        {isSuperAdmin ? (
+                            <Button className="bg-[#f6c347] text-black hover:bg-[#ffd16b]" onClick={() => setAddOpen(true)}>
+                                Add Member
+                            </Button>
+                        ) : null}
                         <Button variant="outline" className="border-black/10" onClick={() => handleExport('csv')}>Export CSV</Button>
                         <Button variant="outline" className="border-black/10" onClick={() => handleExport('xlsx')}>Export XLSX</Button>
                     </div>
@@ -581,6 +704,166 @@ export default function TeamAdmin() {
                 </div>
             </section>
 
+            <Dialog open={addOpen} onOpenChange={(open) => {
+                setAddOpen(open);
+                if (!open) resetAddForm();
+            }}>
+                <DialogContent className="max-w-4xl bg-white">
+                    <DialogHeader>
+                        <DialogTitle className="text-xl font-heading font-black">Add Team Member</DialogTitle>
+                    </DialogHeader>
+                    <form onSubmit={submitNewMember} className="grid gap-4 md:grid-cols-2">
+                        <div>
+                            <Label>Name *</Label>
+                            <Input name="name" value={addForm.name} onChange={(e) => setAddForm((prev) => ({ ...prev, name: e.target.value }))} required />
+                        </div>
+                        <div>
+                            <Label>Register Number *</Label>
+                            <Input name="regno" value={addForm.regno} onChange={(e) => setAddForm((prev) => ({ ...prev, regno: e.target.value }))} required />
+                        </div>
+                        <div>
+                            <Label>Profile Name *</Label>
+                            <Input
+                                name="profile_name"
+                                value={addForm.profile_name}
+                                onChange={(e) => setAddForm((prev) => ({ ...prev, profile_name: e.target.value }))}
+                                placeholder="eg: john_doe"
+                                required
+                            />
+                            <p className="mt-1 text-[11px] text-slate-500">3-40 chars: lowercase letters, numbers, underscore.</p>
+                        </div>
+                        <div>
+                            <Label>Email *</Label>
+                            <Input name="email" type="email" value={addForm.email} onChange={(e) => setAddForm((prev) => ({ ...prev, email: e.target.value }))} required />
+                        </div>
+                        <div>
+                            <Label>Date Of Birth *</Label>
+                            <Input name="dob" type="date" value={addForm.dob} onChange={(e) => setAddForm((prev) => ({ ...prev, dob: e.target.value }))} required />
+                        </div>
+                        <div>
+                            <Label>Gender *</Label>
+                            <Select value={addForm.gender} onValueChange={(value) => setAddForm((prev) => ({ ...prev, gender: value }))}>
+                                <SelectTrigger className="w-full">
+                                    <SelectValue placeholder="Select gender" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {GENDERS.map((gender) => (
+                                        <SelectItem key={gender.value} value={gender.value}>{gender.label}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div>
+                            <Label>Phone *</Label>
+                            <Input name="phno" value={addForm.phno} onChange={(e) => setAddForm((prev) => ({ ...prev, phno: e.target.value }))} required />
+                        </div>
+                        <div>
+                            <Label>Department *</Label>
+                            <Select value={addForm.dept} onValueChange={(value) => setAddForm((prev) => ({ ...prev, dept: value }))}>
+                                <SelectTrigger className="w-full">
+                                    <SelectValue placeholder="Select department" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {DEPARTMENTS.map((dept) => (
+                                        <SelectItem key={dept.value} value={dept.value}>{dept.label}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div>
+                            <Label>Password *</Label>
+                            <Input name="password" type="password" value={addForm.password} onChange={(e) => setAddForm((prev) => ({ ...prev, password: e.target.value }))} required />
+                        </div>
+                        <div>
+                            <Label>Confirm Password *</Label>
+                            <Input name="confirmPassword" type="password" value={addForm.confirmPassword} onChange={(e) => setAddForm((prev) => ({ ...prev, confirmPassword: e.target.value }))} required />
+                        </div>
+                        <div>
+                            <Label>Team *</Label>
+                            <Select
+                                value={addForm.team}
+                                onValueChange={(value) => {
+                                    setAddForm((prev) => {
+                                        const options = getDesignationOptions(value);
+                                        const nextDesignation = options.includes(prev.designation) ? prev.designation : (options[0] || 'Member');
+                                        return { ...prev, team: value, designation: nextDesignation };
+                                    });
+                                }}
+                            >
+                                <SelectTrigger className="w-full">
+                                    <SelectValue placeholder="Select team" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {TEAMS.map((team) => (
+                                        <SelectItem key={team} value={team}>{team}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div>
+                            <Label>Designation *</Label>
+                            <Select
+                                value={addForm.designation}
+                                onValueChange={(value) => setAddForm((prev) => ({ ...prev, designation: value }))}
+                            >
+                                <SelectTrigger className="w-full">
+                                    <SelectValue placeholder="Select designation" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {getDesignationOptions(addForm.team).map((designation) => (
+                                        <SelectItem key={designation} value={designation}>{designation}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div>
+                            <Label>Instagram</Label>
+                            <Input
+                                value={addForm.instagram_url}
+                                onChange={(e) => setAddForm((prev) => ({ ...prev, instagram_url: e.target.value }))}
+                                placeholder="https://instagram.com/username"
+                            />
+                        </div>
+                        <div>
+                            <Label>LinkedIn</Label>
+                            <Input
+                                value={addForm.linkedin_url}
+                                onChange={(e) => setAddForm((prev) => ({ ...prev, linkedin_url: e.target.value }))}
+                                placeholder="https://linkedin.com/in/username"
+                            />
+                        </div>
+                        <div className="md:col-span-2">
+                            <Label>GitHub</Label>
+                            <Input
+                                value={addForm.github_url}
+                                onChange={(e) => setAddForm((prev) => ({ ...prev, github_url: e.target.value }))}
+                                placeholder="https://github.com/username"
+                            />
+                        </div>
+                        <div className="md:col-span-2">
+                            <Label>Upload Photo</Label>
+                            <Input type="file" accept="image/*" onChange={(e) => setAddPhotoFile(e.target.files?.[0] || null)} />
+                        </div>
+                        <div className="md:col-span-2 flex justify-end gap-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="border-black/10"
+                                onClick={() => {
+                                    setAddOpen(false);
+                                    resetAddForm();
+                                }}
+                            >
+                                Cancel
+                            </Button>
+                            <Button type="submit" className="bg-[#f6c347] text-black hover:bg-[#ffd16b]" disabled={adding}>
+                                {adding ? 'Saving...' : 'Add Member'}
+                            </Button>
+                        </div>
+                    </form>
+                </DialogContent>
+            </Dialog>
+
             <Dialog open={!!selectedMember} onOpenChange={() => {
                 setSelectedMember(null);
                 setConfirmOpen(false);
@@ -605,6 +888,19 @@ export default function TeamAdmin() {
                                     <p><span className="font-semibold text-slate-600">Email:</span> {selectedMember.email || 'N/A'}</p>
                                     <p><span className="font-semibold text-slate-600">Phone:</span> {selectedMember.phno || 'N/A'}</p>
                                     <p><span className="font-semibold text-slate-600">Dept:</span> {selectedMember.dept || 'N/A'}</p>
+                                    <p>
+                                        <span className="font-semibold text-slate-600">Resume:</span>{' '}
+                                        {selectedMember.resume_url ? (
+                                            <a
+                                                href={selectedMember.resume_url}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="text-slate-700 underline hover:text-slate-900"
+                                            >
+                                                View Resume
+                                            </a>
+                                        ) : 'N/A'}
+                                    </p>
                                     <p><span className="font-semibold text-slate-600">Instagram:</span> {selectedMember.instagram_url || 'N/A'}</p>
                                 </div>
                                 <div className="space-y-2 text-xs text-slate-500">

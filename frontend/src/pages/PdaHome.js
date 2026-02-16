@@ -89,6 +89,8 @@ export default function PdaHome() {
     const teamScrollRef = useRef(null);
     const [posterDialogOpen, setPosterDialogOpen] = useState(false);
     const [selectedPoster, setSelectedPoster] = useState(null);
+    const [galleryDialogOpen, setGalleryDialogOpen] = useState(false);
+    const [selectedGallery, setSelectedGallery] = useState(null);
     const [programs, setPrograms] = useState([]);
     const [events, setEvents] = useState([]);
     const [featuredItems, setFeaturedItems] = useState([]);
@@ -903,11 +905,21 @@ export default function PdaHome() {
                                 .slice((galleryPage - 1) * GALLERY_PAGE_SIZE, galleryPage * GALLERY_PAGE_SIZE)
                                 .map((item) => (
                                 <div key={item.id} className="flex h-full min-h-[220px] flex-col rounded-2xl border border-black/10 bg-white p-3 shadow-sm">
-                                    <img
-                                        src={item.photo_url}
-                                        alt={item.caption || 'PDA gallery'}
-                                        className="h-44 w-full rounded-xl object-cover"
-                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setSelectedGallery(item);
+                                            setGalleryDialogOpen(true);
+                                        }}
+                                        className="group relative"
+                                        aria-label="Open gallery photo"
+                                    >
+                                        <img
+                                            src={item.photo_url}
+                                            alt={item.caption || 'PDA gallery'}
+                                            className="h-44 w-full rounded-xl object-cover transition group-hover:opacity-90"
+                                        />
+                                    </button>
                                     {item.caption ? (
                                         <p className="mt-3 text-sm text-slate-600">{item.caption}</p>
                                     ) : null}
@@ -929,11 +941,21 @@ export default function PdaHome() {
                                     {galleryItems.map((item) => (
                                         <div key={`gallery-mobile-${item.id}`} className="min-w-[220px] snap-start">
                                             <div className="flex min-h-[210px] flex-col rounded-2xl border border-black/10 bg-white p-3 shadow-sm">
-                                                <img
-                                                    src={item.photo_url}
-                                                    alt={item.caption || 'PDA gallery'}
-                                                    className="h-40 w-full rounded-xl object-cover"
-                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setSelectedGallery(item);
+                                                        setGalleryDialogOpen(true);
+                                                    }}
+                                                    className="group relative"
+                                                    aria-label="Open gallery photo"
+                                                >
+                                                    <img
+                                                        src={item.photo_url}
+                                                        alt={item.caption || 'PDA gallery'}
+                                                        className="h-40 w-full rounded-xl object-cover transition group-hover:opacity-90"
+                                                    />
+                                                </button>
                                                 {item.caption ? (
                                                     <p className="mt-3 text-sm text-slate-600">{item.caption}</p>
                                                 ) : null}
@@ -1005,6 +1027,34 @@ export default function PdaHome() {
                                         </Button>
                                     </Link>
                                 </div>
+                            ) : null}
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog
+                open={galleryDialogOpen}
+                onOpenChange={(open) => {
+                    setGalleryDialogOpen(open);
+                    if (!open) setSelectedGallery(null);
+                }}
+            >
+                <DialogContent className="w-[92vw] max-w-5xl bg-white p-0">
+                    <DialogHeader className="px-6 pb-2 pt-6">
+                        <DialogTitle className="text-xl font-heading font-black">Gallery Photo</DialogTitle>
+                        {selectedGallery?.caption ? (
+                            <p className="mt-1 text-sm text-slate-600">{selectedGallery.caption}</p>
+                        ) : null}
+                    </DialogHeader>
+                    <div className="px-4 pb-6 sm:px-6">
+                        <div className="flex max-h-[72vh] items-center justify-center overflow-hidden rounded-2xl border border-black/10 bg-[#fffdf7]">
+                            {selectedGallery?.photo_url ? (
+                                <img
+                                    src={selectedGallery.photo_url}
+                                    alt={selectedGallery.caption || 'PDA gallery'}
+                                    className="h-full max-h-[72vh] w-full object-contain"
+                                />
                             ) : null}
                         </div>
                     </div>

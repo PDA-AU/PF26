@@ -5,9 +5,12 @@ from dotenv import load_dotenv
 from pathlib import Path
 import os
 import logging
+import time
 
 from database import engine, get_db, SessionLocal, Base
-from models import SystemConfig
+from models import SystemConfig, PdaUser
+from auth import decode_token
+from utils import log_admin_action
 from migrations import (
     ensure_pda_users_table,
     ensure_pda_users_dob_column,
@@ -70,6 +73,48 @@ app.add_middleware(
 
 # Mount static files for uploads
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+
+@app.middleware("http")
+async def admin_audit_middleware(request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    path = request.url.path
+    if path.startswith("/api/pda-admin/"):
+        method = request.method.upper()
+        if method not in {"POST", "PUT", "PATCH", "DELETE"}:
+            return response
+        try:
+            auth_header = request.headers.get("authorization") or ""
+            token = ""
+            if auth_header.lower().startswith("bearer "):
+                token = auth_header.split(" ", 1)[1].strip()
+            if token:
+                payload = decode_token(token)
+                if payload.get("type") == "access" and payload.get("user_type") == "pda":
+                    regno = payload.get("sub")
+                    if regno:
+                        db = SessionLocal()
+                        try:
+                            user = db.query(PdaUser).filter(PdaUser.regno == regno).first()
+                            if user:
+                                duration_ms = int((time.perf_counter() - start) * 1000)
+                                log_admin_action(
+                                    db,
+                                    user,
+                                    "Admin API Request",
+                                    method=method,
+                                    path=path,
+                                    meta={
+                                        "kind": "request",
+                                        "status_code": response.status_code,
+                                        "duration_ms": duration_ms,
+                                    },
+                                )
+                        finally:
+                            db.close()
+        except Exception:
+            logger.exception("Failed to log admin request")
+    return response
 
 @app.on_event("startup")
 async def startup_event():

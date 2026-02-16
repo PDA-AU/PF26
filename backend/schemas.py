@@ -695,9 +695,13 @@ class PdaTeamCreate(BaseModel):
     user_id: Optional[int] = None
     regno: Optional[str] = None
     name: Optional[str] = None
+    profile_name: Optional[str] = None
     dept: Optional[DepartmentEnum] = None
     email: Optional[str] = None
+    dob: Optional[date] = None
+    gender: Optional[GenderEnum] = None
     phno: Optional[str] = None
+    password: Optional[str] = None
     team: Optional["PdaTeamName"] = None
     designation: Optional["PdaTeamDesignation"] = None
     photo_url: Optional[str] = None
@@ -705,7 +709,7 @@ class PdaTeamCreate(BaseModel):
     linkedin_url: Optional[str] = None
     github_url: Optional[str] = None
 
-    @field_validator("dept", mode="before")
+    @field_validator("dept", "gender", mode="before")
     @classmethod
     def normalize_optional_team_dept(cls, v):
         if v is None:
@@ -748,6 +752,7 @@ class PdaTeamResponse(BaseModel):
     email: Optional[str] = None
     phno: Optional[str] = None
     dob: Optional[date] = None
+    resume_url: Optional[str] = None
     team: Optional["PdaTeamName"] = None
     designation: Optional["PdaTeamDesignation"] = None
     photo_url: Optional[str] = None

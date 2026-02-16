@@ -55,6 +55,7 @@ from utils import (
 )
 from auth import get_password_hash
 from recruitment_state import get_recruitment_state, get_recruitment_state_map
+from persohub_service import is_profile_name_valid, generate_unique_profile_name
 
 try:
     import pypdfium2 as pdfium
@@ -114,7 +115,7 @@ def _render_pdf_preview_images(pdf_bytes: bytes, max_pages: int) -> List[bytes]:
         doc.close()
     return images
 
-def _build_team_response(member: PdaTeam, user: Optional[PdaUser]) -> PdaTeamResponse:
+def _build_team_response(member: PdaTeam, user: Optional[PdaUser], resume_url: Optional[str] = None) -> PdaTeamResponse:
     return PdaTeamResponse(
         id=member.id,
         user_id=member.user_id,
@@ -125,6 +126,7 @@ def _build_team_response(member: PdaTeam, user: Optional[PdaUser]) -> PdaTeamRes
         email=user.email if user else None,
         phno=user.phno if user else None,
         dob=user.dob if user else None,
+        resume_url=resume_url,
         team=member.team,
         designation=member.designation,
         photo_url=user.image_url if user else None,
@@ -391,7 +393,16 @@ def list_team_members(
         .order_by(PdaTeam.team.asc().nullslast(), PdaTeam.designation.asc().nullslast(), PdaUser.name.asc().nullslast())
         .all()
     )
-    return [_build_team_response(m, u) for m, u in rows]
+    users = [u for _, u in rows if u and u.id is not None]
+    resume_map = get_recruitment_state_map(db, users) if users else {}
+    return [
+        _build_team_response(
+            m,
+            u,
+            (resume_map.get(u.id) or {}).get("resume_url") if u else None,
+        )
+        for m, u in rows
+    ]
 
 
 @router.get("/pda-admin/users", response_model=List[PdaAdminUserResponse])
@@ -501,7 +512,7 @@ def update_pda_user_admin(
         "Update PDA user",
         request.method if request else None,
         request.url.path if request else None,
-        {"user_id": user_id},
+        {"user_id": user_id, "target_regno": user.regno},
     )
     recruit_state = get_recruitment_state(db, user.id, user=user)
     return _build_admin_user_response(user, member, recruit_state)
@@ -515,6 +526,10 @@ def create_team_member(
     request: Request = None
 ):
     payload = member_data.model_dump(mode="json")
+    desired_profile_name = str(payload.get("profile_name") or "").strip().lower() or None
+    if desired_profile_name and not is_profile_name_valid(desired_profile_name):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid profile name format")
+    password_value = str(payload.get("password") or "").strip()
     user = None
     if payload.get("user_id"):
         user = db.query(PdaUser).filter(PdaUser.id == payload["user_id"]).first()
@@ -522,14 +537,40 @@ def create_team_member(
             for field in ("name", "email", "phno", "dept", "instagram_url", "linkedin_url", "github_url"):
                 if payload.get(field):
                     setattr(user, field, payload[field])
+            if payload.get("dob"):
+                user.dob = payload["dob"]
+            if payload.get("gender"):
+                user.gender = payload["gender"]
+            if desired_profile_name and desired_profile_name != user.profile_name:
+                existing_profile = db.query(PdaUser).filter(PdaUser.profile_name == desired_profile_name).first()
+                if existing_profile and existing_profile.id != user.id:
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Profile name already in use")
+                community_conflict = db.query(PersohubCommunity).filter(
+                    PersohubCommunity.profile_id == desired_profile_name
+                ).first()
+                if community_conflict:
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Profile name reserved by community")
+                user.profile_name = desired_profile_name
     if not user and payload.get("regno"):
         user = db.query(PdaUser).filter(PdaUser.regno == payload["regno"]).first()
         if not user:
+            if desired_profile_name:
+                existing_profile = db.query(PdaUser).filter(PdaUser.profile_name == desired_profile_name).first()
+                if existing_profile:
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Profile name already in use")
+                community_conflict = db.query(PersohubCommunity).filter(
+                    PersohubCommunity.profile_id == desired_profile_name
+                ).first()
+                if community_conflict:
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Profile name reserved by community")
             user = PdaUser(
                 regno=payload["regno"],
                 email=payload.get("email") or f"{payload['regno']}@pda.com",
-                hashed_password=get_password_hash("password"),
+                hashed_password=get_password_hash(password_value or "password"),
                 name=payload.get("name") or f"PDA Member {payload['regno']}",
+                profile_name=desired_profile_name or generate_unique_profile_name(db, payload.get("name") or payload["regno"]),
+                dob=payload.get("dob"),
+                gender=payload.get("gender"),
                 phno=payload.get("phno"),
                 dept=payload.get("dept"),
                 instagram_url=payload.get("instagram_url"),
@@ -545,6 +586,20 @@ def create_team_member(
             for field in ("name", "email", "phno", "dept", "instagram_url", "linkedin_url", "github_url"):
                 if payload.get(field):
                     setattr(user, field, payload[field])
+            if payload.get("dob"):
+                user.dob = payload["dob"]
+            if payload.get("gender"):
+                user.gender = payload["gender"]
+            if desired_profile_name and desired_profile_name != user.profile_name:
+                existing_profile = db.query(PdaUser).filter(PdaUser.profile_name == desired_profile_name).first()
+                if existing_profile and existing_profile.id != user.id:
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Profile name already in use")
+                community_conflict = db.query(PersohubCommunity).filter(
+                    PersohubCommunity.profile_id == desired_profile_name
+                ).first()
+                if community_conflict:
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Profile name reserved by community")
+                user.profile_name = desired_profile_name
 
     if not user:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user_id or regno is required")
@@ -560,8 +615,16 @@ def create_team_member(
     db.add(new_member)
     db.commit()
     db.refresh(new_member)
-    log_admin_action(db, admin, "Create team member", request.method if request else None, request.url.path if request else None, {"member_id": new_member.id})
-    return _build_team_response(new_member, user)
+    log_admin_action(
+        db,
+        admin,
+        "Create team member",
+        request.method if request else None,
+        request.url.path if request else None,
+        {"member_id": new_member.id, "user_id": user.id, "target_regno": user.regno},
+    )
+    resume_state = get_recruitment_state(db, user.id, user=user)
+    return _build_team_response(new_member, user, resume_state.get("resume_url"))
 
 
 @router.put("/pda-admin/team/{member_id}", response_model=PdaTeamResponse)
@@ -603,8 +666,22 @@ def update_team_member(
     db.refresh(member)
     if not user and member.user_id:
         user = db.query(PdaUser).filter(PdaUser.id == member.user_id).first()
-    log_admin_action(db, admin, "Update team member", request.method if request else None, request.url.path if request else None, {"member_id": member_id})
-    return _build_team_response(member, user)
+    meta = {"member_id": member_id}
+    if user:
+        meta.update({"user_id": user.id, "target_regno": user.regno})
+    log_admin_action(
+        db,
+        admin,
+        "Update team member",
+        request.method if request else None,
+        request.url.path if request else None,
+        meta,
+    )
+    resume_url = None
+    if user and user.id:
+        resume_state = get_recruitment_state(db, user.id, user=user)
+        resume_url = resume_state.get("resume_url")
+    return _build_team_response(member, user, resume_url)
 
 
 @router.delete("/pda-admin/team/{member_id}")
@@ -618,6 +695,7 @@ def delete_team_member(
     if not member:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team member not found")
     user_id = member.user_id
+    user = db.query(PdaUser).filter(PdaUser.id == user_id).first() if user_id else None
     db.delete(member)
     if user_id:
         remaining = db.query(PdaTeam).filter(PdaTeam.user_id == user_id).first()
@@ -626,7 +704,19 @@ def delete_team_member(
             if user:
                 user.is_member = False
     db.commit()
-    log_admin_action(db, admin, "Delete team member", request.method if request else None, request.url.path if request else None, {"member_id": member_id})
+    meta = {"member_id": member_id}
+    if user_id:
+        meta["user_id"] = user_id
+    if user:
+        meta["target_regno"] = user.regno
+    log_admin_action(
+        db,
+        admin,
+        "Delete team member",
+        request.method if request else None,
+        request.url.path if request else None,
+        meta,
+    )
     return {"message": "Team member deleted successfully"}
 
 
@@ -705,7 +795,14 @@ def delete_pda_user(
     db.query(PdaAdmin).filter(PdaAdmin.user_id == user_id).delete(synchronize_session=False)
     db.delete(user)
     db.commit()
-    log_admin_action(db, admin, "Delete PDA user", request.method if request else None, request.url.path if request else None, {"user_id": user_id})
+    log_admin_action(
+        db,
+        admin,
+        "Delete PDA user",
+        request.method if request else None,
+        request.url.path if request else None,
+        {"user_id": user_id, "target_regno": user.regno},
+    )
     return {"message": "User deleted successfully"}
 
 
