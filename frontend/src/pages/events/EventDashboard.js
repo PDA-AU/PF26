@@ -198,7 +198,9 @@ export default function EventDashboard() {
         [selectedRound?.date]
     );
 
-    const fetchData = useCallback(async () => {
+    const fetchData = useCallback(async (options = {}) => {
+        const authHeaderOverride = options.authHeaderOverride;
+        const resolvedAuthHeader = authHeaderOverride || getAuthHeader();
         setParticipantAccessClosed(false);
         let nextDashboard = null;
         try {
@@ -212,9 +214,9 @@ export default function EventDashboard() {
                 setPublishedRounds([]);
             }
 
-            if (isLoggedIn) {
+            if (isLoggedIn || authHeaderOverride) {
                 try {
-                    const dashboardRes = await axios.get(`${API}/pda/events/${eventSlug}/dashboard`, { headers: getAuthHeader() });
+                    const dashboardRes = await axios.get(`${API}/pda/events/${eventSlug}/dashboard`, { headers: resolvedAuthHeader });
                     nextDashboard = dashboardRes.data;
                     setDashboard(nextDashboard);
                 } catch (dashboardError) {
@@ -244,9 +246,9 @@ export default function EventDashboard() {
             if (nextDashboard?.is_registered) {
                 const [profileRes, roundsRes] = await Promise.allSettled([
                     nextEvent?.participant_mode === 'individual'
-                        ? axios.get(`${API}/pda/events/${eventSlug}/me`, { headers: getAuthHeader() })
+                        ? axios.get(`${API}/pda/events/${eventSlug}/me`, { headers: resolvedAuthHeader })
                         : Promise.resolve({ data: null }),
-                    axios.get(`${API}/pda/events/${eventSlug}/my-rounds`, { headers: getAuthHeader() })
+                    axios.get(`${API}/pda/events/${eventSlug}/my-rounds`, { headers: resolvedAuthHeader })
                 ]);
 
                 if (profileRes.status === 'fulfilled') {
@@ -314,8 +316,8 @@ export default function EventDashboard() {
         setAuthDialogOpen(false);
     };
 
-    const postAuthOpenRegistration = async () => {
-        const result = await fetchData();
+    const postAuthOpenRegistration = async (authHeaderOverride) => {
+        const result = await fetchData({ authHeaderOverride });
         if (eventIsOpen && !Boolean(result?.is_registered)) {
             setRegistrationDialogOpen(true);
         }
@@ -346,7 +348,8 @@ export default function EventDashboard() {
             }
             toast.success('Login successful');
             setAuthDialogOpen(false);
-            await postAuthOpenRegistration();
+            const authHeaderOverride = data?.access_token ? { Authorization: `Bearer ${data.access_token}` } : null;
+            await postAuthOpenRegistration(authHeaderOverride);
         } catch (error) {
             console.error('PDA login failed:', error);
             toast.error(getErrorMessage(error, 'Login failed. Please check your credentials.'));
