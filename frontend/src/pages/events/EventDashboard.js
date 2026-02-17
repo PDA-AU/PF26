@@ -212,30 +212,32 @@ export default function EventDashboard() {
                 setPublishedRounds([]);
             }
 
-            if (!shouldFetchParticipantData) {
+            if (isLoggedIn) {
+                try {
+                    const dashboardRes = await axios.get(`${API}/pda/events/${eventSlug}/dashboard`, { headers: getAuthHeader() });
+                    nextDashboard = dashboardRes.data;
+                    setDashboard(nextDashboard);
+                } catch (dashboardError) {
+                    setDashboard(null);
+                    const statusCode = dashboardError?.response?.status;
+                    const detail = String(dashboardError?.response?.data?.detail || '');
+                    if (statusCode === 403 && detail === 'Event is closed') {
+                        setParticipantAccessClosed(true);
+                    }
+                }
+            } else {
                 setDashboard(null);
-                setEventProfile(null);
-                setRoundStatuses([]);
-                return { eventInfo: nextEvent, dashboard: null, is_registered: false };
             }
 
-            try {
-                const dashboardRes = await axios.get(`${API}/pda/events/${eventSlug}/dashboard`, { headers: getAuthHeader() });
-                nextDashboard = dashboardRes.data;
-                setDashboard(nextDashboard);
-            } catch (dashboardError) {
-                setDashboard(null);
+            if (!shouldFetchParticipantData) {
                 setEventProfile(null);
                 setRoundStatuses([]);
-                const statusCode = dashboardError?.response?.status;
-                const detail = String(dashboardError?.response?.data?.detail || '');
-                if (statusCode === 403 && detail === 'Event is closed') {
-                    setParticipantAccessClosed(true);
-                    return { eventInfo: nextEvent, dashboard: null, is_registered: false };
-                }
-                if (statusCode !== 401 && statusCode !== 404) {
-                    toast.error(dashboardError?.response?.data?.detail || 'Failed to load your event dashboard');
-                }
+                return { eventInfo: nextEvent, dashboard: nextDashboard, is_registered: Boolean(nextDashboard?.is_registered) };
+            }
+
+            if (!nextDashboard) {
+                setEventProfile(null);
+                setRoundStatuses([]);
                 return { eventInfo: nextEvent, dashboard: null, is_registered: false };
             }
 
@@ -284,7 +286,7 @@ export default function EventDashboard() {
         } finally {
             setLoading(false);
         }
-    }, [eventSlug, getAuthHeader, shouldFetchParticipantData]);
+    }, [eventSlug, getAuthHeader, isLoggedIn, shouldFetchParticipantData]);
 
     useEffect(() => {
         fetchData();
@@ -577,13 +579,14 @@ export default function EventDashboard() {
                                     <span className="rounded-md border-2 border-black bg-white px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] shadow-neo">
                                         {eventInfo.status}
                                     </span>
-                                    {eventIsOpen && !isRegistered ? (
+                                    {eventIsOpen ? (
                                         <Button
                                             data-testid="event-overview-register-button"
-                                            onClick={() => (isLoggedIn ? setRegistrationDialogOpen(true) : openAuthDialog('login'))}
-                                            className="border-2 border-black bg-[#8B5CF6] text-white shadow-neo hover:bg-[#7C3AED]"
+                                            onClick={() => (isRegistered ? null : (isLoggedIn ? setRegistrationDialogOpen(true) : openAuthDialog('login')))}
+                                            className={`border-2 border-black shadow-neo ${isRegistered ? 'bg-slate-200 text-slate-600 cursor-not-allowed' : 'bg-[#8B5CF6] text-white hover:bg-[#7C3AED]'}`}
+                                            disabled={isRegistered}
                                         >
-                                            Register Now
+                                            {isRegistered ? 'Registered' : 'Register Now'}
                                         </Button>
                                     ) : null}
                                 </div>
