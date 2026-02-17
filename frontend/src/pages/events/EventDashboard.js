@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, Navigate, useLocation, useParams } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
 import axios from 'axios';
 import QRCode from 'qrcode';
 import { toast } from 'sonner';
@@ -8,6 +8,8 @@ import {
     CheckCircle2,
     Clock3,
     Copy,
+    Eye,
+    EyeOff,
     ExternalLink,
     LogIn,
     QrCode,
@@ -22,6 +24,7 @@ import PdaFooter from '@/components/layout/PdaFooter';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import ParsedDescription from '@/components/common/ParsedDescription';
@@ -29,6 +32,28 @@ import PosterCarousel from '@/components/common/PosterCarousel';
 import { filterPosterAssetsByRatio, parsePosterAssets, resolvePosterUrl } from '@/utils/posterAssets';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+
+const DEPARTMENTS = [
+    { value: 'Artificial Intelligence and Data Science', label: 'AI & Data Science' },
+    { value: 'Aerospace Engineering', label: 'Aerospace Engineering' },
+    { value: 'Automobile Engineering', label: 'Automobile Engineering' },
+    { value: 'Computer Technology', label: 'Computer Technology' },
+    { value: 'Electronics and Communication Engineering', label: 'ECE' },
+    { value: 'Electronics and Instrumentation Engineering', label: 'EIE' },
+    { value: 'Production Technology', label: 'Production Technology' },
+    { value: 'Robotics and Automation', label: 'Robotics & Automation' },
+    { value: 'Rubber and Plastics Technology', label: 'Rubber & Plastics' },
+    { value: 'Information Technology', label: 'Information Technology' }
+];
+
+const GENDERS = [
+    { value: 'Male', label: 'Male' },
+    { value: 'Female', label: 'Female' }
+];
+
+const authInputClass = 'h-11 border-2 border-black bg-white text-sm shadow-neo focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2';
+const authSelectTriggerClass = 'h-11 border-2 border-black bg-white text-sm shadow-neo focus:ring-2 focus:ring-black focus:ring-offset-2';
+const authSelectContentClass = 'border-2 border-black bg-white shadow-[4px_4px_0px_0px_#000000]';
 
 const statusIcon = (value) => {
     const normalized = String(value || '').toLowerCase();
@@ -61,7 +86,8 @@ const getEventDateLabel = (startDate, endDate) => {
 export default function EventDashboard() {
     const { eventSlug, profileName } = useParams();
     const location = useLocation();
-    const { user, getAuthHeader } = useAuth();
+    const navigate = useNavigate();
+    const { user, login, register, getAuthHeader } = useAuth();
 
     const [eventInfo, setEventInfo] = useState(null);
     const [publishedRounds, setPublishedRounds] = useState([]);
@@ -74,6 +100,26 @@ export default function EventDashboard() {
     const [registrationDialogOpen, setRegistrationDialogOpen] = useState(false);
     const [registerConfirmText, setRegisterConfirmText] = useState('');
     const [registering, setRegistering] = useState(false);
+
+    const [authDialogOpen, setAuthDialogOpen] = useState(false);
+    const [authTab, setAuthTab] = useState('login');
+    const [authLoading, setAuthLoading] = useState(false);
+    const [signupLoading, setSignupLoading] = useState(false);
+    const [showAuthPassword, setShowAuthPassword] = useState(false);
+    const [showAuthConfirmPassword, setShowAuthConfirmPassword] = useState(false);
+    const [loginForm, setLoginForm] = useState({ regno: '', password: '' });
+    const [signupForm, setSignupForm] = useState({
+        name: '',
+        profile_name: '',
+        regno: '',
+        email: '',
+        dob: '',
+        gender: '',
+        phno: '',
+        dept: '',
+        password: '',
+        confirmPassword: ''
+    });
 
     const [teamName, setTeamName] = useState('');
     const [teamCode, setTeamCode] = useState('');
@@ -154,6 +200,7 @@ export default function EventDashboard() {
 
     const fetchData = useCallback(async () => {
         setParticipantAccessClosed(false);
+        let nextDashboard = null;
         try {
             const eventRes = await axios.get(`${API}/pda/events/${eventSlug}`);
             const nextEvent = eventRes.data;
@@ -169,10 +216,9 @@ export default function EventDashboard() {
                 setDashboard(null);
                 setEventProfile(null);
                 setRoundStatuses([]);
-                return;
+                return { eventInfo: nextEvent, dashboard: null, is_registered: false };
             }
 
-            let nextDashboard = null;
             try {
                 const dashboardRes = await axios.get(`${API}/pda/events/${eventSlug}/dashboard`, { headers: getAuthHeader() });
                 nextDashboard = dashboardRes.data;
@@ -185,12 +231,12 @@ export default function EventDashboard() {
                 const detail = String(dashboardError?.response?.data?.detail || '');
                 if (statusCode === 403 && detail === 'Event is closed') {
                     setParticipantAccessClosed(true);
-                    return;
+                    return { eventInfo: nextEvent, dashboard: null, is_registered: false };
                 }
                 if (statusCode !== 401 && statusCode !== 404) {
                     toast.error(dashboardError?.response?.data?.detail || 'Failed to load your event dashboard');
                 }
-                return;
+                return { eventInfo: nextEvent, dashboard: null, is_registered: false };
             }
 
             if (nextDashboard?.is_registered) {
@@ -226,6 +272,7 @@ export default function EventDashboard() {
                 setEventProfile(null);
                 setRoundStatuses([]);
             }
+            return { eventInfo: nextEvent, dashboard: nextDashboard, is_registered: Boolean(nextDashboard?.is_registered) };
         } catch (error) {
             setEventInfo(null);
             setPublishedRounds([]);
@@ -233,6 +280,7 @@ export default function EventDashboard() {
             setEventProfile(null);
             setRoundStatuses([]);
             toast.error(error?.response?.data?.detail || 'Failed to load event');
+            return { eventInfo: null, dashboard: null, is_registered: false };
         } finally {
             setLoading(false);
         }
@@ -252,6 +300,107 @@ export default function EventDashboard() {
         setRegisterConfirmText('');
         setTeamName('');
         setTeamCode('');
+    };
+
+    const openAuthDialog = (tab = 'login') => {
+        setAuthTab(tab);
+        setAuthDialogOpen(true);
+    };
+
+    const closeAuthDialog = () => {
+        if (authLoading || signupLoading) return;
+        setAuthDialogOpen(false);
+    };
+
+    const postAuthOpenRegistration = async () => {
+        const result = await fetchData();
+        if (eventIsOpen && !Boolean(result?.is_registered)) {
+            setRegistrationDialogOpen(true);
+        }
+    };
+
+    const getErrorMessage = (error, fallback) => {
+        const detail = error?.response?.data?.detail;
+        if (Array.isArray(detail)) {
+            return detail.map((item) => item?.msg || item?.detail || JSON.stringify(item)).join(', ');
+        }
+        if (detail && typeof detail === 'object') {
+            return detail.msg || detail.detail || JSON.stringify(detail);
+        }
+        return detail || fallback;
+    };
+
+    const handleLoginSubmit = async (e) => {
+        e.preventDefault();
+        if (!loginForm.regno.trim() || !loginForm.password) return;
+        setAuthLoading(true);
+        try {
+            const data = await login(loginForm.regno.trim(), loginForm.password);
+            if (data?.password_reset_required && data?.reset_token) {
+                toast.info('Please reset your password to continue.');
+                setAuthDialogOpen(false);
+                navigate(`/reset-password?token=${data.reset_token}`);
+                return;
+            }
+            toast.success('Login successful');
+            setAuthDialogOpen(false);
+            await postAuthOpenRegistration();
+        } catch (error) {
+            console.error('PDA login failed:', error);
+            toast.error(getErrorMessage(error, 'Login failed. Please check your credentials.'));
+        } finally {
+            setAuthLoading(false);
+        }
+    };
+
+    const handleSignupSubmit = async (e) => {
+        e.preventDefault();
+        const missingRequiredField = Object.entries(signupForm).some(([key, value]) => {
+            if (key === 'dob' || key === 'gender' || key === 'dept') {
+                return !value;
+            }
+            return !String(value).trim();
+        });
+        if (missingRequiredField) {
+            toast.error('Please complete all required fields');
+            return;
+        }
+        if (signupForm.password !== signupForm.confirmPassword) {
+            toast.error('Passwords do not match');
+            return;
+        }
+        const normalizedProfileName = String(signupForm.profile_name || '').trim().toLowerCase();
+        if (normalizedProfileName && !/^[a-z0-9_]{3,40}$/.test(normalizedProfileName)) {
+            toast.error('Profile name must be 3-40 chars: lowercase letters, numbers, underscore');
+            return;
+        }
+        setSignupLoading(true);
+        try {
+            const result = await register({
+                name: signupForm.name.trim(),
+                profile_name: normalizedProfileName || undefined,
+                regno: signupForm.regno.trim(),
+                email: signupForm.email.trim(),
+                dob: signupForm.dob,
+                gender: signupForm.gender,
+                phno: signupForm.phno.trim(),
+                dept: signupForm.dept,
+                password: signupForm.password
+            });
+            if (result?.status === 'verification_required') {
+                toast.success('Check your email to verify your account, then log in.');
+                setAuthTab('login');
+                return;
+            }
+            toast.success('Registration successful!');
+            setAuthDialogOpen(false);
+            await postAuthOpenRegistration();
+        } catch (error) {
+            console.error('Signup failed:', error);
+            toast.error(getErrorMessage(error, 'Failed to register'));
+        } finally {
+            setSignupLoading(false);
+        }
     };
 
     const registerIndividual = async () => {
@@ -431,7 +580,7 @@ export default function EventDashboard() {
                                     {eventIsOpen && !isRegistered ? (
                                         <Button
                                             data-testid="event-overview-register-button"
-                                            onClick={() => setRegistrationDialogOpen(true)}
+                                            onClick={() => (isLoggedIn ? setRegistrationDialogOpen(true) : openAuthDialog('login'))}
                                             className="border-2 border-black bg-[#8B5CF6] text-white shadow-neo hover:bg-[#7C3AED]"
                                         >
                                             Register Now
@@ -569,20 +718,22 @@ export default function EventDashboard() {
                                         </p>
                                     </div>
                                     <div className="flex flex-wrap gap-2">
-                                        <Link to="/login" state={{ redirectTo: location.pathname + location.search }}>
-                                            <Button
-                                                data-testid="event-public-login-register-button"
-                                                className="border-2 border-black bg-[#8B5CF6] text-white shadow-neo"
-                                            >
-                                                <LogIn className="mr-2 h-4 w-4" />
-                                                Login to Register
-                                            </Button>
-                                        </Link>
-                                        <Link to="/signup">
-                                            <Button data-testid="event-public-signup-button" variant="outline" className="border-2 border-black shadow-neo">
-                                                Create Account
-                                            </Button>
-                                        </Link>
+                                        <Button
+                                            data-testid="event-public-login-register-button"
+                                            className="border-2 border-black bg-[#8B5CF6] text-white shadow-neo"
+                                            onClick={() => openAuthDialog('login')}
+                                        >
+                                            <LogIn className="mr-2 h-4 w-4" />
+                                            Login to Register
+                                        </Button>
+                                        <Button
+                                            data-testid="event-public-signup-button"
+                                            variant="outline"
+                                            className="border-2 border-black shadow-neo"
+                                            onClick={() => openAuthDialog('signup')}
+                                        >
+                                            Create Account
+                                        </Button>
                                     </div>
                                 </div>
                             </section>
@@ -599,12 +750,10 @@ export default function EventDashboard() {
                                 <h2 className="mt-1 font-heading text-3xl font-black uppercase tracking-tight">Login required</h2>
                                 <p className="mt-2 text-sm font-medium text-slate-700">Sign in to access your personal participant dashboard for this event.</p>
                             </div>
-                            <Link to="/login" state={{ redirectTo: location.pathname + location.search }}>
-                                <Button className="border-2 border-black bg-[#8B5CF6] text-white shadow-neo">
-                                    <LogIn className="mr-2 h-4 w-4" />
-                                    Login
-                                </Button>
-                            </Link>
+                            <Button className="border-2 border-black bg-[#8B5CF6] text-white shadow-neo" onClick={() => openAuthDialog('login')}>
+                                <LogIn className="mr-2 h-4 w-4" />
+                                Login
+                            </Button>
                         </div>
                     </section>
                 ) : null}
@@ -839,6 +988,261 @@ export default function EventDashboard() {
                     </>
                 ) : null}
             </main>
+
+            <Dialog open={authDialogOpen} onOpenChange={(open) => (open ? setAuthDialogOpen(true) : closeAuthDialog())}>
+                <DialogContent className="max-h-[90vh] overflow-y-auto border-4 border-black bg-white p-0">
+                    <div className="flex border-b-2 border-black">
+                        <button
+                            type="button"
+                            className={`flex-1 px-4 py-3 text-sm font-bold uppercase tracking-[0.14em] ${authTab === 'login' ? 'bg-[#8B5CF6] text-white' : 'bg-white text-black'}`}
+                            onClick={() => setAuthTab('login')}
+                        >
+                            Login
+                        </button>
+                        <button
+                            type="button"
+                            className={`flex-1 px-4 py-3 text-sm font-bold uppercase tracking-[0.14em] ${authTab === 'signup' ? 'bg-[#FDE047] text-black' : 'bg-white text-black'}`}
+                            onClick={() => setAuthTab('signup')}
+                        >
+                            Sign Up
+                        </button>
+                    </div>
+                    <div className="p-5 sm:p-7">
+                        {authTab === 'login' ? (
+                            <>
+                                <DialogHeader>
+                                    <DialogTitle className="font-heading text-2xl font-black uppercase tracking-tight">
+                                        PDA Login
+                                    </DialogTitle>
+                                </DialogHeader>
+                                <p className="mt-2 text-sm font-medium text-slate-700">Use your register number and password to continue.</p>
+                                <form onSubmit={handleLoginSubmit} className="mt-6 space-y-4">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="auth-regno" className="text-xs font-bold uppercase tracking-[0.12em]">Register Number</Label>
+                                        <Input
+                                            id="auth-regno"
+                                            name="regno"
+                                            value={loginForm.regno}
+                                            onChange={(e) => setLoginForm((prev) => ({ ...prev, regno: e.target.value }))}
+                                            required
+                                            className={authInputClass}
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="auth-password" className="text-xs font-bold uppercase tracking-[0.12em]">Password</Label>
+                                        <div className="relative">
+                                            <Input
+                                                id="auth-password"
+                                                name="password"
+                                                type={showAuthPassword ? 'text' : 'password'}
+                                                value={loginForm.password}
+                                                onChange={(e) => setLoginForm((prev) => ({ ...prev, password: e.target.value }))}
+                                                required
+                                                className={`${authInputClass} pr-12`}
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowAuthPassword((prev) => !prev)}
+                                                className="absolute right-3 top-1/2 inline-flex -translate-y-1/2 items-center justify-center rounded-md border-2 border-black bg-white p-1 text-black shadow-[2px_2px_0px_0px_#000000]"
+                                                aria-label={showAuthPassword ? 'Hide password' : 'Show password'}
+                                            >
+                                                {showAuthPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="flex justify-end gap-2">
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            className="border-2 border-black shadow-neo"
+                                            onClick={closeAuthDialog}
+                                            disabled={authLoading}
+                                        >
+                                            Cancel
+                                        </Button>
+                                        <Button
+                                            type="submit"
+                                            className="border-2 border-black bg-[#8B5CF6] text-white shadow-neo hover:bg-[#7C3AED]"
+                                            disabled={authLoading}
+                                        >
+                                            {authLoading ? 'Logging In...' : 'Login'}
+                                        </Button>
+                                    </div>
+                                </form>
+                            </>
+                        ) : (
+                            <>
+                                <DialogHeader>
+                                    <DialogTitle className="font-heading text-2xl font-black uppercase tracking-tight">
+                                        PDA Signup
+                                    </DialogTitle>
+                                </DialogHeader>
+                                <p className="mt-2 text-sm font-medium text-slate-700">Create your account to register for this event.</p>
+                                <form onSubmit={handleSignupSubmit} className="mt-6 grid gap-4 md:grid-cols-2">
+                                    <div>
+                                        <Label htmlFor="auth-name" className="text-xs font-bold uppercase tracking-[0.12em]">Name *</Label>
+                                        <Input
+                                            id="auth-name"
+                                            name="name"
+                                            value={signupForm.name}
+                                            onChange={(e) => setSignupForm((prev) => ({ ...prev, name: e.target.value }))}
+                                            required
+                                            className={authInputClass}
+                                        />
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="auth-regno-signup" className="text-xs font-bold uppercase tracking-[0.12em]">Register Number *</Label>
+                                        <Input
+                                            id="auth-regno-signup"
+                                            name="regno"
+                                            value={signupForm.regno}
+                                            onChange={(e) => setSignupForm((prev) => ({ ...prev, regno: e.target.value }))}
+                                            required
+                                            className={authInputClass}
+                                        />
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="auth-profile-name" className="text-xs font-bold uppercase tracking-[0.12em]">Profile Name *</Label>
+                                        <Input
+                                            id="auth-profile-name"
+                                            name="profile_name"
+                                            value={signupForm.profile_name}
+                                            onChange={(e) => setSignupForm((prev) => ({ ...prev, profile_name: e.target.value }))}
+                                            placeholder="eg: john_doe"
+                                            required
+                                            className={authInputClass}
+                                        />
+                                        <p className="mt-1 text-[11px] font-medium text-slate-600">3-40 chars: lowercase letters, numbers, underscore.</p>
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="auth-email" className="text-xs font-bold uppercase tracking-[0.12em]">Email *</Label>
+                                        <Input
+                                            id="auth-email"
+                                            name="email"
+                                            type="email"
+                                            value={signupForm.email}
+                                            onChange={(e) => setSignupForm((prev) => ({ ...prev, email: e.target.value }))}
+                                            required
+                                            className={authInputClass}
+                                        />
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="auth-dob" className="text-xs font-bold uppercase tracking-[0.12em]">Date Of Birth *</Label>
+                                        <Input
+                                            id="auth-dob"
+                                            name="dob"
+                                            type="date"
+                                            value={signupForm.dob}
+                                            onChange={(e) => setSignupForm((prev) => ({ ...prev, dob: e.target.value }))}
+                                            required
+                                            className={authInputClass}
+                                        />
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="auth-gender" className="text-xs font-bold uppercase tracking-[0.12em]">Gender *</Label>
+                                        <Select value={signupForm.gender} onValueChange={(value) => setSignupForm((prev) => ({ ...prev, gender: value }))}>
+                                            <SelectTrigger id="auth-gender" className={authSelectTriggerClass}>
+                                                <SelectValue placeholder="Select gender" />
+                                            </SelectTrigger>
+                                            <SelectContent className={authSelectContentClass}>
+                                                {GENDERS.map((gender) => (
+                                                    <SelectItem key={gender.value} value={gender.value}>{gender.label}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="auth-phone" className="text-xs font-bold uppercase tracking-[0.12em]">Phone *</Label>
+                                        <Input
+                                            id="auth-phone"
+                                            name="phno"
+                                            value={signupForm.phno}
+                                            onChange={(e) => setSignupForm((prev) => ({ ...prev, phno: e.target.value }))}
+                                            required
+                                            className={authInputClass}
+                                        />
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="auth-dept" className="text-xs font-bold uppercase tracking-[0.12em]">Department *</Label>
+                                        <Select value={signupForm.dept} onValueChange={(value) => setSignupForm((prev) => ({ ...prev, dept: value }))}>
+                                            <SelectTrigger id="auth-dept" className={authSelectTriggerClass}>
+                                                <SelectValue placeholder="Select department" />
+                                            </SelectTrigger>
+                                            <SelectContent className={authSelectContentClass}>
+                                                {DEPARTMENTS.map((dept) => (
+                                                    <SelectItem key={dept.value} value={dept.value}>{dept.label}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="auth-password-signup" className="text-xs font-bold uppercase tracking-[0.12em]">Password *</Label>
+                                        <div className="relative">
+                                            <Input
+                                                id="auth-password-signup"
+                                                name="password"
+                                                type={showAuthPassword ? 'text' : 'password'}
+                                                value={signupForm.password}
+                                                onChange={(e) => setSignupForm((prev) => ({ ...prev, password: e.target.value }))}
+                                                required
+                                                className={`${authInputClass} pr-12`}
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowAuthPassword((prev) => !prev)}
+                                                className="absolute right-3 top-1/2 inline-flex -translate-y-1/2 items-center justify-center rounded-md border-2 border-black bg-white p-1 text-black shadow-[2px_2px_0px_0px_#000000]"
+                                                aria-label={showAuthPassword ? 'Hide password' : 'Show password'}
+                                            >
+                                                {showAuthPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="auth-confirm-password" className="text-xs font-bold uppercase tracking-[0.12em]">Confirm Password *</Label>
+                                        <div className="relative">
+                                            <Input
+                                                id="auth-confirm-password"
+                                                name="confirmPassword"
+                                                type={showAuthConfirmPassword ? 'text' : 'password'}
+                                                value={signupForm.confirmPassword}
+                                                onChange={(e) => setSignupForm((prev) => ({ ...prev, confirmPassword: e.target.value }))}
+                                                required
+                                                className={`${authInputClass} pr-12`}
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowAuthConfirmPassword((prev) => !prev)}
+                                                className="absolute right-3 top-1/2 inline-flex -translate-y-1/2 items-center justify-center rounded-md border-2 border-black bg-white p-1 text-black shadow-[2px_2px_0px_0px_#000000]"
+                                                aria-label={showAuthConfirmPassword ? 'Hide password' : 'Show password'}
+                                            >
+                                                {showAuthConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="md:col-span-2 flex justify-end gap-2">
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            className="border-2 border-black shadow-neo"
+                                            onClick={closeAuthDialog}
+                                            disabled={signupLoading}
+                                        >
+                                            Cancel
+                                        </Button>
+                                        <Button
+                                            type="submit"
+                                            className="border-2 border-black bg-[#FDE047] text-black shadow-neo"
+                                            disabled={signupLoading}
+                                        >
+                                            {signupLoading ? 'Creating...' : 'Create Account'}
+                                        </Button>
+                                    </div>
+                                </form>
+                            </>
+                        )}
+                    </div>
+                </DialogContent>
+            </Dialog>
 
             <Dialog open={registrationDialogOpen} onOpenChange={(open) => (open ? setRegistrationDialogOpen(true) : closeRegistrationDialog())}>
                 <DialogContent className="border-4 border-black bg-white">
