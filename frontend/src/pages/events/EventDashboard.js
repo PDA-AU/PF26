@@ -98,7 +98,7 @@ export default function EventDashboard() {
     const [participantAccessClosed, setParticipantAccessClosed] = useState(false);
 
     const [registrationDialogOpen, setRegistrationDialogOpen] = useState(false);
-    const [registerConfirmText, setRegisterConfirmText] = useState('');
+    const [registerConfirmed, setRegisterConfirmed] = useState(false);
     const [registering, setRegistering] = useState(false);
 
     const [authDialogOpen, setAuthDialogOpen] = useState(false);
@@ -159,7 +159,7 @@ export default function EventDashboard() {
     const isTeamEvent = eventInfo?.participant_mode === 'team';
     const isRegistered = Boolean(dashboard?.is_registered);
     const eventIsOpen = eventInfo?.status === 'open';
-    const confirmationMatches = Boolean(eventInfo?.title) && registerConfirmText.trim() === eventInfo.title;
+    const confirmationMatches = registerConfirmed;
 
     const isLeader = useMemo(() => {
         if (!user?.id) return false;
@@ -301,7 +301,7 @@ export default function EventDashboard() {
     const closeRegistrationDialog = (force = false) => {
         if (!force && (registering || creatingTeam || joiningTeam)) return;
         setRegistrationDialogOpen(false);
-        setRegisterConfirmText('');
+        setRegisterConfirmed(false);
         setTeamName('');
         setTeamCode('');
     };
@@ -1259,19 +1259,20 @@ export default function EventDashboard() {
                     </DialogHeader>
                     <div className="space-y-4">
                         <p className="text-sm font-medium text-slate-700">
-                            Type <span className="font-bold">{eventInfo.title}</span> to confirm your registration.
+                            Confirm you want to register for this event to proceed.
                         </p>
-                        <div>
-                            <Label htmlFor="event-register-confirm" className="text-xs font-bold uppercase tracking-[0.12em]">Confirmation Text</Label>
-                            <Input
-                                id="event-register-confirm"
-                                value={registerConfirmText}
-                                onChange={(e) => setRegisterConfirmText(e.target.value)}
-                                className="neo-input mt-2"
-                                placeholder={eventInfo.title}
-                                data-testid="event-register-confirm-input"
+                        <label className="flex items-start gap-3 rounded-md border-2 border-black bg-[#fffdf0] p-3 text-sm font-medium text-slate-700 shadow-neo">
+                            <input
+                                type="checkbox"
+                                checked={registerConfirmed}
+                                onChange={(e) => setRegisterConfirmed(e.target.checked)}
+                                className="mt-1 h-4 w-4"
+                                data-testid="event-register-confirm-checkbox"
                             />
-                        </div>
+                            <span>
+                                I confirm that I want to register for <span className="font-bold">{eventInfo.title}</span>.
+                            </span>
+                        </label>
 
                         {!isTeamEvent ? (
                             <div className="flex justify-end gap-2">
@@ -1337,7 +1338,7 @@ export default function EventDashboard() {
                                     </div>
                                 ) : (
                                     <p className="rounded-md border-2 border-black bg-[#fffdf0] p-3 text-sm font-medium text-slate-700 shadow-neo">
-                                        Enter the exact event title to unlock team registration.
+                                        Confirm registration to unlock team registration.
                                     </p>
                                 )}
                                 <div className="flex justify-end">
