@@ -58,6 +58,7 @@ export default function AdminLayout({ title, subtitle, children, allowEventAdmin
             { label: 'Items', path: '/admin/items' },
             { label: 'Users', path: '/admin/users' },
             { label: 'Team', path: '/admin/team' },
+            { label: 'Email', path: '/admin/email' },
             { label: 'Gallery', path: '/admin/gallery' }
         ]
         : [];
@@ -67,7 +68,7 @@ export default function AdminLayout({ title, subtitle, children, allowEventAdmin
 
     const navItems = isSuperAdmin
         ? [...baseNavItems, { label: 'Recruitments', path: '/admin/recruitments' }, { label: 'Logs', path: '/admin/logs' }, { label: 'Superadmin', path: '/admin/superadmin' }]
-        : baseNavItems;
+        : baseNavItems.filter((item) => item.path !== '/admin/email');
 
     const navClass = (path) => (
         `rounded-full border px-4 py-2 text-xs uppercase tracking-[0.25em] transition ${

@@ -1315,5 +1315,31 @@ class PdaManagedQrResponse(BaseModel):
     qr_token: str
 
 
+class AdminBulkEmailRequest(BaseModel):
+    subject: str = Field(..., min_length=1)
+    html: str = Field(..., min_length=1)
+    text: Optional[str] = None
+    recipient_mode: str = Field(..., min_length=1)
+    batch: Optional[str] = None
+    department: Optional[str] = None
+    user_ids: Optional[List[int]] = None
+
+
+class EventBulkEmailRequest(BaseModel):
+    subject: str = Field(..., min_length=1)
+    html: str = Field(..., min_length=1)
+    text: Optional[str] = None
+    recipient_mode: str = Field(..., min_length=1)
+    selected_source: Optional[str] = None
+    top_k: Optional[int] = None
+    random_count: Optional[int] = None
+    entity_ids: Optional[List[int]] = None
+    department: Optional[str] = None
+    gender: Optional[str] = None
+    batch: Optional[str] = None
+    status: Optional[str] = None
+    search: Optional[str] = None
+
+
 # Update forward reference
 TokenResponse.model_rebuild()

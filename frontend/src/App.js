@@ -13,6 +13,7 @@ import GalleryAdmin from "@/pages/HomeAdmin/GalleryAdmin";
 import SuperAdmin from "@/pages/HomeAdmin/SuperAdmin";
 import LogsAdmin from "@/pages/HomeAdmin/LogsAdmin";
 import RecruitmentsAdmin from "@/pages/HomeAdmin/RecruitmentsAdmin";
+import EmailAdmin from "@/pages/HomeAdmin/EmailAdmin";
 import AdminEvents from "@/pages/events/AdminEvents";
 import EventDashboard from "@/pages/events/EventDashboard";
 import EventAdminDashboardPage from "@/pages/events/admin/EventAdminDashboardPage";
@@ -23,6 +24,7 @@ import EventAdminParticipantsPage from "@/pages/events/admin/EventAdminParticipa
 import EventAdminLeaderboardPage from "@/pages/events/admin/EventAdminLeaderboardPage";
 import EventAdminLogsPage from "@/pages/events/admin/EventAdminLogsPage";
 import EventAdminBadgesPage from "@/pages/events/admin/EventAdminBadgesPage";
+import EventAdminEmailPage from "@/pages/events/admin/EventAdminEmailPage";
 import PdaLogin from "@/pages/pda/PdaLogin";
 import PdaRecruit from "@/pages/pda/PdaRecruit";
 import PdaSignup from "@/pages/pda/PdaSignup";
@@ -102,6 +104,11 @@ function AppRoutes() {
             <Route path="/admin/users" element={<UsersAdmin />} />
             <Route path="/admin/team" element={<TeamAdmin />} />
             <Route path="/admin/gallery" element={<GalleryAdmin />} />
+            <Route path="/admin/email" element={
+                <ProtectedPdaRoute requireSuperAdmin>
+                    <EmailAdmin />
+                </ProtectedPdaRoute>
+            } />
             <Route path="/admin/events" element={
                 <ProtectedPdaRoute requireEvents>
                     <AdminEvents />
@@ -137,6 +144,11 @@ function AppRoutes() {
             <Route path="/admin/events/:eventSlug/leaderboard" element={
                 <ProtectedPdaRoute requireEvents>
                     <EventAdminLeaderboardPage />
+                </ProtectedPdaRoute>
+            } />
+            <Route path="/admin/events/:eventSlug/email" element={
+                <ProtectedPdaRoute requireEvents>
+                    <EventAdminEmailPage />
                 </ProtectedPdaRoute>
             } />
             <Route path="/admin/events/:eventSlug/badges" element={

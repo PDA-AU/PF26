@@ -12,6 +12,7 @@ import {
     Trophy,
     ListChecks,
     Award,
+    Mail,
 } from 'lucide-react';
 
 import { useAuth } from '@/context/AuthContext';
@@ -82,6 +83,7 @@ export default function EventAdminShell({
         { id: 'rounds', label: 'Rounds', icon: Calendar, to: `/admin/events/${eventSlug}/rounds` },
         { id: 'participants', label: participantTabLabel, icon: Users, to: `/admin/events/${eventSlug}/participants` },
         { id: 'leaderboard', label: 'Leaderboard', icon: Trophy, to: `/admin/events/${eventSlug}/leaderboard` },
+        { id: 'email', label: 'Email', icon: Mail, to: `/admin/events/${eventSlug}/email` },
         { id: 'badges', label: 'Badges', icon: Award, to: `/admin/events/${eventSlug}/badges` },
         { id: 'logs', label: 'Logs', icon: ListChecks, to: `/admin/events/${eventSlug}/logs` },
     ];

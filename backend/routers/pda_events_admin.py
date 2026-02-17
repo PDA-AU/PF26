@@ -4,14 +4,14 @@ import re
 from collections import Counter
 from typing import Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook, load_workbook
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from auth import decode_token
-from database import get_db
+from database import get_db, SessionLocal
 from models import (
     PdaAdmin,
     PdaUser,
@@ -28,6 +28,7 @@ from models import (
     PdaEventRegistrationStatus,
     PdaEventTeam,
     PdaEventTeamMember,
+    PdaTeam,
     PdaEventRound,
     PdaEventRoundState,
     PdaEventAttendance,
@@ -54,7 +55,10 @@ from schemas import (
     PdaManagedRoundUpdate,
     PdaManagedScoreEntry,
     PdaManagedTeamResponse,
+    EventBulkEmailRequest,
 )
+from emailer import send_email
+from email_bulk import render_email_template, derive_text_from_html, extract_batch
 from security import get_admin_context, require_pda_event_admin, require_superadmin
 from utils import log_admin_action, log_pda_event_action
 
@@ -235,6 +239,60 @@ def _log_event_admin_action(
     )
 
 
+def _send_bulk_event_email_background(
+    recipients: List[Tuple[str, Dict[str, object]]],
+    subject: str,
+    html: str,
+    text: Optional[str],
+    admin_id: int,
+    event_id: int,
+    event_slug: str,
+    mode: str,
+    request_method: Optional[str],
+    request_path: Optional[str],
+    skipped_no_email: int,
+    skipped_duplicate: int,
+) -> None:
+    db = SessionLocal()
+    sent = 0
+    failed = 0
+    errors: List[Dict[str, str]] = []
+    try:
+        for email_value, context in recipients:
+            try:
+                rendered_html = render_email_template(html, context, html_mode=True)
+                rendered_text = render_email_template(text, context, html_mode=False) if text else None
+                text_content = rendered_text if rendered_text is not None else derive_text_from_html(rendered_html)
+                send_email(email_value, subject, rendered_html, text_content)
+                sent += 1
+            except Exception as exc:
+                failed += 1
+                if len(errors) < 10:
+                    errors.append({"email": email_value, "error": str(exc)})
+        admin = db.query(PdaUser).filter(PdaUser.id == admin_id).first()
+        event = db.query(PdaEvent).filter(PdaEvent.id == event_id).first()
+        if admin and event:
+            _log_event_admin_action(
+                db,
+                admin,
+                event,
+                "send_pda_event_bulk_email",
+                method=request_method or "POST",
+                path=request_path or f"/pda-admin/events/{event_slug}/email/bulk",
+                meta={
+                    "mode": mode,
+                    "queued": len(recipients),
+                    "sent": sent,
+                    "failed": failed,
+                    "skipped_no_email": skipped_no_email,
+                    "skipped_duplicate": skipped_duplicate,
+                    "errors": errors,
+                },
+            )
+    finally:
+        db.close()
+
+
 def _registered_entities(db: Session, event: PdaEvent):
     if event.participant_mode == PdaEventParticipantMode.INDIVIDUAL:
         query = (
@@ -290,6 +348,61 @@ def _registered_entities(db: Session, event: PdaEvent):
                 "members_count": members_count,
                 "status": _registration_status_label(reg.status),
                 "participant_status": _registration_status_label(reg.status),
+            }
+        )
+    return payload
+
+
+def _unregistered_entities(db: Session, event: PdaEvent):
+    query = db.query(PdaUser).filter(PdaUser.regno != "0000000000")
+    if event.participant_mode == PdaEventParticipantMode.INDIVIDUAL:
+        registered_subq = (
+            db.query(PdaEventRegistration.user_id)
+            .filter(
+                PdaEventRegistration.event_id == event.id,
+                PdaEventRegistration.entity_type == PdaEventEntityType.USER,
+                PdaEventRegistration.user_id.isnot(None),
+            )
+            .subquery()
+        )
+        query = query.filter(~PdaUser.id.in_(registered_subq))
+    else:
+        team_ids = db.query(PdaEventTeam.id).filter(PdaEventTeam.event_id == event.id).subquery()
+        member_ids = (
+            db.query(PdaEventTeamMember.user_id)
+            .filter(PdaEventTeamMember.team_id.in_(team_ids))
+            .subquery()
+        )
+        lead_ids = (
+            db.query(PdaEventTeam.team_lead_user_id)
+            .filter(PdaEventTeam.event_id == event.id)
+            .subquery()
+        )
+        query = query.filter(~PdaUser.id.in_(member_ids)).filter(~PdaUser.id.in_(lead_ids))
+
+    users = query.order_by(PdaUser.name.asc().nullslast(), PdaUser.regno.asc()).all()
+    payload = []
+    for user in users:
+        payload.append(
+            {
+                "entity_type": "user",
+                "entity_id": user.id,
+                "participant_id": user.id,
+                "name": user.name,
+                "participant_name": user.name,
+                "regno_or_code": user.regno,
+                "register_number": user.regno,
+                "participant_register_number": user.regno,
+                "email": user.email,
+                "department": user.dept,
+                "gender": user.gender,
+                "batch": _batch_from_regno(user.regno),
+                "profile_picture": user.image_url,
+                "status": "Unregistered",
+                "participant_status": "Unregistered",
+                "referral_code": None,
+                "referred_by": None,
+                "referral_count": 0,
             }
         )
     return payload
@@ -716,6 +829,56 @@ def event_participants(
     if status_filter:
         normalized = str(status_filter or "").strip().lower()
         items = [item for item in items if str(item.get("status") or "").strip().lower() == normalized]
+    if search:
+        needle = search.lower()
+        filtered = []
+        for item in items:
+            haystack = " ".join(
+                [
+                    str(item.get("name") or ""),
+                    str(item.get("regno_or_code") or ""),
+                    str(item.get("email") or ""),
+                    str(item.get("department") or ""),
+                    str(item.get("gender") or ""),
+                    str(item.get("batch") or ""),
+                ]
+            ).lower()
+            if needle in haystack:
+                filtered.append(item)
+        items = filtered
+
+    total = len(items)
+    start = (page - 1) * page_size
+    end = start + page_size
+    paged = items[start:end]
+    if response is not None:
+        response.headers["X-Total-Count"] = str(total)
+        response.headers["X-Page"] = str(page)
+        response.headers["X-Page-Size"] = str(page_size)
+    return paged
+
+
+@router.get("/pda-admin/events/{slug}/unregistered-users")
+def event_unregistered_users(
+    slug: str,
+    search: Optional[str] = None,
+    department: Optional[str] = None,
+    gender: Optional[str] = None,
+    batch: Optional[str] = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    response: Response = None,
+    _: PdaUser = Depends(require_pda_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    items = _unregistered_entities(db, event)
+    if department:
+        items = [item for item in items if str(item.get("department") or "") == str(department)]
+    if gender:
+        items = [item for item in items if str(item.get("gender") or "") == str(gender)]
+    if batch:
+        items = [item for item in items if str(item.get("batch") or "") == str(batch)]
     if search:
         needle = search.lower()
         filtered = []
@@ -2088,6 +2251,268 @@ def event_leaderboard(
         response.headers["X-Page"] = str(page)
         response.headers["X-Page-Size"] = str(page_size)
     return paged
+
+
+@router.post("/pda-admin/events/{slug}/email/bulk")
+def send_bulk_event_email(
+    slug: str,
+    payload: EventBulkEmailRequest,
+    background_tasks: BackgroundTasks,
+    admin: PdaUser = Depends(require_pda_event_admin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    mode = str(payload.recipient_mode or "").strip().lower()
+    allowed_modes = {"registered", "active", "eliminated", "top_k", "selected", "unregistered"}
+    if mode not in allowed_modes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid recipient_mode")
+
+    subject = str(payload.subject or "").strip()
+    html = str(payload.html or "").strip()
+    if not subject or not html:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Subject and HTML are required")
+
+    event = _get_event_or_404(db, slug)
+    selected_source = str(payload.selected_source or "").strip().lower()
+    if mode == "selected" and selected_source == "unregistered":
+        items = _unregistered_entities(db, event)
+    else:
+        items = _unregistered_entities(db, event) if mode == "unregistered" else _registered_entities(db, event)
+
+    if mode != "selected":
+        if event.participant_mode == PdaEventParticipantMode.INDIVIDUAL:
+            if payload.department:
+                items = [item for item in items if str(item.get("department") or "") == str(payload.department)]
+            if payload.gender:
+                items = [item for item in items if str(item.get("gender") or "") == str(payload.gender)]
+            if payload.batch:
+                items = [item for item in items if str(item.get("batch") or "") == str(payload.batch)]
+        if payload.status and mode != "unregistered":
+            normalized = str(payload.status or "").strip().lower()
+            items = [item for item in items if str(item.get("status") or "").strip().lower() == normalized]
+        if payload.search:
+            needle = str(payload.search).lower()
+            filtered = []
+            for item in items:
+                haystack = " ".join(
+                    [
+                        str(item.get("name") or ""),
+                        str(item.get("regno_or_code") or ""),
+                        str(item.get("email") or ""),
+                        str(item.get("department") or ""),
+                        str(item.get("gender") or ""),
+                        str(item.get("batch") or ""),
+                    ]
+                ).lower()
+                if needle in haystack:
+                    filtered.append(item)
+            items = filtered
+
+    if mode == "active":
+        items = [item for item in items if _status_is_active(item.get("status"))]
+    elif mode == "eliminated":
+        items = [item for item in items if not _status_is_active(item.get("status"))]
+    elif mode == "selected":
+        if not payload.entity_ids:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="entity_ids required for selected mode")
+        target_set = {int(value) for value in payload.entity_ids}
+        items = [item for item in items if int(item.get("entity_id")) in target_set]
+
+    leaderboard_rows = event_leaderboard(
+        slug=slug,
+        department=payload.department,
+        gender=payload.gender,
+        batch=payload.batch,
+        status_filter=payload.status,
+        search=payload.search,
+        page=1,
+        page_size=10000,
+        response=None,
+        _=admin,
+        db=db,
+    )
+    leaderboard_map: Dict[int, dict] = {}
+    for row in leaderboard_rows:
+        try:
+            entity_id = int(row.get("entity_id"))
+            leaderboard_map[entity_id] = row
+        except Exception:
+            continue
+
+    if mode == "top_k":
+        limit = int(payload.top_k or 0)
+        if limit <= 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="top_k must be positive")
+        source = leaderboard_rows if leaderboard_rows else items
+        items = source[:limit]
+
+    entity_ids = [int(item.get("entity_id")) for item in items if item.get("entity_id") is not None]
+
+    user_map: Dict[int, PdaUser] = {}
+    team_map: Dict[int, PdaEventTeam] = {}
+    leader_map: Dict[int, PdaUser] = {}
+    home_team_map: Dict[int, PdaTeam] = {}
+    treat_as_individual = (
+        event.participant_mode == PdaEventParticipantMode.INDIVIDUAL
+        or mode == "unregistered"
+        or (mode == "selected" and selected_source == "unregistered")
+    )
+    if treat_as_individual:
+        users = db.query(PdaUser).filter(PdaUser.id.in_(entity_ids)).all() if entity_ids else []
+        user_map = {user.id: user for user in users}
+        if users:
+            team_rows = (
+                db.query(PdaTeam)
+                .filter(PdaTeam.user_id.in_([user.id for user in users]))
+                .order_by(PdaTeam.id.asc())
+                .all()
+            )
+            for member in team_rows:
+                if member.user_id not in home_team_map:
+                    home_team_map[member.user_id] = member
+    else:
+        teams = db.query(PdaEventTeam).filter(PdaEventTeam.id.in_(entity_ids)).all() if entity_ids else []
+        team_map = {team.id: team for team in teams}
+        leader_ids = [team.team_lead_user_id for team in teams if team.team_lead_user_id]
+        leaders = db.query(PdaUser).filter(PdaUser.id.in_(leader_ids)).all() if leader_ids else []
+        leader_map = {leader.id: leader for leader in leaders}
+        leader_team_map: Dict[int, PdaTeam] = {}
+        if leaders:
+            leader_team_rows = (
+                db.query(PdaTeam)
+                .filter(PdaTeam.user_id.in_([leader.id for leader in leaders]))
+                .order_by(PdaTeam.id.asc())
+                .all()
+            )
+            for member in leader_team_rows:
+                if member.user_id not in leader_team_map:
+                    leader_team_map[member.user_id] = member
+
+    skipped_no_email = 0
+    skipped_duplicate = 0
+    seen = set()
+    unique_recipients: List[Tuple[str, Dict[str, object]]] = []
+    for item in items:
+        entity_id = int(item.get("entity_id"))
+        leaderboard = leaderboard_map.get(entity_id, {})
+        if treat_as_individual:
+            user = user_map.get(entity_id)
+            if not user:
+                skipped_no_email += 1
+                continue
+            email_value = str(user.email or "").strip().lower()
+            member = home_team_map.get(user.id)
+            context = {
+                "name": user.name,
+                "profile_name": user.profile_name,
+                "regno": user.regno,
+                "email": user.email,
+                "dept": user.dept,
+                "gender": user.gender,
+                "phno": user.phno,
+                "dob": user.dob,
+                "team": member.team if member else None,
+                "designation": member.designation if member else None,
+                "instagram_url": user.instagram_url,
+                "linkedin_url": user.linkedin_url,
+                "github_url": user.github_url,
+                "photo_url": user.image_url,
+                "is_member": bool(user.is_member),
+                "email_verified": bool(user.email_verified_at),
+                "created_at": user.created_at,
+                "updated_at": user.updated_at,
+                "batch": extract_batch(user.regno),
+            }
+        else:
+            team = team_map.get(entity_id)
+            leader = leader_map.get(team.team_lead_user_id) if team else None
+            leader_member = leader_team_map.get(leader.id) if leader else None
+            if not leader:
+                skipped_no_email += 1
+                continue
+            email_value = str(leader.email or "").strip().lower()
+            context = {
+                "name": leader.name,
+                "profile_name": leader.profile_name,
+                "regno": leader.regno,
+                "email": leader.email,
+                "dept": leader.dept,
+                "gender": leader.gender,
+                "phno": leader.phno,
+                "dob": leader.dob,
+                "team": leader_member.team if leader_member else None,
+                "designation": leader_member.designation if leader_member else None,
+                "instagram_url": leader.instagram_url,
+                "linkedin_url": leader.linkedin_url,
+                "github_url": leader.github_url,
+                "photo_url": leader.image_url,
+                "is_member": bool(leader.is_member),
+                "email_verified": bool(leader.email_verified_at),
+                "created_at": leader.created_at,
+                "updated_at": leader.updated_at,
+                "batch": extract_batch(leader.regno),
+                "team_name": team.team_name if team else None,
+                "team_code": team.team_code if team else None,
+                "members_count": item.get("members_count"),
+                "leader_name": leader.name,
+                "leader_regno": leader.regno,
+                "leader_email": leader.email,
+                "leader_profile_name": leader.profile_name,
+                "leader_dept": leader.dept,
+                "leader_phno": leader.phno,
+                "leader_gender": leader.gender,
+                "leader_batch": extract_batch(leader.regno),
+            }
+
+        context.update(
+            {
+                "status": item.get("status"),
+                "batch": item.get("batch") or context.get("batch"),
+                "regno_or_code": item.get("regno_or_code"),
+                "referral_code": item.get("referral_code"),
+                "referred_by": item.get("referred_by"),
+                "referral_count": item.get("referral_count"),
+                "entity_id": item.get("entity_id"),
+                "participant_id": item.get("participant_id") or item.get("entity_id"),
+                "entity_type": item.get("entity_type"),
+                "event_title": event.title,
+                "event_code": event.event_code,
+                "rank": leaderboard.get("rank"),
+                "cumulative_score": leaderboard.get("cumulative_score"),
+                "attendance_count": leaderboard.get("attendance_count"),
+                "rounds_participated": leaderboard.get("rounds_participated"),
+            }
+        )
+        if not email_value:
+            skipped_no_email += 1
+            continue
+        if email_value in seen:
+            skipped_duplicate += 1
+            continue
+        seen.add(email_value)
+        unique_recipients.append((email_value, context))
+
+    background_tasks.add_task(
+        _send_bulk_event_email_background,
+        unique_recipients,
+        subject,
+        html,
+        payload.text,
+        admin.id,
+        event.id,
+        event.slug,
+        mode,
+        request.method if request else "POST",
+        request.url.path if request else f"/pda-admin/events/{slug}/email/bulk",
+        skipped_no_email,
+        skipped_duplicate,
+    )
+    return {
+        "requested": len(items),
+        "queued": len(unique_recipients),
+        "skipped_no_email": skipped_no_email,
+        "skipped_duplicate": skipped_duplicate,
+    }
 
 
 @router.get("/pda-admin/events/{slug}/logs", response_model=List[PdaEventLogResponse])

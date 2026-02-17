@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, UploadFile, File, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import os
 import io
 import csv
@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 
-from database import get_db
+from database import get_db, SessionLocal
 from models import (
     PdaItem,
     PdaTeam,
@@ -42,7 +42,10 @@ from schemas import (
     PdaGalleryCreate, PdaGalleryUpdate, PdaGalleryResponse,
     PresignRequest, PresignResponse,
     PdaPdfPreviewGenerateRequest, PdaPdfPreviewGenerateResponse,
+    AdminBulkEmailRequest,
 )
+from emailer import send_email
+from email_bulk import render_email_template, derive_text_from_html, extract_batch
 from security import require_pda_home_admin, require_superadmin
 from utils import (
     S3_BUCKET_NAME,
@@ -170,6 +173,90 @@ def _build_admin_user_response(
         github_url=user.github_url,
         created_at=user.created_at,
     )
+
+
+def _build_email_context_for_user(
+    user: PdaUser,
+    member: Optional[PdaTeam] = None,
+    recruit: Optional[Dict[str, Optional[str]]] = None,
+) -> Dict[str, object]:
+    recruit_state = recruit or {}
+    return {
+        "name": user.name,
+        "profile_name": user.profile_name,
+        "regno": user.regno,
+        "email": user.email,
+        "dept": user.dept,
+        "gender": user.gender,
+        "phno": user.phno,
+        "dob": user.dob,
+        "team": member.team if member else None,
+        "designation": member.designation if member else None,
+        "instagram_url": user.instagram_url,
+        "linkedin_url": user.linkedin_url,
+        "github_url": user.github_url,
+        "resume_url": recruit_state.get("resume_url"),
+        "photo_url": user.image_url,
+        "is_member": bool(user.is_member),
+        "is_applied": bool(recruit_state.get("is_applied")),
+        "email_verified": bool(user.email_verified_at),
+        "preferred_team": recruit_state.get("preferred_team"),
+        "preferred_team_1": recruit_state.get("preferred_team_1"),
+        "preferred_team_2": recruit_state.get("preferred_team_2"),
+        "preferred_team_3": recruit_state.get("preferred_team_3"),
+        "created_at": user.created_at,
+        "updated_at": user.updated_at,
+        "batch": extract_batch(user.regno),
+    }
+
+
+def _send_bulk_admin_email_background(
+    recipients: List[Tuple[str, Dict[str, object]]],
+    subject: str,
+    html: str,
+    text: Optional[str],
+    admin_id: int,
+    mode: str,
+    request_method: Optional[str],
+    request_path: Optional[str],
+    skipped_no_email: int,
+    skipped_duplicate: int,
+) -> None:
+    db = SessionLocal()
+    sent = 0
+    failed = 0
+    errors: List[Dict[str, str]] = []
+    try:
+        for email_value, context in recipients:
+            try:
+                rendered_html = render_email_template(html, context, html_mode=True)
+                rendered_text = render_email_template(text, context, html_mode=False) if text else None
+                text_content = rendered_text if rendered_text is not None else derive_text_from_html(rendered_html)
+                send_email(email_value, subject, rendered_html, text_content)
+                sent += 1
+            except Exception as exc:
+                failed += 1
+                if len(errors) < 10:
+                    errors.append({"email": email_value, "error": str(exc)})
+        admin = db.query(PdaUser).filter(PdaUser.id == admin_id).first()
+        log_admin_action(
+            db,
+            admin,
+            "Send bulk email",
+            request_method,
+            request_path,
+            {
+                "mode": mode,
+                "queued": len(recipients),
+                "sent": sent,
+                "failed": failed,
+                "skipped_no_email": skipped_no_email,
+                "skipped_duplicate": skipped_duplicate,
+                "errors": errors,
+            },
+        )
+    finally:
+        db.close()
 
 
 def _sync_member_status_from_team(user: Optional[PdaUser], member: Optional[PdaTeam]) -> None:
@@ -429,6 +516,110 @@ def list_pda_users(
             team_map[member.user_id] = member
     recruit_map = get_recruitment_state_map(db, users)
     return [_build_admin_user_response(user, team_map.get(user.id), recruit_map.get(user.id)) for user in users]
+
+
+@router.post("/pda-admin/email/bulk")
+def send_bulk_admin_email(
+    payload: AdminBulkEmailRequest,
+    background_tasks: BackgroundTasks,
+    admin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    mode = str(payload.recipient_mode or "").strip().lower()
+    allowed_modes = {"all_users", "team", "batch", "department", "selected"}
+    if mode not in allowed_modes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid recipient_mode")
+
+    subject = str(payload.subject or "").strip()
+    html = str(payload.html or "").strip()
+    if not subject or not html:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Subject and HTML are required")
+
+    recipients = []
+    if mode == "team":
+        rows = (
+            db.query(PdaTeam, PdaUser)
+            .join(PdaUser, PdaTeam.user_id == PdaUser.id, isouter=True)
+            .order_by(PdaTeam.team.asc().nullslast(), PdaTeam.designation.asc().nullslast(), PdaUser.name.asc().nullslast())
+            .all()
+        )
+        users = [u for _, u in rows if u]
+        recruit_map = get_recruitment_state_map(db, users) if users else {}
+        for member, user in rows:
+            if not user:
+                continue
+            context = _build_email_context_for_user(user, member, recruit_map.get(user.id))
+            recipients.append((user.email, context))
+    else:
+        query = db.query(PdaUser).filter(PdaUser.regno != "0000000000")
+        if mode == "batch":
+            batch_value = str(payload.batch or "").strip()
+            if not batch_value:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Batch is required")
+            query = query.filter(PdaUser.regno.like(f"{batch_value}%"))
+        elif mode == "department":
+            dept_value = str(payload.department or "").strip()
+            if not dept_value:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Department is required")
+            query = query.filter(PdaUser.dept == dept_value)
+        elif mode == "selected":
+            if not payload.user_ids:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user_ids required for selected mode")
+            query = query.filter(PdaUser.id.in_(payload.user_ids))
+
+        users = query.order_by(PdaUser.name.asc().nullslast(), PdaUser.regno.asc()).all()
+        user_ids = [user.id for user in users]
+        team_rows = (
+            db.query(PdaTeam)
+            .filter(PdaTeam.user_id.in_(user_ids))
+            .order_by(PdaTeam.id.asc())
+            .all()
+            if user_ids else []
+        )
+        team_map = {}
+        for member in team_rows:
+            if member.user_id not in team_map:
+                team_map[member.user_id] = member
+        recruit_map = get_recruitment_state_map(db, users) if users else {}
+        for user in users:
+            context = _build_email_context_for_user(user, team_map.get(user.id), recruit_map.get(user.id))
+            recipients.append((user.email, context))
+
+    skipped_no_email = 0
+    skipped_duplicate = 0
+    seen = set()
+    unique_recipients: List[Tuple[str, Dict[str, object]]] = []
+    for email, context in recipients:
+        email_value = str(email or "").strip().lower()
+        if not email_value:
+            skipped_no_email += 1
+            continue
+        if email_value in seen:
+            skipped_duplicate += 1
+            continue
+        seen.add(email_value)
+        unique_recipients.append((email_value, context))
+
+    background_tasks.add_task(
+        _send_bulk_admin_email_background,
+        unique_recipients,
+        subject,
+        html,
+        payload.text,
+        admin.id,
+        mode,
+        request.method if request else None,
+        request.url.path if request else None,
+        skipped_no_email,
+        skipped_duplicate,
+    )
+    return {
+        "requested": len(recipients),
+        "queued": len(unique_recipients),
+        "skipped_no_email": skipped_no_email,
+        "skipped_duplicate": skipped_duplicate,
+    }
 
 
 @router.put("/pda-admin/users/{user_id}", response_model=PdaAdminUserResponse)
