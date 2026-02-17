@@ -1270,15 +1270,12 @@ export default function EventDashboard() {
                                 data-testid="event-register-confirm-checkbox"
                             />
                             <span>
-                                I confirm that I want to register for <span className="font-bold">{eventInfo.title}</span>.
+                                Claim my spot! I’m ready to level up @<span className="font-bold">{eventInfo.title}</span>.
                             </span>
                         </label>
 
                         {!isTeamEvent ? (
-                            <div className="flex justify-end gap-2">
-                                <Button data-testid="event-register-cancel-button" variant="outline" className="border-2 border-black shadow-neo" onClick={closeRegistrationDialog} disabled={registering}>
-                                    Cancel
-                                </Button>
+                            <div className="flex justify-center">
                                 <Button
                                     data-testid="event-register-confirm-button"
                                     className="border-2 border-black bg-[#FDE047] text-black shadow-neo"
