@@ -338,11 +338,11 @@ export default function UsersAdmin() {
         );
     }
 
-    const statsMembers = usersRows;
-    const totalUsers = usersRows.length;
-    const totalMembers = usersRows.filter((m) => Boolean(m.is_member)).length;
-    const totalApplied = usersRows.filter((m) => Boolean(m.is_applied)).length;
-    const totalVerified = usersRows.filter((m) => Boolean(m.email_verified)).length;
+    const statsMembers = usersRows.filter((m) => String(m?.regno || '') !== '0000000000');
+    const totalUsers = statsMembers.length;
+    const totalMembers = statsMembers.filter((m) => Boolean(m.is_member)).length;
+    const totalApplied = statsMembers.filter((m) => Boolean(m.is_applied)).length;
+    const totalVerified = statsMembers.filter((m) => Boolean(m.email_verified)).length;
     const totalUnverified = totalUsers - totalVerified;
     const totalNotApplied = totalUsers - totalApplied;
 
