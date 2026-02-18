@@ -16,7 +16,6 @@ import {
     filterPosterAssetsByRatio,
     parsePosterAssets,
     pickPosterAssetByRatio,
-    POSTER_ASPECT_RATIOS,
     resolvePosterUrl,
     serializePosterAssets,
 } from '@/utils/posterAssets';
@@ -41,13 +40,20 @@ const initialForm = {
 
 const makePosterAssetId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
-const toPosterAssetRows = (rawPosterUrl) => parsePosterAssets(rawPosterUrl).map((asset) => ({
-    id: makePosterAssetId(),
-    aspect_ratio: asset.aspect_ratio || '4:5',
-    url: asset.url,
-    file: null,
-    preview_url: '',
-}));
+const toPosterAssetRows = (rawPosterUrl) => {
+    const preferred = pickPosterAssetByRatio(
+        filterPosterAssetsByRatio(parsePosterAssets(rawPosterUrl), ['4:5']),
+        ['4:5'],
+    );
+    if (!preferred?.url) return [];
+    return [{
+        id: makePosterAssetId(),
+        aspect_ratio: '4:5',
+        url: preferred.url,
+        file: null,
+        preview_url: '',
+    }];
+};
 
 const releasePosterPreviewUrls = (rows) => {
     (rows || []).forEach((row) => {
@@ -109,8 +115,8 @@ const buildEventPayload = (formState, posterUrl) => ({
 });
 
 const getCardPosterSrc = (rawPosterUrl) => {
-    const assets = filterPosterAssetsByRatio(parsePosterAssets(rawPosterUrl), ['4:5', '5:4']);
-    const preferred = pickPosterAssetByRatio(assets, ['4:5', '5:4']);
+    const assets = filterPosterAssetsByRatio(parsePosterAssets(rawPosterUrl), ['4:5']);
+    const preferred = pickPosterAssetByRatio(assets, ['4:5']);
     return resolvePosterUrl(preferred?.url);
 };
 
@@ -120,8 +126,6 @@ function EventFormFields({
     posterInputId,
     posterAssets,
     setPosterAssets,
-    posterUploadRatio,
-    setPosterUploadRatio,
 }) {
     return (
         <>
@@ -162,41 +166,32 @@ function EventFormFields({
                 <Input type="date" value={form.end_date} onChange={(e) => setForm((prev) => ({ ...prev, end_date: e.target.value }))} />
             </div>
             <div className="md:col-span-2">
-                <Label htmlFor={posterInputId}>Poster Uploads (Multiple)</Label>
-                <div className="mt-2 grid gap-2 sm:grid-cols-[160px_1fr]">
-                    <select
-                        value={posterUploadRatio}
-                        onChange={(e) => setPosterUploadRatio(e.target.value)}
-                        className="h-10 w-full rounded-md border border-black/10 bg-white px-3 text-sm"
-                    >
-                        {POSTER_ASPECT_RATIOS.map((ratio) => (
-                            <option key={ratio} value={ratio}>{ratio}</option>
-                        ))}
-                    </select>
+                <Label htmlFor={posterInputId}>Poster Upload (4:5 only, single)</Label>
+                <div className="mt-2">
                     <Input
                         id={posterInputId}
                         type="file"
-                        multiple
                         accept="image/png,image/jpeg,image/webp"
                         onChange={(e) => {
                             const files = Array.from(e.target.files || []);
                             if (!files.length) return;
-                            setPosterAssets((prev) => ([
-                                ...prev,
-                                ...files.map((file) => ({
+                            const file = files[0];
+                            setPosterAssets((prev) => {
+                                releasePosterPreviewUrls(prev);
+                                return [{
                                     id: makePosterAssetId(),
-                                    aspect_ratio: posterUploadRatio,
+                                    aspect_ratio: '4:5',
                                     url: '',
                                     file,
                                     preview_url: URL.createObjectURL(file),
-                                })),
-                            ]));
+                                }];
+                            });
                             e.target.value = '';
                         }}
                     />
                 </div>
                 <p className="mt-2 text-xs text-slate-500">
-                    Select an aspect ratio, then upload one or more images for that ratio.
+                    Only one 4:5 poster is supported temporarily.
                 </p>
                 {posterAssets.length ? (
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -344,8 +339,6 @@ export default function PersohubAdminEventsPage() {
     const [editTarget, setEditTarget] = useState(null);
     const [posterAssets, setPosterAssets] = useState([]);
     const [editPosterAssets, setEditPosterAssets] = useState([]);
-    const [posterUploadRatio, setPosterUploadRatio] = useState('4:5');
-    const [editPosterUploadRatio, setEditPosterUploadRatio] = useState('4:5');
     const [uploadingPoster, setUploadingPoster] = useState(false);
     const [uploadingEditPoster, setUploadingEditPoster] = useState(false);
     const [form, setForm] = useState(initialForm);
@@ -387,24 +380,17 @@ export default function PersohubAdminEventsPage() {
         if (!validateDateRange(form)) return;
         setSaving(true);
         try {
-            let nextAssets = posterAssets.filter((asset) => asset.url && !asset.file).map((asset) => ({
-                url: asset.url,
-                aspect_ratio: asset.aspect_ratio,
-            }));
-            const pendingAssets = posterAssets.filter((asset) => asset.file);
-            if (pendingAssets.length) {
+            let posterUrl = null;
+            const currentAsset = posterAssets[0];
+            if (currentAsset?.file) {
                 setUploadingPoster(true);
-                for (const asset of pendingAssets) {
-                    const processedPoster = await compressImageToWebp(asset.file);
-                    const uploadedUrl = await persohubAdminApi.uploadEventPoster(processedPoster);
-                    nextAssets.push({
-                        url: uploadedUrl,
-                        aspect_ratio: asset.aspect_ratio,
-                    });
-                }
+                const processedPoster = await compressImageToWebp(currentAsset.file);
+                const uploadedUrl = await persohubAdminApi.uploadEventPoster(processedPoster);
+                posterUrl = serializePosterAssets([{ url: uploadedUrl, aspect_ratio: '4:5' }]);
                 setUploadingPoster(false);
+            } else if (currentAsset?.url) {
+                posterUrl = serializePosterAssets([{ url: currentAsset.url, aspect_ratio: '4:5' }]);
             }
-            const posterUrl = serializePosterAssets(nextAssets);
             const payload = buildEventPayload(form, posterUrl);
             await persohubAdminApi.createAdminEvent(payload);
             toast.success('Event created');
@@ -445,24 +431,17 @@ export default function PersohubAdminEventsPage() {
         if (!validateDateRange(editForm)) return;
         setSavingEdit(true);
         try {
-            let nextAssets = editPosterAssets.filter((asset) => asset.url && !asset.file).map((asset) => ({
-                url: asset.url,
-                aspect_ratio: asset.aspect_ratio,
-            }));
-            const pendingAssets = editPosterAssets.filter((asset) => asset.file);
-            if (pendingAssets.length) {
+            let posterUrl = null;
+            const currentAsset = editPosterAssets[0];
+            if (currentAsset?.file) {
                 setUploadingEditPoster(true);
-                for (const asset of pendingAssets) {
-                    const processedPoster = await compressImageToWebp(asset.file);
-                    const uploadedUrl = await persohubAdminApi.uploadEventPoster(processedPoster);
-                    nextAssets.push({
-                        url: uploadedUrl,
-                        aspect_ratio: asset.aspect_ratio,
-                    });
-                }
+                const processedPoster = await compressImageToWebp(currentAsset.file);
+                const uploadedUrl = await persohubAdminApi.uploadEventPoster(processedPoster);
+                posterUrl = serializePosterAssets([{ url: uploadedUrl, aspect_ratio: '4:5' }]);
                 setUploadingEditPoster(false);
+            } else if (currentAsset?.url) {
+                posterUrl = serializePosterAssets([{ url: currentAsset.url, aspect_ratio: '4:5' }]);
             }
-            const posterUrl = serializePosterAssets(nextAssets);
             const payload = buildEventPayload(editForm, posterUrl);
             await persohubAdminApi.updateAdminEvent(editTarget.slug, payload);
             toast.success('Event updated');
@@ -542,8 +521,6 @@ export default function PersohubAdminEventsPage() {
                             posterInputId="persohub-event-poster-upload"
                             posterAssets={posterAssets}
                             setPosterAssets={setPosterAssets}
-                            posterUploadRatio={posterUploadRatio}
-                            setPosterUploadRatio={setPosterUploadRatio}
                         />
                         <div className="md:col-span-2 flex justify-end">
                             <Button type="submit" className="bg-[#f6c347] text-black hover:bg-[#ffd16b]" disabled={saving || uploadingPoster}>
@@ -652,8 +629,6 @@ export default function PersohubAdminEventsPage() {
                             posterInputId="persohub-event-poster-upload-edit"
                             posterAssets={editPosterAssets}
                             setPosterAssets={setEditPosterAssets}
-                            posterUploadRatio={editPosterUploadRatio}
-                            setPosterUploadRatio={setEditPosterUploadRatio}
                         />
                         <div className="md:col-span-2 flex justify-end gap-2">
                             <Button type="button" variant="outline" className="border-black/20" onClick={() => closeEditDialog()} disabled={savingEdit || uploadingEditPoster}>

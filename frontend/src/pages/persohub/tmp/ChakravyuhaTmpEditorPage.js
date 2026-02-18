@@ -50,6 +50,11 @@ const DEFAULT_CONTENT = {
     services: {
         title: 'SERVICES & HOSPITALITY',
         subtitle: "We've got you covered",
+        enquireLink: '',
+        contactPerson: {
+            name: '',
+            number: '',
+        },
         items: [],
     },
     gallery: {
@@ -443,6 +448,18 @@ export default function ChakravyuhaTmpEditorPage() {
                     <div className="grid gap-3 md:grid-cols-2">
                         <div className="grid gap-1"><Label>Title</Label><Input value={content.services.title || ''} onChange={(e) => setField('services.title', e.target.value)} /></div>
                         <div className="grid gap-1"><Label>Subtitle</Label><Input value={content.services.subtitle || ''} onChange={(e) => setField('services.subtitle', e.target.value)} /></div>
+                        <div className="grid gap-1">
+                            <Label>Link to Enquire</Label>
+                            <Input value={content.services.enquireLink || ''} onChange={(e) => setField('services.enquireLink', e.target.value)} />
+                        </div>
+                        <div className="grid gap-1">
+                            <Label>Contact Person Name</Label>
+                            <Input value={content.services.contactPerson?.name || ''} onChange={(e) => setField('services.contactPerson.name', e.target.value)} />
+                        </div>
+                        <div className="grid gap-1">
+                            <Label>Contact Person Number</Label>
+                            <Input value={content.services.contactPerson?.number || ''} onChange={(e) => setField('services.contactPerson.number', e.target.value)} />
+                        </div>
                     </div>
                     <div className="grid gap-1"><Label>Items (JSON Array)</Label><Textarea rows={10} value={arrayEditors['services.items']} onChange={(e) => setArrayEditors((prev) => ({ ...prev, 'services.items': e.target.value }))} /></div>
                 </Section>

@@ -66,6 +66,23 @@ def _parse_cursor_offset(cursor: Optional[str]) -> int:
     return value
 
 
+def _normalize_chakravyuha_content(content: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    payload = dict(content or {})
+    services = payload.get("services")
+    if not isinstance(services, dict):
+        services = {}
+    contact_person = services.get("contactPerson")
+    if not isinstance(contact_person, dict):
+        contact_person = {}
+    services["enquireLink"] = str(services.get("enquireLink") or "")
+    services["contactPerson"] = {
+        "name": str(contact_person.get("name") or ""),
+        "number": str(contact_person.get("number") or ""),
+    }
+    payload["services"] = services
+    return payload
+
+
 @router.get("/persohub/communities", response_model=List[PersohubCommunityCard])
 def list_communities(
     db: Session = Depends(get_db),
@@ -114,7 +131,7 @@ def get_chakravyuha_public_content(
     )
     if not sympo:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chakravyuha content not found")
-    return sympo.content or {}
+    return _normalize_chakravyuha_content(sympo.content)
 
 
 def _serialize_chakravyuha_event(event: CommunityEvent, community: PersohubCommunity) -> Dict[str, Any]:
