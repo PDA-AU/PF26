@@ -78,6 +78,23 @@ if (config.enableVisualEdits && babelMetadataPlugin) {
 }
 
 webpackConfig.devServer = (devServerConfig) => {
+  const proxyTarget =
+    process.env.FRONTEND_API_PROXY_TARGET ||
+    process.env.REACT_APP_BACKEND_URL ||
+    "http://localhost:8001";
+
+  // Route frontend-origin /api requests to backend in dev/preview.
+  devServerConfig.proxy = {
+    ...(devServerConfig.proxy || {}),
+    "/api": {
+      target: proxyTarget,
+      changeOrigin: true,
+      secure: false,
+      ws: true,
+      logLevel: "warn",
+    },
+  };
+
   // Apply visual edits dev server setup only if enabled
   if (config.enableVisualEdits && setupDevServer) {
     devServerConfig = setupDevServer(devServerConfig);
