@@ -1,5 +1,5 @@
 import json
-from datetime import date, datetime
+from datetime import date, datetime, time
 from enum import Enum
 from typing import List, Optional, Literal
 from urllib.parse import urlparse
@@ -165,6 +165,7 @@ class PersohubAdminEventCreateRequest(BaseModel):
     description: Optional[str] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
+    event_time: Optional[time] = None
     poster_url: Optional[str] = None
     whatsapp_url: Optional[str] = None
     external_url_name: Optional[str] = "Join whatsapp channel"
@@ -217,6 +218,7 @@ class PersohubAdminEventUpdateRequest(BaseModel):
     description: Optional[str] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
+    event_time: Optional[time] = None
     poster_url: Optional[str] = None
     whatsapp_url: Optional[str] = None
     external_url_name: Optional[str] = None
@@ -277,6 +279,7 @@ class PersohubAdminEventResponse(BaseModel):
     description: Optional[str] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
+    event_time: Optional[time] = None
     poster_url: Optional[str] = None
     whatsapp_url: Optional[str] = None
     external_url_name: str = "Join whatsapp channel"
@@ -290,8 +293,30 @@ class PersohubAdminEventResponse(BaseModel):
     team_max_size: Optional[int] = None
     is_visible: bool = True
     status: PersohubAdminEventStatusEnum
+    sympo_id: Optional[int] = None
+    sympo_name: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
+
+
+class PersohubAdminEventSympoAssignRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sympo_id: Optional[int] = Field(default=None, ge=1)
+
+
+class PersohubAdminEventSympoAssignResponse(BaseModel):
+    event_id: int
+    sympo_id: Optional[int] = None
+    sympo_name: Optional[str] = None
+    message: str
+
+
+class PersohubAdminSympoOption(BaseModel):
+    id: int
+    name: str
+    organising_club_id: int
+    organising_club_name: Optional[str] = None
 
 
 class PersohubAdminCommunityUpdateRequest(BaseModel):

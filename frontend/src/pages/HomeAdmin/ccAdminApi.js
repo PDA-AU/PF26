@@ -19,7 +19,8 @@ export const ccAdminApi = {
     updateSympo: (sympoId, payload, headers) => axios.put(`${API}/pda-admin/cc/sympos/${sympoId}`, payload, { headers }),
     deleteSympo: (sympoId, headers) => axios.delete(`${API}/pda-admin/cc/sympos/${sympoId}`, { headers }),
 
-    listCommunityEventOptions: (headers) => axios.get(`${API}/pda-admin/cc/options/community-events`, { headers }),
+    listCommunityEventOptions: (headers, params = {}) => axios.get(`${API}/pda-admin/cc/options/community-events`, { headers, params }),
+    assignCommunityEventSympo: (eventId, payload, headers) => axios.put(`${API}/pda-admin/cc/community-events/${eventId}/sympo`, payload, { headers }),
     listAdminUserOptions: (headers) => axios.get(`${API}/pda-admin/cc/options/admin-users`, { headers }),
 
     presignLogoUpload: (file, headers) => axios.post(`${API}/pda-admin/cc/logos/presign`, {

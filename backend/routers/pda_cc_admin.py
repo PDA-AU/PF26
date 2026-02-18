@@ -1,6 +1,7 @@
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -23,6 +24,8 @@ from schemas import (
     CcClubUpdateRequest,
     CcCommunityCreateRequest,
     CcCommunityEventOption,
+    CcCommunityEventSympoAssignRequest,
+    CcCommunityEventSympoAssignResponse,
     CcCommunityResetPasswordRequest,
     CcCommunityResponse,
     CcCommunityUpdateRequest,
@@ -468,7 +471,38 @@ def list_cc_sympos(
         .order_by(CommunitySympo.name.asc(), CommunitySympo.id.asc())
         .all()
     )
-    return [_build_sympo_response(db, sympo, club.name) for sympo, club in rows]
+    if not rows:
+        return []
+
+    sympo_ids = [sympo.id for sympo, _club in rows]
+    linked_rows = (
+        db.query(CommunitySympoEvent.sympo_id, CommunityEvent.id, CommunityEvent.title)
+        .join(CommunityEvent, CommunityEvent.id == CommunitySympoEvent.event_id)
+        .filter(CommunitySympoEvent.sympo_id.in_(sympo_ids))
+        .order_by(CommunitySympoEvent.sympo_id.asc(), CommunityEvent.title.asc(), CommunityEvent.id.asc())
+        .all()
+    )
+
+    event_ids_by_sympo: Dict[int, List[int]] = {}
+    event_titles_by_sympo: Dict[int, List[str]] = {}
+    for sympo_id, event_id, event_title in linked_rows:
+        event_ids_by_sympo.setdefault(sympo_id, []).append(event_id)
+        event_titles_by_sympo.setdefault(sympo_id, []).append(event_title)
+
+    return [
+        CcSympoResponse(
+            id=sympo.id,
+            name=sympo.name,
+            organising_club_id=sympo.organising_club_id,
+            organising_club_name=club.name,
+            content=sympo.content,
+            event_ids=event_ids_by_sympo.get(sympo.id, []),
+            event_titles=event_titles_by_sympo.get(sympo.id, []),
+            created_at=sympo.created_at,
+            updated_at=sympo.updated_at,
+        )
+        for sympo, club in rows
+    ]
 
 
 @router.post("/pda-admin/cc/sympos", response_model=CcSympoResponse)
@@ -591,15 +625,42 @@ def delete_cc_sympo(
 
 @router.get("/pda-admin/cc/options/community-events", response_model=List[CcCommunityEventOption])
 def list_cc_community_event_options(
+    response: Response,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    q: Optional[str] = Query(default=None),
     _: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db),
 ):
-    rows = (
-        db.query(CommunityEvent, PersohubCommunity)
+    query = (
+        db.query(CommunityEvent, PersohubCommunity, CommunitySympoEvent, CommunitySympo)
         .join(PersohubCommunity, PersohubCommunity.id == CommunityEvent.community_id)
-        .order_by(CommunityEvent.title.asc(), CommunityEvent.id.asc())
+        .outerjoin(CommunitySympoEvent, CommunitySympoEvent.event_id == CommunityEvent.id)
+        .outerjoin(CommunitySympo, CommunitySympo.id == CommunitySympoEvent.sympo_id)
+    )
+    if q and q.strip():
+        keyword = f"%{q.strip()}%"
+        query = query.filter(
+            or_(
+                CommunityEvent.title.ilike(keyword),
+                CommunityEvent.slug.ilike(keyword),
+                CommunityEvent.event_code.ilike(keyword),
+                PersohubCommunity.name.ilike(keyword),
+            )
+        )
+
+    total_count = int(query.count())
+    rows = (
+        query.order_by(CommunityEvent.title.asc(), CommunityEvent.id.asc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
         .all()
     )
+
+    response.headers["X-Total-Count"] = str(total_count)
+    response.headers["X-Page"] = str(page)
+    response.headers["X-Page-Size"] = str(page_size)
+
     return [
         CcCommunityEventOption(
             id=event.id,
@@ -608,9 +669,68 @@ def list_cc_community_event_options(
             title=event.title,
             community_id=community.id,
             community_name=community.name,
+            sympo_id=(sympo.id if sympo else None),
+            sympo_name=(sympo.name if sympo else None),
         )
-        for event, community in rows
+        for event, community, _mapping, sympo in rows
     ]
+
+
+@router.put("/pda-admin/cc/community-events/{event_id}/sympo", response_model=CcCommunityEventSympoAssignResponse)
+def assign_cc_event_sympo(
+    event_id: int,
+    payload: CcCommunityEventSympoAssignRequest,
+    admin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    event = db.query(CommunityEvent).filter(CommunityEvent.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Community event not found")
+
+    existing = db.query(CommunitySympoEvent).filter(CommunitySympoEvent.event_id == event_id).first()
+    previous_sympo_id = existing.sympo_id if existing else None
+
+    next_sympo = None
+    if payload.sympo_id is not None:
+        next_sympo = db.query(CommunitySympo).filter(CommunitySympo.id == payload.sympo_id).first()
+        if not next_sympo:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sympo not found")
+
+    if existing and next_sympo and existing.sympo_id == next_sympo.id:
+        return CcCommunityEventSympoAssignResponse(
+            event_id=event_id,
+            sympo_id=next_sympo.id,
+            sympo_name=next_sympo.name,
+            message="Event already mapped to selected sympo",
+        )
+
+    if existing:
+        db.delete(existing)
+        db.flush()
+
+    if next_sympo:
+        db.add(CommunitySympoEvent(sympo_id=next_sympo.id, event_id=event_id))
+
+    db.commit()
+    log_admin_action(
+        db,
+        admin,
+        "Assign C&C event sympo",
+        request.method if request else None,
+        request.url.path if request else None,
+        {
+            "event_id": event_id,
+            "previous_sympo_id": previous_sympo_id,
+            "next_sympo_id": (next_sympo.id if next_sympo else None),
+        },
+    )
+    return CcCommunityEventSympoAssignResponse(
+        event_id=event_id,
+        sympo_id=(next_sympo.id if next_sympo else None),
+        sympo_name=(next_sympo.name if next_sympo else None),
+        message=("Event unassigned from sympo" if next_sympo is None else "Event mapped to sympo"),
+    )
 
 
 @router.get("/pda-admin/cc/options/admin-users", response_model=List[CcAdminUserOption])

@@ -40,6 +40,7 @@ const EMPTY_SYMPO = {
     organising_club_id: '',
     content_text: '',
 };
+const EVENTS_PAGE_SIZE = 20;
 
 const parseApiError = (error, fallback) => {
     const detail = error?.response?.data?.detail;
@@ -79,6 +80,9 @@ export default function CCAdmin() {
     const { isSuperAdmin, getAuthHeader } = useAuth();
 
     const [loading, setLoading] = useState(true);
+    const [eventsLoading, setEventsLoading] = useState(false);
+    const [adminOptionsLoading, setAdminOptionsLoading] = useState(false);
+    const [eventOptionsLoading, setEventOptionsLoading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [uploadingField, setUploadingField] = useState('');
 
@@ -87,9 +91,16 @@ export default function CCAdmin() {
     const [sympos, setSympos] = useState([]);
     const [adminOptions, setAdminOptions] = useState([]);
     const [eventOptions, setEventOptions] = useState([]);
+    const [events, setEvents] = useState([]);
 
     const [activeTab, setActiveTab] = useState('clubs');
     const [search, setSearch] = useState('');
+    const [eventsQuery, setEventsQuery] = useState('');
+    const [eventsQueryDebounced, setEventsQueryDebounced] = useState('');
+    const [eventsPage, setEventsPage] = useState(1);
+    const [eventsTotalCount, setEventsTotalCount] = useState(0);
+    const [assigningEventId, setAssigningEventId] = useState(null);
+    const [eventSympoDrafts, setEventSympoDrafts] = useState({});
 
     const [clubModalOpen, setClubModalOpen] = useState(false);
     const [clubEditing, setClubEditing] = useState(null);
@@ -116,21 +127,22 @@ export default function CCAdmin() {
 
     const headers = useMemo(() => getAuthHeader(), [getAuthHeader]);
 
+    useEffect(() => {
+        const timer = setTimeout(() => setEventsQueryDebounced(eventsQuery.trim()), 250);
+        return () => clearTimeout(timer);
+    }, [eventsQuery]);
+
     const loadData = useCallback(async () => {
         setLoading(true);
         try {
-            const [clubsRes, communitiesRes, symposRes, adminRes, eventRes] = await Promise.all([
+            const [clubsRes, communitiesRes, symposRes] = await Promise.all([
                 ccAdminApi.listClubs(headers),
                 ccAdminApi.listCommunities(headers),
                 ccAdminApi.listSympos(headers),
-                ccAdminApi.listAdminUserOptions(headers),
-                ccAdminApi.listCommunityEventOptions(headers),
             ]);
             setClubs(clubsRes.data || []);
             setCommunities(communitiesRes.data || []);
             setSympos(symposRes.data || []);
-            setAdminOptions(adminRes.data || []);
-            setEventOptions(eventRes.data || []);
         } catch (error) {
             toast.error(parseApiError(error, 'Failed to load C&C data'));
         } finally {
@@ -138,11 +150,74 @@ export default function CCAdmin() {
         }
     }, [headers]);
 
+    const loadAdminOptions = useCallback(async () => {
+        if (adminOptionsLoading || adminOptions.length) return;
+        setAdminOptionsLoading(true);
+        try {
+            const response = await ccAdminApi.listAdminUserOptions(headers);
+            setAdminOptions(response?.data || []);
+        } catch (error) {
+            toast.error(parseApiError(error, 'Failed to load admin user options'));
+        } finally {
+            setAdminOptionsLoading(false);
+        }
+    }, [headers, adminOptionsLoading, adminOptions.length]);
+
+    const loadEventOptions = useCallback(async () => {
+        if (eventOptionsLoading) return;
+        setEventOptionsLoading(true);
+        try {
+            const response = await ccAdminApi.listCommunityEventOptions(headers, { page: 1, page_size: 200 });
+            setEventOptions(response?.data || []);
+        } catch (error) {
+            toast.error(parseApiError(error, 'Failed to load event options'));
+        } finally {
+            setEventOptionsLoading(false);
+        }
+    }, [headers, eventOptionsLoading]);
+
+    const loadEventsPage = useCallback(async () => {
+        setEventsLoading(true);
+        try {
+            const response = await ccAdminApi.listCommunityEventOptions(headers, {
+                page: eventsPage,
+                page_size: EVENTS_PAGE_SIZE,
+                q: eventsQueryDebounced || undefined,
+            });
+            const rows = response?.data || [];
+            const total = Number(response?.headers?.['x-total-count'] || 0);
+            setEvents(rows);
+            setEventsTotalCount(total);
+            setEventSympoDrafts(
+                rows.reduce((acc, row) => {
+                    acc[row.id] = row.sympo_id ? String(row.sympo_id) : 'none';
+                    return acc;
+                }, {})
+            );
+        } catch (error) {
+            toast.error(parseApiError(error, 'Failed to load events'));
+        } finally {
+            setEventsLoading(false);
+        }
+    }, [headers, eventsPage, eventsQueryDebounced]);
+
     useEffect(() => {
         if (isSuperAdmin) {
             loadData();
         }
     }, [isSuperAdmin, loadData]);
+
+    useEffect(() => {
+        if (!isSuperAdmin || activeTab !== 'events') return;
+        loadEventsPage();
+    }, [isSuperAdmin, activeTab, loadEventsPage]);
+
+    const refreshData = useCallback(async () => {
+        await loadData();
+        if (activeTab === 'events') {
+            await loadEventsPage();
+        }
+    }, [activeTab, loadData, loadEventsPage]);
 
     const filteredClubs = useMemo(() => {
         const s = search.trim().toLowerCase();
@@ -173,6 +248,18 @@ export default function CCAdmin() {
             .toLowerCase()
             .includes(s));
     }, [sympos, search]);
+
+    const totalEventPages = useMemo(() => {
+        if (!eventsTotalCount) return 1;
+        return Math.max(1, Math.ceil(eventsTotalCount / EVENTS_PAGE_SIZE));
+    }, [eventsTotalCount]);
+
+    const eventRangeLabel = useMemo(() => {
+        if (!eventsTotalCount) return '0-0';
+        const start = (eventsPage - 1) * EVENTS_PAGE_SIZE + 1;
+        const end = Math.min(eventsTotalCount, eventsPage * EVENTS_PAGE_SIZE);
+        return `${start}-${end}`;
+    }, [eventsPage, eventsTotalCount]);
 
     const handleLogoUpload = async (file, onValue) => {
         if (!file) return;
@@ -223,7 +310,7 @@ export default function CCAdmin() {
                 toast.success('Club created');
             }
             setClubModalOpen(false);
-            await loadData();
+            await refreshData();
         } catch (error) {
             toast.error(parseApiError(error, 'Failed to save club'));
         } finally {
@@ -232,6 +319,7 @@ export default function CCAdmin() {
     };
 
     const openCommunityModal = (community = null) => {
+        loadAdminOptions();
         setCommunityEditing(community);
         setCommunityForm(community ? {
             name: community.name || '',
@@ -262,7 +350,7 @@ export default function CCAdmin() {
                 toast.success('Community updated');
             }
             setCommunityModalOpen(false);
-            await loadData();
+            await refreshData();
         } catch (error) {
             toast.error(parseApiError(error, 'Failed to save community'));
         } finally {
@@ -305,6 +393,7 @@ export default function CCAdmin() {
         setEventMapTarget(sympo);
         setEventMapIds((sympo.event_ids || []).map((id) => Number(id)));
         setEventMapModalOpen(true);
+        loadEventOptions();
     };
 
     const toggleEventMapId = (eventId) => {
@@ -312,6 +401,26 @@ export default function CCAdmin() {
             const has = prev.includes(eventId);
             return has ? prev.filter((id) => id !== eventId) : [...prev, eventId];
         });
+    };
+
+    const assignEventToSympo = async (eventRow) => {
+        if (assigningEventId) return;
+        const currentSympoValue = eventRow.sympo_id ? String(eventRow.sympo_id) : 'none';
+        const draftValue = eventSympoDrafts[eventRow.id] || currentSympoValue;
+        if (draftValue === currentSympoValue) return;
+        setAssigningEventId(eventRow.id);
+        try {
+            const payload = {
+                sympo_id: draftValue === 'none' ? null : Number(draftValue),
+            };
+            const response = await ccAdminApi.assignCommunityEventSympo(eventRow.id, payload, headers);
+            toast.success(response?.data?.message || 'Event mapping updated');
+            await refreshData();
+        } catch (error) {
+            toast.error(parseApiError(error, 'Failed to update event mapping'));
+        } finally {
+            setAssigningEventId(null);
+        }
     };
 
     const submitSympo = async (e) => {
@@ -345,7 +454,7 @@ export default function CCAdmin() {
                 toast.success('Sympo created');
             }
             setSympoModalOpen(false);
-            await loadData();
+            await refreshData();
         } catch (error) {
             toast.error(parseApiError(error, 'Failed to save sympo'));
         } finally {
@@ -361,7 +470,7 @@ export default function CCAdmin() {
             await ccAdminApi.updateSympo(eventMapTarget.id, { event_ids: eventMapIds }, headers);
             toast.success('Sympo events updated');
             setEventMapModalOpen(false);
-            await loadData();
+            await refreshData();
         } catch (error) {
             toast.error(parseApiError(error, 'Failed to update sympo events'));
         } finally {
@@ -384,7 +493,7 @@ export default function CCAdmin() {
             const summary = counts ? Object.entries(counts).map(([key, value]) => `${key}: ${value}`).join(', ') : '';
             toast.success(summary ? `Deleted. ${summary}` : 'Deleted successfully');
             setDeleteModalOpen(false);
-            await loadData();
+            await refreshData();
         } catch (error) {
             toast.error(parseApiError(error, 'Delete failed'));
         } finally {
@@ -403,9 +512,16 @@ export default function CCAdmin() {
             <section className="space-y-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <Input
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                        placeholder={`Search ${activeTab}`}
+                        value={activeTab === 'events' ? eventsQuery : search}
+                        onChange={(e) => {
+                            if (activeTab === 'events') {
+                                setEventsQuery(e.target.value);
+                                setEventsPage(1);
+                                return;
+                            }
+                            setSearch(e.target.value);
+                        }}
+                        placeholder={`Search ${activeTab === 'events' ? 'events' : activeTab}`}
                         className="max-w-md"
                     />
                     <div className="flex gap-2">
@@ -416,10 +532,11 @@ export default function CCAdmin() {
                 </div>
 
                 <Tabs value={activeTab} onValueChange={setActiveTab}>
-                    <TabsList className="grid w-full grid-cols-3 md:w-[420px]">
+                    <TabsList className="grid w-full grid-cols-4 md:w-[560px]">
                         <TabsTrigger value="clubs">Clubs</TabsTrigger>
                         <TabsTrigger value="communities">Communities</TabsTrigger>
                         <TabsTrigger value="sympos">Sympos</TabsTrigger>
+                        <TabsTrigger value="events">Events</TabsTrigger>
                     </TabsList>
 
                     <TabsContent value="clubs" className="space-y-3">
@@ -534,6 +651,126 @@ export default function CCAdmin() {
                             </div>
                         ))}
                     </TabsContent>
+
+                    <TabsContent value="events" className="space-y-3">
+                        <div className="hidden md:block rounded-2xl border border-black/10 bg-white overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead className="bg-slate-50">
+                                    <tr>
+                                        <th className="px-3 py-2 text-left">Title</th>
+                                        <th className="px-3 py-2 text-left">Code / Slug</th>
+                                        <th className="px-3 py-2 text-left">Community</th>
+                                        <th className="px-3 py-2 text-left">Current Sympo</th>
+                                        <th className="px-3 py-2 text-right">Map Sympo</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {events.map((event) => {
+                                        const currentSympoValue = event.sympo_id ? String(event.sympo_id) : 'none';
+                                        const draftValue = eventSympoDrafts[event.id] || currentSympoValue;
+                                        return (
+                                            <tr key={event.id} className="border-t border-black/10">
+                                                <td className="px-3 py-2 font-medium">{event.title}</td>
+                                                <td className="px-3 py-2 text-xs text-slate-600">
+                                                    <div>{event.event_code}</div>
+                                                    <div>{event.slug}</div>
+                                                </td>
+                                                <td className="px-3 py-2">{event.community_name}</td>
+                                                <td className="px-3 py-2">{event.sympo_name || '—'}</td>
+                                                <td className="px-3 py-2">
+                                                    <div className="flex items-center justify-end gap-2">
+                                                        <Select
+                                                            value={draftValue}
+                                                            onValueChange={(value) => setEventSympoDrafts((prev) => ({ ...prev, [event.id]: value }))}
+                                                        >
+                                                            <SelectTrigger className="w-[220px]">
+                                                                <SelectValue placeholder="Select sympo" />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                <SelectItem value="none">No sympo</SelectItem>
+                                                                {sympos.map((sympo) => (
+                                                                    <SelectItem key={sympo.id} value={String(sympo.id)}>{sympo.name}</SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                        <Button
+                                                            size="sm"
+                                                            disabled={draftValue === currentSympoValue || assigningEventId === event.id}
+                                                            onClick={() => assignEventToSympo(event)}
+                                                        >
+                                                            {assigningEventId === event.id ? 'Saving...' : 'Save'}
+                                                        </Button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div className="space-y-2 md:hidden">
+                            {events.map((event) => {
+                                const currentSympoValue = event.sympo_id ? String(event.sympo_id) : 'none';
+                                const draftValue = eventSympoDrafts[event.id] || currentSympoValue;
+                                return (
+                                    <div key={event.id} className="rounded-2xl border border-black/10 bg-white p-3">
+                                        <p className="font-semibold">{event.title}</p>
+                                        <p className="text-xs text-slate-500">{event.event_code} · {event.slug}</p>
+                                        <p className="text-xs text-slate-500">Community: {event.community_name}</p>
+                                        <p className="text-xs text-slate-500">Current sympo: {event.sympo_name || '—'}</p>
+                                        <div className="mt-3 space-y-2">
+                                            <Select
+                                                value={draftValue}
+                                                onValueChange={(value) => setEventSympoDrafts((prev) => ({ ...prev, [event.id]: value }))}
+                                            >
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="Select sympo" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="none">No sympo</SelectItem>
+                                                    {sympos.map((sympo) => (
+                                                        <SelectItem key={sympo.id} value={String(sympo.id)}>{sympo.name}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            <Button
+                                                size="sm"
+                                                disabled={draftValue === currentSympoValue || assigningEventId === event.id}
+                                                onClick={() => assignEventToSympo(event)}
+                                            >
+                                                {assigningEventId === event.id ? 'Saving...' : 'Save'}
+                                            </Button>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        <div className="flex items-center justify-between gap-2 text-sm">
+                            <p className="text-slate-500">
+                                Showing {eventRangeLabel} of {eventsTotalCount}
+                            </p>
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setEventsPage((prev) => Math.max(1, prev - 1))}
+                                    disabled={eventsPage <= 1 || eventsLoading}
+                                >
+                                    Prev
+                                </Button>
+                                <span className="text-xs text-slate-600">Page {eventsPage} / {totalEventPages}</span>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setEventsPage((prev) => Math.min(totalEventPages, prev + 1))}
+                                    disabled={eventsPage >= totalEventPages || eventsLoading}
+                                >
+                                    Next
+                                </Button>
+                            </div>
+                        </div>
+                        {eventsLoading ? <p className="text-xs text-slate-500">Loading events...</p> : null}
+                    </TabsContent>
                 </Tabs>
             </section>
 
@@ -632,6 +869,7 @@ export default function CCAdmin() {
                                     ))}
                                 </SelectContent>
                             </Select>
+                            {adminOptionsLoading ? <p className="text-xs text-slate-500">Loading admin users...</p> : null}
                         </div>
                         <div className="grid gap-2">
                             <Label>Logo URL</Label>
@@ -705,6 +943,8 @@ export default function CCAdmin() {
                         <div className="grid gap-2">
                             <Label>Map Events</Label>
                             <div className="max-h-64 overflow-y-auto rounded-lg border border-black/10 p-2 space-y-1">
+                                {eventOptionsLoading ? <p className="p-2 text-xs text-slate-500">Loading events...</p> : null}
+                                {!eventOptionsLoading && !eventOptions.length ? <p className="p-2 text-xs text-slate-500">No events available.</p> : null}
                                 {eventOptions.map((event) => (
                                     <label key={event.id} className="flex items-start gap-2 text-sm p-1 rounded hover:bg-slate-50">
                                         <input

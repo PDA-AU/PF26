@@ -124,6 +124,7 @@ def list_routes():
             {"method": "PUT", "path": "/pda-admin/cc/sympos/{sympo_id}"},
             {"method": "DELETE", "path": "/pda-admin/cc/sympos/{sympo_id}"},
             {"method": "GET", "path": "/pda-admin/cc/options/community-events"},
+            {"method": "PUT", "path": "/pda-admin/cc/community-events/{event_id}/sympo"},
             {"method": "GET", "path": "/pda-admin/cc/options/admin-users"},
             {"method": "POST", "path": "/pda-admin/cc/logos/presign"},
             {"method": "POST", "path": "/pda-admin/email/bulk"},
@@ -152,8 +153,10 @@ def list_routes():
             {"method": "POST", "path": "/pda-admin/recruitments/approve"},
             {"method": "POST", "path": "/pda-admin/recruitments/reject"},
             {"method": "GET", "path": "/persohub/admin/events"},
+            {"method": "GET", "path": "/persohub/admin/sympo-options"},
             {"method": "POST", "path": "/persohub/admin/events"},
             {"method": "PUT", "path": "/persohub/admin/events/{slug}"},
+            {"method": "PUT", "path": "/persohub/admin/events/{slug}/sympo"},
             {"method": "DELETE", "path": "/persohub/admin/events/{slug}"}
         ]
     }

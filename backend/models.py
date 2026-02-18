@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, Date, Enum as SQLEnum, ForeignKey, Text, JSON, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, Date, Time, Enum as SQLEnum, ForeignKey, Text, JSON, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -449,6 +449,7 @@ class CommunityEvent(Base):
     description = Column(Text, nullable=True)
     start_date = Column(Date, nullable=True)
     end_date = Column(Date, nullable=True)
+    event_time = Column(Time, nullable=True)
     poster_url = Column(Text, nullable=True)
     whatsapp_url = Column(String(500), nullable=True)
     external_url_name = Column(String(120), nullable=True, default="Join whatsapp channel")

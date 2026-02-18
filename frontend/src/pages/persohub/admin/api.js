@@ -72,12 +72,27 @@ export const persohubAdminApi = {
         });
     },
 
-    async listAdminEvents() {
+    async listAdminEvents(params = {}) {
         return withCommunityAuthRetry(async () => {
             const response = await axios.get(`${API}/persohub/admin/events`, {
+                params,
                 headers: { ...getCommunityAuthHeader() },
             });
-            return response.data;
+            return {
+                items: response.data || [],
+                totalCount: Number(response.headers?.['x-total-count'] || 0),
+                page: Number(response.headers?.['x-page'] || params.page || 1),
+                pageSize: Number(response.headers?.['x-page-size'] || params.page_size || 20),
+            };
+        });
+    },
+
+    async listAdminSympoOptions() {
+        return withCommunityAuthRetry(async () => {
+            const response = await axios.get(`${API}/persohub/admin/sympo-options`, {
+                headers: { ...getCommunityAuthHeader() },
+            });
+            return response.data || [];
         });
     },
 
@@ -93,6 +108,15 @@ export const persohubAdminApi = {
     async updateAdminEvent(slug, payload) {
         return withCommunityAuthRetry(async () => {
             const response = await axios.put(`${API}/persohub/admin/events/${slug}`, payload, {
+                headers: { ...getCommunityAuthHeader() },
+            });
+            return response.data;
+        });
+    },
+
+    async assignAdminEventSympo(slug, payload) {
+        return withCommunityAuthRetry(async () => {
+            const response = await axios.put(`${API}/persohub/admin/events/${slug}/sympo`, payload, {
                 headers: { ...getCommunityAuthHeader() },
             });
             return response.data;

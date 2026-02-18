@@ -1,7 +1,8 @@
 import re
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -16,6 +17,7 @@ from models import (
     CommunityEventScore,
     CommunityEventTeam,
     CommunityEventTeamMember,
+    CommunitySympo,
     CommunitySympoLegacy,
     CommunitySympoEvent,
     PdaEventFormat,
@@ -26,12 +28,16 @@ from models import (
     PdaEventTemplate,
     PdaEventType,
     PdaUser,
+    PersohubClub,
     PersohubCommunity,
 )
 from persohub_schemas import (
     PersohubAdminEventCreateRequest,
     PersohubAdminEventResponse,
+    PersohubAdminEventSympoAssignRequest,
+    PersohubAdminEventSympoAssignResponse,
     PersohubAdminEventUpdateRequest,
+    PersohubAdminSympoOption,
 )
 from security import require_persohub_community
 
@@ -132,7 +138,7 @@ def _enum_value(value) -> str:
     return str(value)
 
 
-def _serialize_event(event: CommunityEvent) -> PersohubAdminEventResponse:
+def _serialize_event(event: CommunityEvent, sympo: Optional[CommunitySympo] = None) -> PersohubAdminEventResponse:
     return PersohubAdminEventResponse(
         id=event.id,
         slug=event.slug,
@@ -142,6 +148,7 @@ def _serialize_event(event: CommunityEvent) -> PersohubAdminEventResponse:
         description=event.description,
         start_date=event.start_date,
         end_date=event.end_date,
+        event_time=event.event_time,
         poster_url=event.poster_url,
         whatsapp_url=event.whatsapp_url,
         external_url_name=str(event.external_url_name or _DEFAULT_EVENT_ACTION),
@@ -155,6 +162,8 @@ def _serialize_event(event: CommunityEvent) -> PersohubAdminEventResponse:
         team_max_size=event.team_max_size,
         is_visible=bool(event.is_visible),
         status=_enum_value(event.status),
+        sympo_id=(sympo.id if sympo else None),
+        sympo_name=(sympo.name if sympo else None),
         created_at=event.created_at,
         updated_at=event.updated_at,
     )
@@ -208,21 +217,72 @@ def _log_community_event_action(
 
 @router.get("/persohub/admin/events", response_model=List[PersohubAdminEventResponse])
 def list_admin_events(
+    response: Response,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    q: Optional[str] = Query(default=None),
     community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
     if not community.club_id:
+        response.headers["X-Total-Count"] = "0"
+        response.headers["X-Page"] = str(page)
+        response.headers["X-Page-Size"] = str(page_size)
         return []
     root_community = _resolve_root_community(db, community.club_id)
     if not root_community:
+        response.headers["X-Total-Count"] = "0"
+        response.headers["X-Page"] = str(page)
+        response.headers["X-Page-Size"] = str(page_size)
         return []
-    events = (
-        db.query(CommunityEvent)
+    query = (
+        db.query(CommunityEvent, CommunitySympo)
+        .outerjoin(CommunitySympoEvent, CommunitySympoEvent.event_id == CommunityEvent.id)
+        .outerjoin(CommunitySympo, CommunitySympo.id == CommunitySympoEvent.sympo_id)
         .filter(CommunityEvent.community_id == root_community.id)
-        .order_by(CommunityEvent.created_at.desc(), CommunityEvent.id.desc())
+    )
+    if q and q.strip():
+        keyword = f"%{q.strip()}%"
+        query = query.filter(
+            or_(
+                CommunityEvent.title.ilike(keyword),
+                CommunityEvent.slug.ilike(keyword),
+                CommunityEvent.event_code.ilike(keyword),
+            )
+        )
+    total_count = int(query.count())
+    rows = (
+        query.order_by(CommunityEvent.created_at.desc(), CommunityEvent.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
         .all()
     )
-    return [_serialize_event(event) for event in events]
+    response.headers["X-Total-Count"] = str(total_count)
+    response.headers["X-Page"] = str(page)
+    response.headers["X-Page-Size"] = str(page_size)
+    return [_serialize_event(event, sympo) for event, sympo in rows]
+
+
+@router.get("/persohub/admin/sympo-options", response_model=List[PersohubAdminSympoOption])
+def list_admin_sympo_options(
+    _: PersohubCommunity = Depends(require_persohub_community),
+    db: Session = Depends(get_db),
+):
+    rows = (
+        db.query(CommunitySympo, PersohubClub)
+        .join(PersohubClub, PersohubClub.id == CommunitySympo.organising_club_id)
+        .order_by(CommunitySympo.name.asc(), CommunitySympo.id.asc())
+        .all()
+    )
+    return [
+        PersohubAdminSympoOption(
+            id=sympo.id,
+            name=sympo.name,
+            organising_club_id=sympo.organising_club_id,
+            organising_club_name=club.name,
+        )
+        for sympo, club in rows
+    ]
 
 
 @router.post("/persohub/admin/events", response_model=PersohubAdminEventResponse)
@@ -260,6 +320,7 @@ def create_admin_event(
         description=payload.description,
         start_date=payload.start_date,
         end_date=payload.end_date,
+        event_time=payload.event_time,
         poster_url=payload.poster_url,
         whatsapp_url=payload.whatsapp_url,
         external_url_name=str(payload.external_url_name or _DEFAULT_EVENT_ACTION).strip() or _DEFAULT_EVENT_ACTION,
@@ -371,6 +432,69 @@ def update_admin_event(
     db.commit()
     db.refresh(event)
     return _serialize_event(event)
+
+
+@router.put("/persohub/admin/events/{slug}/sympo", response_model=PersohubAdminEventSympoAssignResponse)
+def assign_admin_event_sympo(
+    slug: str,
+    payload: PersohubAdminEventSympoAssignRequest,
+    request: Request,
+    community: PersohubCommunity = Depends(require_persohub_community),
+    db: Session = Depends(get_db),
+):
+    if not community.club_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Community is not linked to a club")
+    _require_root_editor(community)
+
+    root_community = _resolve_root_community(db, community.club_id)
+    if not root_community:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Root community not found")
+
+    event = _get_event_or_404(db, slug, root_community.id)
+    existing = db.query(CommunitySympoEvent).filter(CommunitySympoEvent.event_id == event.id).first()
+    previous_sympo_id = existing.sympo_id if existing else None
+
+    next_sympo = None
+    if payload.sympo_id is not None:
+        next_sympo = db.query(CommunitySympo).filter(CommunitySympo.id == payload.sympo_id).first()
+        if not next_sympo:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sympo not found")
+
+    if existing and next_sympo and existing.sympo_id == next_sympo.id:
+        return PersohubAdminEventSympoAssignResponse(
+            event_id=event.id,
+            sympo_id=next_sympo.id,
+            sympo_name=next_sympo.name,
+            message="Event already mapped to selected sympo",
+        )
+
+    if existing:
+        db.delete(existing)
+        db.flush()
+    if next_sympo:
+        db.add(CommunitySympoEvent(sympo_id=next_sympo.id, event_id=event.id))
+
+    _log_community_event_action(
+        db,
+        community,
+        action="assign_community_event_sympo",
+        method=request.method,
+        path=request.url.path,
+        event=event,
+        meta={
+            "event_id": event.id,
+            "slug": event.slug,
+            "previous_sympo_id": previous_sympo_id,
+            "next_sympo_id": (next_sympo.id if next_sympo else None),
+        },
+    )
+    db.commit()
+    return PersohubAdminEventSympoAssignResponse(
+        event_id=event.id,
+        sympo_id=(next_sympo.id if next_sympo else None),
+        sympo_name=(next_sympo.name if next_sympo else None),
+        message=("Event unassigned from sympo" if next_sympo is None else "Event mapped to sympo"),
+    )
 
 
 @router.delete("/persohub/admin/events/{slug}")

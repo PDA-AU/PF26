@@ -25,6 +25,7 @@ const initialForm = {
     description: '',
     start_date: '',
     end_date: '',
+    event_time: '',
     poster_url: '',
     whatsapp_url: '',
     external_url_name: 'Click To Register',
@@ -36,6 +37,7 @@ const initialForm = {
     round_count: 1,
     team_min_size: '',
     team_max_size: '',
+    sympo_id: 'none',
 };
 
 const makePosterAssetId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -70,11 +72,19 @@ const toDateInputValue = (value) => {
     return raw.slice(0, 10);
 };
 
+const toTimeInputValue = (value) => {
+    if (!value) return '';
+    const raw = String(value).trim();
+    if (!raw) return '';
+    return raw.slice(0, 5);
+};
+
 const toEventForm = (eventRow = {}) => ({
     title: eventRow.title || '',
     description: eventRow.description || '',
     start_date: toDateInputValue(eventRow.start_date),
     end_date: toDateInputValue(eventRow.end_date),
+    event_time: toTimeInputValue(eventRow.event_time),
     poster_url: eventRow.poster_url || '',
     whatsapp_url: eventRow.whatsapp_url || '',
     external_url_name: eventRow.external_url_name || 'Click To Register',
@@ -86,6 +96,7 @@ const toEventForm = (eventRow = {}) => ({
     round_count: Number(eventRow.round_count || 1),
     team_min_size: eventRow.team_min_size ?? '',
     team_max_size: eventRow.team_max_size ?? '',
+    sympo_id: eventRow.sympo_id ? String(eventRow.sympo_id) : 'none',
 });
 
 const formatDateLabel = (value) => {
@@ -96,11 +107,18 @@ const formatDateLabel = (value) => {
     return parsed.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
+const formatTimeLabel = (value) => {
+    const timeValue = toTimeInputValue(value);
+    if (!timeValue) return 'TBD';
+    return timeValue;
+};
+
 const buildEventPayload = (formState, posterUrl) => ({
     title: formState.title.trim(),
     description: formState.description?.trim() || '',
     start_date: formState.start_date || null,
     end_date: formState.end_date || null,
+    event_time: formState.event_time || null,
     poster_url: posterUrl,
     whatsapp_url: formState.whatsapp_url?.trim() || null,
     external_url_name: formState.external_url_name?.trim() || 'Click To Register',
@@ -126,6 +144,7 @@ function EventFormFields({
     posterInputId,
     posterAssets,
     setPosterAssets,
+    sympoOptions,
 }) {
     return (
         <>
@@ -164,6 +183,22 @@ function EventFormFields({
             <div>
                 <Label>End Date</Label>
                 <Input type="date" value={form.end_date} onChange={(e) => setForm((prev) => ({ ...prev, end_date: e.target.value }))} />
+            </div>
+            <div>
+                <Label>Time</Label>
+                <Input type="time" value={form.event_time} onChange={(e) => setForm((prev) => ({ ...prev, event_time: e.target.value }))} />
+            </div>
+            <div>
+                <Label>Sympo</Label>
+                <Select value={form.sympo_id} onValueChange={(value) => setForm((prev) => ({ ...prev, sympo_id: value }))}>
+                    <SelectTrigger><SelectValue placeholder="No sympo" /></SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="none">No sympo</SelectItem>
+                        {sympoOptions.map((sympo) => (
+                            <SelectItem key={sympo.id} value={String(sympo.id)}>{sympo.name}</SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
             </div>
             <div className="md:col-span-2">
                 <Label htmlFor={posterInputId}>Poster Upload (4:5 only, single)</Label>
@@ -328,6 +363,14 @@ export default function PersohubAdminEventsPage() {
     const canMutate = Boolean(community?.is_root);
 
     const [events, setEvents] = useState([]);
+    const [sympoOptions, setSympoOptions] = useState([]);
+    const [eventSympoDrafts, setEventSympoDrafts] = useState({});
+    const [assigningSympoSlug, setAssigningSympoSlug] = useState('');
+    const [query, setQuery] = useState('');
+    const [queryDebounced, setQueryDebounced] = useState('');
+    const [page, setPage] = useState(1);
+    const [pageSize] = useState(20);
+    const [totalCount, setTotalCount] = useState(0);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [savingEdit, setSavingEdit] = useState(false);
@@ -345,26 +388,61 @@ export default function PersohubAdminEventsPage() {
     const [editForm, setEditForm] = useState(initialForm);
     const [expandedDescriptions, setExpandedDescriptions] = useState({});
 
+    useEffect(() => {
+        const timer = setTimeout(() => setQueryDebounced(query.trim()), 250);
+        return () => clearTimeout(timer);
+    }, [query]);
+
     const fetchEvents = useCallback(async () => {
         if (!community) {
             setEvents([]);
+            setTotalCount(0);
             setLoading(false);
             return;
         }
         setLoading(true);
         try {
-            const response = await persohubAdminApi.listAdminEvents();
-            setEvents(response || []);
+            const response = await persohubAdminApi.listAdminEvents({
+                page,
+                page_size: pageSize,
+                q: queryDebounced || undefined,
+            });
+            const rows = response?.items || [];
+            setEvents(rows);
+            setTotalCount(Number(response?.totalCount || 0));
+            setEventSympoDrafts(
+                rows.reduce((acc, eventRow) => {
+                    acc[eventRow.slug] = eventRow.sympo_id ? String(eventRow.sympo_id) : 'none';
+                    return acc;
+                }, {})
+            );
         } catch (error) {
             toast.error(persohubAdminApi.parseApiError(error, 'Failed to load events'));
         } finally {
             setLoading(false);
+        }
+    }, [community, page, pageSize, queryDebounced]);
+
+    const fetchSympoOptions = useCallback(async () => {
+        if (!community) {
+            setSympoOptions([]);
+            return;
+        }
+        try {
+            const rows = await persohubAdminApi.listAdminSympoOptions();
+            setSympoOptions(rows || []);
+        } catch (error) {
+            toast.error(persohubAdminApi.parseApiError(error, 'Failed to load sympos'));
         }
     }, [community]);
 
     useEffect(() => {
         fetchEvents();
     }, [fetchEvents]);
+
+    useEffect(() => {
+        fetchSympoOptions();
+    }, [fetchSympoOptions]);
 
     const validateDateRange = (formState) => {
         if (formState.start_date && formState.end_date && formState.start_date > formState.end_date) {
@@ -392,7 +470,10 @@ export default function PersohubAdminEventsPage() {
                 posterUrl = serializePosterAssets([{ url: currentAsset.url, aspect_ratio: '4:5' }]);
             }
             const payload = buildEventPayload(form, posterUrl);
-            await persohubAdminApi.createAdminEvent(payload);
+            const createdEvent = await persohubAdminApi.createAdminEvent(payload);
+            if (form.sympo_id && form.sympo_id !== 'none') {
+                await persohubAdminApi.assignAdminEventSympo(createdEvent.slug, { sympo_id: Number(form.sympo_id) });
+            }
             toast.success('Event created');
             setForm(initialForm);
             releasePosterPreviewUrls(posterAssets);
@@ -444,6 +525,9 @@ export default function PersohubAdminEventsPage() {
             }
             const payload = buildEventPayload(editForm, posterUrl);
             await persohubAdminApi.updateAdminEvent(editTarget.slug, payload);
+            await persohubAdminApi.assignAdminEventSympo(editTarget.slug, {
+                sympo_id: editForm.sympo_id === 'none' ? null : Number(editForm.sympo_id),
+            });
             toast.success('Event updated');
             closeEditDialog(true);
             fetchEvents();
@@ -499,6 +583,28 @@ export default function PersohubAdminEventsPage() {
         }
     };
 
+    const assignEventSympo = async (eventRow) => {
+        if (!canMutate || assigningSympoSlug) return;
+        const currentValue = eventRow.sympo_id ? String(eventRow.sympo_id) : 'none';
+        const draftValue = eventSympoDrafts[eventRow.slug] || currentValue;
+        if (currentValue === draftValue) return;
+        setAssigningSympoSlug(eventRow.slug);
+        try {
+            const payload = { sympo_id: draftValue === 'none' ? null : Number(draftValue) };
+            const response = await persohubAdminApi.assignAdminEventSympo(eventRow.slug, payload);
+            toast.success(response?.message || 'Event mapping updated');
+            fetchEvents();
+        } catch (error) {
+            toast.error(persohubAdminApi.parseApiError(error, 'Failed to update event mapping'));
+        } finally {
+            setAssigningSympoSlug('');
+        }
+    };
+
+    const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+    const startIndex = totalCount ? ((page - 1) * pageSize) + 1 : 0;
+    const endIndex = totalCount ? Math.min(totalCount, page * pageSize) : 0;
+
     return (
         <PersohubAdminLayout
             title="Persohub Admin Events"
@@ -521,6 +627,7 @@ export default function PersohubAdminEventsPage() {
                             posterInputId="persohub-event-poster-upload"
                             posterAssets={posterAssets}
                             setPosterAssets={setPosterAssets}
+                            sympoOptions={sympoOptions}
                         />
                         <div className="md:col-span-2 flex justify-end">
                             <Button type="submit" className="bg-[#f6c347] text-black hover:bg-[#ffd16b]" disabled={saving || uploadingPoster}>
@@ -532,7 +639,18 @@ export default function PersohubAdminEventsPage() {
             ) : null}
 
             <section className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
-                <h2 className="text-2xl font-heading font-black">Root-Owned Club Events</h2>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <h2 className="text-2xl font-heading font-black">Root-Owned Club Events</h2>
+                    <Input
+                        value={query}
+                        onChange={(e) => {
+                            setQuery(e.target.value);
+                            setPage(1);
+                        }}
+                        placeholder="Search events"
+                        className="sm:max-w-sm"
+                    />
+                </div>
                 {loading ? (
                     <p className="mt-4 text-sm text-slate-500">Loading...</p>
                 ) : events.length === 0 ? (
@@ -584,13 +702,47 @@ export default function PersohubAdminEventsPage() {
                                         </button>
                                     ) : null}
                                     <p className="mt-2 text-xs font-medium text-slate-500">
-                                        Start: {formatDateLabel(eventRow.start_date)} · End: {formatDateLabel(eventRow.end_date)}
+                                        Start: {formatDateLabel(eventRow.start_date)} · End: {formatDateLabel(eventRow.end_date)} · Time: {formatTimeLabel(eventRow.event_time)}
                                     </p>
                                     <div className="mt-4 flex flex-wrap gap-2 text-xs">
                                         <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.event_type}</span>
                                         <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.format}</span>
                                         <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.participant_mode}</span>
                                         <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.template_option}</span>
+                                    </div>
+                                    <div className="mt-4 rounded-xl border border-black/10 bg-white p-3">
+                                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Sympo Mapping</p>
+                                        <p className="mt-1 text-xs text-slate-500">Current: {eventRow.sympo_name || 'No sympo'}</p>
+                                        {canMutate ? (
+                                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                                                <Select
+                                                    value={eventSympoDrafts[eventRow.slug] || (eventRow.sympo_id ? String(eventRow.sympo_id) : 'none')}
+                                                    onValueChange={(value) => setEventSympoDrafts((prev) => ({ ...prev, [eventRow.slug]: value }))}
+                                                >
+                                                    <SelectTrigger className="w-full sm:w-[260px]">
+                                                        <SelectValue placeholder="Select sympo" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="none">No sympo</SelectItem>
+                                                        {sympoOptions.map((sympo) => (
+                                                            <SelectItem key={sympo.id} value={String(sympo.id)}>{sympo.name}</SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                                <Button
+                                                    size="sm"
+                                                    className="bg-[#11131a] text-white hover:bg-[#1f2330]"
+                                                    disabled={
+                                                        assigningSympoSlug === eventRow.slug
+                                                        || (eventSympoDrafts[eventRow.slug] || (eventRow.sympo_id ? String(eventRow.sympo_id) : 'none'))
+                                                            === (eventRow.sympo_id ? String(eventRow.sympo_id) : 'none')
+                                                    }
+                                                    onClick={() => assignEventSympo(eventRow)}
+                                                >
+                                                    {assigningSympoSlug === eventRow.slug ? 'Saving...' : 'Save Sympo'}
+                                                </Button>
+                                            </div>
+                                        ) : null}
                                     </div>
 
                                     {canMutate ? (
@@ -615,6 +767,28 @@ export default function PersohubAdminEventsPage() {
                         })}
                     </div>
                 )}
+                <div className="mt-5 flex items-center justify-between gap-2 text-sm">
+                    <p className="text-slate-500">Showing {startIndex}-{endIndex} of {totalCount}</p>
+                    <div className="flex items-center gap-2">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                            disabled={loading || page <= 1}
+                        >
+                            Prev
+                        </Button>
+                        <span className="text-xs text-slate-600">Page {page} / {totalPages}</span>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+                            disabled={loading || page >= totalPages}
+                        >
+                            Next
+                        </Button>
+                    </div>
+                </div>
             </section>
 
             <Dialog open={editDialogOpen} onOpenChange={(open) => (open ? setEditDialogOpen(true) : closeEditDialog())}>
@@ -629,6 +803,7 @@ export default function PersohubAdminEventsPage() {
                             posterInputId="persohub-event-poster-upload-edit"
                             posterAssets={editPosterAssets}
                             setPosterAssets={setEditPosterAssets}
+                            sympoOptions={sympoOptions}
                         />
                         <div className="md:col-span-2 flex justify-end gap-2">
                             <Button type="button" variant="outline" className="border-black/20" onClick={() => closeEditDialog()} disabled={savingEdit || uploadingEditPoster}>

@@ -892,6 +892,21 @@ class CcCommunityEventOption(BaseModel):
     title: str
     community_id: int
     community_name: str
+    sympo_id: Optional[int] = None
+    sympo_name: Optional[str] = None
+
+
+class CcCommunityEventSympoAssignRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sympo_id: Optional[int] = Field(default=None, ge=1)
+
+
+class CcCommunityEventSympoAssignResponse(BaseModel):
+    event_id: int
+    sympo_id: Optional[int] = None
+    sympo_name: Optional[str] = None
+    message: str
 
 
 # Dashboard Stats

@@ -1253,6 +1253,7 @@ def ensure_community_event_tables(engine):
                     description TEXT,
                     start_date DATE,
                     end_date DATE,
+                    event_time TIME,
                     poster_url TEXT,
                     whatsapp_url VARCHAR(500),
                     external_url_name VARCHAR(120) NOT NULL DEFAULT 'Join whatsapp channel',
@@ -1274,6 +1275,7 @@ def ensure_community_event_tables(engine):
         )
         conn.execute(text("ALTER TABLE community_events ADD COLUMN IF NOT EXISTS start_date DATE"))
         conn.execute(text("ALTER TABLE community_events ADD COLUMN IF NOT EXISTS end_date DATE"))
+        conn.execute(text("ALTER TABLE community_events ADD COLUMN IF NOT EXISTS event_time TIME"))
         conn.execute(text("ALTER TABLE community_events ADD COLUMN IF NOT EXISTS whatsapp_url VARCHAR(500)"))
         conn.execute(
             text(

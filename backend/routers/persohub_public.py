@@ -145,6 +145,7 @@ def _serialize_chakravyuha_event(event: CommunityEvent, community: PersohubCommu
         "description": event.description,
         "start_date": event.start_date.isoformat() if event.start_date else None,
         "end_date": event.end_date.isoformat() if event.end_date else None,
+        "event_time": (event.event_time.isoformat() if event.event_time else None),
         "poster_url": event.poster_url,
         "whatsapp_url": event.whatsapp_url,
         "external_url_name": event.external_url_name,
