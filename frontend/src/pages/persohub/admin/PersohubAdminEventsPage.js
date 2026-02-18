@@ -152,16 +152,6 @@ function EventFormFields({
                         <li><code>1. step one</code>, <code>2. step two</code> for numbered lines.</li>
                     </ul>
                 </div>
-                <div className="mt-3 rounded-lg border border-black/10 bg-white p-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Parsed Preview</p>
-                    <div className="mt-2 space-y-2 text-sm text-slate-700">
-                        <ParsedDescription
-                            description={form.description}
-                            emptyText="No description preview yet."
-                            listClassName="list-disc space-y-1 pl-5"
-                        />
-                    </div>
-                </div>
             </div>
             <div>
                 <Label>Start Date</Label>
