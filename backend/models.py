@@ -461,6 +461,43 @@ class CommunityEvent(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
+class CommunitySympoLegacy(Base):
+    __tablename__ = "community_sympo"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    organising_club_id = Column(Integer, ForeignKey("persohub_clubs.id"), nullable=False, index=True)
+    event_id = Column(Integer, ForeignKey("community_events.id"), nullable=False, index=True)
+    content = Column(JSON, nullable=True)
+
+
+class CommunitySympo(Base):
+    __tablename__ = "community_sympos"
+    __table_args__ = (
+        UniqueConstraint("organising_club_id", "name", name="uq_community_sympos_club_name"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    organising_club_id = Column(Integer, ForeignKey("persohub_clubs.id"), nullable=False, index=True)
+    content = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class CommunitySympoEvent(Base):
+    __tablename__ = "community_sympo_events"
+    __table_args__ = (
+        UniqueConstraint("sympo_id", "event_id", name="uq_community_sympo_events_pair"),
+        UniqueConstraint("event_id", name="uq_community_sympo_events_event"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    sympo_id = Column(Integer, ForeignKey("community_sympos.id"), nullable=False, index=True)
+    event_id = Column(Integer, ForeignKey("community_events.id"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class CommunityEventRegistration(Base):
     __tablename__ = "community_event_registrations"
     __table_args__ = (
@@ -638,6 +675,7 @@ class PersohubClub(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(120), unique=True, nullable=False, index=True)
+    profile_id = Column(String(64), unique=True, nullable=False, index=True)
     club_url = Column(String(500), nullable=True)
     club_logo_url = Column(String(500), nullable=True)
     club_tagline = Column(String(255), nullable=True)

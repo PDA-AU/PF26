@@ -15,6 +15,7 @@ import SuperAdmin from "@/pages/HomeAdmin/SuperAdmin";
 import LogsAdmin from "@/pages/HomeAdmin/LogsAdmin";
 import RecruitmentsAdmin from "@/pages/HomeAdmin/RecruitmentsAdmin";
 import EmailAdmin from "@/pages/HomeAdmin/EmailAdmin";
+import CCAdmin from "@/pages/HomeAdmin/CCAdmin";
 import AdminEvents from "@/pages/events/AdminEvents";
 import EventDashboard from "@/pages/events/EventDashboard";
 import EventAdminDashboardPage from "@/pages/events/admin/EventAdminDashboardPage";
@@ -36,6 +37,7 @@ import PdaResetPassword from "@/pages/pda/ResetPassword";
 import PersohubFeedPage from "@/pages/persohub/PersohubFeedPage";
 import PersohubPostPage from "@/pages/persohub/PersohubPostPage";
 import PersohubProfilePage from "@/pages/persohub/PersohubProfilePage";
+import ChakravyuhaTmpEditorPage from "@/pages/persohub/tmp/ChakravyuhaTmpEditorPage";
 import PersohubAdminEntryPage from "@/pages/persohub/admin/PersohubAdminEntryPage";
 import PersohubAdminProfilePage from "@/pages/persohub/admin/PersohubAdminProfilePage";
 
@@ -112,6 +114,11 @@ function AppRoutes() {
                     <EmailAdmin />
                 </ProtectedPdaRoute>
             } />
+            <Route path="/admin/cc" element={
+                <ProtectedPdaRoute requireSuperAdmin>
+                    <CCAdmin />
+                </ProtectedPdaRoute>
+            } />
             <Route path="/admin/events" element={
                 <ProtectedPdaRoute requireEvents>
                     <AdminEvents />
@@ -177,6 +184,11 @@ function AppRoutes() {
             <Route path="/events/:eventSlug/:profileName" element={<EventDashboard />} />
             <Route path="/persohub" element={<PersohubFeedPage />} />
             <Route path="/persohub/p/:slugToken" element={<PersohubPostPage />} />
+            <Route path="/persohub/tmp/chakravyuha" element={
+                <ProtectedPdaRoute requireSuperAdmin>
+                    <ChakravyuhaTmpEditorPage />
+                </ProtectedPdaRoute>
+            } />
             <Route path="/persohub/admin" element={<PersohubAdminEntryPage />} />
             <Route path="/persohub/admin/profile" element={<PersohubAdminProfilePage />} />
             <Route path="/persohub/:profileName" element={<PersohubProfilePage />} />

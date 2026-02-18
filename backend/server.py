@@ -45,7 +45,7 @@ from migrations import (
     ensure_persohub_defaults,
 )
 
-from routers import public, auth_pda, pda_public, pda_admin, superadmin
+from routers import public, auth_pda, pda_public, pda_admin, superadmin, pda_cc_admin
 from routers import pda_events, pda_events_admin
 from routers import persohub_public, persohub_community_auth, persohub_community_admin, persohub_admin_profile
 
@@ -180,6 +180,7 @@ app.include_router(public.router, prefix="/api")
 app.include_router(auth_pda.router, prefix="/api")
 app.include_router(pda_public.router, prefix="/api")
 app.include_router(pda_admin.router, prefix="/api")
+app.include_router(pda_cc_admin.router, prefix="/api")
 app.include_router(superadmin.router, prefix="/api")
 app.include_router(pda_events.router, prefix="/api")
 app.include_router(pda_events_admin.router, prefix="/api")

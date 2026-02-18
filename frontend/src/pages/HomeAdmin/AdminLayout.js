@@ -67,7 +67,7 @@ export default function AdminLayout({ title, subtitle, children, allowEventAdmin
     }
 
     const navItems = isSuperAdmin
-        ? [...baseNavItems, { label: 'Recruitments', path: '/admin/recruitments' }, { label: 'Logs', path: '/admin/logs' }, { label: 'Superadmin', path: '/admin/superadmin' }]
+        ? [...baseNavItems, { label: 'C&C', path: '/admin/cc' }, { label: 'Recruitments', path: '/admin/recruitments' }, { label: 'Logs', path: '/admin/logs' }, { label: 'Superadmin', path: '/admin/superadmin' }]
         : baseNavItems.filter((item) => item.path !== '/admin/email');
 
     const navClass = (path) => (

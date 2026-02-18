@@ -139,6 +139,16 @@ def _normalize_profile_seed(name: str) -> str:
     return value[:32]
 
 
+def _slugify_club_profile_id(raw: str) -> str:
+    value = str(raw or "").strip().lower()
+    value = re.sub(r"[\s_]+", "-", value)
+    value = re.sub(r"[^a-z0-9-]+", "", value)
+    value = re.sub(r"-{2,}", "-", value).strip("-")
+    if len(value) < 3:
+        value = "club"
+    return value[:64]
+
+
 def ensure_pda_users_profile_name_column(engine):
     with engine.begin() as conn:
         if not _table_exists(conn, "users"):
@@ -1223,6 +1233,50 @@ def ensure_community_event_tables(engine):
         conn.execute(
             text(
                 """
+                CREATE TABLE IF NOT EXISTS community_sympo (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL,
+                    organising_club_id INTEGER NOT NULL REFERENCES persohub_clubs(id) ON DELETE RESTRICT,
+                    event_id INTEGER NOT NULL REFERENCES community_events(id) ON DELETE CASCADE,
+                    content JSONB
+                )
+                """
+            )
+        )
+        conn.execute(text("ALTER TABLE community_sympo ADD COLUMN IF NOT EXISTS content JSONB"))
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS community_sympos (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL,
+                    organising_club_id INTEGER NOT NULL REFERENCES persohub_clubs(id) ON DELETE CASCADE,
+                    content JSONB,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ,
+                    CONSTRAINT uq_community_sympos_club_name UNIQUE (organising_club_id, name)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS community_sympo_events (
+                    id SERIAL PRIMARY KEY,
+                    sympo_id INTEGER NOT NULL REFERENCES community_sympos(id) ON DELETE CASCADE,
+                    event_id INTEGER NOT NULL REFERENCES community_events(id) ON DELETE CASCADE,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    CONSTRAINT uq_community_sympo_events_pair UNIQUE (sympo_id, event_id),
+                    CONSTRAINT uq_community_sympo_events_event UNIQUE (event_id)
+                )
+                """
+            )
+        )
+
+        conn.execute(
+            text(
+                """
                 CREATE TABLE IF NOT EXISTS community_event_teams (
                     id SERIAL PRIMARY KEY,
                     event_id INTEGER NOT NULL REFERENCES community_events(id) ON DELETE CASCADE,
@@ -1425,6 +1479,10 @@ def ensure_community_event_tables(engine):
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_attendance_event_round ON community_event_attendance(event_id, round_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_scores_event_round ON community_event_scores(event_id, round_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_badges_event ON community_event_badges(event_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_sympo_organising_club ON community_sympo(organising_club_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_sympo_event ON community_sympo(event_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_sympos_organising_club ON community_sympos(organising_club_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_sympo_events_event ON community_sympo_events(event_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_logs_event_created ON community_event_logs(event_id, created_at DESC)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_logs_slug_created ON community_event_logs(event_slug, created_at DESC)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_logs_admin_created ON community_event_logs(admin_id, created_at DESC)"))
@@ -1438,6 +1496,79 @@ def ensure_community_event_tables(engine):
                 """
             )
         )
+
+        # Backfill legacy community_sympo rows into normalized community_sympos + community_sympo_events.
+        if _table_exists(conn, "community_sympo"):
+            legacy_rows = conn.execute(
+                text(
+                    """
+                    SELECT id, name, organising_club_id, event_id, content
+                    FROM community_sympo
+                    ORDER BY id ASC
+                    """
+                )
+            ).mappings().all()
+            for row in legacy_rows:
+                sympo_name = str(row.get("name") or "").strip()
+                if not sympo_name:
+                    continue
+                club_id = row.get("organising_club_id")
+                event_id = row.get("event_id")
+                if not club_id or not event_id:
+                    continue
+
+                existing_sympo_id = conn.execute(
+                    text(
+                        """
+                        SELECT id
+                        FROM community_sympos
+                        WHERE organising_club_id = :club_id AND name = :name
+                        LIMIT 1
+                        """
+                    ),
+                    {"club_id": club_id, "name": sympo_name},
+                ).scalar()
+
+                content_value = row.get("content")
+                content_json = json.dumps(content_value) if content_value is not None else None
+
+                if existing_sympo_id:
+                    sympo_id = int(existing_sympo_id)
+                    if content_json is not None:
+                        conn.execute(
+                            text(
+                                """
+                                UPDATE community_sympos
+                                SET content = COALESCE(content, CAST(:content AS JSONB))
+                                WHERE id = :sympo_id
+                                """
+                            ),
+                            {"sympo_id": sympo_id, "content": content_json},
+                        )
+                else:
+                    sympo_id = int(
+                        conn.execute(
+                            text(
+                                """
+                                INSERT INTO community_sympos (name, organising_club_id, content)
+                                VALUES (:name, :club_id, CAST(:content AS JSONB))
+                                RETURNING id
+                                """
+                            ),
+                            {"name": sympo_name, "club_id": club_id, "content": content_json},
+                        ).scalar()
+                    )
+
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO community_sympo_events (sympo_id, event_id)
+                        VALUES (:sympo_id, :event_id)
+                        ON CONFLICT DO NOTHING
+                        """
+                    ),
+                    {"sympo_id": sympo_id, "event_id": event_id},
+                )
 
 
 def backfill_pda_event_round_count_once(engine):
@@ -1504,6 +1635,7 @@ def ensure_persohub_tables(engine):
                 CREATE TABLE IF NOT EXISTS persohub_clubs (
                     id SERIAL PRIMARY KEY,
                     name VARCHAR(120) UNIQUE NOT NULL,
+                    profile_id VARCHAR(64) UNIQUE NOT NULL,
                     club_url VARCHAR(500),
                     club_logo_url VARCHAR(500),
                     club_tagline VARCHAR(255),
@@ -1514,6 +1646,7 @@ def ensure_persohub_tables(engine):
                 """
             )
         )
+        conn.execute(text("ALTER TABLE persohub_clubs ADD COLUMN IF NOT EXISTS profile_id VARCHAR(64)"))
         conn.execute(text("ALTER TABLE persohub_clubs ADD COLUMN IF NOT EXISTS club_tagline VARCHAR(255)"))
         conn.execute(text("ALTER TABLE persohub_clubs ADD COLUMN IF NOT EXISTS club_description TEXT"))
 
@@ -1539,6 +1672,84 @@ def ensure_persohub_tables(engine):
         )
         conn.execute(text("ALTER TABLE persohub_communities ADD COLUMN IF NOT EXISTS is_root BOOLEAN NOT NULL DEFAULT FALSE"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_communities_club_id ON persohub_communities(club_id)"))
+
+        # Backfill persohub_clubs.profile_id and enforce uniqueness/non-null.
+        clubs_rows = conn.execute(
+            text(
+                """
+                SELECT
+                    c.id,
+                    c.name,
+                    NULLIF(btrim(c.profile_id), '') AS profile_id,
+                    (
+                        SELECT pc.profile_id
+                        FROM persohub_communities pc
+                        WHERE pc.club_id = c.id
+                          AND pc.is_root = TRUE
+                          AND pc.profile_id IS NOT NULL
+                          AND btrim(pc.profile_id) <> ''
+                        ORDER BY pc.id ASC
+                        LIMIT 1
+                    ) AS root_profile_id,
+                    CASE
+                        WHEN EXISTS (
+                            SELECT 1
+                            FROM persohub_communities pc2
+                            WHERE pc2.club_id = c.id
+                              AND pc2.is_root = TRUE
+                        ) THEN 1 ELSE 0
+                    END AS has_root
+                FROM persohub_clubs c
+                ORDER BY has_root DESC, c.id ASC
+                """
+            )
+        ).mappings().all()
+
+        claimed_profile_ids = set()
+        assignments = []
+        for row in clubs_rows:
+            club_id = int(row["id"])
+            current_profile = row.get("profile_id")
+            root_profile = row.get("root_profile_id")
+            club_name = row.get("name") or f"club-{club_id}"
+
+            candidate = _slugify_club_profile_id(current_profile or root_profile or club_name)
+            if not re.fullmatch(r"[a-z0-9-]{3,64}", candidate):
+                candidate = _slugify_club_profile_id(club_name)
+
+            dedupe = 2
+            final_profile = candidate
+            while final_profile in claimed_profile_ids:
+                suffix = f"-{dedupe}"
+                final_profile = f"{candidate[:64 - len(suffix)]}{suffix}"
+                dedupe += 1
+
+            claimed_profile_ids.add(final_profile)
+            assignments.append(
+                {
+                    "club_id": club_id,
+                    "current_profile": current_profile,
+                    "final_profile": final_profile,
+                }
+            )
+
+        # Use a two-pass update to avoid transient unique collisions while reshuffling IDs.
+        updates = [item for item in assignments if item["current_profile"] != item["final_profile"]]
+        for item in updates:
+            temp_profile = f"tmp-{item['club_id']}-{secrets.token_hex(4)}"
+            conn.execute(
+                text("UPDATE persohub_clubs SET profile_id = :profile_id WHERE id = :club_id"),
+                {"club_id": item["club_id"], "profile_id": temp_profile},
+            )
+
+        for item in updates:
+            conn.execute(
+                text("UPDATE persohub_clubs SET profile_id = :profile_id WHERE id = :club_id"),
+                {"club_id": item["club_id"], "profile_id": item["final_profile"]},
+            )
+
+        conn.execute(text("ALTER TABLE persohub_clubs ALTER COLUMN profile_id SET NOT NULL"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_persohub_clubs_profile_id ON persohub_clubs(profile_id)"))
 
         conn.execute(
             text(

@@ -1,10 +1,11 @@
-from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 from typing import Optional, List, Dict, Any
 from enum import Enum
 from datetime import datetime, date
 from enum import Enum
 import json
 import re
+from urllib.parse import urlparse
 
 
 class DepartmentEnum(str, Enum):
@@ -51,6 +52,32 @@ class ParticipantStatusEnum(str, Enum):
 class RoundModeEnum(str, Enum):
     ONLINE = "Online"
     OFFLINE = "Offline"
+
+
+PROFILE_ID_SLUG_RE = re.compile(r"^[a-z0-9-]{3,64}$")
+
+
+def _normalize_optional_http_url(value: Optional[str], field_name: str, max_length: int = 500) -> Optional[str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if len(raw) > max_length:
+        raise ValueError(f"{field_name} must be at most {max_length} characters")
+    parsed = urlparse(raw)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(f"{field_name} must be a valid http/https URL")
+    return raw
+
+
+def _normalize_optional_logo_url(value: Optional[str], field_name: str, max_length: int = 500) -> Optional[str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if raw.startswith("/"):
+        if len(raw) > max_length:
+            raise ValueError(f"{field_name} must be at most {max_length} characters")
+        return raw
+    return _normalize_optional_http_url(raw, field_name, max_length=max_length)
 
 
 # Auth Schemas
@@ -559,6 +586,312 @@ class PdaAdminCreate(BaseModel):
 
 class PdaAdminPolicyUpdate(BaseModel):
     policy: Dict[str, Any]
+
+
+class CcClubCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, max_length=120)
+    profile_id: str = Field(..., min_length=3, max_length=64)
+    club_url: Optional[str] = Field(default=None, max_length=500)
+    club_logo_url: Optional[str] = Field(default=None, max_length=500)
+    club_tagline: Optional[str] = Field(default=None, max_length=255)
+    club_description: Optional[str] = None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_name(cls, value):
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("name cannot be empty")
+        return normalized
+
+    @field_validator("profile_id", mode="before")
+    @classmethod
+    def normalize_profile_id(cls, value):
+        normalized = str(value or "").strip().lower()
+        if not PROFILE_ID_SLUG_RE.fullmatch(normalized):
+            raise ValueError("profile_id must match [a-z0-9-]{3,64}")
+        return normalized
+
+    @field_validator("club_url", mode="before")
+    @classmethod
+    def normalize_club_url(cls, value):
+        return _normalize_optional_http_url(value, "club_url")
+
+    @field_validator("club_logo_url", mode="before")
+    @classmethod
+    def normalize_logo(cls, value):
+        return _normalize_optional_logo_url(value, "club_logo_url")
+
+    @field_validator("club_tagline", "club_description", mode="before")
+    @classmethod
+    def normalize_optional_text(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+
+class CcClubUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    profile_id: Optional[str] = Field(default=None, min_length=3, max_length=64)
+    club_url: Optional[str] = Field(default=None, max_length=500)
+    club_logo_url: Optional[str] = Field(default=None, max_length=500)
+    club_tagline: Optional[str] = Field(default=None, max_length=255)
+    club_description: Optional[str] = None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_name(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        if not normalized:
+            raise ValueError("name cannot be empty")
+        return normalized
+
+    @field_validator("profile_id", mode="before")
+    @classmethod
+    def normalize_profile_id(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip().lower()
+        if not PROFILE_ID_SLUG_RE.fullmatch(normalized):
+            raise ValueError("profile_id must match [a-z0-9-]{3,64}")
+        return normalized
+
+    @field_validator("club_url", mode="before")
+    @classmethod
+    def normalize_club_url(cls, value):
+        return _normalize_optional_http_url(value, "club_url")
+
+    @field_validator("club_logo_url", mode="before")
+    @classmethod
+    def normalize_logo(cls, value):
+        return _normalize_optional_logo_url(value, "club_logo_url")
+
+    @field_validator("club_tagline", "club_description", mode="before")
+    @classmethod
+    def normalize_optional_text(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+
+class CcClubResponse(BaseModel):
+    id: int
+    name: str
+    profile_id: str
+    club_url: Optional[str] = None
+    club_logo_url: Optional[str] = None
+    club_tagline: Optional[str] = None
+    club_description: Optional[str] = None
+    linked_community_count: int = 0
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class CcCommunityCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, max_length=120)
+    profile_id: str = Field(..., min_length=3, max_length=64)
+    club_id: Optional[int] = Field(default=None, ge=1)
+    admin_id: int = Field(..., ge=1)
+    password: str = Field(..., min_length=8)
+    logo_url: Optional[str] = Field(default=None, max_length=500)
+    description: Optional[str] = None
+    is_active: bool = True
+    is_root: bool = False
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_name(cls, value):
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("name cannot be empty")
+        return normalized
+
+    @field_validator("profile_id", mode="before")
+    @classmethod
+    def normalize_profile_id(cls, value):
+        normalized = str(value or "").strip().lower()
+        if not PROFILE_ID_SLUG_RE.fullmatch(normalized):
+            raise ValueError("profile_id must match [a-z0-9-]{3,64}")
+        return normalized
+
+    @field_validator("logo_url", mode="before")
+    @classmethod
+    def normalize_logo(cls, value):
+        return _normalize_optional_logo_url(value, "logo_url")
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def normalize_description(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+
+class CcCommunityUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    club_id: Optional[int] = Field(default=None, ge=1)
+    admin_id: Optional[int] = Field(default=None, ge=1)
+    logo_url: Optional[str] = Field(default=None, max_length=500)
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+    is_root: Optional[bool] = None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_name(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        if not normalized:
+            raise ValueError("name cannot be empty")
+        return normalized
+
+    @field_validator("logo_url", mode="before")
+    @classmethod
+    def normalize_logo(cls, value):
+        return _normalize_optional_logo_url(value, "logo_url")
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def normalize_description(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+
+class CcCommunityResetPasswordRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    new_password: str = Field(..., min_length=8)
+
+
+class CcCommunityResponse(BaseModel):
+    id: int
+    name: str
+    profile_id: str
+    club_id: Optional[int] = None
+    club_name: Optional[str] = None
+    admin_id: int
+    admin_name: Optional[str] = None
+    admin_regno: Optional[str] = None
+    logo_url: Optional[str] = None
+    description: Optional[str] = None
+    is_active: bool
+    is_root: bool
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class CcSympoCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, max_length=255)
+    organising_club_id: int = Field(..., ge=1)
+    event_ids: List[int] = Field(default_factory=list)
+    content: Optional[Dict[str, Any]] = None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_name(cls, value):
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("name cannot be empty")
+        return normalized
+
+    @field_validator("event_ids")
+    @classmethod
+    def normalize_event_ids(cls, values):
+        if values is None:
+            return []
+        deduped = []
+        seen = set()
+        for raw in values:
+            value = int(raw)
+            if value <= 0 or value in seen:
+                continue
+            seen.add(value)
+            deduped.append(value)
+        return deduped
+
+
+class CcSympoUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    organising_club_id: Optional[int] = Field(default=None, ge=1)
+    event_ids: Optional[List[int]] = None
+    content: Optional[Dict[str, Any]] = None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_name(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        if not normalized:
+            raise ValueError("name cannot be empty")
+        return normalized
+
+    @field_validator("event_ids")
+    @classmethod
+    def normalize_event_ids(cls, values):
+        if values is None:
+            return None
+        deduped = []
+        seen = set()
+        for raw in values:
+            value = int(raw)
+            if value <= 0 or value in seen:
+                continue
+            seen.add(value)
+            deduped.append(value)
+        return deduped
+
+
+class CcSympoResponse(BaseModel):
+    id: int
+    name: str
+    organising_club_id: int
+    organising_club_name: Optional[str] = None
+    content: Optional[Dict[str, Any]] = None
+    event_ids: List[int] = Field(default_factory=list)
+    event_titles: List[str] = Field(default_factory=list)
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class CcDeleteSummaryResponse(BaseModel):
+    message: str
+    deleted_counts: Dict[str, int] = Field(default_factory=dict)
+
+
+class CcAdminUserOption(BaseModel):
+    id: int
+    regno: str
+    name: str
+
+
+class CcCommunityEventOption(BaseModel):
+    id: int
+    slug: str
+    event_code: str
+    title: str
+    community_id: int
+    community_name: str
 
 
 # Dashboard Stats

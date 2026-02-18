@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_
@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models import (
+    CommunitySympo,
     PdaEventBadge,
     PdaTeam,
     PdaUser,
@@ -98,6 +99,20 @@ def list_public_club_community_info(
         )
         for community, club in rows
     ]
+
+
+@router.get("/persohub/chakravyuha-26", response_model=Dict[str, Any])
+def get_chakravyuha_public_content(
+    db: Session = Depends(get_db),
+):
+    sympo = (
+        db.query(CommunitySympo)
+        .filter(func.lower(CommunitySympo.name) == "chakravyuha-26")
+        .first()
+    )
+    if not sympo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chakravyuha content not found")
+    return sympo.content or {}
 
 
 @router.post("/persohub/communities/{profile_id}/follow-toggle")

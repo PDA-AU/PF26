@@ -104,6 +104,7 @@ def seed_mock_data(
 
         club = PersohubClub(
             name=f"{MOCK_MARKER}Club_{stamp}",
+            profile_id=f"mockph-club-{stamp[-8:]}",
             club_url="https://pda.mitindia.edu/mock",
             club_logo_url=f"https://placehold.co/400x400?text={MOCK_MARKER}CLUB",
         )
