@@ -40,6 +40,7 @@ import PersohubProfilePage from "@/pages/persohub/PersohubProfilePage";
 import ChakravyuhaTmpEditorPage from "@/pages/persohub/tmp/ChakravyuhaTmpEditorPage";
 import PersohubAdminEntryPage from "@/pages/persohub/admin/PersohubAdminEntryPage";
 import PersohubAdminProfilePage from "@/pages/persohub/admin/PersohubAdminProfilePage";
+import PersohubAdminEventsPage from "@/pages/persohub/admin/PersohubAdminEventsPage";
 
 // Protected Route Components
 const ProtectedPdaRoute = ({ children, requirePf = false, requireHome = false, requireSuperAdmin = false, requireEvents = false }) => {
@@ -191,6 +192,7 @@ function AppRoutes() {
             } />
             <Route path="/persohub/admin" element={<PersohubAdminEntryPage />} />
             <Route path="/persohub/admin/profile" element={<PersohubAdminProfilePage />} />
+            <Route path="/persohub/admin/events" element={<PersohubAdminEventsPage />} />
             <Route path="/persohub/:profileName" element={<PersohubProfilePage />} />
 
             {/* Catch all */}

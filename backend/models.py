@@ -188,6 +188,11 @@ class PdaGallery(Base):
 
 
 class PdaEventType(enum.Enum):
+    TECHNICAL = "Technical"
+    FUNTECHINICAL = "FunTechinical"
+    HACKATHON = "Hackathon"
+    SIGNATURE = "Signature"
+    NONTECHINICAL = "NonTechinical"
     SESSION = "Session"
     WORKSHOP = "Workshop"
     EVENT = "Event"

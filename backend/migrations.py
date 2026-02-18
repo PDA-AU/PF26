@@ -1176,6 +1176,67 @@ def ensure_pda_event_tables(engine):
                     """
                 )
             )
+            conn.execute(
+                text(
+                    """
+                    DO $$
+                    BEGIN
+                        IF EXISTS (
+                            SELECT 1
+                            FROM pg_type
+                            WHERE typname = 'pdaeventtype'
+                        ) THEN
+                            IF NOT EXISTS (
+                                SELECT 1
+                                FROM pg_enum e
+                                JOIN pg_type t ON t.oid = e.enumtypid
+                                WHERE t.typname = 'pdaeventtype'
+                                  AND e.enumlabel = 'TECHNICAL'
+                            ) THEN
+                                ALTER TYPE pdaeventtype ADD VALUE 'TECHNICAL';
+                            END IF;
+                            IF NOT EXISTS (
+                                SELECT 1
+                                FROM pg_enum e
+                                JOIN pg_type t ON t.oid = e.enumtypid
+                                WHERE t.typname = 'pdaeventtype'
+                                  AND e.enumlabel = 'FUNTECHINICAL'
+                            ) THEN
+                                ALTER TYPE pdaeventtype ADD VALUE 'FUNTECHINICAL';
+                            END IF;
+                            IF NOT EXISTS (
+                                SELECT 1
+                                FROM pg_enum e
+                                JOIN pg_type t ON t.oid = e.enumtypid
+                                WHERE t.typname = 'pdaeventtype'
+                                  AND e.enumlabel = 'HACKATHON'
+                            ) THEN
+                                ALTER TYPE pdaeventtype ADD VALUE 'HACKATHON';
+                            END IF;
+                            IF NOT EXISTS (
+                                SELECT 1
+                                FROM pg_enum e
+                                JOIN pg_type t ON t.oid = e.enumtypid
+                                WHERE t.typname = 'pdaeventtype'
+                                  AND e.enumlabel = 'SIGNATURE'
+                            ) THEN
+                                ALTER TYPE pdaeventtype ADD VALUE 'SIGNATURE';
+                            END IF;
+                            IF NOT EXISTS (
+                                SELECT 1
+                                FROM pg_enum e
+                                JOIN pg_type t ON t.oid = e.enumtypid
+                                WHERE t.typname = 'pdaeventtype'
+                                  AND e.enumlabel = 'NONTECHINICAL'
+                            ) THEN
+                                ALTER TYPE pdaeventtype ADD VALUE 'NONTECHINICAL';
+                            END IF;
+                        END IF;
+                    END
+                    $$;
+                    """
+                )
+            )
 
 
 def ensure_community_event_tables(engine):

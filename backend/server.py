@@ -47,7 +47,13 @@ from migrations import (
 
 from routers import public, auth_pda, pda_public, pda_admin, superadmin, pda_cc_admin
 from routers import pda_events, pda_events_admin
-from routers import persohub_public, persohub_community_auth, persohub_community_admin, persohub_admin_profile
+from routers import (
+    persohub_public,
+    persohub_community_auth,
+    persohub_community_admin,
+    persohub_admin_profile,
+    persohub_admin_events,
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -188,3 +194,4 @@ app.include_router(persohub_public.router, prefix="/api")
 app.include_router(persohub_community_auth.router, prefix="/api")
 app.include_router(persohub_community_admin.router, prefix="/api")
 app.include_router(persohub_admin_profile.router, prefix="/api")
+app.include_router(persohub_admin_events.router, prefix="/api")

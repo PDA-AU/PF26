@@ -1,4 +1,6 @@
-from datetime import datetime
+import json
+from datetime import date, datetime
+from enum import Enum
 from typing import List, Optional, Literal
 from urllib.parse import urlparse
 
@@ -56,6 +58,43 @@ def _normalize_optional_logo_url(value: Optional[str], field_name: str, max_leng
     return _normalize_optional_http_url(raw, field_name, max_length=max_length)
 
 
+def _normalize_optional_http_url_or_assets_json(
+    value: Optional[str],
+    field_name: str,
+    max_length: int = 20_000,
+) -> Optional[str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if len(raw) > max_length:
+        raise ValueError(f"{field_name} must be at most {max_length} characters")
+    if raw.startswith("["):
+        try:
+            parsed = json.loads(raw)
+        except Exception as exc:
+            raise ValueError(f"{field_name} must be a valid JSON array") from exc
+        if not isinstance(parsed, list):
+            raise ValueError(f"{field_name} must be a JSON array")
+        normalized_assets = []
+        for index, asset in enumerate(parsed):
+            if not isinstance(asset, dict):
+                raise ValueError(f"{field_name}[{index}] must be an object")
+            normalized_url = _normalize_optional_http_url(
+                asset.get("url") or asset.get("src"),
+                f"{field_name}[{index}].url",
+                max_length=800,
+            )
+            if not normalized_url:
+                raise ValueError(f"{field_name}[{index}].url is required")
+            normalized_asset = {"url": normalized_url}
+            aspect_ratio = str(asset.get("aspect_ratio") or asset.get("ratio") or "").strip()
+            if aspect_ratio:
+                normalized_asset["aspect_ratio"] = aspect_ratio
+            normalized_assets.append(normalized_asset)
+        return json.dumps(normalized_assets, separators=(",", ":"))
+    return _normalize_optional_http_url(raw, field_name, max_length=800)
+
+
 class PersohubAdminCommunityProfile(BaseModel):
     id: int
     name: str
@@ -81,6 +120,178 @@ class PersohubAdminClubProfile(BaseModel):
 class PersohubAdminProfileResponse(BaseModel):
     community: PersohubAdminCommunityProfile
     club: Optional[PersohubAdminClubProfile] = None
+
+
+class PersohubAdminEventTypeEnum(str, Enum):
+    TECHNICAL = "Technical"
+    FUNTECHINICAL = "FunTechinical"
+    HACKATHON = "Hackathon"
+    SIGNATURE = "Signature"
+    NONTECHINICAL = "NonTechinical"
+    SESSION = "Session"
+    WORKSHOP = "Workshop"
+
+
+class PersohubAdminEventFormatEnum(str, Enum):
+    ONLINE = "Online"
+    OFFLINE = "Offline"
+    HYBRID = "Hybrid"
+
+
+class PersohubAdminEventTemplateEnum(str, Enum):
+    ATTENDANCE_ONLY = "attendance_only"
+    ATTENDANCE_SCORING = "attendance_scoring"
+
+
+class PersohubAdminParticipantModeEnum(str, Enum):
+    INDIVIDUAL = "individual"
+    TEAM = "team"
+
+
+class PersohubAdminRoundModeEnum(str, Enum):
+    SINGLE = "single"
+    MULTI = "multi"
+
+
+class PersohubAdminEventStatusEnum(str, Enum):
+    OPEN = "open"
+    CLOSED = "closed"
+
+
+class PersohubAdminEventCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(..., min_length=2, max_length=255)
+    description: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    poster_url: Optional[str] = None
+    whatsapp_url: Optional[str] = None
+    external_url_name: Optional[str] = "Join whatsapp channel"
+    event_type: PersohubAdminEventTypeEnum
+    format: PersohubAdminEventFormatEnum
+    template_option: PersohubAdminEventTemplateEnum
+    participant_mode: PersohubAdminParticipantModeEnum
+    round_mode: PersohubAdminRoundModeEnum
+    round_count: int = Field(1, ge=1, le=20)
+    team_min_size: Optional[int] = Field(None, ge=1, le=100)
+    team_max_size: Optional[int] = Field(None, ge=1, le=100)
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def _normalize_title(cls, value):
+        normalized = str(value or "").strip()
+        if len(normalized) < 2:
+            raise ValueError("title must be at least 2 characters")
+        return normalized
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _normalize_description(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+    @field_validator("poster_url", mode="before")
+    @classmethod
+    def _normalize_poster_url(cls, value):
+        return _normalize_optional_http_url_or_assets_json(value, "poster_url")
+
+    @field_validator("whatsapp_url", mode="before")
+    @classmethod
+    def _normalize_whatsapp_url(cls, value):
+        return _normalize_optional_http_url(value, "whatsapp_url", max_length=500)
+
+    @field_validator("external_url_name", mode="before")
+    @classmethod
+    def _normalize_external_url_name(cls, value):
+        normalized = str(value or "").strip()
+        return normalized or "Join whatsapp channel"
+
+
+class PersohubAdminEventUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: Optional[str] = Field(default=None, min_length=2, max_length=255)
+    description: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    poster_url: Optional[str] = None
+    whatsapp_url: Optional[str] = None
+    external_url_name: Optional[str] = None
+    event_type: Optional[PersohubAdminEventTypeEnum] = None
+    format: Optional[PersohubAdminEventFormatEnum] = None
+    template_option: Optional[PersohubAdminEventTemplateEnum] = None
+    participant_mode: Optional[PersohubAdminParticipantModeEnum] = None
+    round_mode: Optional[PersohubAdminRoundModeEnum] = None
+    round_count: Optional[int] = Field(default=None, ge=1, le=20)
+    team_min_size: Optional[int] = Field(default=None, ge=1, le=100)
+    team_max_size: Optional[int] = Field(default=None, ge=1, le=100)
+    is_visible: Optional[bool] = None
+    status: Optional[PersohubAdminEventStatusEnum] = None
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def _normalize_title(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        if len(normalized) < 2:
+            raise ValueError("title must be at least 2 characters")
+        return normalized
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _normalize_description(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+    @field_validator("poster_url", mode="before")
+    @classmethod
+    def _normalize_poster_url(cls, value):
+        return _normalize_optional_http_url_or_assets_json(value, "poster_url")
+
+    @field_validator("whatsapp_url", mode="before")
+    @classmethod
+    def _normalize_whatsapp_url(cls, value):
+        return _normalize_optional_http_url(value, "whatsapp_url", max_length=500)
+
+    @field_validator("external_url_name", mode="before")
+    @classmethod
+    def _normalize_external_url_name(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or "Join whatsapp channel"
+
+
+class PersohubAdminEventResponse(BaseModel):
+    id: int
+    slug: str
+    event_code: str
+    community_id: int
+    title: str
+    description: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    poster_url: Optional[str] = None
+    whatsapp_url: Optional[str] = None
+    external_url_name: str = "Join whatsapp channel"
+    event_type: PersohubAdminEventTypeEnum
+    format: PersohubAdminEventFormatEnum
+    template_option: PersohubAdminEventTemplateEnum
+    participant_mode: PersohubAdminParticipantModeEnum
+    round_mode: PersohubAdminRoundModeEnum
+    round_count: int
+    team_min_size: Optional[int] = None
+    team_max_size: Optional[int] = None
+    is_visible: bool = True
+    status: PersohubAdminEventStatusEnum
+    created_at: datetime
+    updated_at: Optional[datetime] = None
 
 
 class PersohubAdminCommunityUpdateRequest(BaseModel):

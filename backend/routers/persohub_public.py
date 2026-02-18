@@ -6,7 +6,9 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models import (
+    CommunityEvent,
     CommunitySympo,
+    CommunitySympoEvent,
     PdaEventBadge,
     PdaTeam,
     PdaUser,
@@ -113,6 +115,60 @@ def get_chakravyuha_public_content(
     if not sympo:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chakravyuha content not found")
     return sympo.content or {}
+
+
+def _serialize_chakravyuha_event(event: CommunityEvent, community: PersohubCommunity) -> Dict[str, Any]:
+    return {
+        "id": event.id,
+        "slug": event.slug,
+        "event_code": event.event_code,
+        "community_id": community.profile_id,
+        "community_name": community.name,
+        "title": event.title,
+        "description": event.description,
+        "start_date": event.start_date.isoformat() if event.start_date else None,
+        "end_date": event.end_date.isoformat() if event.end_date else None,
+        "poster_url": event.poster_url,
+        "whatsapp_url": event.whatsapp_url,
+        "external_url_name": event.external_url_name,
+        "event_type": str(event.event_type.value if hasattr(event.event_type, "value") else event.event_type),
+        "format": str(event.format.value if hasattr(event.format, "value") else event.format),
+        "template_option": str(
+            event.template_option.value if hasattr(event.template_option, "value") else event.template_option
+        ),
+        "participant_mode": str(
+            event.participant_mode.value if hasattr(event.participant_mode, "value") else event.participant_mode
+        ),
+        "round_mode": str(event.round_mode.value if hasattr(event.round_mode, "value") else event.round_mode),
+        "round_count": event.round_count,
+        "team_min_size": event.team_min_size,
+        "team_max_size": event.team_max_size,
+        "is_visible": event.is_visible,
+        "status": str(event.status.value if hasattr(event.status, "value") else event.status),
+    }
+
+
+@router.get("/persohub/chakravyuha-26/events", response_model=List[Dict[str, Any]])
+def get_chakravyuha_public_events(
+    db: Session = Depends(get_db),
+):
+    sympo = (
+        db.query(CommunitySympo)
+        .filter(func.lower(CommunitySympo.name) == "chakravyuha-26")
+        .first()
+    )
+    if not sympo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chakravyuha content not found")
+
+    rows = (
+        db.query(CommunityEvent, PersohubCommunity)
+        .join(CommunitySympoEvent, CommunitySympoEvent.event_id == CommunityEvent.id)
+        .join(PersohubCommunity, PersohubCommunity.id == CommunityEvent.community_id)
+        .filter(CommunitySympoEvent.sympo_id == sympo.id)
+        .order_by(CommunityEvent.start_date.asc().nullslast(), CommunityEvent.id.asc())
+        .all()
+    )
+    return [_serialize_chakravyuha_event(event, community) for event, community in rows]
 
 
 @router.post("/persohub/communities/{profile_id}/follow-toggle")

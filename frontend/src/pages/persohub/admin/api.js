@@ -72,6 +72,42 @@ export const persohubAdminApi = {
         });
     },
 
+    async listAdminEvents() {
+        return withCommunityAuthRetry(async () => {
+            const response = await axios.get(`${API}/persohub/admin/events`, {
+                headers: { ...getCommunityAuthHeader() },
+            });
+            return response.data;
+        });
+    },
+
+    async createAdminEvent(payload) {
+        return withCommunityAuthRetry(async () => {
+            const response = await axios.post(`${API}/persohub/admin/events`, payload, {
+                headers: { ...getCommunityAuthHeader() },
+            });
+            return response.data;
+        });
+    },
+
+    async updateAdminEvent(slug, payload) {
+        return withCommunityAuthRetry(async () => {
+            const response = await axios.put(`${API}/persohub/admin/events/${slug}`, payload, {
+                headers: { ...getCommunityAuthHeader() },
+            });
+            return response.data;
+        });
+    },
+
+    async deleteAdminEvent(slug) {
+        return withCommunityAuthRetry(async () => {
+            const response = await axios.delete(`${API}/persohub/admin/events/${slug}`, {
+                headers: { ...getCommunityAuthHeader() },
+            });
+            return response.data;
+        });
+    },
+
     async presignProfileUpload(file) {
         return withCommunityAuthRetry(async () => {
             const response = await axios.post(
@@ -89,6 +125,30 @@ export const persohubAdminApi = {
 
     async uploadProfileImage(file) {
         const presigned = await this.presignProfileUpload(file);
+        await axios.put(presigned.upload_url, file, {
+            headers: { 'Content-Type': presigned.content_type || file.type || 'application/octet-stream' },
+            timeout: 60000,
+        });
+        return presigned.public_url;
+    },
+
+    async presignEventPosterUpload(file) {
+        return withCommunityAuthRetry(async () => {
+            const response = await axios.post(
+                `${API}/persohub/community/uploads/presign`,
+                {
+                    filename: file.name,
+                    content_type: file.type || 'application/octet-stream',
+                    size_bytes: file.size,
+                },
+                { headers: { ...getCommunityAuthHeader() } },
+            );
+            return response.data;
+        });
+    },
+
+    async uploadEventPoster(file) {
+        const presigned = await this.presignEventPosterUpload(file);
         await axios.put(presigned.upload_url, file, {
             headers: { 'Content-Type': presigned.content_type || file.type || 'application/octet-stream' },
             timeout: 60000,

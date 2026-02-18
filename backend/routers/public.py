@@ -67,6 +67,7 @@ def list_routes():
             {"method": "GET", "path": "/pda/team"},
             {"method": "GET", "path": "/pda/gallery"},
             {"method": "GET", "path": "/persohub/chakravyuha-26"},
+            {"method": "GET", "path": "/persohub/chakravyuha-26/events"},
             {"method": "POST", "path": "/pda-admin/programs"},
             {"method": "PUT", "path": "/pda-admin/programs/{program_id}"},
             {"method": "DELETE", "path": "/pda-admin/programs/{program_id}"},
@@ -149,6 +150,10 @@ def list_routes():
             {"method": "GET", "path": "/pda-admin/recruitments"},
             {"method": "GET", "path": "/pda-admin/recruitments/export"},
             {"method": "POST", "path": "/pda-admin/recruitments/approve"},
-            {"method": "POST", "path": "/pda-admin/recruitments/reject"}
+            {"method": "POST", "path": "/pda-admin/recruitments/reject"},
+            {"method": "GET", "path": "/persohub/admin/events"},
+            {"method": "POST", "path": "/persohub/admin/events"},
+            {"method": "PUT", "path": "/persohub/admin/events/{slug}"},
+            {"method": "DELETE", "path": "/persohub/admin/events/{slug}"}
         ]
     }
