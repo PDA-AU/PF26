@@ -37,6 +37,7 @@ from migrations import (
     ensure_superadmin_policies,
     ensure_default_superadmin,
     ensure_pda_event_tables,
+    ensure_community_event_tables,
     backfill_pda_event_round_count_once,
     remove_legacy_persofest_once,
     clear_legacy_poster_urls_once,
@@ -46,7 +47,7 @@ from migrations import (
 
 from routers import public, auth_pda, pda_public, pda_admin, superadmin
 from routers import pda_events, pda_events_admin
-from routers import persohub_public, persohub_community_auth, persohub_community_admin
+from routers import persohub_public, persohub_community_auth, persohub_community_admin, persohub_admin_profile
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -134,6 +135,7 @@ async def startup_event():
     ensure_pda_admins_table(engine)
     ensure_email_auth_columns(engine)
     ensure_pda_event_tables(engine)
+    ensure_community_event_tables(engine)
     backfill_pda_event_round_count_once(engine)
     ensure_persohub_tables(engine)
     ensure_pda_recruitment_tables(engine)
@@ -184,3 +186,4 @@ app.include_router(pda_events_admin.router, prefix="/api")
 app.include_router(persohub_public.router, prefix="/api")
 app.include_router(persohub_community_auth.router, prefix="/api")
 app.include_router(persohub_community_admin.router, prefix="/api")
+app.include_router(persohub_admin_profile.router, prefix="/api")

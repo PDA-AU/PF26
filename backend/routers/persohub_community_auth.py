@@ -28,6 +28,7 @@ def _build_community_auth_response(db: Session, community: PersohubCommunity) ->
         logo_url=community.logo_url or (club.club_logo_url if club else None),
         club_id=community.club_id,
         club_name=club.name if club else None,
+        is_root=bool(community.is_root),
     )
 
 

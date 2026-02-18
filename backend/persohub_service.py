@@ -151,9 +151,9 @@ def ensure_default_persohub_setup(db: Session) -> None:
     # Make sure user profile names exist before creating community profile ids.
     ensure_all_user_profile_names(db)
 
-    club = db.query(PersohubClub).filter(PersohubClub.name == "PDA Club").first()
+    club = db.query(PersohubClub).filter(PersohubClub.name == "PDA").first()
     if not club:
-        club = PersohubClub(name="PDA Club", club_url="https://pda.mitindia.edu", club_logo_url=None)
+        club = PersohubClub(name="PDA", club_url="https://pda.mitindia.edu", club_logo_url=None)
         db.add(club)
         db.flush()
 

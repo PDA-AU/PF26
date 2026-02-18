@@ -9,6 +9,7 @@ from models import (
     PdaEventBadge,
     PdaTeam,
     PdaUser,
+    PersohubClub,
     PersohubCommunity,
     PersohubCommunityFollow,
     PersohubHashtag,
@@ -27,6 +28,7 @@ from persohub_schemas import (
     PersohubPostResponse,
     PersohubPublicProfileResponse,
     PersohubCommunityCard,
+    PersohubPublicClubCommunityInfo,
     PersohubSearchResponse,
     PersohubSearchSuggestion,
 )
@@ -73,6 +75,29 @@ def list_communities(
     )
     cards = build_community_cards_bulk(db, communities, current_user_id=(user.id if user else None))
     return [cards[c.id] for c in communities if c.id in cards]
+
+
+@router.get("/persohub/clubs", response_model=List[PersohubPublicClubCommunityInfo])
+def list_public_club_community_info(
+    db: Session = Depends(get_db),
+):
+    rows = (
+        db.query(PersohubCommunity, PersohubClub)
+        .join(PersohubClub, PersohubCommunity.club_id == PersohubClub.id)
+        .filter(PersohubCommunity.is_root == True)  # noqa: E712
+        .order_by(PersohubClub.name.asc(), PersohubCommunity.profile_id.asc())
+        .all()
+    )
+    return [
+        PersohubPublicClubCommunityInfo(
+            clubId=community.profile_id,
+            clubName=club.name,
+            clubTagline=club.club_tagline,
+            clubImage=community.logo_url or club.club_logo_url,
+            clubDescription=club.club_description or community.description,
+        )
+        for community, club in rows
+    ]
 
 
 @router.post("/persohub/communities/{profile_id}/follow-toggle")

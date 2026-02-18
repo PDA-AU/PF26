@@ -44,7 +44,7 @@ from schemas import (
     PdaPdfPreviewGenerateRequest, PdaPdfPreviewGenerateResponse,
     AdminBulkEmailRequest,
 )
-from emailer import send_email
+from emailer import send_bulk_email
 from email_bulk import render_email_template, derive_text_from_html, extract_batch
 from security import require_pda_home_admin, require_superadmin
 from utils import (
@@ -232,7 +232,7 @@ def _send_bulk_admin_email_background(
                 rendered_html = render_email_template(html, context, html_mode=True)
                 rendered_text = render_email_template(text, context, html_mode=False) if text else None
                 text_content = rendered_text if rendered_text is not None else derive_text_from_html(rendered_html)
-                send_email(email_value, subject, rendered_html, text_content)
+                send_bulk_email(email_value, subject, rendered_html, text_content)
                 sent += 1
             except Exception as exc:
                 failed += 1

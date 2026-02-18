@@ -3,6 +3,7 @@ import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { PersohubAdminAuthProvider } from "@/context/PersohubAdminAuthContext";
 
 // Pages
 import PdaHome from "@/pages/PdaHome";
@@ -35,6 +36,8 @@ import PdaResetPassword from "@/pages/pda/ResetPassword";
 import PersohubFeedPage from "@/pages/persohub/PersohubFeedPage";
 import PersohubPostPage from "@/pages/persohub/PersohubPostPage";
 import PersohubProfilePage from "@/pages/persohub/PersohubProfilePage";
+import PersohubAdminEntryPage from "@/pages/persohub/admin/PersohubAdminEntryPage";
+import PersohubAdminProfilePage from "@/pages/persohub/admin/PersohubAdminProfilePage";
 
 // Protected Route Components
 const ProtectedPdaRoute = ({ children, requirePf = false, requireHome = false, requireSuperAdmin = false, requireEvents = false }) => {
@@ -174,6 +177,8 @@ function AppRoutes() {
             <Route path="/events/:eventSlug/:profileName" element={<EventDashboard />} />
             <Route path="/persohub" element={<PersohubFeedPage />} />
             <Route path="/persohub/p/:slugToken" element={<PersohubPostPage />} />
+            <Route path="/persohub/admin" element={<PersohubAdminEntryPage />} />
+            <Route path="/persohub/admin/profile" element={<PersohubAdminProfilePage />} />
             <Route path="/persohub/:profileName" element={<PersohubProfilePage />} />
 
             {/* Catch all */}
@@ -185,10 +190,12 @@ function AppRoutes() {
 function App() {
     return (
         <AuthProvider>
-            <BrowserRouter>
-                <AppRoutes />
-                <Toaster position="top-right" richColors />
-            </BrowserRouter>
+            <PersohubAdminAuthProvider>
+                <BrowserRouter>
+                    <AppRoutes />
+                    <Toaster position="top-right" richColors />
+                </BrowserRouter>
+            </PersohubAdminAuthProvider>
         </AuthProvider>
     );
 }

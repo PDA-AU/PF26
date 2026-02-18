@@ -1168,6 +1168,278 @@ def ensure_pda_event_tables(engine):
             )
 
 
+def ensure_community_event_tables(engine):
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS community_events (
+                    id SERIAL PRIMARY KEY,
+                    slug VARCHAR(120) UNIQUE NOT NULL,
+                    event_code VARCHAR(20) UNIQUE NOT NULL,
+                    community_id INTEGER NOT NULL REFERENCES persohub_communities(id) ON DELETE CASCADE,
+                    title VARCHAR(255) NOT NULL,
+                    description TEXT,
+                    start_date DATE,
+                    end_date DATE,
+                    poster_url TEXT,
+                    whatsapp_url VARCHAR(500),
+                    external_url_name VARCHAR(120) NOT NULL DEFAULT 'Join whatsapp channel',
+                    event_type VARCHAR(30) NOT NULL,
+                    format VARCHAR(30) NOT NULL,
+                    template_option VARCHAR(50) NOT NULL,
+                    participant_mode VARCHAR(30) NOT NULL,
+                    round_mode VARCHAR(30) NOT NULL,
+                    round_count INTEGER NOT NULL DEFAULT 1,
+                    team_min_size INTEGER,
+                    team_max_size INTEGER,
+                    is_visible BOOLEAN NOT NULL DEFAULT TRUE,
+                    status VARCHAR(20) NOT NULL DEFAULT 'closed',
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ
+                )
+                """
+            )
+        )
+        conn.execute(text("ALTER TABLE community_events ADD COLUMN IF NOT EXISTS start_date DATE"))
+        conn.execute(text("ALTER TABLE community_events ADD COLUMN IF NOT EXISTS end_date DATE"))
+        conn.execute(text("ALTER TABLE community_events ADD COLUMN IF NOT EXISTS whatsapp_url VARCHAR(500)"))
+        conn.execute(
+            text(
+                "ALTER TABLE community_events "
+                "ADD COLUMN IF NOT EXISTS external_url_name VARCHAR(120) NOT NULL DEFAULT 'Join whatsapp channel'"
+            )
+        )
+        conn.execute(
+            text(
+                "UPDATE community_events "
+                "SET external_url_name = 'Join whatsapp channel' "
+                "WHERE external_url_name IS NULL OR btrim(external_url_name) = ''"
+            )
+        )
+        conn.execute(text("ALTER TABLE community_events ADD COLUMN IF NOT EXISTS is_visible BOOLEAN NOT NULL DEFAULT TRUE"))
+        conn.execute(text("ALTER TABLE community_events ALTER COLUMN poster_url TYPE TEXT"))
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS community_event_teams (
+                    id SERIAL PRIMARY KEY,
+                    event_id INTEGER NOT NULL REFERENCES community_events(id) ON DELETE CASCADE,
+                    team_code VARCHAR(5) NOT NULL,
+                    team_name VARCHAR(255) NOT NULL,
+                    team_lead_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ,
+                    CONSTRAINT uq_community_event_team_event_code UNIQUE (event_id, team_code)
+                )
+                """
+            )
+        )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS community_event_rounds (
+                    id SERIAL PRIMARY KEY,
+                    event_id INTEGER NOT NULL REFERENCES community_events(id) ON DELETE CASCADE,
+                    round_no INTEGER NOT NULL,
+                    name VARCHAR(255) NOT NULL,
+                    description TEXT,
+                    round_poster TEXT,
+                    whatsapp_url VARCHAR(500),
+                    external_url VARCHAR(500),
+                    external_url_name VARCHAR(120) NOT NULL DEFAULT 'Explore Round',
+                    date TIMESTAMPTZ,
+                    mode VARCHAR(30) NOT NULL DEFAULT 'OFFLINE',
+                    state VARCHAR(30) NOT NULL DEFAULT 'DRAFT',
+                    evaluation_criteria JSONB,
+                    elimination_type VARCHAR(20),
+                    elimination_value DOUBLE PRECISION,
+                    is_frozen BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ,
+                    CONSTRAINT uq_community_event_round_event_round_no UNIQUE (event_id, round_no)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "UPDATE community_event_rounds "
+                "SET external_url = whatsapp_url "
+                "WHERE external_url IS NULL AND whatsapp_url IS NOT NULL"
+            )
+        )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS community_event_registrations (
+                    id SERIAL PRIMARY KEY,
+                    event_id INTEGER NOT NULL REFERENCES community_events(id) ON DELETE CASCADE,
+                    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                    team_id INTEGER REFERENCES community_event_teams(id) ON DELETE CASCADE,
+                    entity_type VARCHAR(10) NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+                    referral_code VARCHAR(16),
+                    referred_by VARCHAR(16),
+                    referral_count INTEGER NOT NULL DEFAULT 0,
+                    registered_at TIMESTAMPTZ DEFAULT now(),
+                    CONSTRAINT uq_community_event_registration_event_user UNIQUE (event_id, user_id),
+                    CONSTRAINT uq_community_event_registration_event_team UNIQUE (event_id, team_id)
+                )
+                """
+            )
+        )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS community_event_team_members (
+                    id SERIAL PRIMARY KEY,
+                    team_id INTEGER NOT NULL REFERENCES community_event_teams(id) ON DELETE CASCADE,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    role VARCHAR(20) NOT NULL DEFAULT 'member',
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ,
+                    CONSTRAINT uq_community_event_team_member_team_user UNIQUE (team_id, user_id)
+                )
+                """
+            )
+        )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS community_event_attendance (
+                    id SERIAL PRIMARY KEY,
+                    event_id INTEGER NOT NULL REFERENCES community_events(id) ON DELETE CASCADE,
+                    round_id INTEGER REFERENCES community_event_rounds(id) ON DELETE CASCADE,
+                    entity_type VARCHAR(10) NOT NULL,
+                    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                    team_id INTEGER REFERENCES community_event_teams(id) ON DELETE CASCADE,
+                    is_present BOOLEAN NOT NULL DEFAULT FALSE,
+                    marked_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    marked_at TIMESTAMPTZ DEFAULT now(),
+                    CONSTRAINT uq_community_event_attendance_entity UNIQUE (event_id, round_id, entity_type, user_id, team_id)
+                )
+                """
+            )
+        )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS community_event_scores (
+                    id SERIAL PRIMARY KEY,
+                    event_id INTEGER NOT NULL REFERENCES community_events(id) ON DELETE CASCADE,
+                    round_id INTEGER NOT NULL REFERENCES community_event_rounds(id) ON DELETE CASCADE,
+                    entity_type VARCHAR(10) NOT NULL,
+                    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                    team_id INTEGER REFERENCES community_event_teams(id) ON DELETE CASCADE,
+                    criteria_scores JSONB,
+                    total_score DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    normalized_score DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    is_present BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ,
+                    CONSTRAINT uq_community_event_score_entity UNIQUE (event_id, round_id, entity_type, user_id, team_id)
+                )
+                """
+            )
+        )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS community_event_badges (
+                    id SERIAL PRIMARY KEY,
+                    event_id INTEGER NOT NULL REFERENCES community_events(id) ON DELETE CASCADE,
+                    title VARCHAR(255) NOT NULL,
+                    image_url VARCHAR(500),
+                    place VARCHAR(30) NOT NULL,
+                    score DOUBLE PRECISION,
+                    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                    team_id INTEGER REFERENCES community_event_teams(id) ON DELETE CASCADE,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ
+                )
+                """
+            )
+        )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS community_event_invites (
+                    id SERIAL PRIMARY KEY,
+                    event_id INTEGER NOT NULL REFERENCES community_events(id) ON DELETE CASCADE,
+                    team_id INTEGER NOT NULL REFERENCES community_event_teams(id) ON DELETE CASCADE,
+                    invited_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    invited_by_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ,
+                    CONSTRAINT uq_community_event_invite_unique UNIQUE (event_id, team_id, invited_user_id)
+                )
+                """
+            )
+        )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS community_event_logs (
+                    id SERIAL PRIMARY KEY,
+                    event_id INTEGER REFERENCES community_events(id) ON DELETE SET NULL,
+                    event_slug VARCHAR(120) NOT NULL,
+                    admin_id INTEGER,
+                    admin_register_number VARCHAR(20) NOT NULL,
+                    admin_name VARCHAR(255) NOT NULL,
+                    action VARCHAR(255) NOT NULL,
+                    method VARCHAR(10),
+                    path VARCHAR(255),
+                    meta JSONB,
+                    created_at TIMESTAMPTZ DEFAULT now()
+                )
+                """
+            )
+        )
+
+        if not _column_exists(conn, "community_event_registrations", "status"):
+            conn.execute(text("ALTER TABLE community_event_registrations ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE'"))
+        if not _column_exists(conn, "community_event_registrations", "referral_code"):
+            conn.execute(text("ALTER TABLE community_event_registrations ADD COLUMN referral_code VARCHAR(16)"))
+        if not _column_exists(conn, "community_event_registrations", "referred_by"):
+            conn.execute(text("ALTER TABLE community_event_registrations ADD COLUMN referred_by VARCHAR(16)"))
+        if not _column_exists(conn, "community_event_registrations", "referral_count"):
+            conn.execute(text("ALTER TABLE community_event_registrations ADD COLUMN referral_count INTEGER NOT NULL DEFAULT 0"))
+
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_events_community_created ON community_events(community_id, created_at DESC)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_rounds_event_round ON community_event_rounds(event_id, round_no ASC)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_rounds_event_state ON community_event_rounds(event_id, state)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_registration_event_status ON community_event_registrations(event_id, status)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_registration_event_referred_by ON community_event_registrations(event_id, referred_by)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_team_members_team_user ON community_event_team_members(team_id, user_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_attendance_event_round ON community_event_attendance(event_id, round_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_scores_event_round ON community_event_scores(event_id, round_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_badges_event ON community_event_badges(event_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_logs_event_created ON community_event_logs(event_id, created_at DESC)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_logs_slug_created ON community_event_logs(event_slug, created_at DESC)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_logs_admin_created ON community_event_logs(admin_id, created_at DESC)"))
+
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_community_event_registration_referral_code
+                ON community_event_registrations(event_id, referral_code)
+                WHERE entity_type = 'USER' AND referral_code IS NOT NULL
+                """
+            )
+        )
+
+
 def backfill_pda_event_round_count_once(engine):
     marker_key = "migration_backfill_pda_event_round_count_v1"
     with engine.begin() as conn:
@@ -1234,12 +1506,16 @@ def ensure_persohub_tables(engine):
                     name VARCHAR(120) UNIQUE NOT NULL,
                     club_url VARCHAR(500),
                     club_logo_url VARCHAR(500),
+                    club_tagline VARCHAR(255),
+                    club_description TEXT,
                     created_at TIMESTAMPTZ DEFAULT now(),
                     updated_at TIMESTAMPTZ
                 )
                 """
             )
         )
+        conn.execute(text("ALTER TABLE persohub_clubs ADD COLUMN IF NOT EXISTS club_tagline VARCHAR(255)"))
+        conn.execute(text("ALTER TABLE persohub_clubs ADD COLUMN IF NOT EXISTS club_description TEXT"))
 
         conn.execute(
             text(
@@ -1254,12 +1530,14 @@ def ensure_persohub_tables(engine):
                     logo_url VARCHAR(500),
                     description TEXT,
                     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    is_root BOOLEAN NOT NULL DEFAULT FALSE,
                     created_at TIMESTAMPTZ DEFAULT now(),
                     updated_at TIMESTAMPTZ
                 )
                 """
             )
         )
+        conn.execute(text("ALTER TABLE persohub_communities ADD COLUMN IF NOT EXISTS is_root BOOLEAN NOT NULL DEFAULT FALSE"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_communities_club_id ON persohub_communities(club_id)"))
 
         conn.execute(

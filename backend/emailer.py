@@ -93,3 +93,15 @@ def send_email(to_email: str, subject: str, html: str, text: str) -> None:
 
     _send_via_config(secondary, to_email, subject, html, text)
     logger.info("Email sent via secondary SMTP")
+
+
+def send_bulk_email(to_email: str, subject: str, html: str, text: str) -> None:
+    bulk = _load_smtp("SMTP_BULK")
+    if not bulk:
+        send_email(to_email, subject, html, text)
+        return
+    try:
+        _send_via_config(bulk, to_email, subject, html, text)
+    except Exception as exc:
+        logger.warning("Bulk SMTP failed, falling back to primary/secondary: %s", exc)
+        send_email(to_email, subject, html, text)
