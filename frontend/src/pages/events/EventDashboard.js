@@ -996,7 +996,7 @@ export default function EventDashboard() {
             </main>
 
             <Dialog open={authDialogOpen} onOpenChange={(open) => (open ? setAuthDialogOpen(true) : closeAuthDialog())}>
-                <DialogContent className="max-h-[90vh] overflow-y-auto border-4 border-black bg-white p-0">
+                <DialogContent className="max-h-[calc(100vh-2rem)] overflow-x-hidden overflow-y-auto border-4 border-black bg-white p-0">
                     <div className="flex border-b-2 border-black">
                         <button
                             type="button"
@@ -1251,9 +1251,9 @@ export default function EventDashboard() {
             </Dialog>
 
             <Dialog open={registrationDialogOpen} onOpenChange={(open) => (open ? setRegistrationDialogOpen(true) : closeRegistrationDialog())}>
-                <DialogContent className="border-4 border-black bg-white">
+                <DialogContent className="max-h-[calc(100vh-2rem)] overflow-x-hidden overflow-y-auto border-4 border-black bg-white">
                     <DialogHeader>
-                        <DialogTitle className="font-heading text-2xl font-black uppercase tracking-tight">
+                        <DialogTitle className="pr-8 break-words font-heading text-2xl font-black uppercase tracking-tight">
                             Register: {eventInfo.title}
                         </DialogTitle>
                     </DialogHeader>
@@ -1350,7 +1350,7 @@ export default function EventDashboard() {
             </Dialog>
 
             <Dialog open={Boolean(selectedRound)} onOpenChange={(open) => (!open ? setSelectedRound(null) : null)}>
-                <DialogContent className="max-h-[94vh] max-w-5xl overflow-y-auto border-4 border-black bg-white p-6 sm:p-7">
+                <DialogContent className="max-h-[calc(100vh-2rem)] max-w-5xl overflow-x-hidden overflow-y-auto border-4 border-black bg-white p-6 sm:p-7">
                     {selectedRound ? (
                         <>
                             <DialogHeader>
@@ -1424,7 +1424,7 @@ export default function EventDashboard() {
             </Dialog>
 
             <Dialog open={qrDialogOpen} onOpenChange={setQrDialogOpen}>
-                <DialogContent className="border-4 border-black bg-white">
+                <DialogContent className="max-h-[calc(100vh-2rem)] overflow-x-hidden overflow-y-auto border-4 border-black bg-white">
                     <DialogHeader>
                         <DialogTitle className="font-heading text-2xl font-black uppercase tracking-tight">Attendance QR</DialogTitle>
                     </DialogHeader>

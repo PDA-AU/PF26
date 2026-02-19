@@ -378,7 +378,7 @@ function DashboardContent() {
                         {hasDepartmentSegments ? (
                             <>
                                 <div className="mx-auto w-full max-w-[260px]">
-                                    <div className="mb-3 text-center text-xs sm:text-sm font-semibold min-h-[20px]">
+                                    <div className="mb-3 min-h-[20px] text-center text-xs font-semibold sm:text-sm break-words">
                                         {hoveredDepartment
                                             ? `${hoveredDepartment.name}: ${hoveredDepartment.value} (${hoveredDepartment.pctText})`
                                             : 'Hover a slice to see details'}
@@ -408,13 +408,13 @@ function DashboardContent() {
                                         </text>
                                     </svg>
                                 </div>
-                                <div className="grid sm:grid-cols-2 gap-3">
+                                <div className="grid gap-3 sm:grid-cols-2">
                                     {departmentSegments.map((segment) => (
                                         <div key={segment.name} className="flex items-center justify-between gap-3 p-3 bg-muted border-2 border-black">
-                                            <div className="min-w-0">
+                                            <div className="min-w-0 flex-1">
                                                 <div className="flex items-center gap-2">
                                                     <span className="inline-block h-3 w-3 border border-black shrink-0" style={{ backgroundColor: segment.color }} />
-                                                    <span className="font-medium text-xs sm:text-sm truncate">{segment.name}</span>
+                                                    <span className="font-medium text-xs leading-tight sm:text-sm break-words" title={segment.name}>{segment.name}</span>
                                                 </div>
                                                 <p className="text-[11px] sm:text-xs text-gray-600 mt-1">
                                                     {segment.pctText}

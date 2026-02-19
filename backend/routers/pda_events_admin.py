@@ -1696,17 +1696,27 @@ def round_participants(
     for row in score_rows:
         key = ("user", row.user_id) if row.user_id else ("team", row.team_id)
         score_map[key] = row
+    attendance_rows = db.query(PdaEventAttendance).filter(
+        PdaEventAttendance.event_id == event.id,
+        PdaEventAttendance.round_id == round_id,
+    ).all()
+    attendance_map = {}
+    for row in attendance_rows:
+        key = ("user", row.user_id) if row.user_id else ("team", row.team_id)
+        attendance_map[key] = row
     result = []
     for entity in entities:
         key = (entity["entity_type"], entity["entity_id"])
         row = score_map.get(key)
+        attendance_row = attendance_map.get(key)
+        is_present = bool(attendance_row.is_present) if attendance_row else (bool(row.is_present) if row else False)
         payload = {
             **entity,
             "score_id": row.id if row else None,
             "criteria_scores": row.criteria_scores if row else {},
             "total_score": float(row.total_score or 0.0) if row else 0.0,
             "normalized_score": float(row.normalized_score or 0.0) if row else 0.0,
-            "is_present": bool(row.is_present) if row else False,
+            "is_present": is_present,
         }
         if event.participant_mode == PdaEventParticipantMode.INDIVIDUAL:
             payload.setdefault("participant_id", entity["entity_id"])
@@ -1795,6 +1805,29 @@ def save_scores(
                     total_score=total,
                     normalized_score=normalized,
                     is_present=bool(entry.is_present),
+                )
+            )
+
+        attendance_row = db.query(PdaEventAttendance).filter(
+            PdaEventAttendance.event_id == event.id,
+            PdaEventAttendance.round_id == round_id,
+            PdaEventAttendance.entity_type == entity_type,
+            PdaEventAttendance.user_id == user_id,
+            PdaEventAttendance.team_id == team_id,
+        ).first()
+        if attendance_row:
+            attendance_row.is_present = bool(entry.is_present)
+            attendance_row.marked_by_user_id = admin.id
+        else:
+            db.add(
+                PdaEventAttendance(
+                    event_id=event.id,
+                    round_id=round_id,
+                    entity_type=entity_type,
+                    user_id=user_id,
+                    team_id=team_id,
+                    is_present=bool(entry.is_present),
+                    marked_by_user_id=admin.id,
                 )
             )
     db.commit()

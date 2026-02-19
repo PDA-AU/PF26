@@ -708,7 +708,7 @@ export default function TeamAdmin() {
                 setAddOpen(open);
                 if (!open) resetAddForm();
             }}>
-                <DialogContent className="max-w-4xl bg-white">
+                <DialogContent className="w-[calc(100vw-1rem)] max-w-4xl max-h-[calc(100vh-2rem)] overflow-x-hidden overflow-y-auto bg-white">
                     <DialogHeader>
                         <DialogTitle className="text-xl font-heading font-black">Add Team Member</DialogTitle>
                     </DialogHeader>
@@ -868,7 +868,7 @@ export default function TeamAdmin() {
                 setSelectedMember(null);
                 setConfirmOpen(false);
             }}>
-                <DialogContent className="max-w-3xl bg-white">
+                <DialogContent className="w-[calc(100vw-1rem)] max-w-3xl max-h-[calc(100vh-2rem)] overflow-x-hidden overflow-y-auto bg-white">
                     <DialogHeader>
                         <DialogTitle className="text-xl font-heading font-black">Member Details</DialogTitle>
                     </DialogHeader>
@@ -1020,7 +1020,7 @@ export default function TeamAdmin() {
             </Dialog>
 
             <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-                <DialogContent className="max-w-md bg-white">
+                <DialogContent className="w-[calc(100vw-1rem)] max-w-md max-h-[calc(100vh-2rem)] overflow-x-hidden overflow-y-auto bg-white">
                     <DialogHeader>
                         <DialogTitle className="text-lg font-heading font-black">Confirm Delete</DialogTitle>
                     </DialogHeader>

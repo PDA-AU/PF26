@@ -24,6 +24,15 @@ import { useAuth } from '@/context/AuthContext';
 import EventAdminShell, { useEventAdminShell } from './EventAdminShell';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const SCORING_PAGE_SIZE_KEY = 'event_admin_scoring_page_size';
+const SCORING_PAGE_SIZE_OPTIONS = [10, 20, 50];
+
+const loadPageSize = (storageKey, fallback, allowedValues) => {
+    if (typeof window === 'undefined') return fallback;
+    const raw = window.localStorage.getItem(storageKey);
+    const parsed = Number.parseInt(raw || '', 10);
+    return allowedValues.includes(parsed) ? parsed : fallback;
+};
 
 function ScoringContent() {
     const navigate = useNavigate();
@@ -40,6 +49,8 @@ function ScoringContent() {
     const [statusFilter, setStatusFilter] = useState('all');
     const [presenceFilter, setPresenceFilter] = useState('all');
     const [sortBy, setSortBy] = useState('register_asc');
+    const [currentPage, setCurrentPage] = useState(1);
+    const [pageSize, setPageSize] = useState(() => loadPageSize(SCORING_PAGE_SIZE_KEY, 10, SCORING_PAGE_SIZE_OPTIONS));
     const [freezeDialogOpen, setFreezeDialogOpen] = useState(false);
     const fileInputRef = useRef(null);
 
@@ -61,12 +72,12 @@ function ScoringContent() {
         };
     }, [entityMode]);
 
-    const fetchRoundData = useCallback(async (searchValue = '') => {
+    const fetchRoundData = useCallback(async () => {
         setLoading(true);
         try {
             const [roundRes, rowsRes] = await Promise.all([
                 axios.get(`${API}/pda-admin/events/${eventSlug}/rounds`, { headers: getAuthHeader() }),
-                axios.get(`${API}/pda-admin/events/${eventSlug}/rounds/${roundId}/participants${searchValue ? `?search=${encodeURIComponent(searchValue)}` : ''}`, {
+                axios.get(`${API}/pda-admin/events/${eventSlug}/rounds/${roundId}/participants`, {
                     headers: getAuthHeader(),
                 }),
             ]);
@@ -110,7 +121,17 @@ function ScoringContent() {
     }, [round?.is_frozen, rows]);
 
     const displayedRows = useMemo(() => {
+        const needle = search.trim().toLowerCase();
         const filtered = rows.filter((row) => {
+            if (needle) {
+                const haystack = [
+                    String(row._name || ''),
+                    String(row._code || ''),
+                    String(row.email || ''),
+                    String(row.department || ''),
+                ].join(' ').toLowerCase();
+                if (!haystack.includes(needle)) return false;
+            }
             if (statusFilter !== 'all') {
                 if (statusFilter === 'active' && row._status !== 'Active') return false;
                 if (statusFilter === 'eliminated' && row._status !== 'Eliminated') return false;
@@ -150,10 +171,35 @@ function ScoringContent() {
                     return regA.localeCompare(regB, undefined, { numeric: true, sensitivity: 'base' });
             }
         });
-    }, [getTotalScore, presenceFilter, roundRankMap, rows, sortBy, statusFilter]);
+    }, [getTotalScore, presenceFilter, roundRankMap, rows, search, sortBy, statusFilter]);
 
-    const handleSearch = async () => {
-        fetchRoundData(search);
+    const totalRows = displayedRows.length;
+    const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+    const pageStart = totalRows ? ((currentPage - 1) * pageSize + 1) : 0;
+    const pageEnd = Math.min((currentPage - 1) * pageSize + pageSize, totalRows);
+    const pagedRows = useMemo(() => {
+        const start = (currentPage - 1) * pageSize;
+        return displayedRows.slice(start, start + pageSize);
+    }, [currentPage, displayedRows, pageSize]);
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [search, statusFilter, presenceFilter, sortBy, pageSize]);
+
+    useEffect(() => {
+        if (currentPage > totalPages) {
+            setCurrentPage(totalPages);
+        }
+    }, [currentPage, totalPages]);
+
+    const handlePageSizeChange = (value) => {
+        const nextSize = Number.parseInt(value, 10);
+        if (!SCORING_PAGE_SIZE_OPTIONS.includes(nextSize)) return;
+        setPageSize(nextSize);
+        setCurrentPage(1);
+        if (typeof window !== 'undefined') {
+            window.localStorage.setItem(SCORING_PAGE_SIZE_KEY, String(nextSize));
+        }
     };
 
     const handlePresenceChange = (entityId, isPresent) => {
@@ -214,7 +260,7 @@ function ScoringContent() {
                 headers: getAuthHeader(),
             });
             toast.success('Scores saved successfully');
-            fetchRoundData(search);
+            fetchRoundData();
         } catch (error) {
             toast.error(getErrorMessage(error, 'Failed to save scores'));
         } finally {
@@ -258,7 +304,7 @@ function ScoringContent() {
             if (Array.isArray(response.data.errors) && response.data.errors.length > 0) {
                 response.data.errors.forEach((msg) => toast.error(msg));
             }
-            fetchRoundData(search);
+            fetchRoundData();
         } catch (error) {
             toast.error(getErrorMessage(error, 'Import failed'));
         } finally {
@@ -292,7 +338,7 @@ function ScoringContent() {
             await axios.post(`${API}/pda-admin/events/${eventSlug}/rounds/${roundId}/freeze`, {}, { headers: getAuthHeader() });
             toast.success('Round frozen');
             setFreezeDialogOpen(false);
-            fetchRoundData(search);
+            fetchRoundData();
         } catch (error) {
             toast.error(getErrorMessage(error, 'Failed to freeze round'));
         }
@@ -302,7 +348,7 @@ function ScoringContent() {
         try {
             await axios.post(`${API}/pda-admin/events/${eventSlug}/rounds/${roundId}/unfreeze`, {}, { headers: getAuthHeader() });
             toast.success('Round unfrozen');
-            fetchRoundData(search);
+            fetchRoundData();
         } catch (error) {
             toast.error(getErrorMessage(error, 'Failed to unfreeze round'));
         }
@@ -409,7 +455,7 @@ function ScoringContent() {
                         <FileSpreadsheet className="w-8 h-8 text-blue-600 flex-shrink-0" />
                         <div>
                             <h3 className="font-heading font-bold text-lg">Bulk Score Import</h3>
-                            <p className="text-gray-600 text-sm">1. Download template -> 2. Fill scores -> 3. Upload Excel</p>
+                            <p className="text-gray-600 text-sm">1. Download template → 2. Fill scores → 3. Upload Excel</p>
                         </div>
                     </div>
                 </div>
@@ -423,13 +469,9 @@ function ScoringContent() {
                             placeholder="Search..."
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter') handleSearch();
-                            }}
                             className="neo-input pl-10"
                         />
                     </div>
-                    <Button onClick={handleSearch} className="bg-primary text-white border-2 border-black shadow-neo">Search</Button>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-3">
                     <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -463,6 +505,13 @@ function ScoringContent() {
                 </div>
             </div>
 
+            {!loading && totalRows > 0 ? (
+                <div className="mb-3 flex items-center justify-between text-sm text-gray-600">
+                    <span>Showing {pageStart}-{pageEnd} of {totalRows}</span>
+                    <span>Page {currentPage} / {totalPages}</span>
+                </div>
+            ) : null}
+
             {displayedRows.length === 0 ? (
                 <div className="neo-card text-center py-12">
                     <Users className="w-16 h-16 mx-auto mb-4 text-gray-400" />
@@ -486,7 +535,7 @@ function ScoringContent() {
                             </tr>
                         </thead>
                         <tbody>
-                            {displayedRows.map((row) => {
+                            {pagedRows.map((row) => {
                                 const totalScore = getTotalScore(row);
                                 const maxScore = criteria.reduce((sum, criterion) => sum + Number(criterion.max_marks || 0), 0);
                                 const normalized = maxScore > 0 ? (totalScore / maxScore * 100).toFixed(2) : '0.00';
@@ -541,6 +590,48 @@ function ScoringContent() {
                     </table>
                 </div>
             )}
+
+            {!loading && totalRows > 0 ? (
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm text-gray-600">
+                        Showing {pageStart}-{pageEnd} of {totalRows}
+                    </p>
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Rows per page</span>
+                        <Select value={String(pageSize)} onValueChange={handlePageSizeChange}>
+                            <SelectTrigger className="w-[90px] neo-input">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {SCORING_PAGE_SIZE_OPTIONS.map((option) => (
+                                    <SelectItem key={option} value={String(option)}>{option}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                            disabled={currentPage === 1}
+                            className="border-2 border-black shadow-neo disabled:opacity-50"
+                        >
+                            <ArrowLeft className="h-4 w-4" />
+                        </Button>
+                        <span className="min-w-24 text-center text-sm font-bold">Page {currentPage} / {totalPages}</span>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                            disabled={currentPage === totalPages}
+                            className="border-2 border-black shadow-neo disabled:opacity-50"
+                        >
+                            <ArrowLeft className="h-4 w-4 rotate-180" />
+                        </Button>
+                    </div>
+                </div>
+            ) : null}
         </>
     );
 }

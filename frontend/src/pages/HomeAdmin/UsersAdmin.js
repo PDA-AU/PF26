@@ -662,7 +662,7 @@ export default function UsersAdmin() {
                 setSelectedMember(null);
                 setConfirmOpen(false);
             }}>
-                <DialogContent className="w-[calc(100vw-1rem)] max-w-3xl max-h-[90vh] overflow-y-auto bg-white p-4 sm:p-6">
+                <DialogContent className="w-[calc(100vw-1rem)] max-w-3xl max-h-[calc(100vh-2rem)] overflow-x-hidden overflow-y-auto bg-white p-4 sm:p-6">
                     <DialogHeader>
                         <DialogTitle className="text-xl font-heading font-black">User Details</DialogTitle>
                     </DialogHeader>
@@ -885,7 +885,7 @@ export default function UsersAdmin() {
             </Dialog>
 
             <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-                <DialogContent className="w-[calc(100vw-1rem)] max-w-md max-h-[85vh] overflow-y-auto bg-white p-4 sm:p-6">
+                <DialogContent className="w-[calc(100vw-1rem)] max-w-md max-h-[calc(100vh-2rem)] overflow-x-hidden overflow-y-auto bg-white p-4 sm:p-6">
                     <DialogHeader>
                         <DialogTitle className="text-lg font-heading font-black">Confirm Delete</DialogTitle>
                     </DialogHeader>
