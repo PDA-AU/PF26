@@ -38,7 +38,7 @@ export default function ProfileSummaryCard({
                 {fields.map((field) => (
                     <div key={field.label} className={field.fullWidth ? 'sm:col-span-2' : ''}>
                         <dt className="text-xs uppercase tracking-[0.12em] text-slate-500">{field.label}</dt>
-                        <dd className="mt-1 whitespace-pre-wrap break-words rounded-lg border border-black/5 bg-slate-50 px-3 py-2 text-sm text-slate-800">
+                        <dd className="mt-1 whitespace-pre-wrap break-all rounded-lg border border-black/5 bg-slate-50 px-3 py-2 text-sm text-slate-800">
                             {field.value || '—'}
                         </dd>
                     </div>

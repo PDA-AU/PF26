@@ -711,8 +711,8 @@ export default function PersohubAdminEventsPage() {
                                         <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.template_option}</span>
                                     </div>
                                     <div className="mt-4 rounded-xl border border-black/10 bg-white p-3">
-                                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Sympo Mapping</p>
-                                        <p className="mt-1 text-xs text-slate-500">Current: {eventRow.sympo_name || 'No sympo'}</p>
+                                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Add to symp</p>
+                                        <p className="mt-1 text-xs text-slate-500">Current: {eventRow.sympo_name || 'Standalone'}</p>
                                         {canMutate ? (
                                             <div className="mt-2 flex flex-wrap items-center gap-2">
                                                 <Select
@@ -723,7 +723,7 @@ export default function PersohubAdminEventsPage() {
                                                         <SelectValue placeholder="Select sympo" />
                                                     </SelectTrigger>
                                                     <SelectContent>
-                                                        <SelectItem value="none">No sympo</SelectItem>
+                                                        <SelectItem value="none">Standalone</SelectItem>
                                                         {sympoOptions.map((sympo) => (
                                                             <SelectItem key={sympo.id} value={String(sympo.id)}>{sympo.name}</SelectItem>
                                                         ))}

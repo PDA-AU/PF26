@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 import AdminLayout from '@/pages/HomeAdmin/AdminLayout';
 import { useAuth } from '@/context/AuthContext';
@@ -653,6 +654,33 @@ export default function CCAdmin() {
                     </TabsContent>
 
                     <TabsContent value="events" className="space-y-3">
+                        <div className="flex items-center justify-between gap-2 text-sm">
+                            <p className="text-slate-500">
+                                Showing {eventRangeLabel} of {eventsTotalCount}
+                            </p>
+                            {totalEventPages > 1 ? (
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setEventsPage((prev) => Math.max(1, prev - 1))}
+                                        className="rounded-full border border-[#c99612] bg-[#f6c347] p-2 text-[#11131a] transition hover:bg-[#ffd16b] disabled:cursor-not-allowed disabled:opacity-50"
+                                        aria-label="Previous events page"
+                                        disabled={eventsPage <= 1 || eventsLoading}
+                                    >
+                                        <ChevronLeft className="h-4 w-4" />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setEventsPage((prev) => Math.min(totalEventPages, prev + 1))}
+                                        className="rounded-full border border-[#c99612] bg-[#f6c347] p-2 text-[#11131a] transition hover:bg-[#ffd16b] disabled:cursor-not-allowed disabled:opacity-50"
+                                        aria-label="Next events page"
+                                        disabled={eventsPage >= totalEventPages || eventsLoading}
+                                    >
+                                        <ChevronRight className="h-4 w-4" />
+                                    </button>
+                                </div>
+                            ) : null}
+                        </div>
                         <div className="hidden md:block rounded-2xl border border-black/10 bg-white overflow-x-auto">
                             <table className="w-full text-sm">
                                 <thead className="bg-slate-50">
@@ -660,8 +688,7 @@ export default function CCAdmin() {
                                         <th className="px-3 py-2 text-left">Title</th>
                                         <th className="px-3 py-2 text-left">Code / Slug</th>
                                         <th className="px-3 py-2 text-left">Community</th>
-                                        <th className="px-3 py-2 text-left">Current Sympo</th>
-                                        <th className="px-3 py-2 text-right">Map Sympo</th>
+                                        <th className="px-3 py-2 text-right">Add to symp</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -676,9 +703,9 @@ export default function CCAdmin() {
                                                     <div>{event.slug}</div>
                                                 </td>
                                                 <td className="px-3 py-2">{event.community_name}</td>
-                                                <td className="px-3 py-2">{event.sympo_name || '—'}</td>
                                                 <td className="px-3 py-2">
                                                     <div className="flex items-center justify-end gap-2">
+                                                        <span className="text-xs text-slate-500">{event.sympo_name || 'Standalone'}</span>
                                                         <Select
                                                             value={draftValue}
                                                             onValueChange={(value) => setEventSympoDrafts((prev) => ({ ...prev, [event.id]: value }))}
@@ -687,7 +714,7 @@ export default function CCAdmin() {
                                                                 <SelectValue placeholder="Select sympo" />
                                                             </SelectTrigger>
                                                             <SelectContent>
-                                                                <SelectItem value="none">No sympo</SelectItem>
+                                                                <SelectItem value="none">Standalone</SelectItem>
                                                                 {sympos.map((sympo) => (
                                                                     <SelectItem key={sympo.id} value={String(sympo.id)}>{sympo.name}</SelectItem>
                                                                 ))}
@@ -717,7 +744,7 @@ export default function CCAdmin() {
                                         <p className="font-semibold">{event.title}</p>
                                         <p className="text-xs text-slate-500">{event.event_code} · {event.slug}</p>
                                         <p className="text-xs text-slate-500">Community: {event.community_name}</p>
-                                        <p className="text-xs text-slate-500">Current sympo: {event.sympo_name || '—'}</p>
+                                        <p className="text-xs text-slate-500">Add to symp: {event.sympo_name || 'Standalone'}</p>
                                         <div className="mt-3 space-y-2">
                                             <Select
                                                 value={draftValue}
@@ -727,7 +754,7 @@ export default function CCAdmin() {
                                                     <SelectValue placeholder="Select sympo" />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    <SelectItem value="none">No sympo</SelectItem>
+                                                    <SelectItem value="none">Standalone</SelectItem>
                                                     {sympos.map((sympo) => (
                                                         <SelectItem key={sympo.id} value={String(sympo.id)}>{sympo.name}</SelectItem>
                                                     ))}
@@ -744,30 +771,6 @@ export default function CCAdmin() {
                                     </div>
                                 );
                             })}
-                        </div>
-                        <div className="flex items-center justify-between gap-2 text-sm">
-                            <p className="text-slate-500">
-                                Showing {eventRangeLabel} of {eventsTotalCount}
-                            </p>
-                            <div className="flex items-center gap-2">
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => setEventsPage((prev) => Math.max(1, prev - 1))}
-                                    disabled={eventsPage <= 1 || eventsLoading}
-                                >
-                                    Prev
-                                </Button>
-                                <span className="text-xs text-slate-600">Page {eventsPage} / {totalEventPages}</span>
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => setEventsPage((prev) => Math.min(totalEventPages, prev + 1))}
-                                    disabled={eventsPage >= totalEventPages || eventsLoading}
-                                >
-                                    Next
-                                </Button>
-                            </div>
                         </div>
                         {eventsLoading ? <p className="text-xs text-slate-500">Loading events...</p> : null}
                     </TabsContent>

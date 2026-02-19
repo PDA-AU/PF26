@@ -130,6 +130,7 @@ class PersohubAdminEventTypeEnum(str, Enum):
     NONTECHINICAL = "NonTechinical"
     SESSION = "Session"
     WORKSHOP = "Workshop"
+    EVENT = "Event"
 
 
 class PersohubAdminEventFormatEnum(str, Enum):

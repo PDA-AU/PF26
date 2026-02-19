@@ -160,16 +160,16 @@ export default function PersohubAdminLayout({ children, title = 'Persohub Admin'
             <header className="border-b border-black/10 bg-white">
                 <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 px-5 py-6">
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
+                        <div className="min-w-0">
                             <p className="text-xs uppercase tracking-[0.4em] text-slate-400">Persohub Community Admin</p>
                             <h1 className="text-3xl font-heading font-black">{title}</h1>
                             {subtitle ? <p className="mt-2 text-sm text-slate-600">{subtitle}</p> : null}
                         </div>
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs rounded-full border border-black/10 bg-slate-50 px-3 py-1 text-slate-700">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2 sm:justify-end">
+                            <span className="max-w-full break-all text-xs rounded-full border border-black/10 bg-slate-50 px-3 py-1 text-slate-700">
                                 @{community.profile_id}
                             </span>
-                            <Button variant="outline" onClick={logout} className="border-black/10 text-sm">
+                            <Button variant="outline" onClick={logout} className="shrink-0 border-black/10 text-sm">
                                 Logout
                             </Button>
                         </div>

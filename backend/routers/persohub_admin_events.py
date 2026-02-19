@@ -196,14 +196,16 @@ def _log_community_event_action(
     action: str,
     method: str,
     path: str,
-    event: CommunityEvent,
+    event: Optional[CommunityEvent] = None,
+    event_slug: Optional[str] = None,
     meta: Optional[dict] = None,
 ) -> None:
     admin_id, admin_regno, admin_name = _admin_identity(db, community)
+    resolved_slug = str(event_slug or (event.slug if event else "") or "")
     db.add(
         CommunityEventLog(
-            event_id=event.id,
-            event_slug=event.slug,
+            event_id=(event.id if event else None),
+            event_slug=resolved_slug,
             admin_id=admin_id,
             admin_register_number=admin_regno,
             admin_name=admin_name,
@@ -561,7 +563,8 @@ def delete_admin_event(
         action="delete_community_managed_event",
         method=request.method,
         path=request.url.path,
-        event=event,
+        event=None,
+        event_slug=event_slug,
         meta={"event_id": event_id, "slug": event_slug},
     )
 
