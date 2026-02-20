@@ -1290,6 +1290,89 @@ def ensure_pda_event_registration_open_column(engine):
             conn.execute(text("ALTER TABLE pda_events ADD COLUMN IF NOT EXISTS registration_open BOOLEAN NOT NULL DEFAULT TRUE"))
 
 
+def ensure_pda_event_round_submission_tables(engine):
+    with engine.begin() as conn:
+        if _table_exists(conn, "pda_event_rounds"):
+            conn.execute(text("ALTER TABLE pda_event_rounds ADD COLUMN IF NOT EXISTS requires_submission BOOLEAN NOT NULL DEFAULT FALSE"))
+            conn.execute(text("ALTER TABLE pda_event_rounds ADD COLUMN IF NOT EXISTS submission_mode VARCHAR(32) NOT NULL DEFAULT 'file_or_link'"))
+            conn.execute(text("ALTER TABLE pda_event_rounds ADD COLUMN IF NOT EXISTS submission_deadline TIMESTAMPTZ"))
+            conn.execute(text("ALTER TABLE pda_event_rounds ADD COLUMN IF NOT EXISTS allowed_mime_types JSONB"))
+            conn.execute(text("ALTER TABLE pda_event_rounds ADD COLUMN IF NOT EXISTS max_file_size_mb INTEGER NOT NULL DEFAULT 25"))
+            conn.execute(
+                text(
+                    """
+                    UPDATE pda_event_rounds
+                    SET allowed_mime_types = CAST(:default_types AS jsonb)
+                    WHERE allowed_mime_types IS NULL
+                    """
+                ),
+                {
+                    "default_types": json.dumps([
+                        "application/pdf",
+                        "application/vnd.ms-powerpoint",
+                        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        "image/png",
+                        "image/jpeg",
+                        "image/webp",
+                        "application/zip",
+                    ])
+                },
+            )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS pda_event_round_submissions (
+                    id SERIAL PRIMARY KEY,
+                    event_id INTEGER NOT NULL REFERENCES pda_events(id) ON DELETE CASCADE,
+                    round_id INTEGER NOT NULL REFERENCES pda_event_rounds(id) ON DELETE CASCADE,
+                    entity_type VARCHAR(10) NOT NULL,
+                    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                    team_id INTEGER REFERENCES pda_event_teams(id) ON DELETE CASCADE,
+                    submission_type VARCHAR(16) NOT NULL,
+                    file_url VARCHAR(800),
+                    file_name VARCHAR(255),
+                    file_size_bytes BIGINT,
+                    mime_type VARCHAR(255),
+                    link_url VARCHAR(800),
+                    notes TEXT,
+                    version INTEGER NOT NULL DEFAULT 1,
+                    is_locked BOOLEAN NOT NULL DEFAULT FALSE,
+                    submitted_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ,
+                    updated_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_pda_event_round_submission_entity
+                ON pda_event_round_submissions(event_id, round_id, entity_type, user_id, team_id)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_pda_round_submission_event_round "
+                "ON pda_event_round_submissions(event_id, round_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_pda_round_submission_entity_user "
+                "ON pda_event_round_submissions(event_id, entity_type, user_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_pda_round_submission_entity_team "
+                "ON pda_event_round_submissions(event_id, entity_type, team_id)"
+            )
+        )
+
+
 def ensure_community_event_tables(engine):
     with engine.begin() as conn:
         conn.execute(

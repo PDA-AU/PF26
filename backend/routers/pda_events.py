@@ -28,6 +28,7 @@ from models import (
     PdaEventBadge,
     PdaEventAttendance,
     PdaEventScore,
+    PdaEventRoundSubmission,
 )
 from schemas import (
     PdaManagedAchievement,
@@ -37,6 +38,10 @@ from schemas import (
     PdaManagedEventResponse,
     PdaManagedMyEvent,
     PdaManagedQrResponse,
+    PdaRoundSubmissionPresignRequest,
+    PdaRoundSubmissionResponse,
+    PdaRoundSubmissionUpsertRequest,
+    PresignResponse,
     PdaManagedTeamCreate,
     PdaManagedTeamInvite,
     PdaManagedTeamJoin,
@@ -45,6 +50,7 @@ from schemas import (
     PdaManagedEntityTypeEnum,
 )
 from security import require_pda_user
+from utils import _generate_presigned_put_url
 
 router = APIRouter()
 
@@ -125,6 +131,106 @@ def _get_user_team_for_event(db: Session, event_id: int, user_id: int) -> Option
         .first()
     )
     return row
+
+
+def _resolve_submission_entity(
+    db: Session,
+    event: PdaEvent,
+    user: PdaUser,
+    enforce_team_leader: bool = False,
+) -> Tuple[PdaEventRegistration, PdaEventEntityType, Optional[int], Optional[int], Optional[PdaEventTeam], bool]:
+    registration = None
+    entity_type = PdaEventEntityType.USER
+    entity_user_id: Optional[int] = user.id
+    entity_team_id: Optional[int] = None
+    team: Optional[PdaEventTeam] = None
+    is_team_leader = False
+
+    if event.participant_mode == PdaEventParticipantMode.INDIVIDUAL:
+        registration = db.query(PdaEventRegistration).filter(
+            PdaEventRegistration.event_id == event.id,
+            PdaEventRegistration.user_id == user.id,
+            PdaEventRegistration.entity_type == PdaEventEntityType.USER,
+        ).first()
+    else:
+        team = _get_user_team_for_event(db, event.id, user.id)
+        if team:
+            entity_type = PdaEventEntityType.TEAM
+            entity_user_id = None
+            entity_team_id = team.id
+            is_team_leader = int(team.team_lead_user_id) == int(user.id)
+            registration = db.query(PdaEventRegistration).filter(
+                PdaEventRegistration.event_id == event.id,
+                PdaEventRegistration.team_id == team.id,
+                PdaEventRegistration.entity_type == PdaEventEntityType.TEAM,
+            ).first()
+
+    if not registration:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration not found")
+    if enforce_team_leader and event.participant_mode == PdaEventParticipantMode.TEAM and not is_team_leader:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only team leader can submit for this round")
+    return registration, entity_type, entity_user_id, entity_team_id, team, is_team_leader
+
+
+def _round_submission_lock_reason(round_row: PdaEventRound, submission: Optional[PdaEventRoundSubmission]) -> Optional[str]:
+    now = datetime.now(timezone.utc)
+    if round_row.state in {PdaEventRoundState.COMPLETED, PdaEventRoundState.REVEAL}:
+        return "Round is finalized"
+    if bool(round_row.is_frozen):
+        return "Round is frozen"
+    deadline = round_row.submission_deadline
+    if deadline and deadline.tzinfo is None:
+        deadline = deadline.replace(tzinfo=timezone.utc)
+    if deadline and now >= deadline:
+        return "Submission deadline has passed"
+    if submission and bool(submission.is_locked):
+        return "Submission is locked by admin"
+    return None
+
+
+def _default_round_allowed_mime_types() -> List[str]:
+    return [
+        "application/pdf",
+        "application/vnd.ms-powerpoint",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "image/png",
+        "image/jpeg",
+        "image/webp",
+        "application/zip",
+    ]
+
+
+def _submission_payload(
+    round_row: PdaEventRound,
+    entity_type: PdaEventEntityType,
+    entity_user_id: Optional[int],
+    entity_team_id: Optional[int],
+    submission: Optional[PdaEventRoundSubmission],
+) -> PdaRoundSubmissionResponse:
+    lock_reason = _round_submission_lock_reason(round_row, submission)
+    return PdaRoundSubmissionResponse(
+        id=submission.id if submission else None,
+        event_id=int(round_row.event_id),
+        round_id=int(round_row.id),
+        entity_type=PdaManagedEntityTypeEnum.TEAM if entity_type == PdaEventEntityType.TEAM else PdaManagedEntityTypeEnum.USER,
+        user_id=entity_user_id,
+        team_id=entity_team_id,
+        submission_type=submission.submission_type if submission else None,
+        file_url=submission.file_url if submission else None,
+        file_name=submission.file_name if submission else None,
+        file_size_bytes=submission.file_size_bytes if submission else None,
+        mime_type=submission.mime_type if submission else None,
+        link_url=submission.link_url if submission else None,
+        notes=submission.notes if submission else None,
+        version=int(submission.version or 0) if submission else 0,
+        is_locked=bool(submission.is_locked) if submission else False,
+        submitted_at=submission.submitted_at if submission else None,
+        updated_at=submission.updated_at if submission else None,
+        updated_by_user_id=submission.updated_by_user_id if submission else None,
+        is_editable=lock_reason is None,
+        lock_reason=lock_reason,
+        deadline_at=round_row.submission_deadline,
+    )
 
 
 def _ensure_registration_open_for_registration_actions(event: PdaEvent) -> None:
@@ -208,6 +314,193 @@ def list_event_published_rounds(slug: str, db: Session = Depends(get_db)):
         .all()
     )
     return [PdaEventPublicRoundResponse.model_validate(round_row) for round_row in rounds]
+
+
+@router.get("/pda/events/{slug}/rounds/{round_id}/submission", response_model=PdaRoundSubmissionResponse)
+def get_my_round_submission(
+    slug: str,
+    round_id: int,
+    user: PdaUser = Depends(require_pda_user),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    _ensure_event_visible_for_public_access(event)
+    round_row = db.query(PdaEventRound).filter(PdaEventRound.id == round_id, PdaEventRound.event_id == event.id).first()
+    if not round_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
+    if not bool(round_row.requires_submission):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Round does not require submission")
+    _, entity_type, entity_user_id, entity_team_id, _, _ = _resolve_submission_entity(db, event, user, enforce_team_leader=False)
+    submission = db.query(PdaEventRoundSubmission).filter(
+        PdaEventRoundSubmission.event_id == event.id,
+        PdaEventRoundSubmission.round_id == round_row.id,
+        PdaEventRoundSubmission.entity_type == entity_type,
+        PdaEventRoundSubmission.user_id == entity_user_id,
+        PdaEventRoundSubmission.team_id == entity_team_id,
+    ).first()
+    return _submission_payload(round_row, entity_type, entity_user_id, entity_team_id, submission)
+
+
+@router.post("/pda/events/{slug}/rounds/{round_id}/submission/presign", response_model=PresignResponse)
+def presign_my_round_submission(
+    slug: str,
+    round_id: int,
+    payload: PdaRoundSubmissionPresignRequest,
+    user: PdaUser = Depends(require_pda_user),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    _ensure_event_visible_for_public_access(event)
+    round_row = db.query(PdaEventRound).filter(PdaEventRound.id == round_id, PdaEventRound.event_id == event.id).first()
+    if not round_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
+    if not bool(round_row.requires_submission):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Round does not require submission")
+    _, entity_type, entity_user_id, entity_team_id, _, _ = _resolve_submission_entity(db, event, user, enforce_team_leader=True)
+    existing = db.query(PdaEventRoundSubmission).filter(
+        PdaEventRoundSubmission.event_id == event.id,
+        PdaEventRoundSubmission.round_id == round_row.id,
+        PdaEventRoundSubmission.entity_type == entity_type,
+        PdaEventRoundSubmission.user_id == entity_user_id,
+        PdaEventRoundSubmission.team_id == entity_team_id,
+    ).first()
+    lock_reason = _round_submission_lock_reason(round_row, existing)
+    if lock_reason:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=lock_reason)
+
+    allowed_mime_types = list(round_row.allowed_mime_types or _default_round_allowed_mime_types())
+    if payload.content_type not in allowed_mime_types:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file type")
+
+    max_file_size_mb = int(round_row.max_file_size_mb or 25)
+    max_bytes = max_file_size_mb * 1024 * 1024
+    if int(payload.file_size_bytes) > max_bytes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"File size exceeds {max_file_size_mb} MB limit")
+
+    presign = _generate_presigned_put_url(
+        key_prefix=f"submissions/pda_events/{event.slug}/rounds/{round_row.id}",
+        filename=payload.filename,
+        content_type=payload.content_type,
+        allowed_types=allowed_mime_types,
+    )
+    return PresignResponse(**presign)
+
+
+@router.put("/pda/events/{slug}/rounds/{round_id}/submission", response_model=PdaRoundSubmissionResponse)
+def upsert_my_round_submission(
+    slug: str,
+    round_id: int,
+    payload: PdaRoundSubmissionUpsertRequest,
+    user: PdaUser = Depends(require_pda_user),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    _ensure_event_visible_for_public_access(event)
+    round_row = db.query(PdaEventRound).filter(PdaEventRound.id == round_id, PdaEventRound.event_id == event.id).first()
+    if not round_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
+    if not bool(round_row.requires_submission):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Round does not require submission")
+
+    _, entity_type, entity_user_id, entity_team_id, _, _ = _resolve_submission_entity(db, event, user, enforce_team_leader=True)
+    submission = db.query(PdaEventRoundSubmission).filter(
+        PdaEventRoundSubmission.event_id == event.id,
+        PdaEventRoundSubmission.round_id == round_row.id,
+        PdaEventRoundSubmission.entity_type == entity_type,
+        PdaEventRoundSubmission.user_id == entity_user_id,
+        PdaEventRoundSubmission.team_id == entity_team_id,
+    ).first()
+
+    lock_reason = _round_submission_lock_reason(round_row, submission)
+    if lock_reason:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=lock_reason)
+
+    data = payload.model_dump()
+    submission_type = str(data.get("submission_type") or "").strip().lower()
+    allowed_mime_types = list(round_row.allowed_mime_types or _default_round_allowed_mime_types())
+    max_file_size_mb = int(round_row.max_file_size_mb or 25)
+    max_bytes = max_file_size_mb * 1024 * 1024
+
+    if submission_type == "file":
+        file_url = str(data.get("file_url") or "").strip()
+        mime_type = str(data.get("mime_type") or "").strip().lower()
+        file_size_bytes = int(data.get("file_size_bytes") or 0)
+        if not file_url:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file_url is required for file submissions")
+        if not mime_type:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mime_type is required for file submissions")
+        if mime_type not in allowed_mime_types:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file type")
+        if file_size_bytes <= 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file_size_bytes is required for file submissions")
+        if file_size_bytes > max_bytes:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"File size exceeds {max_file_size_mb} MB limit")
+        if submission:
+            submission.submission_type = "file"
+            submission.file_url = file_url
+            submission.file_name = str(data.get("file_name") or "").strip() or None
+            submission.file_size_bytes = file_size_bytes
+            submission.mime_type = mime_type
+            submission.link_url = None
+            submission.notes = str(data.get("notes") or "").strip() or None
+            submission.version = int(submission.version or 0) + 1
+            submission.updated_by_user_id = user.id
+        else:
+            submission = PdaEventRoundSubmission(
+                event_id=event.id,
+                round_id=round_row.id,
+                entity_type=entity_type,
+                user_id=entity_user_id,
+                team_id=entity_team_id,
+                submission_type="file",
+                file_url=file_url,
+                file_name=str(data.get("file_name") or "").strip() or None,
+                file_size_bytes=file_size_bytes,
+                mime_type=mime_type,
+                link_url=None,
+                notes=str(data.get("notes") or "").strip() or None,
+                version=1,
+                updated_by_user_id=user.id,
+            )
+            db.add(submission)
+    elif submission_type == "link":
+        link_url = str(data.get("link_url") or "").strip()
+        if not link_url:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="link_url is required for link submissions")
+        if submission:
+            submission.submission_type = "link"
+            submission.file_url = None
+            submission.file_name = None
+            submission.file_size_bytes = None
+            submission.mime_type = None
+            submission.link_url = link_url
+            submission.notes = str(data.get("notes") or "").strip() or None
+            submission.version = int(submission.version or 0) + 1
+            submission.updated_by_user_id = user.id
+        else:
+            submission = PdaEventRoundSubmission(
+                event_id=event.id,
+                round_id=round_row.id,
+                entity_type=entity_type,
+                user_id=entity_user_id,
+                team_id=entity_team_id,
+                submission_type="link",
+                file_url=None,
+                file_name=None,
+                file_size_bytes=None,
+                mime_type=None,
+                link_url=link_url,
+                notes=str(data.get("notes") or "").strip() or None,
+                version=1,
+                updated_by_user_id=user.id,
+            )
+            db.add(submission)
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="submission_type must be file or link")
+
+    db.commit()
+    db.refresh(submission)
+    return _submission_payload(round_row, entity_type, entity_user_id, entity_team_id, submission)
 
 
 @router.get("/pda/events/{slug}/dashboard", response_model=PdaManagedEventDashboard)

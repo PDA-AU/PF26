@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>{{ event_name }} - Round {{ round_number }} Shortlisted</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 15mm 15mm 25mm 15mm;
+        }
+
+        body {
+            font-family: "Times New Roman", Times, serif;
+            margin: 0;
+            padding: 0;
+            background: transparent !important;
+            font-size: 12px;
+            line-height: 1.15;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 180mm;
+            margin: 0 auto;
+            position: relative;
+            background: transparent !important;
+        }
+
+        .header-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+            table-layout: fixed;
+            background: transparent !important;
+        }
+
+        .header-table td {
+            vertical-align: top;
+            background: transparent !important;
+        }
+
+        .logo-cell {
+            width: 100px;
+        }
+
+        .logo {
+            width: 100px;
+            height: 100px;
+            object-fit: contain;
+        }
+
+        .center-content {
+            text-align: center;
+            line-height: 1.15;
+            padding: 0 10px;
+            background: transparent !important;
+        }
+
+        .university-name,
+        .institute-name,
+        .pda-name,
+        .address {
+            font-size: 13pt;
+            font-weight: bold;
+            text-transform: uppercase;
+            margin: 0 0 2px 0;
+            letter-spacing: 0.3px;
+        }
+
+        .contact-info {
+            font-size: 11pt;
+            font-weight: bold;
+            margin-bottom: 8px;
+            letter-spacing: 0.2px;
+            white-space: nowrap;
+        }
+
+        .contact-label {
+            text-transform: uppercase;
+        }
+
+        .email-link,
+        .website-link {
+            color: #0000ff;
+            text-decoration: none;
+            font-weight: normal;
+            text-transform: lowercase;
+        }
+
+        .event-title {
+            font-size: 15pt;
+            font-weight: bold;
+            text-transform: uppercase;
+            text-align: center;
+            margin: 10px 0 5px 0;
+            letter-spacing: 0.5px;
+        }
+
+        .round-title {
+            font-size: 13pt;
+            font-weight: bold;
+            text-transform: uppercase;
+            text-align: center;
+            margin: 0 0 5px 0;
+            letter-spacing: 0.5px;
+        }
+
+        .leaderboard-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 0;
+            font-family: "Times New Roman", Times, serif;
+            table-layout: fixed;
+            background: transparent !important;
+        }
+
+        .leaderboard-table thead,
+        .leaderboard-table tbody,
+        .leaderboard-table tr {
+            background: transparent !important;
+        }
+
+        .leaderboard-table th {
+            border: 1px solid #000000;
+            padding: 8px;
+            text-align: center;
+            font-weight: bold;
+            text-transform: uppercase;
+            font-size: 13px;
+            background-color: transparent !important;
+            font-family: "Times New Roman", Times, serif;
+        }
+
+        .leaderboard-table td {
+            border: 1px solid #000000;
+            padding: 6px 8px;
+            text-align: center;
+            font-size: 13px;
+            font-weight: normal;
+            background-color: transparent !important;
+            font-family: "Times New Roman", Times, serif;
+            word-wrap: break-word;
+        }
+
+        .si-no-column {
+            width: 15%;
+        }
+
+        .team-code-column,
+        .register-no-column {
+            width: 25%;
+        }
+
+        .team-name-column {
+            width: 60%;
+        }
+
+        .name-column {
+            width: 35%;
+        }
+
+        .department-column {
+            width: 25%;
+        }
+
+        .team-code {
+            font-weight: bold;
+        }
+
+        .footer-text {
+            margin-top: 20px;
+            text-align: center;
+            font-size: 10pt;
+            font-style: italic;
+            color: #666666;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <table class="header-table">
+            <tr>
+                <td class="logo-cell">
+                    {% if left_logo %}
+                    <img src="{{ left_logo }}" alt="Left Logo" class="logo">
+                    {% endif %}
+                </td>
+                <td>
+                    <div class="center-content">
+                        <div class="university-name">ANNA UNIVERSITY</div>
+                        <div class="institute-name">MADRAS INSTITUTE OF TECHNOLOGY</div>
+                        <div class="pda-name">PERSONALITY DEVELOPMENT ASSOCIATION</div>
+                        <div class="address">CHROMEPET, CHENNAI - 600 044</div>
+                        <div class="contact-info">
+                            <span class="contact-label">EMAIL:</span><a href="mailto:pda@mitindia.edu" class="email-link">pda@mitindia.edu</a>&nbsp;&nbsp;&nbsp;&nbsp;<span class="contact-label">WEBSITE:</span><a href="https://pdamit.in" class="website-link">https://pdamit.in</a>
+                        </div>
+                        <div class="event-title">{{ event_name }}</div>
+                        <div class="round-title">ROUND {{ round_number }} SHORTLISTED</div>
+                    </div>
+                </td>
+                <td class="logo-cell">
+                    {% if right_logo %}
+                    <img src="{{ right_logo }}" alt="Right Logo" class="logo">
+                    {% endif %}
+                </td>
+            </tr>
+        </table>
+
+        <table class="leaderboard-table">
+            <thead>
+                <tr>
+                    {% for header in table_headers %}
+                    <th class="{{ header.class_name }}">{{ header.label }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in table_rows %}
+                <tr>
+                    {% for cell in row.cells %}
+                    <td class="{% if is_team_mode and loop.index0 == 1 and cell %}team-code{% endif %}">{{ cell }}</td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+
+                {% for _ in range(table_rows|length, min_rows) %}
+                <tr class="empty-row">
+                    {% for __ in range(column_count) %}
+                    <td></td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <div class="footer-text">
+            {{ footer_text }}
+        </div>
+    </div>
+</body>
+</html>

@@ -1259,6 +1259,15 @@ class PdaManagedRoundStateEnum(str, Enum):
     REVEAL = "Reveal"
 
 
+class PdaManagedRoundSubmissionModeEnum(str, Enum):
+    FILE_OR_LINK = "file_or_link"
+
+
+class PdaManagedRoundSubmissionTypeEnum(str, Enum):
+    FILE = "file"
+    LINK = "link"
+
+
 class PdaManagedBadgePlaceEnum(str, Enum):
     WINNER = "Winner"
     RUNNER = "Runner"
@@ -1453,6 +1462,21 @@ class PdaManagedRoundCreate(BaseModel):
     date: Optional[datetime] = None
     mode: PdaManagedEventFormatEnum = PdaManagedEventFormatEnum.OFFLINE
     evaluation_criteria: Optional[List[PdaManagedRoundCriteria]] = None
+    requires_submission: bool = False
+    submission_mode: PdaManagedRoundSubmissionModeEnum = PdaManagedRoundSubmissionModeEnum.FILE_OR_LINK
+    submission_deadline: Optional[datetime] = None
+    allowed_mime_types: List[str] = Field(
+        default_factory=lambda: [
+            "application/pdf",
+            "application/vnd.ms-powerpoint",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "application/zip",
+        ]
+    )
+    max_file_size_mb: int = Field(default=25, ge=1, le=500)
 
     @model_validator(mode="before")
     @classmethod
@@ -1489,6 +1513,11 @@ class PdaManagedRoundUpdate(BaseModel):
     elimination_type: Optional[str] = None
     elimination_value: Optional[float] = None
     eliminate_absent: Optional[bool] = None
+    requires_submission: Optional[bool] = None
+    submission_mode: Optional[PdaManagedRoundSubmissionModeEnum] = None
+    submission_deadline: Optional[datetime] = None
+    allowed_mime_types: Optional[List[str]] = None
+    max_file_size_mb: Optional[int] = Field(default=None, ge=1, le=500)
 
     @model_validator(mode="before")
     @classmethod
@@ -1525,6 +1554,11 @@ class PdaManagedRoundResponse(BaseModel):
     evaluation_criteria: Optional[List[Dict[str, Any]]] = None
     elimination_type: Optional[str] = None
     elimination_value: Optional[float] = None
+    requires_submission: bool = False
+    submission_mode: PdaManagedRoundSubmissionModeEnum = PdaManagedRoundSubmissionModeEnum.FILE_OR_LINK
+    submission_deadline: Optional[datetime] = None
+    allowed_mime_types: Optional[List[str]] = Field(default_factory=list)
+    max_file_size_mb: int = 25
     is_frozen: bool
     created_at: datetime
 
@@ -1544,9 +1578,81 @@ class PdaEventPublicRoundResponse(BaseModel):
     date: Optional[datetime] = None
     mode: PdaManagedEventFormatEnum
     state: PdaManagedRoundStateEnum
+    requires_submission: bool = False
+    submission_mode: PdaManagedRoundSubmissionModeEnum = PdaManagedRoundSubmissionModeEnum.FILE_OR_LINK
+    submission_deadline: Optional[datetime] = None
+    allowed_mime_types: Optional[List[str]] = Field(default_factory=list)
+    max_file_size_mb: int = 25
 
     class Config:
         from_attributes = True
+
+
+class PdaRoundSubmissionPresignRequest(BaseModel):
+    filename: str = Field(..., min_length=1)
+    content_type: str = Field(..., min_length=1)
+    file_size_bytes: int = Field(..., ge=1)
+
+
+class PdaRoundSubmissionUpsertRequest(BaseModel):
+    submission_type: PdaManagedRoundSubmissionTypeEnum
+    file_url: Optional[str] = None
+    file_name: Optional[str] = None
+    file_size_bytes: Optional[int] = Field(default=None, ge=1)
+    mime_type: Optional[str] = None
+    link_url: Optional[str] = None
+    notes: Optional[str] = None
+
+    @field_validator("file_url", "link_url", mode="before")
+    @classmethod
+    def normalize_optional_url(cls, value):
+        return _normalize_optional_http_url(value, "url")
+
+
+class PdaRoundSubmissionAdminUpdate(BaseModel):
+    submission_type: Optional[PdaManagedRoundSubmissionTypeEnum] = None
+    file_url: Optional[str] = None
+    file_name: Optional[str] = None
+    file_size_bytes: Optional[int] = Field(default=None, ge=1)
+    mime_type: Optional[str] = None
+    link_url: Optional[str] = None
+    notes: Optional[str] = None
+    is_locked: Optional[bool] = None
+
+    @field_validator("file_url", "link_url", mode="before")
+    @classmethod
+    def normalize_optional_url(cls, value):
+        return _normalize_optional_http_url(value, "url")
+
+
+class PdaRoundSubmissionResponse(BaseModel):
+    id: Optional[int] = None
+    event_id: int
+    round_id: int
+    entity_type: PdaManagedEntityTypeEnum
+    user_id: Optional[int] = None
+    team_id: Optional[int] = None
+    submission_type: Optional[PdaManagedRoundSubmissionTypeEnum] = None
+    file_url: Optional[str] = None
+    file_name: Optional[str] = None
+    file_size_bytes: Optional[int] = None
+    mime_type: Optional[str] = None
+    link_url: Optional[str] = None
+    notes: Optional[str] = None
+    version: int = 0
+    is_locked: bool = False
+    submitted_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    updated_by_user_id: Optional[int] = None
+    is_editable: bool = False
+    lock_reason: Optional[str] = None
+    deadline_at: Optional[datetime] = None
+
+
+class PdaRoundSubmissionAdminListItem(PdaRoundSubmissionResponse):
+    participant_name: str
+    participant_register_number: str
+    participant_status: str
 
 
 class PdaManagedAttendanceMarkRequest(BaseModel):

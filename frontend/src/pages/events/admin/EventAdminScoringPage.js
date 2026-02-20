@@ -863,6 +863,7 @@ function ScoringContent() {
                                 <th>{entityMode === 'team' ? 'Team Code' : 'Register No'}</th>
                                 <th>{entityMode === 'team' ? 'Team Name' : 'Name'}</th>
                                 <th>Round Status</th>
+                                <th>Submission</th>
                                 <th>Present</th>
                                 {criteria.map((criterion, index) => (
                                     <th key={`${criterion.name}-${index}`}>{criterion.name} (/{criterion.max_marks})</th>
@@ -893,6 +894,25 @@ function ScoringContent() {
                                         <td className="font-medium">{row._name || '—'}</td>
                                         <td>
                                             <span className={`tag border-2 ${roundStatusClass}`}>{roundStatus}</span>
+                                        </td>
+                                        <td>
+                                            {row.submission_file_url || row.submission_link_url ? (
+                                                <div className="flex items-center gap-2">
+                                                    <a
+                                                        href={row.submission_file_url || row.submission_link_url}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className="text-xs font-bold underline"
+                                                    >
+                                                        View
+                                                    </a>
+                                                    {row.submission_is_locked ? (
+                                                        <span className="tag border-2 border-slate-500 bg-slate-100 text-slate-700">Locked</span>
+                                                    ) : null}
+                                                </div>
+                                            ) : (
+                                                <span className="text-xs text-slate-500">Missing</span>
+                                            )}
                                         </td>
                                         <td>
                                             <Checkbox

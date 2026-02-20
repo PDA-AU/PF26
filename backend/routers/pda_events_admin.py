@@ -2,8 +2,13 @@ import csv
 import io
 import math
 import re
+import base64
+import ssl
 from collections import Counter
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -34,10 +39,12 @@ from models import (
     PdaEventRoundState,
     PdaEventAttendance,
     PdaEventScore,
+    PdaEventRoundSubmission,
     PdaEventBadge,
     PdaEventBadgePlace,
     PdaEventInvite,
     PdaEventLog,
+    PersohubClub,
 )
 from schemas import (
     PdaManagedAttendanceMarkRequest,
@@ -55,6 +62,8 @@ from schemas import (
     PdaEventLogResponse,
     PdaManagedRoundResponse,
     PdaManagedRoundUpdate,
+    PdaRoundSubmissionAdminListItem,
+    PdaRoundSubmissionAdminUpdate,
     PdaManagedScoreEntry,
     PdaManagedTeamResponse,
     EventBulkEmailRequest,
@@ -65,6 +74,7 @@ from security import get_admin_context, require_pda_event_admin, require_superad
 from utils import log_admin_action, log_pda_event_action
 
 router = APIRouter()
+OFFICIAL_LETTERHEAD_LEFT_LOGO_URL = "https://pda-uploads.s3.ap-south-1.amazonaws.com/pda/letterhead/left-logo/mit-logo-20260220125851.png"
 
 
 def _slugify(value: str) -> str:
@@ -114,6 +124,73 @@ def _ensure_events_policy_shape(policy: Optional[dict]) -> dict:
 
 def _criteria_def(round_obj: PdaEventRound) -> List[dict]:
     return round_obj.evaluation_criteria or [{"name": "Score", "max_marks": 100}]
+
+
+def _default_round_allowed_mime_types() -> List[str]:
+    return [
+        "application/pdf",
+        "application/vnd.ms-powerpoint",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "image/png",
+        "image/jpeg",
+        "image/webp",
+        "application/zip",
+    ]
+
+
+def _round_submission_deadline_has_passed(round_row: PdaEventRound) -> bool:
+    if not round_row.submission_deadline:
+        return False
+    now = datetime.now(timezone.utc)
+    deadline = round_row.submission_deadline
+    if deadline.tzinfo is None:
+        deadline = deadline.replace(tzinfo=timezone.utc)
+    return now >= deadline
+
+
+def _round_submission_payload_for_admin(
+    round_row: PdaEventRound,
+    event: PdaEvent,
+    entity: dict,
+    submission: Optional[PdaEventRoundSubmission],
+) -> PdaRoundSubmissionAdminListItem:
+    deadline_passed = _round_submission_deadline_has_passed(round_row)
+    lock_reason = None
+    if submission and submission.is_locked:
+        lock_reason = "Submission is locked by admin"
+    elif deadline_passed:
+        lock_reason = "Submission deadline has passed"
+    elif round_row.state in {PdaEventRoundState.COMPLETED, PdaEventRoundState.REVEAL}:
+        lock_reason = "Round is finalized"
+    elif round_row.is_frozen:
+        lock_reason = "Round is frozen"
+
+    return PdaRoundSubmissionAdminListItem(
+        id=submission.id if submission else None,
+        event_id=event.id,
+        round_id=round_row.id,
+        entity_type=entity["entity_type"],
+        user_id=entity["entity_id"] if str(entity["entity_type"]) == "user" else None,
+        team_id=entity["entity_id"] if str(entity["entity_type"]) == "team" else None,
+        participant_name=str(entity.get("name") or ""),
+        participant_register_number=str(entity.get("regno_or_code") or ""),
+        participant_status=str(entity.get("status") or "Active"),
+        submission_type=(submission.submission_type if submission else None),
+        file_url=(submission.file_url if submission else None),
+        file_name=(submission.file_name if submission else None),
+        file_size_bytes=(submission.file_size_bytes if submission else None),
+        mime_type=(submission.mime_type if submission else None),
+        link_url=(submission.link_url if submission else None),
+        notes=(submission.notes if submission else None),
+        version=(int(submission.version or 0) if submission else 0),
+        is_locked=(bool(submission.is_locked) if submission else False),
+        submitted_at=(submission.submitted_at if submission else None),
+        updated_at=(submission.updated_at if submission else None),
+        updated_by_user_id=(submission.updated_by_user_id if submission else None),
+        is_editable=bool(submission and not submission.is_locked),
+        lock_reason=lock_reason,
+        deadline_at=round_row.submission_deadline,
+    )
 
 
 SCORE_RATIO_RE = re.compile(r"^\s*([+-]?\d+(?:\.\d+)?)\s*/\s*([+-]?\d+(?:\.\d+)?)\s*$")
@@ -545,6 +622,10 @@ def create_managed_event(
                 mode=new_event.format,
                 state=PdaEventRoundState.DRAFT,
                 evaluation_criteria=[{"name": "Score", "max_marks": 100}],
+                requires_submission=False,
+                submission_mode="file_or_link",
+                allowed_mime_types=_default_round_allowed_mime_types(),
+                max_file_size_mb=25,
             )
         )
 
@@ -664,17 +745,20 @@ def delete_managed_event(
         db.query(PdaEventInvite).filter(PdaEventInvite.team_id.in_(team_ids)).delete(synchronize_session=False)
         db.query(PdaEventBadge).filter(PdaEventBadge.team_id.in_(team_ids)).delete(synchronize_session=False)
         db.query(PdaEventScore).filter(PdaEventScore.team_id.in_(team_ids)).delete(synchronize_session=False)
+        db.query(PdaEventRoundSubmission).filter(PdaEventRoundSubmission.team_id.in_(team_ids)).delete(synchronize_session=False)
         db.query(PdaEventAttendance).filter(PdaEventAttendance.team_id.in_(team_ids)).delete(synchronize_session=False)
         db.query(PdaEventRegistration).filter(PdaEventRegistration.team_id.in_(team_ids)).delete(synchronize_session=False)
         db.query(PdaEventTeamMember).filter(PdaEventTeamMember.team_id.in_(team_ids)).delete(synchronize_session=False)
 
     if round_ids:
         db.query(PdaEventScore).filter(PdaEventScore.round_id.in_(round_ids)).delete(synchronize_session=False)
+        db.query(PdaEventRoundSubmission).filter(PdaEventRoundSubmission.round_id.in_(round_ids)).delete(synchronize_session=False)
         db.query(PdaEventAttendance).filter(PdaEventAttendance.round_id.in_(round_ids)).delete(synchronize_session=False)
 
     db.query(PdaEventInvite).filter(PdaEventInvite.event_id == event_id).delete(synchronize_session=False)
     db.query(PdaEventBadge).filter(PdaEventBadge.event_id == event_id).delete(synchronize_session=False)
     db.query(PdaEventScore).filter(PdaEventScore.event_id == event_id).delete(synchronize_session=False)
+    db.query(PdaEventRoundSubmission).filter(PdaEventRoundSubmission.event_id == event_id).delete(synchronize_session=False)
     db.query(PdaEventAttendance).filter(PdaEventAttendance.event_id == event_id).delete(synchronize_session=False)
     db.query(PdaEventRegistration).filter(PdaEventRegistration.event_id == event_id).delete(synchronize_session=False)
     db.query(PdaEventTeamMember).filter(
@@ -1633,6 +1717,11 @@ def create_round(
         date=payload.date,
         mode=_to_event_format(payload.mode),
         evaluation_criteria=[c.model_dump() for c in payload.evaluation_criteria] if payload.evaluation_criteria else [{"name": "Score", "max_marks": 100}],
+        requires_submission=bool(payload.requires_submission),
+        submission_mode=(payload.submission_mode.value if hasattr(payload.submission_mode, "value") else str(payload.submission_mode or "file_or_link")),
+        submission_deadline=payload.submission_deadline,
+        allowed_mime_types=list(payload.allowed_mime_types or _default_round_allowed_mime_types()),
+        max_file_size_mb=int(payload.max_file_size_mb or 25),
     )
     db.add(round_row)
     _sync_event_round_count(db, event.id)
@@ -1676,6 +1765,14 @@ def update_round(
         updates["state"] = _to_round_state(payload.state)
     if "evaluation_criteria" in updates and payload.evaluation_criteria is not None:
         updates["evaluation_criteria"] = [c.model_dump() for c in payload.evaluation_criteria]
+    if "submission_mode" in updates:
+        updates["submission_mode"] = (
+            payload.submission_mode.value
+            if hasattr(payload.submission_mode, "value")
+            else str(payload.submission_mode or "file_or_link")
+        )
+    if "allowed_mime_types" in updates:
+        updates["allowed_mime_types"] = list(payload.allowed_mime_types or _default_round_allowed_mime_types())
 
     if requested_round_no is not None:
         next_round_no = int(requested_round_no)
@@ -1822,6 +1919,10 @@ def delete_round(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
     if round_row.state != PdaEventRoundState.DRAFT:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only draft rounds can be deleted")
+    db.query(PdaEventRoundSubmission).filter(
+        PdaEventRoundSubmission.event_id == event.id,
+        PdaEventRoundSubmission.round_id == round_row.id,
+    ).delete(synchronize_session=False)
     db.delete(round_row)
     _sync_event_round_count(db, event.id)
     db.commit()
@@ -1957,11 +2058,20 @@ def round_participants(
     for row in attendance_rows:
         key = ("user", row.user_id) if row.user_id else ("team", row.team_id)
         attendance_map[key] = row
+    submission_rows = db.query(PdaEventRoundSubmission).filter(
+        PdaEventRoundSubmission.event_id == event.id,
+        PdaEventRoundSubmission.round_id == round_id,
+    ).all()
+    submission_map = {}
+    for row in submission_rows:
+        key = ("user", row.user_id) if row.user_id else ("team", row.team_id)
+        submission_map[key] = row
     result = []
     for entity in entities:
         key = (entity["entity_type"], entity["entity_id"])
         row = score_map.get(key)
         attendance_row = attendance_map.get(key)
+        submission_row = submission_map.get(key)
         is_present = bool(attendance_row.is_present) if attendance_row else (bool(row.is_present) if row else False)
         payload = {
             **entity,
@@ -1970,6 +2080,11 @@ def round_participants(
             "total_score": float(row.total_score or 0.0) if row else 0.0,
             "normalized_score": float(row.normalized_score or 0.0) if row else 0.0,
             "is_present": is_present,
+            "submission_id": submission_row.id if submission_row else None,
+            "submission_type": submission_row.submission_type if submission_row else None,
+            "submission_file_url": submission_row.file_url if submission_row else None,
+            "submission_link_url": submission_row.link_url if submission_row else None,
+            "submission_is_locked": bool(submission_row.is_locked) if submission_row else False,
         }
         if event.participant_mode == PdaEventParticipantMode.INDIVIDUAL:
             payload.setdefault("participant_id", entity["entity_id"])
@@ -1978,6 +2093,158 @@ def round_participants(
             payload.setdefault("participant_status", entity.get("status"))
         result.append(payload)
     return result
+
+
+@router.get("/pda-admin/events/{slug}/rounds/{round_id}/submissions", response_model=List[PdaRoundSubmissionAdminListItem])
+def round_submissions(
+    slug: str,
+    round_id: int,
+    search: Optional[str] = None,
+    _: PdaUser = Depends(require_pda_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    round_row = _get_event_round_or_404(db, event.id, round_id)
+    if not bool(round_row.requires_submission):
+        return []
+
+    entities = _round_scoring_entities(db, event, round_row)
+    if search:
+        needle = str(search).strip().lower()
+        entities = [
+            item for item in entities
+            if needle in " ".join(
+                [
+                    str(item.get("name") or ""),
+                    str(item.get("regno_or_code") or ""),
+                    str(item.get("email") or ""),
+                ]
+            ).lower()
+        ]
+
+    submissions = db.query(PdaEventRoundSubmission).filter(
+        PdaEventRoundSubmission.event_id == event.id,
+        PdaEventRoundSubmission.round_id == round_row.id,
+    ).all()
+    submission_map = {}
+    for row in submissions:
+        key = ("user", row.user_id) if row.user_id else ("team", row.team_id)
+        submission_map[key] = row
+
+    result: List[PdaRoundSubmissionAdminListItem] = []
+    for entity in entities:
+        key = (entity["entity_type"], entity["entity_id"])
+        result.append(_round_submission_payload_for_admin(round_row, event, entity, submission_map.get(key)))
+    return result
+
+
+@router.put("/pda-admin/events/{slug}/rounds/{round_id}/submissions/{submission_id}", response_model=PdaRoundSubmissionAdminListItem)
+def update_round_submission_as_admin(
+    slug: str,
+    round_id: int,
+    submission_id: int,
+    payload: PdaRoundSubmissionAdminUpdate,
+    admin: PdaUser = Depends(require_pda_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    round_row = _get_event_round_or_404(db, event.id, round_id)
+    submission = db.query(PdaEventRoundSubmission).filter(
+        PdaEventRoundSubmission.id == submission_id,
+        PdaEventRoundSubmission.event_id == event.id,
+        PdaEventRoundSubmission.round_id == round_row.id,
+    ).first()
+    if not submission:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
+
+    updates = payload.model_dump(exclude_unset=True)
+    if "submission_type" in updates:
+        updates["submission_type"] = (
+            payload.submission_type.value
+            if hasattr(payload.submission_type, "value")
+            else str(payload.submission_type)
+        ).lower()
+    if "submission_type" in updates:
+        if updates["submission_type"] not in {"file", "link"}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="submission_type must be file or link")
+
+    allowed_mime_types = list(round_row.allowed_mime_types or _default_round_allowed_mime_types())
+    max_file_size_mb = int(round_row.max_file_size_mb or 25)
+    max_bytes = max_file_size_mb * 1024 * 1024
+
+    next_type = str(updates.get("submission_type") or submission.submission_type or "").lower()
+    next_file_url = str(updates.get("file_url") if "file_url" in updates else (submission.file_url or "")).strip()
+    next_link_url = str(updates.get("link_url") if "link_url" in updates else (submission.link_url or "")).strip()
+    next_mime_type = str(updates.get("mime_type") if "mime_type" in updates else (submission.mime_type or "")).strip().lower()
+    next_file_size_bytes = updates.get("file_size_bytes", submission.file_size_bytes)
+
+    if next_type == "file":
+        if not next_file_url:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file_url is required for file submissions")
+        if not next_mime_type:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mime_type is required for file submissions")
+        if next_mime_type not in allowed_mime_types:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file type")
+        if next_file_size_bytes is None or int(next_file_size_bytes) <= 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file_size_bytes is required for file submissions")
+        if int(next_file_size_bytes) > max_bytes:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"File size exceeds {max_file_size_mb} MB limit")
+        updates.pop("link_url", None)
+        submission.link_url = None
+    elif next_type == "link":
+        if not next_link_url:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="link_url is required for link submissions")
+        updates.pop("file_url", None)
+        updates.pop("file_name", None)
+        updates.pop("file_size_bytes", None)
+        updates.pop("mime_type", None)
+        submission.file_url = None
+        submission.file_name = None
+        submission.file_size_bytes = None
+        submission.mime_type = None
+
+    for field, value in updates.items():
+        setattr(submission, field, value)
+
+    submission.version = int(submission.version or 0) + 1
+    submission.updated_by_user_id = admin.id
+    db.commit()
+    db.refresh(submission)
+
+    entity = {
+        "entity_type": "team" if submission.entity_type == PdaEventEntityType.TEAM else "user",
+        "entity_id": submission.team_id if submission.entity_type == PdaEventEntityType.TEAM else submission.user_id,
+        "name": "Unknown",
+        "regno_or_code": "-",
+        "status": "Active",
+    }
+    if submission.entity_type == PdaEventEntityType.USER and submission.user_id:
+        joined = db.query(PdaEventRegistration, PdaUser).join(
+            PdaUser, PdaEventRegistration.user_id == PdaUser.id
+        ).filter(
+            PdaEventRegistration.event_id == event.id,
+            PdaEventRegistration.user_id == submission.user_id,
+            PdaEventRegistration.entity_type == PdaEventEntityType.USER,
+        ).first()
+        if joined:
+            reg, user_row = joined
+            entity["name"] = user_row.name
+            entity["regno_or_code"] = user_row.regno
+            entity["status"] = _registration_status_label(reg.status)
+    elif submission.entity_type == PdaEventEntityType.TEAM and submission.team_id:
+        joined = db.query(PdaEventRegistration, PdaEventTeam).join(
+            PdaEventTeam, PdaEventRegistration.team_id == PdaEventTeam.id
+        ).filter(
+            PdaEventRegistration.event_id == event.id,
+            PdaEventRegistration.team_id == submission.team_id,
+            PdaEventRegistration.entity_type == PdaEventEntityType.TEAM,
+        ).first()
+        if joined:
+            reg, team_row = joined
+            entity["name"] = team_row.team_name
+            entity["regno_or_code"] = team_row.team_code
+            entity["status"] = _registration_status_label(reg.status)
+    return _round_submission_payload_for_admin(round_row, event, entity, submission)
 
 
 @router.post("/pda-admin/events/{slug}/rounds/{round_id}/scores")
@@ -3086,6 +3353,253 @@ def _export_to_xlsx(headers: List[str], rows: List[List[object]]) -> bytes:
     return out.read()
 
 
+def _extract_round_state_text(value) -> str:
+    if hasattr(value, "value"):
+        return str(value.value or "").strip().lower()
+    return str(value or "").strip().lower()
+
+
+def _official_shortlist_round_number(db: Session, event: PdaEvent) -> int:
+    round_rows = (
+        db.query(PdaEventRound.round_no, PdaEventRound.state)
+        .filter(PdaEventRound.event_id == event.id)
+        .order_by(PdaEventRound.round_no.asc())
+        .all()
+    )
+    latest_completed_round_no: Optional[int] = None
+    for row in round_rows:
+        if _extract_round_state_text(row.state) == "completed":
+            latest_completed_round_no = int(row.round_no)
+    return latest_completed_round_no if latest_completed_round_no is not None else 1
+
+
+def _official_shortlist_heading(db: Session, event: PdaEvent) -> str:
+    return f"ROUND {_official_shortlist_round_number(db, event)} SHORTLISTED"
+
+
+def _official_logo_url(db: Session, event: PdaEvent) -> Optional[str]:
+    candidate_ids: List[int] = []
+    try:
+        club_id = int(event.club_id)
+        if club_id > 0:
+            candidate_ids.append(club_id)
+    except Exception:
+        pass
+    if 1 not in candidate_ids:
+        candidate_ids.append(1)
+
+    clubs = db.query(PersohubClub).filter(PersohubClub.id.in_(candidate_ids)).all() if candidate_ids else []
+    club_map = {int(club.id): club for club in clubs}
+    for club_id in candidate_ids:
+        club = club_map.get(club_id)
+        logo_url = str(getattr(club, "club_logo_url", "") or "").strip() if club else ""
+        if logo_url:
+            return logo_url
+    return None
+
+
+def _load_remote_image_data_uri(
+    image_url: Optional[str],
+) -> Optional[str]:
+    if not image_url:
+        return None
+    try:
+        request = UrlRequest(image_url, headers={"User-Agent": "Mozilla/5.0"})
+        try:
+            with urlopen(request, timeout=8) as response:
+                image_bytes = response.read()
+                content_type = str(response.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        except Exception:
+            with urlopen(request, timeout=8, context=ssl._create_unverified_context()) as response:
+                image_bytes = response.read()
+                content_type = str(response.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if not image_bytes:
+            return None
+        if not content_type.startswith("image/"):
+            if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+                content_type = "image/png"
+            elif image_bytes[:3] == b"\xff\xd8\xff":
+                content_type = "image/jpeg"
+            elif image_bytes[:4] == b"RIFF" and image_bytes[8:12] == b"WEBP":
+                content_type = "image/webp"
+            else:
+                content_type = "image/png"
+        encoded = base64.b64encode(image_bytes).decode("ascii")
+        return f"data:{content_type};base64,{encoded}"
+    except Exception:
+        return None
+
+
+def _render_leaderboard_template_html(
+    *,
+    event: PdaEvent,
+    round_number: int,
+    table_headers: List[dict],
+    table_rows: List[dict],
+    is_team_mode: bool,
+    left_logo_data_uri: Optional[str],
+    right_logo_data_uri: Optional[str],
+    watermark_logo_data_uri: Optional[str],
+) -> str:
+    try:
+        from jinja2 import Environment, FileSystemLoader, select_autoescape
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Template dependency is unavailable") from exc
+
+    template_dir = Path(__file__).resolve().parents[1] / "templates"
+    template_name = "event_leaderboard_official.html"
+    template_path = template_dir / template_name
+    if not template_path.exists():
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Leaderboard PDF template is missing")
+
+    environment = Environment(
+        loader=FileSystemLoader(str(template_dir)),
+        autoescape=select_autoescape(enabled_extensions=("html", "xml")),
+    )
+    template = environment.get_template(template_name)
+    return template.render(
+        event_name=str(event.title or "").upper(),
+        round_number=round_number,
+        table_headers=table_headers,
+        table_rows=table_rows,
+        is_team_mode=is_team_mode,
+        column_count=len(table_headers),
+        min_rows=6,
+        left_logo=left_logo_data_uri,
+        right_logo=right_logo_data_uri,
+        watermark_logo=watermark_logo_data_uri,
+        footer_text="The leaderboard was autogenerated using PERSOHUB version 1.0",
+    )
+
+
+def _render_html_to_pdf(html_content: str) -> bytes:
+    try:
+        from xhtml2pdf import pisa
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="PDF rendering dependency is unavailable") from exc
+
+    output = io.BytesIO()
+    result = pisa.CreatePDF(src=html_content, dest=output, encoding="utf-8")
+    if getattr(result, "err", 0):
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to render leaderboard PDF")
+    output.seek(0)
+    return output.read()
+
+
+def _decode_data_uri_bytes(data_uri: Optional[str]) -> Optional[bytes]:
+    if not data_uri or not str(data_uri).startswith("data:"):
+        return None
+    try:
+        _, payload = str(data_uri).split(",", 1)
+        return base64.b64decode(payload)
+    except Exception:
+        return None
+
+
+def _apply_pdf_background_and_footer(pdf_bytes: bytes, watermark_data_uri: Optional[str]) -> bytes:
+    try:
+        from reportlab.lib.units import mm
+        from reportlab.lib.utils import ImageReader
+        from reportlab.pdfgen import canvas as pdf_canvas
+        from pypdf import PdfReader, PdfWriter
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="PDF decoration dependencies are unavailable") from exc
+
+    base_reader = PdfReader(io.BytesIO(pdf_bytes))
+    writer = PdfWriter()
+    watermark_bytes = _decode_data_uri_bytes(watermark_data_uri)
+    watermark_reader = None
+    if watermark_bytes:
+        try:
+            watermark_reader = ImageReader(io.BytesIO(watermark_bytes))
+        except Exception:
+            watermark_reader = None
+
+    for index, base_page in enumerate(base_reader.pages, start=1):
+        width = float(base_page.mediabox.width)
+        height = float(base_page.mediabox.height)
+        stamp_buffer = io.BytesIO()
+        stamp_canvas = pdf_canvas.Canvas(stamp_buffer, pagesize=(width, height))
+
+        if watermark_reader is not None:
+            mark_size = min(400.0, width * 0.72)
+            stamp_canvas.saveState()
+            if hasattr(stamp_canvas, "setFillAlpha"):
+                stamp_canvas.setFillAlpha(0.1)
+            stamp_canvas.drawImage(
+                watermark_reader,
+                (width - mark_size) / 2.0,
+                (height - mark_size) / 2.0,
+                width=mark_size,
+                height=mark_size,
+                preserveAspectRatio=True,
+                mask="auto",
+            )
+            stamp_canvas.restoreState()
+
+        stamp_canvas.setFont("Times-Roman", 10)
+        stamp_canvas.drawCentredString(width / 2.0, 10 * mm, f"Page {index}")
+        stamp_canvas.save()
+
+        stamp_buffer.seek(0)
+        stamp_page = PdfReader(stamp_buffer).pages[0]
+        base_page.merge_page(stamp_page)
+        writer.add_page(base_page)
+
+    out = io.BytesIO()
+    writer.write(out)
+    out.seek(0)
+    return out.read()
+
+
+def _export_leaderboard_to_pdf(db: Session, event: PdaEvent, leaderboard: List[dict]) -> bytes:
+    round_number = _official_shortlist_round_number(db, event)
+    is_team_mode = event.participant_mode == PdaEventParticipantMode.TEAM
+    if is_team_mode:
+        headers = [
+            {"label": "SI.NO", "class_name": "si-no-column"},
+            {"label": "TEAM CODE", "class_name": "team-code-column"},
+            {"label": "TEAM NAME", "class_name": "team-name-column"},
+        ]
+        rows = [{
+            "cells": [
+                str(index),
+                str(row.get("regno_or_code") or row.get("register_number") or ""),
+                str(row.get("name") or ""),
+            ]
+        } for index, row in enumerate(leaderboard, start=1)]
+    else:
+        headers = [
+            {"label": "SI.NO", "class_name": "si-no-column"},
+            {"label": "REGISTER NO", "class_name": "register-no-column"},
+            {"label": "NAME", "class_name": "name-column"},
+            {"label": "DEPARTMENT", "class_name": "department-column"},
+        ]
+        rows = [{
+            "cells": [
+                str(index),
+                str(row.get("register_number") or row.get("regno_or_code") or ""),
+                str(row.get("name") or ""),
+                str(row.get("department") or "-"),
+            ]
+        } for index, row in enumerate(leaderboard, start=1)]
+
+    club_logo_data_uri = _load_remote_image_data_uri(_official_logo_url(db, event))
+    left_logo_data_uri = _load_remote_image_data_uri(OFFICIAL_LETTERHEAD_LEFT_LOGO_URL) or club_logo_data_uri
+    html_content = _render_leaderboard_template_html(
+        event=event,
+        round_number=round_number,
+        table_headers=headers,
+        table_rows=rows,
+        is_team_mode=is_team_mode,
+        left_logo_data_uri=left_logo_data_uri,
+        right_logo_data_uri=club_logo_data_uri,
+        watermark_logo_data_uri=club_logo_data_uri,
+    )
+    rendered_pdf = _render_html_to_pdf(html_content)
+    return _apply_pdf_background_and_footer(rendered_pdf, club_logo_data_uri)
+
+
 @router.get("/pda-admin/events/{slug}/export/participants")
 def export_participants(
     slug: str,
@@ -3204,7 +3718,11 @@ def export_leaderboard(
             ]
             for row in leaderboard
         ]
-    if format == "xlsx":
+    if format == "pdf":
+        content = _export_leaderboard_to_pdf(db=db, event=event, leaderboard=leaderboard)
+        media_type = "application/pdf"
+        filename = f"{event.event_code}_leaderboard_official.pdf"
+    elif format == "xlsx":
         content = _export_to_xlsx(headers, rows)
         media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         filename = f"{event.event_code}_leaderboard.xlsx"

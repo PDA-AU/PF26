@@ -11,6 +11,7 @@ import {
     Eye,
     EyeOff,
     ExternalLink,
+    Upload,
     LogIn,
     QrCode,
     UserPlus,
@@ -132,6 +133,13 @@ export default function EventDashboard() {
     const [qrImageUrl, setQrImageUrl] = useState('');
     const [qrLoading, setQrLoading] = useState(false);
     const [selectedRound, setSelectedRound] = useState(null);
+    const [roundSubmission, setRoundSubmission] = useState(null);
+    const [loadingSubmission, setLoadingSubmission] = useState(false);
+    const [submittingRoundWork, setSubmittingRoundWork] = useState(false);
+    const [submissionType, setSubmissionType] = useState('file');
+    const [submissionLink, setSubmissionLink] = useState('');
+    const [submissionNotes, setSubmissionNotes] = useState('');
+    const [submissionFile, setSubmissionFile] = useState(null);
 
     const [copiedReferral, setCopiedReferral] = useState(false);
 
@@ -323,7 +331,7 @@ export default function EventDashboard() {
         }
     };
 
-    const getErrorMessage = (error, fallback) => {
+    const getErrorMessage = useCallback((error, fallback) => {
         const detail = error?.response?.data?.detail;
         if (Array.isArray(detail)) {
             return detail.map((item) => item?.msg || item?.detail || JSON.stringify(item)).join(', ');
@@ -332,7 +340,7 @@ export default function EventDashboard() {
             return detail.msg || detail.detail || JSON.stringify(detail);
         }
         return detail || fallback;
-    };
+    }, []);
 
     const handleLoginSubmit = async (e) => {
         e.preventDefault();
@@ -503,6 +511,110 @@ export default function EventDashboard() {
         setCopiedReferral(true);
         toast.success('Referral code copied');
         setTimeout(() => setCopiedReferral(false), 1800);
+    };
+
+    const loadRoundSubmission = useCallback(async (round) => {
+        if (!round?.id || !shouldFetchParticipantData || !isRegistered || !round?.requires_submission) {
+            setRoundSubmission(null);
+            return;
+        }
+        setLoadingSubmission(true);
+        try {
+            const response = await axios.get(
+                `${API}/pda/events/${eventSlug}/rounds/${round.id}/submission`,
+                { headers: getAuthHeader() }
+            );
+            const data = response.data || null;
+            setRoundSubmission(data);
+            setSubmissionType(String(data?.submission_type || 'file').toLowerCase() === 'link' ? 'link' : 'file');
+            setSubmissionLink(data?.link_url || '');
+            setSubmissionNotes(data?.notes || '');
+            setSubmissionFile(null);
+        } catch (error) {
+            setRoundSubmission(null);
+            toast.error(getErrorMessage(error, 'Failed to load round submission'));
+        } finally {
+            setLoadingSubmission(false);
+        }
+    }, [eventSlug, getAuthHeader, getErrorMessage, isRegistered, shouldFetchParticipantData]);
+
+    useEffect(() => {
+        if (!selectedRound) {
+            setRoundSubmission(null);
+            setSubmissionFile(null);
+            setSubmissionLink('');
+            setSubmissionNotes('');
+            setSubmissionType('file');
+            return;
+        }
+        loadRoundSubmission(selectedRound);
+    }, [loadRoundSubmission, selectedRound]);
+
+    const submitRoundWork = async () => {
+        if (!selectedRound?.id || !selectedRound?.requires_submission) return;
+        if (!shouldFetchParticipantData || !isRegistered) {
+            toast.error('Open your participant dashboard to submit work');
+            return;
+        }
+        setSubmittingRoundWork(true);
+        try {
+            let payload = {
+                submission_type: submissionType,
+                notes: String(submissionNotes || '').trim() || null,
+            };
+            if (submissionType === 'file') {
+                if (!submissionFile) {
+                    toast.error('Choose a file to upload');
+                    setSubmittingRoundWork(false);
+                    return;
+                }
+                const presignRes = await axios.post(
+                    `${API}/pda/events/${eventSlug}/rounds/${selectedRound.id}/submission/presign`,
+                    {
+                        filename: submissionFile.name,
+                        content_type: submissionFile.type,
+                        file_size_bytes: submissionFile.size,
+                    },
+                    { headers: getAuthHeader() }
+                );
+                const { upload_url, public_url, content_type } = presignRes.data || {};
+                await axios.put(upload_url, submissionFile, {
+                    headers: { 'Content-Type': content_type || submissionFile.type },
+                });
+                payload = {
+                    ...payload,
+                    submission_type: 'file',
+                    file_url: public_url,
+                    file_name: submissionFile.name,
+                    file_size_bytes: submissionFile.size,
+                    mime_type: submissionFile.type,
+                    link_url: null,
+                };
+            } else {
+                const cleanedLink = String(submissionLink || '').trim();
+                if (!cleanedLink) {
+                    toast.error('Enter a submission link');
+                    setSubmittingRoundWork(false);
+                    return;
+                }
+                payload = {
+                    ...payload,
+                    submission_type: 'link',
+                    link_url: cleanedLink,
+                };
+            }
+            await axios.put(
+                `${API}/pda/events/${eventSlug}/rounds/${selectedRound.id}/submission`,
+                payload,
+                { headers: getAuthHeader() }
+            );
+            toast.success('Round submission saved');
+            await loadRoundSubmission(selectedRound);
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to submit round work'));
+        } finally {
+            setSubmittingRoundWork(false);
+        }
     };
 
     if (isParticipantRoute && isLoggedIn && hasUserProfile && !isParticipantOwner) {
@@ -1410,6 +1522,100 @@ export default function EventDashboard() {
                                                     {String(selectedRound?.external_url_name || '').trim() || 'Explore Round'}
                                                 </Button>
                                             </a>
+                                        ) : null}
+                                        {selectedRound?.requires_submission ? (
+                                            <div className="rounded-md border-2 border-black bg-[#fffdf0] p-4">
+                                                <h4 className="font-heading text-base font-black uppercase tracking-tight">Submission</h4>
+                                                <p className="mt-1 text-xs font-medium text-slate-700">
+                                                    Mode: {selectedRound?.submission_mode || 'file_or_link'}
+                                                    {selectedRound?.submission_deadline ? ` | Deadline: ${new Date(selectedRound.submission_deadline).toLocaleString()}` : ''}
+                                                </p>
+                                                {!shouldFetchParticipantData || !isRegistered ? (
+                                                    <p className="mt-3 text-sm font-medium text-slate-700">
+                                                        Open your participant dashboard and register for this event to submit work.
+                                                    </p>
+                                                ) : loadingSubmission ? (
+                                                    <p className="mt-3 text-sm font-medium text-slate-700">Loading submission...</p>
+                                                ) : (
+                                                    <div className="mt-3 space-y-3">
+                                                        {roundSubmission?.id ? (
+                                                            <div className="rounded-md border-2 border-black bg-white p-3 text-xs font-medium text-slate-700">
+                                                                <p>Version: {roundSubmission?.version || 1}</p>
+                                                                <p>Type: {roundSubmission?.submission_type || '-'}</p>
+                                                                {roundSubmission?.file_url ? (
+                                                                    <p>
+                                                                        File:
+                                                                        <a className="ml-1 underline" href={roundSubmission.file_url} target="_blank" rel="noreferrer">
+                                                                            {roundSubmission?.file_name || 'Open file'}
+                                                                        </a>
+                                                                    </p>
+                                                                ) : null}
+                                                                {roundSubmission?.link_url ? (
+                                                                    <p>
+                                                                        Link:
+                                                                        <a className="ml-1 underline" href={roundSubmission.link_url} target="_blank" rel="noreferrer">Open link</a>
+                                                                    </p>
+                                                                ) : null}
+                                                            </div>
+                                                        ) : (
+                                                            <p className="text-sm font-medium text-slate-700">No submission yet.</p>
+                                                        )}
+                                                        {roundSubmission?.lock_reason ? (
+                                                            <p className="text-xs font-bold text-red-600">{roundSubmission.lock_reason}</p>
+                                                        ) : null}
+                                                        <div>
+                                                            <Label className="text-xs font-bold uppercase tracking-[0.1em]">Submission Type</Label>
+                                                            <Select value={submissionType} onValueChange={setSubmissionType} disabled={!roundSubmission?.is_editable || submittingRoundWork}>
+                                                                <SelectTrigger className="neo-input mt-2"><SelectValue /></SelectTrigger>
+                                                                <SelectContent>
+                                                                    <SelectItem value="file">File Upload</SelectItem>
+                                                                    <SelectItem value="link">External Link</SelectItem>
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </div>
+                                                        {submissionType === 'file' ? (
+                                                            <div>
+                                                                <Label className="text-xs font-bold uppercase tracking-[0.1em]">File</Label>
+                                                                <Input
+                                                                    type="file"
+                                                                    accept=".pdf,.ppt,.pptx,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/webp,application/zip"
+                                                                    className="neo-input mt-2"
+                                                                    disabled={!roundSubmission?.is_editable || submittingRoundWork}
+                                                                    onChange={(e) => setSubmissionFile((e.target.files || [])[0] || null)}
+                                                                />
+                                                            </div>
+                                                        ) : (
+                                                            <div>
+                                                                <Label className="text-xs font-bold uppercase tracking-[0.1em]">Submission Link</Label>
+                                                                <Input
+                                                                    value={submissionLink}
+                                                                    onChange={(e) => setSubmissionLink(e.target.value)}
+                                                                    placeholder="https://..."
+                                                                    className="neo-input mt-2"
+                                                                    disabled={!roundSubmission?.is_editable || submittingRoundWork}
+                                                                />
+                                                            </div>
+                                                        )}
+                                                        <div>
+                                                            <Label className="text-xs font-bold uppercase tracking-[0.1em]">Notes</Label>
+                                                            <Input
+                                                                value={submissionNotes}
+                                                                onChange={(e) => setSubmissionNotes(e.target.value)}
+                                                                className="neo-input mt-2"
+                                                                disabled={!roundSubmission?.is_editable || submittingRoundWork}
+                                                            />
+                                                        </div>
+                                                        <Button
+                                                            className="w-full border-2 border-black bg-[#8B5CF6] text-white shadow-neo"
+                                                            disabled={!roundSubmission?.is_editable || submittingRoundWork}
+                                                            onClick={submitRoundWork}
+                                                        >
+                                                            <Upload className="mr-2 h-4 w-4" />
+                                                            {submittingRoundWork ? 'Submitting...' : 'Submit Work'}
+                                                        </Button>
+                                                    </div>
+                                                )}
+                                            </div>
                                         ) : null}
                                     </div>
                                 </div>

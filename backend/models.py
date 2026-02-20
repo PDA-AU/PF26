@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, Date, Time, Enum as SQLEnum, ForeignKey, Text, JSON, UniqueConstraint
+from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime, Float, Date, Time, Enum as SQLEnum, ForeignKey, Text, JSON, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -352,6 +352,11 @@ class PdaEventRound(Base):
     evaluation_criteria = Column(JSON, nullable=True)
     elimination_type = Column(String(20), nullable=True)
     elimination_value = Column(Float, nullable=True)
+    requires_submission = Column(Boolean, nullable=False, default=False)
+    submission_mode = Column(String(32), nullable=False, default="file_or_link")
+    submission_deadline = Column(DateTime(timezone=True), nullable=True)
+    allowed_mime_types = Column(JSON, nullable=True)
+    max_file_size_mb = Column(Integer, nullable=False, default=25)
     is_frozen = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -406,6 +411,39 @@ class PdaEventScore(Base):
     is_present = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PdaEventRoundSubmission(Base):
+    __tablename__ = "pda_event_round_submissions"
+    __table_args__ = (
+        UniqueConstraint(
+            "event_id",
+            "round_id",
+            "entity_type",
+            "user_id",
+            "team_id",
+            name="uq_pda_event_round_submission_entity",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("pda_events.id"), nullable=False, index=True)
+    round_id = Column(Integer, ForeignKey("pda_event_rounds.id"), nullable=False, index=True)
+    entity_type = Column(SQLEnum(PdaEventEntityType), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    team_id = Column(Integer, ForeignKey("pda_event_teams.id"), nullable=True, index=True)
+    submission_type = Column(String(16), nullable=False)
+    file_url = Column(String(800), nullable=True)
+    file_name = Column(String(255), nullable=True)
+    file_size_bytes = Column(BigInteger, nullable=True)
+    mime_type = Column(String(255), nullable=True)
+    link_url = Column(String(800), nullable=True)
+    notes = Column(Text, nullable=True)
+    version = Column(Integer, nullable=False, default=1)
+    is_locked = Column(Boolean, nullable=False, default=False)
+    submitted_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    updated_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
 
 class PdaEventBadge(Base):

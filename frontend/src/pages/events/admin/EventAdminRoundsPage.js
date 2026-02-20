@@ -63,6 +63,11 @@ function RoundsContent() {
     const [externalUrlName, setExternalUrlName] = useState('Explore Round');
     const [date, setDate] = useState('');
     const [mode, setMode] = useState('Offline');
+    const [requiresSubmission, setRequiresSubmission] = useState(false);
+    const [submissionMode, setSubmissionMode] = useState('file_or_link');
+    const [submissionDeadline, setSubmissionDeadline] = useState('');
+    const [allowedMimeTypes, setAllowedMimeTypes] = useState('application/pdf, application/vnd.ms-powerpoint, application/vnd.openxmlformats-officedocument.presentationml.presentation, image/png, image/jpeg, image/webp, application/zip');
+    const [maxFileSizeMb, setMaxFileSizeMb] = useState('25');
     const [criteria, setCriteria] = useState([createCriterion('Score', 100)]);
     const [roundStats, setRoundStats] = useState({});
     const [revealRound, setRevealRound] = useState(null);
@@ -146,6 +151,11 @@ function RoundsContent() {
         setExternalUrlName('Explore Round');
         setDate('');
         setMode('Offline');
+        setRequiresSubmission(false);
+        setSubmissionMode('file_or_link');
+        setSubmissionDeadline('');
+        setAllowedMimeTypes('application/pdf, application/vnd.ms-powerpoint, application/vnd.openxmlformats-officedocument.presentationml.presentation, image/png, image/jpeg, image/webp, application/zip');
+        setMaxFileSizeMb('25');
         setCriteria([createCriterion('Score', 100)]);
         setEditingRound(null);
     };
@@ -169,6 +179,10 @@ function RoundsContent() {
                 max_marks: parseFloat(criterion.max_marks) || 0,
             }))
             .filter((criterion) => criterion.name);
+        const parsedMimeTypes = String(allowedMimeTypes || '')
+            .split(',')
+            .map((item) => String(item || '').trim().toLowerCase())
+            .filter(Boolean);
 
         try {
             let uploadedPosterUrl = String(roundPoster || '').trim();
@@ -198,6 +212,11 @@ function RoundsContent() {
                 date: date ? new Date(date).toISOString() : null,
                 mode,
                 evaluation_criteria: cleanedCriteria.length > 0 ? cleanedCriteria : [{ name: 'Score', max_marks: 100 }],
+                requires_submission: Boolean(requiresSubmission),
+                submission_mode: submissionMode || 'file_or_link',
+                submission_deadline: submissionDeadline ? new Date(submissionDeadline).toISOString() : null,
+                allowed_mime_types: parsedMimeTypes.length ? parsedMimeTypes : ['application/pdf', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'image/png', 'image/jpeg', 'image/webp', 'application/zip'],
+                max_file_size_mb: Math.max(1, parseInt(maxFileSizeMb, 10) || 25),
             };
             if (editingRound) {
                 await axios.put(`${API}/pda-admin/events/${eventSlug}/rounds/${editingRound.id}`, payload, {
@@ -229,6 +248,19 @@ function RoundsContent() {
         setExternalUrlName(round.external_url_name || 'Explore Round');
         setDate(round.date ? new Date(round.date).toISOString().split('T')[0] : '');
         setMode(round.mode || 'Offline');
+        setRequiresSubmission(Boolean(round.requires_submission));
+        setSubmissionMode(String(round.submission_mode || 'file_or_link'));
+        setSubmissionDeadline(
+            round.submission_deadline
+                ? new Date(round.submission_deadline).toISOString().slice(0, 16)
+                : ''
+        );
+        setAllowedMimeTypes(
+            Array.isArray(round.allowed_mime_types) && round.allowed_mime_types.length
+                ? round.allowed_mime_types.join(', ')
+                : 'application/pdf, application/vnd.ms-powerpoint, application/vnd.openxmlformats-officedocument.presentationml.presentation, image/png, image/jpeg, image/webp, application/zip'
+        );
+        setMaxFileSizeMb(String(round.max_file_size_mb || 25));
         setCriteria((round.evaluation_criteria && round.evaluation_criteria.length > 0)
             ? round.evaluation_criteria.map((criterion) => createCriterion(criterion.name || '', criterion.max_marks || 0))
             : [createCriterion('Score', 100)]);
@@ -429,6 +461,58 @@ function RoundsContent() {
                                         </SelectContent>
                                     </Select>
                                 </div>
+                            </div>
+                            <div className="space-y-3 rounded-md border-2 border-black p-3">
+                                <div className="flex items-center justify-between gap-3">
+                                    <Label className="font-bold">Require Participant Submission</Label>
+                                    <input
+                                        type="checkbox"
+                                        checked={requiresSubmission}
+                                        onChange={(e) => setRequiresSubmission(e.target.checked)}
+                                    />
+                                </div>
+                                {requiresSubmission ? (
+                                    <>
+                                        <div>
+                                            <Label className="font-bold">Submission Mode</Label>
+                                            <Select value={submissionMode} onValueChange={setSubmissionMode}>
+                                                <SelectTrigger className="neo-input"><SelectValue /></SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="file_or_link">File or Link</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div>
+                                                <Label className="font-bold">Submission Deadline</Label>
+                                                <Input
+                                                    type="datetime-local"
+                                                    value={submissionDeadline}
+                                                    onChange={(e) => setSubmissionDeadline(e.target.value)}
+                                                    className="neo-input"
+                                                />
+                                            </div>
+                                            <div>
+                                                <Label className="font-bold">Max File Size (MB)</Label>
+                                                <Input
+                                                    type="number"
+                                                    min="1"
+                                                    value={maxFileSizeMb}
+                                                    onChange={(e) => setMaxFileSizeMb(e.target.value)}
+                                                    className="neo-input"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <Label className="font-bold">Allowed MIME Types (comma separated)</Label>
+                                            <Textarea
+                                                value={allowedMimeTypes}
+                                                onChange={(e) => setAllowedMimeTypes(e.target.value)}
+                                                className="neo-input"
+                                            />
+                                        </div>
+                                    </>
+                                ) : null}
                             </div>
                             <div className="space-y-3">
                                 <div className="flex items-center justify-between">

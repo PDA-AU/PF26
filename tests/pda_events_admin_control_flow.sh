@@ -149,9 +149,12 @@ if [[ "$LB_COUNT" -lt 2 ]]; then
 fi
 curl -fsS "$API/pda-admin/events/$EVENT_SLUG/export/participants?format=csv" -H "Authorization: Bearer $SUPER_TOKEN" >/tmp/pda_evt_participants.csv
 curl -fsS "$API/pda-admin/events/$EVENT_SLUG/export/leaderboard?format=csv" -H "Authorization: Bearer $SUPER_TOKEN" >/tmp/pda_evt_leaderboard.csv
+curl -fsS "$API/pda-admin/events/$EVENT_SLUG/export/leaderboard?format=pdf" -H "Authorization: Bearer $SUPER_TOKEN" >/tmp/pda_evt_leaderboard.pdf
 curl -fsS "$API/pda-admin/events/$EVENT_SLUG/export/round/$ROUND_ID?format=csv" -H "Authorization: Bearer $SUPER_TOKEN" >/tmp/pda_evt_round.csv
 [[ -s /tmp/pda_evt_participants.csv ]] || { echo "Participants export empty"; exit 1; }
 [[ -s /tmp/pda_evt_leaderboard.csv ]] || { echo "Leaderboard export empty"; exit 1; }
+[[ -s /tmp/pda_evt_leaderboard.pdf ]] || { echo "Leaderboard PDF export empty"; exit 1; }
+head -c 4 /tmp/pda_evt_leaderboard.pdf | grep -q '%PDF' || { echo "Leaderboard PDF export invalid"; exit 1; }
 [[ -s /tmp/pda_evt_round.csv ]] || { echo "Round export empty"; exit 1; }
 
 
@@ -241,6 +244,9 @@ echo "$ACH_JSON" | grep -q "\"event_slug\":\"$EVENT_SLUG\"" || { echo "Achieveme
 echo "[14/15] Team leaderboard export includes status column"
 curl -fsS "$API/pda-admin/events/$TEAM_EVENT_SLUG/export/leaderboard?format=csv" -H "Authorization: Bearer $SUPER_TOKEN" >/tmp/pda_evt_team_leaderboard.csv
 grep -q "Status" /tmp/pda_evt_team_leaderboard.csv || { echo "Team leaderboard export missing Status"; exit 1; }
+curl -fsS "$API/pda-admin/events/$TEAM_EVENT_SLUG/export/leaderboard?format=pdf" -H "Authorization: Bearer $SUPER_TOKEN" >/tmp/pda_evt_team_leaderboard.pdf
+[[ -s /tmp/pda_evt_team_leaderboard.pdf ]] || { echo "Team leaderboard PDF export empty"; exit 1; }
+head -c 4 /tmp/pda_evt_team_leaderboard.pdf | grep -q '%PDF' || { echo "Team leaderboard PDF export invalid"; exit 1; }
 
 echo "[15/15] Team participants export includes status column"
 curl -fsS "$API/pda-admin/events/$TEAM_EVENT_SLUG/export/participants?format=csv" -H "Authorization: Bearer $SUPER_TOKEN" >/tmp/pda_evt_team_participants.csv
