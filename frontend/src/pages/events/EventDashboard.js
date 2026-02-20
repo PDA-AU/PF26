@@ -63,6 +63,28 @@ const statusIcon = (value) => {
     return <Clock3 className="h-5 w-5 text-slate-500" />;
 };
 
+const attendanceMeta = (isPresent) => {
+    if (isPresent === true) {
+        return {
+            label: 'Present',
+            icon: <CheckCircle2 className="h-5 w-5 text-emerald-600" />,
+            badgeClassName: 'bg-[#ecfdf5] text-emerald-700'
+        };
+    }
+    if (isPresent === false) {
+        return {
+            label: 'Absent',
+            icon: <XCircle className="h-5 w-5 text-red-600" />,
+            badgeClassName: 'bg-[#fef2f2] text-red-700'
+        };
+    }
+    return {
+        label: 'Attendance Pending',
+        icon: <Clock3 className="h-5 w-5 text-slate-500" />,
+        badgeClassName: 'bg-[#f8fafc] text-slate-600'
+    };
+};
+
 const formatEventDate = (value) => {
     if (!value) return '';
     const dateValue = String(value).trim().slice(0, 10);
@@ -1071,23 +1093,32 @@ export default function EventDashboard() {
                                             <h3 className="font-heading text-2xl font-black uppercase tracking-tight">Round Status</h3>
                                             {roundStatuses.length > 0 ? (
                                                 <div className="mt-4 space-y-3">
-                                                    {roundStatuses.map((round) => (
-                                                        <div key={`${round.round_no}-${round.round_name}`} className="flex flex-wrap items-center justify-between gap-3 rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
-                                                            <div className="flex items-center gap-3">
-                                                                <div className="inline-flex h-11 w-11 items-center justify-center rounded-md border-2 border-black bg-[#8B5CF6] font-heading text-sm font-black text-white shadow-neo">
-                                                                    {String(round.round_no || '').slice(-2)}
+                                                    {roundStatuses.map((round) => {
+                                                        const attendance = attendanceMeta(round.is_present);
+                                                        return (
+                                                            <div key={`${round.round_no}-${round.round_name}`} className="flex flex-wrap items-center justify-between gap-3 rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
+                                                                <div className="flex items-center gap-3">
+                                                                    <div className="inline-flex h-11 w-11 items-center justify-center rounded-md border-2 border-black bg-[#8B5CF6] font-heading text-sm font-black text-white shadow-neo">
+                                                                        {String(round.round_no || '').slice(-2)}
+                                                                    </div>
+                                                                    <div>
+                                                                        <p className="font-heading text-lg font-black uppercase tracking-tight">{round.round_name}</p>
+                                                                        <p className="text-xs font-medium uppercase tracking-[0.1em] text-slate-600">{round.round_no}</p>
+                                                                    </div>
                                                                 </div>
-                                                                <div>
-                                                                    <p className="font-heading text-lg font-black uppercase tracking-tight">{round.round_name}</p>
-                                                                    <p className="text-xs font-medium uppercase tracking-[0.1em] text-slate-600">{round.round_no}</p>
+                                                                <div className="flex flex-wrap items-center justify-end gap-2">
+                                                                    <div className="flex items-center gap-2 rounded-md border-2 border-black bg-white px-3 py-2 shadow-neo">
+                                                                        {statusIcon(round.status)}
+                                                                        <span className="text-xs font-bold uppercase tracking-[0.12em] text-black">{round.status}</span>
+                                                                    </div>
+                                                                    <div className={`flex items-center gap-2 rounded-md border-2 border-black px-3 py-2 shadow-neo ${attendance.badgeClassName}`}>
+                                                                        {attendance.icon}
+                                                                        <span className="text-xs font-bold uppercase tracking-[0.12em]">{attendance.label}</span>
+                                                                    </div>
                                                                 </div>
                                                             </div>
-                                                            <div className="flex items-center gap-2 rounded-md border-2 border-black bg-white px-3 py-2 shadow-neo">
-                                                                {statusIcon(round.status)}
-                                                                <span className="text-xs font-bold uppercase tracking-[0.12em] text-black">{round.status}</span>
-                                                            </div>
-                                                        </div>
-                                                    ))}
+                                                        );
+                                                    })}
                                                 </div>
                                             ) : (
                                                 <div className="mt-4 rounded-md border-2 border-black bg-[#fffdf0] p-5 text-sm font-medium text-slate-700 shadow-neo">
