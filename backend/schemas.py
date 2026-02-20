@@ -1364,6 +1364,10 @@ class PdaManagedEventVisibilityUpdate(BaseModel):
     is_visible: bool
 
 
+class PdaManagedEventRegistrationUpdate(BaseModel):
+    registration_open: bool
+
+
 class PdaManagedEventResponse(BaseModel):
     id: int
     slug: str
@@ -1385,6 +1389,7 @@ class PdaManagedEventResponse(BaseModel):
     team_min_size: Optional[int] = None
     team_max_size: Optional[int] = None
     is_visible: bool = True
+    registration_open: bool = True
     status: PdaManagedEventStatusEnum
     created_at: datetime
 
@@ -1548,13 +1553,13 @@ class PdaManagedAttendanceMarkRequest(BaseModel):
     entity_type: PdaManagedEntityTypeEnum
     user_id: Optional[int] = None
     team_id: Optional[int] = None
-    round_id: Optional[int] = None
+    round_id: int
     is_present: bool = True
 
 
 class PdaManagedAttendanceScanRequest(BaseModel):
     token: str
-    round_id: Optional[int] = None
+    round_id: int
 
 
 class PdaManagedAttendanceResponse(BaseModel):

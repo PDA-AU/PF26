@@ -37,6 +37,7 @@ from migrations import (
     ensure_superadmin_policies,
     ensure_default_superadmin,
     ensure_pda_event_tables,
+    ensure_pda_event_registration_open_column,
     ensure_community_event_tables,
     backfill_pda_event_round_count_once,
     remove_legacy_persofest_once,
@@ -141,6 +142,7 @@ async def startup_event():
     ensure_pda_admins_table(engine)
     ensure_email_auth_columns(engine)
     ensure_pda_event_tables(engine)
+    ensure_pda_event_registration_open_column(engine)
     ensure_community_event_tables(engine)
     backfill_pda_event_round_count_once(engine)
     ensure_persohub_tables(engine)

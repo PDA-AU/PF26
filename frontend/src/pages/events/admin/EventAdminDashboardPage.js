@@ -107,6 +107,7 @@ function DashboardContent() {
     };
 
     const isOpen = String(eventInfo?.status || '').toLowerCase() === 'open';
+    const isRegistrationOpen = Boolean(eventInfo?.registration_open);
     const isVisible = Boolean(eventInfo?.is_visible);
     const totalParticipants = Number(stats?.registrations || 0);
 
@@ -155,17 +156,17 @@ function DashboardContent() {
     const departmentSegments = departmentPieData.segments;
     const hasDepartmentSegments = departmentSegments.length > 0;
 
-    const toggleEventStatus = async () => {
+    const toggleEventRegistration = async () => {
         setActionLoading(true);
         try {
-            const nextStatus = isOpen ? 'closed' : 'open';
-            await axios.put(`${API}/pda-admin/events/${eventSlug}/status`, {
-                status: nextStatus,
+            const nextRegistrationOpen = !isRegistrationOpen;
+            await axios.put(`${API}/pda-admin/events/${eventSlug}/registration`, {
+                registration_open: nextRegistrationOpen,
             }, { headers: getAuthHeader() });
             await Promise.all([refreshEventInfo(), fetchDashboardStats()]);
-            toast.success(`Event ${nextStatus === 'open' ? 'opened' : 'closed'}`);
+            toast.success(`Registration ${nextRegistrationOpen ? 'opened' : 'closed'}`);
         } catch (error) {
-            toast.error(getErrorMessage(error, 'Failed to update event status'));
+            toast.error(getErrorMessage(error, 'Failed to update registration state'));
         } finally {
             setActionLoading(false);
         }
@@ -206,30 +207,31 @@ function DashboardContent() {
                 </Link>
             </div>
 
-            <div className={`neo-card mb-8 ${isOpen ? 'bg-green-50 border-green-500' : 'bg-red-50 border-red-500'}`}>
+            <div className={`neo-card mb-8 ${isRegistrationOpen ? 'bg-green-50 border-green-500' : 'bg-red-50 border-red-500'}`}>
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                     <div className="flex items-center gap-4">
-                        {isOpen ? (
+                        {isRegistrationOpen ? (
                             <PlayCircle className="w-9 h-9 sm:w-10 sm:h-10 text-green-500" />
                         ) : (
                             <PauseCircle className="w-9 h-9 sm:w-10 sm:h-10 text-red-500" />
                         )}
                         <div>
-                            <h2 className="font-heading font-bold text-lg sm:text-xl">Event: {isOpen ? 'OPEN' : 'CLOSED'}</h2>
+                            <h2 className="font-heading font-bold text-lg sm:text-xl">Registration: {isRegistrationOpen ? 'OPEN' : 'CLOSED'}</h2>
                             <p className="text-gray-600 text-sm sm:text-base">
-                                {isOpen ? 'Registrations and actions are enabled' : 'Event is paused'}
+                                {isRegistrationOpen ? 'New participants can register now' : 'New registrations are blocked'}
                             </p>
+                            <p className="text-gray-500 text-xs sm:text-sm">Event lifecycle status is still {isOpen ? 'OPEN' : 'CLOSED'}.</p>
                         </div>
                     </div>
                     <Button
-                        onClick={toggleEventStatus}
+                        onClick={toggleEventRegistration}
                         disabled={actionLoading}
-                        className={`${isOpen ? 'bg-red-500' : 'bg-green-500'} text-white border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none text-sm sm:text-base`}
+                        className={`${isRegistrationOpen ? 'bg-red-500' : 'bg-green-500'} text-white border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none text-sm sm:text-base`}
                     >
-                        {isOpen ? (
-                            <><PauseCircle className="w-4 h-4 sm:w-5 sm:h-5 mr-2" /> Close Event</>
+                        {isRegistrationOpen ? (
+                            <><PauseCircle className="w-4 h-4 sm:w-5 sm:h-5 mr-2" /> Close Registration</>
                         ) : (
-                            <><PlayCircle className="w-4 h-4 sm:w-5 sm:h-5 mr-2" /> Open Event</>
+                            <><PlayCircle className="w-4 h-4 sm:w-5 sm:h-5 mr-2" /> Open Registration</>
                         )}
                     </Button>
                 </div>

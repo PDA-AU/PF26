@@ -74,6 +74,7 @@ function AttendanceContent() {
     const [presenceDraft, setPresenceDraft] = useState({});
     const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false);
     const [pendingNavAction, setPendingNavAction] = useState(null);
+    const [highlightedRowKey, setHighlightedRowKey] = useState('');
     const cameraRef = useRef(null);
     const streamRef = useRef(null);
     const detectorTimerRef = useRef(null);
@@ -82,26 +83,50 @@ function AttendanceContent() {
     const canvasCtxRef = useRef(null);
     const detectingRef = useRef(false);
     const qrImageInputRef = useRef(null);
+    const highlightTimerRef = useRef(null);
 
     const getErrorMessage = (error, fallback) => (
         error?.response?.data?.detail || error?.response?.data?.message || fallback
     );
+    const activeRounds = useMemo(
+        () => rounds.filter((round) => String(round.state || '').trim().toLowerCase() === 'active'),
+        [rounds]
+    );
+    const hasActiveRounds = activeRounds.length > 0;
 
     const fetchRounds = useCallback(async () => {
         try {
             const response = await axios.get(`${API}/pda-admin/events/${eventSlug}/rounds`, { headers: getAuthHeader() });
-            setRounds(response.data || []);
+            const roundRows = response.data || [];
+            setRounds(roundRows);
+            const activeRoundRows = roundRows.filter((round) => String(round.state || '').trim().toLowerCase() === 'active');
+            if (activeRoundRows.length === 0) {
+                setAttendanceRoundId('');
+                setRows([]);
+                return;
+            }
+            if (!attendanceRoundId || !activeRoundRows.some((round) => String(round.id) === String(attendanceRoundId))) {
+                setAttendanceRoundId(String(activeRoundRows[0].id));
+            }
         } catch (error) {
             setRounds([]);
+            setAttendanceRoundId('');
+            setRows([]);
         }
-    }, [eventSlug, getAuthHeader]);
+    }, [attendanceRoundId, eventSlug, getAuthHeader]);
 
     const fetchAttendance = useCallback(async () => {
+        if (!attendanceRoundId) {
+            setRows([]);
+            setPresenceDraft({});
+            setLoading(false);
+            return;
+        }
         setLoading(true);
         try {
             const response = await axios.get(`${API}/pda-admin/events/${eventSlug}/attendance`, {
                 headers: getAuthHeader(),
-                params: { round_id: attendanceRoundId ? Number(attendanceRoundId) : undefined },
+                params: { round_id: Number(attendanceRoundId) },
             });
             setRows(response.data || []);
             setPresenceDraft({});
@@ -116,8 +141,11 @@ function AttendanceContent() {
 
     useEffect(() => {
         fetchRounds();
+    }, [fetchRounds]);
+
+    useEffect(() => {
         fetchAttendance();
-    }, [fetchAttendance, fetchRounds]);
+    }, [fetchAttendance]);
 
     function markFromToken(rawToken) {
         const token = String(rawToken || '').trim();
@@ -173,6 +201,15 @@ function AttendanceContent() {
             }
             goToPageByIndex(indexInAllRows);
         }
+
+        setHighlightedRowKey(rowKey);
+        if (highlightTimerRef.current) {
+            clearTimeout(highlightTimerRef.current);
+        }
+        highlightTimerRef.current = setTimeout(() => {
+            setHighlightedRowKey('');
+            highlightTimerRef.current = null;
+        }, 5000);
 
         setScanToken('');
         toast.success('Attendance marked locally. Click Save to update DB.');
@@ -307,6 +344,10 @@ function AttendanceContent() {
 
     useEffect(() => () => {
         stopScanner();
+        if (highlightTimerRef.current) {
+            clearTimeout(highlightTimerRef.current);
+            highlightTimerRef.current = null;
+        }
     }, []);
 
     const handleQrImageUpload = async (e) => {
@@ -440,7 +481,7 @@ function AttendanceContent() {
     }, [dirtyCount, performNavigation]);
 
     const handleRoundChange = useCallback((value) => {
-        const nextRoundId = value === 'none' ? '' : value;
+        const nextRoundId = value;
         if (nextRoundId === attendanceRoundId) return;
         requestNavigation({ type: 'round', value: nextRoundId });
     }, [attendanceRoundId, requestNavigation]);
@@ -457,7 +498,7 @@ function AttendanceContent() {
                         entity_type: row.entity_type,
                         user_id: row.entity_type === 'user' ? row.entity_id : null,
                         team_id: row.entity_type === 'team' ? row.entity_id : null,
-                        round_id: attendanceRoundId ? Number(attendanceRoundId) : null,
+                        round_id: Number(attendanceRoundId),
                         is_present: Boolean(presenceDraft[key]),
                     }, { headers: getAuthHeader() });
                 })
@@ -500,27 +541,26 @@ function AttendanceContent() {
             <div className="neo-card mb-6">
                 <div className="flex flex-wrap items-end gap-3">
                     <div>
-                        <Label>Round (optional)</Label>
-                        <Select value={attendanceRoundId || 'none'} onValueChange={handleRoundChange}>
+                        <Label>Round</Label>
+                        <Select value={attendanceRoundId} onValueChange={handleRoundChange} disabled={!hasActiveRounds}>
                             <SelectTrigger className="w-[260px] neo-input"><SelectValue /></SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="none">Event-level attendance</SelectItem>
-                                {rounds.map((round) => (
+                                {activeRounds.map((round) => (
                                     <SelectItem key={round.id} value={String(round.id)}>Round {round.round_no}: {round.name}</SelectItem>
                                 ))}
                             </SelectContent>
                         </Select>
                     </div>
-                    <Button onClick={fetchAttendance}>Refresh</Button>
-                    <Button variant="outline" className="border-black/20" onClick={startScanner}>
+                    <Button onClick={fetchAttendance} disabled={!hasActiveRounds || !attendanceRoundId}>Refresh</Button>
+                    <Button variant="outline" className="border-black/20" onClick={startScanner} disabled={!hasActiveRounds || !attendanceRoundId}>
                         <Camera className="mr-2 h-4 w-4" /> Scan QR
                     </Button>
-                    <Button variant="outline" className="border-black/20" onClick={() => qrImageInputRef.current?.click()}>
+                    <Button variant="outline" className="border-black/20" onClick={() => qrImageInputRef.current?.click()} disabled={!hasActiveRounds || !attendanceRoundId}>
                         Upload QR Image
                     </Button>
                     <Button
                         onClick={saveAttendanceChanges}
-                        disabled={!dirtyCount || savingChanges}
+                        disabled={!hasActiveRounds || !attendanceRoundId || !dirtyCount || savingChanges}
                         className="bg-primary text-white border-2 border-black shadow-neo"
                     >
                         <Save className="mr-2 h-4 w-4" />
@@ -554,8 +594,8 @@ function AttendanceContent() {
                     </div>
                 ) : null}
                 <div className="mt-3 flex gap-2">
-                    <Input value={scanToken} onChange={(e) => setScanToken(e.target.value)} placeholder="Manual token input" />
-                    <Button onClick={() => markFromToken(scanToken)}>Mark Locally</Button>
+                    <Input value={scanToken} onChange={(e) => setScanToken(e.target.value)} placeholder="Manual token input" disabled={!hasActiveRounds || !attendanceRoundId} />
+                    <Button onClick={() => markFromToken(scanToken)} disabled={!hasActiveRounds || !attendanceRoundId}>Mark Locally</Button>
                 </div>
             </div>
 
@@ -563,6 +603,10 @@ function AttendanceContent() {
                 <div className="neo-card text-center py-12">
                     <div className="loading-spinner mx-auto"></div>
                     <p className="mt-4">Loading attendance...</p>
+                </div>
+            ) : !attendanceRoundId ? (
+                <div className="neo-card text-center py-12">
+                    <p className="mt-1 text-slate-600">No active rounds found. Set a round state to Active to manage attendance.</p>
                 </div>
             ) : (
                 <div className="overflow-x-auto">
@@ -585,17 +629,24 @@ function AttendanceContent() {
                         </thead>
                         <tbody>
                             {pagedRows.map((row) => (
-                                <tr key={`${row.entity_type}-${row.entity_id}`}>
-                                    <td>{row.entity_type}</td>
-                                    <td>{row.name}</td>
-                                    <td>{row.regno_or_code}</td>
-                                    <td>
+                                (() => {
+                                    const rowKey = `${row.entity_type}-${row.entity_id}`;
+                                    const isHighlighted = highlightedRowKey === rowKey;
+                                    const tdClassName = isHighlighted ? '!bg-amber-200 transition-colors' : '';
+                                    return (
+                                        <tr key={rowKey}>
+                                            <td className={tdClassName}>{row.entity_type}</td>
+                                            <td className={tdClassName}>{row.name}</td>
+                                            <td className={tdClassName}>{row.regno_or_code}</td>
+                                            <td className={tdClassName}>
                                         <Checkbox
                                             checked={getPresentValue(row)}
                                             onCheckedChange={(checked) => handlePresenceChange(row, checked)}
                                         />
-                                    </td>
-                                </tr>
+                                            </td>
+                                        </tr>
+                                    );
+                                })()
                             ))}
                         </tbody>
                     </table>

@@ -169,15 +169,25 @@ export default function AdminEventManage() {
         const response = await axios.get(`${API}/pda-admin/events/${eventSlug}/rounds`, { headers: getAuthHeader() });
         const rows = response.data || [];
         setRounds(rows);
+        if (rows.length === 0) {
+            setAttendanceRoundId('');
+        } else if (!attendanceRoundId || !rows.some((round) => String(round.id) === String(attendanceRoundId))) {
+            const activeRound = rows.find((round) => String(round.state || '').trim().toLowerCase() === 'active');
+            setAttendanceRoundId(String((activeRound || rows[0]).id));
+        }
         if (!selectedRoundId && rows.length > 0) {
             setSelectedRoundId(rows[0].id);
         }
-    }, [eventSlug, getAuthHeader, selectedRoundId]);
+    }, [attendanceRoundId, eventSlug, getAuthHeader, selectedRoundId]);
 
     const fetchAttendance = useCallback(async () => {
+        if (!attendanceRoundId) {
+            setAttendance([]);
+            return;
+        }
         const response = await axios.get(`${API}/pda-admin/events/${eventSlug}/attendance`, {
             headers: getAuthHeader(),
-            params: { round_id: attendanceRoundId ? Number(attendanceRoundId) : undefined }
+            params: { round_id: Number(attendanceRoundId) }
         });
         setAttendance(response.data || []);
     }, [attendanceRoundId, eventSlug, getAuthHeader]);
@@ -288,7 +298,7 @@ export default function AdminEventManage() {
                 entity_type: row.entity_type,
                 user_id: row.entity_type === 'user' ? row.entity_id : null,
                 team_id: row.entity_type === 'team' ? row.entity_id : null,
-                round_id: attendanceRoundId ? Number(attendanceRoundId) : null,
+                round_id: Number(attendanceRoundId),
                 is_present: Boolean(isPresent)
             }, { headers: getAuthHeader() });
             fetchAttendance();
@@ -303,7 +313,7 @@ export default function AdminEventManage() {
         try {
             await axios.post(`${API}/pda-admin/events/${eventSlug}/attendance/scan`, {
                 token,
-                round_id: attendanceRoundId ? Number(attendanceRoundId) : null
+                round_id: Number(attendanceRoundId)
             }, { headers: getAuthHeader() });
             toast.success('Attendance marked');
             setScanToken('');
@@ -456,20 +466,20 @@ export default function AdminEventManage() {
         }
     };
 
-    const toggleEventStatus = async () => {
-        if (!eventInfo?.status) return;
-        const nextStatus = String(eventInfo.status).toLowerCase() === 'open' ? 'closed' : 'open';
+    const toggleEventRegistration = async () => {
+        if (!eventInfo) return;
+        const nextRegistrationOpen = !Boolean(eventInfo.registration_open);
         try {
             const response = await axios.put(
-                `${API}/pda-admin/events/${eventSlug}/status`,
-                { status: nextStatus },
+                `${API}/pda-admin/events/${eventSlug}/registration`,
+                { registration_open: nextRegistrationOpen },
                 { headers: getAuthHeader() }
             );
             setEventInfo(response.data);
-            toast.success(`Event ${nextStatus === 'open' ? 'opened' : 'closed'}`);
+            toast.success(`Registration ${nextRegistrationOpen ? 'opened' : 'closed'}`);
             fetchEventInfo();
         } catch (error) {
-            toast.error(getApiErrorMessage(error, 'Failed to update event status'));
+            toast.error(getApiErrorMessage(error, 'Failed to update registration state'));
         }
     };
 
@@ -777,17 +787,18 @@ export default function AdminEventManage() {
 
             {activeTab === 'dashboard' ? (
                 <section className="space-y-4">
-                    <div className={`neo-card ${String(eventInfo.status || '').toLowerCase() === 'open' ? 'bg-green-50 border-green-500' : 'bg-red-50 border-red-500'}`}>
+                    <div className={`neo-card ${Boolean(eventInfo.registration_open) ? 'bg-green-50 border-green-500' : 'bg-red-50 border-red-500'}`}>
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                             <div>
-                                <h2 className="font-heading font-bold text-xl">Event Status: {eventInfo.status}</h2>
-                                <p className="text-gray-600 text-sm">Toggle open/closed state for registrations and participant actions.</p>
+                                <h2 className="font-heading font-bold text-xl">Registration: {Boolean(eventInfo.registration_open) ? 'OPEN' : 'CLOSED'}</h2>
+                                <p className="text-gray-600 text-sm">Toggle registration only. Participant access remains available.</p>
+                                <p className="text-gray-500 text-xs">Event lifecycle status: {eventInfo.status}</p>
                             </div>
                             <Button
-                                onClick={toggleEventStatus}
-                                className={`${String(eventInfo.status || '').toLowerCase() === 'open' ? 'bg-red-500' : 'bg-green-500'} text-white border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none`}
+                                onClick={toggleEventRegistration}
+                                className={`${Boolean(eventInfo.registration_open) ? 'bg-red-500' : 'bg-green-500'} text-white border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none`}
                             >
-                                {String(eventInfo.status || '').toLowerCase() === 'open' ? 'Close Event' : 'Open Event'}
+                                {Boolean(eventInfo.registration_open) ? 'Close Registration' : 'Open Registration'}
                             </Button>
                         </div>
                     </div>
@@ -896,21 +907,20 @@ export default function AdminEventManage() {
                 <section className="mt-6 rounded-2xl border border-black/10 bg-white p-4">
                     <div className="flex flex-wrap items-end gap-3">
                         <div>
-                            <Label>Round (optional)</Label>
-                            <Select value={attendanceRoundId || 'none'} onValueChange={(value) => setAttendanceRoundId(value === 'none' ? '' : value)}>
+                            <Label>Round</Label>
+                            <Select value={attendanceRoundId} onValueChange={setAttendanceRoundId} disabled={rounds.length === 0}>
                                 <SelectTrigger className="w-[240px]"><SelectValue /></SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="none">Event-level attendance</SelectItem>
                                     {rounds.map((round) => <SelectItem key={round.id} value={String(round.id)}>Round {round.round_no}: {round.name}</SelectItem>)}
                                 </SelectContent>
                             </Select>
                         </div>
-                        <Button onClick={fetchAttendance}>Refresh</Button>
-                        <Button variant="outline" className="border-black/20" onClick={startScanner}>
+                        <Button onClick={fetchAttendance} disabled={!attendanceRoundId}>Refresh</Button>
+                        <Button variant="outline" className="border-black/20" onClick={startScanner} disabled={!attendanceRoundId}>
                             <Camera className="mr-2 h-4 w-4" />
                             Scan QR
                         </Button>
-                        <Button variant="outline" className="border-black/20" onClick={() => qrImageInputRef.current?.click()}>
+                        <Button variant="outline" className="border-black/20" onClick={() => qrImageInputRef.current?.click()} disabled={!attendanceRoundId}>
                             Upload QR Image
                         </Button>
                         {isScanning ? <Button variant="outline" className="border-red-400 text-red-600" onClick={stopScanner}>Stop</Button> : null}
@@ -928,11 +938,14 @@ export default function AdminEventManage() {
                         </div>
                     ) : null}
                     <div className="mt-3 flex gap-2">
-                        <Input value={scanToken} onChange={(e) => setScanToken(e.target.value)} placeholder="Manual token input" />
-                        <Button onClick={() => markFromToken(scanToken)}>Mark</Button>
+                        <Input value={scanToken} onChange={(e) => setScanToken(e.target.value)} placeholder="Manual token input" disabled={!attendanceRoundId} />
+                        <Button onClick={() => markFromToken(scanToken)} disabled={!attendanceRoundId}>Mark</Button>
                     </div>
                     <div className="mt-3 overflow-x-auto">
-                        <table className="w-full border-collapse">
+                        {!attendanceRoundId ? (
+                            <p className="mt-2 text-sm text-slate-500">No rounds found. Create a round to manage attendance.</p>
+                        ) : (
+                            <table className="w-full border-collapse">
                             <thead>
                                 <tr className="border-b border-black/10 text-left text-xs uppercase tracking-[0.2em] text-slate-500">
                                     <th className="py-2">Type</th>
@@ -953,7 +966,8 @@ export default function AdminEventManage() {
                                     </tr>
                                 ))}
                             </tbody>
-                        </table>
+                            </table>
+                        )}
                     </div>
                 </section>
             ) : null}

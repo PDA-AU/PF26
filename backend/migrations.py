@@ -986,6 +986,7 @@ def ensure_pda_event_tables(engine):
             )
         )
         conn.execute(text("ALTER TABLE pda_events ADD COLUMN IF NOT EXISTS is_visible BOOLEAN NOT NULL DEFAULT TRUE"))
+        conn.execute(text("ALTER TABLE pda_events ADD COLUMN IF NOT EXISTS registration_open BOOLEAN NOT NULL DEFAULT TRUE"))
         conn.execute(text("ALTER TABLE pda_events ALTER COLUMN poster_url TYPE TEXT"))
         if _table_exists(conn, "pda_event_rounds"):
             conn.execute(text("ALTER TABLE pda_event_rounds ADD COLUMN IF NOT EXISTS round_poster TEXT"))
@@ -1099,6 +1100,50 @@ def ensure_pda_event_tables(engine):
         )
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pda_event_registration_event_status ON pda_event_registrations(event_id, status)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pda_event_registration_event_referred_by ON pda_event_registrations(event_id, referred_by)"))
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_pda_event_registration_event_entity_status_user "
+                "ON pda_event_registrations(event_id, entity_type, status, user_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_pda_event_registration_event_entity_status_team "
+                "ON pda_event_registrations(event_id, entity_type, status, team_id)"
+            )
+        )
+        if _table_exists(conn, "pda_event_scores"):
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_pda_event_scores_event_round_entity_present_score "
+                    "ON pda_event_scores(event_id, round_id, entity_type, is_present, normalized_score)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_pda_event_scores_event_entity_user_round "
+                    "ON pda_event_scores(event_id, entity_type, user_id, round_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_pda_event_scores_event_entity_team_round "
+                    "ON pda_event_scores(event_id, entity_type, team_id, round_id)"
+                )
+            )
+        if _table_exists(conn, "pda_event_attendance"):
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_pda_event_attendance_event_entity_user_present "
+                    "ON pda_event_attendance(event_id, entity_type, user_id, is_present)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_pda_event_attendance_event_entity_team_present "
+                    "ON pda_event_attendance(event_id, entity_type, team_id, is_present)"
+                )
+            )
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pda_event_logs_event_created ON pda_event_logs(event_id, created_at DESC)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pda_event_logs_slug_created ON pda_event_logs(event_slug, created_at DESC)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_pda_event_logs_admin_created ON pda_event_logs(admin_id, created_at DESC)"))
@@ -1237,6 +1282,12 @@ def ensure_pda_event_tables(engine):
                     """
                 )
             )
+
+
+def ensure_pda_event_registration_open_column(engine):
+    with engine.begin() as conn:
+        if _table_exists(conn, "pda_events"):
+            conn.execute(text("ALTER TABLE pda_events ADD COLUMN IF NOT EXISTS registration_open BOOLEAN NOT NULL DEFAULT TRUE"))
 
 
 def ensure_community_event_tables(engine):

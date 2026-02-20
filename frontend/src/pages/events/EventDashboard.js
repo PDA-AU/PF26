@@ -158,7 +158,7 @@ export default function EventDashboard() {
 
     const isTeamEvent = eventInfo?.participant_mode === 'team';
     const isRegistered = Boolean(dashboard?.is_registered);
-    const eventIsOpen = eventInfo?.status === 'open';
+    const registrationOpen = Boolean(eventInfo?.registration_open);
     const confirmationMatches = registerConfirmed;
 
     const isLeader = useMemo(() => {
@@ -176,7 +176,7 @@ export default function EventDashboard() {
         () => getEventDateLabel(eventInfo?.start_date, eventInfo?.end_date),
         [eventInfo?.start_date, eventInfo?.end_date]
     );
-    const showParticipantDashboardTab = Boolean(participantPath) && eventIsOpen;
+    const showParticipantDashboardTab = Boolean(participantPath);
     const eventPosterAssets = useMemo(
         () => filterPosterAssetsByRatio(parsePosterAssets(eventInfo?.poster_url), ['4:5', '5:4']),
         [eventInfo?.poster_url]
@@ -318,7 +318,7 @@ export default function EventDashboard() {
 
     const postAuthOpenRegistration = async (authHeaderOverride) => {
         const result = await fetchData({ authHeaderOverride });
-        if (eventIsOpen && !Boolean(result?.is_registered)) {
+        if (registrationOpen && !Boolean(result?.is_registered)) {
             setRegistrationDialogOpen(true);
         }
     };
@@ -409,7 +409,7 @@ export default function EventDashboard() {
     };
 
     const registerIndividual = async () => {
-        if (!confirmationMatches || !eventInfo || !eventIsOpen) return;
+        if (!confirmationMatches || !eventInfo || !registrationOpen) return;
         setRegistering(true);
         try {
             await axios.post(`${API}/pda/events/${eventSlug}/register`, {}, { headers: getAuthHeader() });
@@ -425,7 +425,7 @@ export default function EventDashboard() {
 
     const createTeam = async (e) => {
         e.preventDefault();
-        if (!confirmationMatches || !eventIsOpen) return;
+        if (!confirmationMatches || !registrationOpen) return;
         setCreatingTeam(true);
         try {
             await axios.post(`${API}/pda/events/${eventSlug}/teams/create`, { team_name: teamName }, { headers: getAuthHeader() });
@@ -441,7 +441,7 @@ export default function EventDashboard() {
 
     const joinTeam = async (e) => {
         e.preventDefault();
-        if (!confirmationMatches || !eventIsOpen) return;
+        if (!confirmationMatches || !registrationOpen) return;
         setJoiningTeam(true);
         try {
             await axios.post(`${API}/pda/events/${eventSlug}/teams/join`, { team_code: teamCode }, { headers: getAuthHeader() });
@@ -541,10 +541,6 @@ export default function EventDashboard() {
         );
     }
 
-    if (isParticipantRoute && !eventIsOpen) {
-        return <Navigate to={infoPath} replace />;
-    }
-
     return (
         <div className="min-h-screen bg-[#fffdf5] flex flex-col">
             <PdaHeader />
@@ -582,7 +578,7 @@ export default function EventDashboard() {
                                     <span className="rounded-md border-2 border-black bg-white px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] shadow-neo">
                                         {eventInfo.status}
                                     </span>
-                                    {eventIsOpen ? (
+                                    {registrationOpen ? (
                                         <Button
                                             data-testid="event-overview-register-button"
                                             onClick={() => (isRegistered ? null : (isLoggedIn ? setRegistrationDialogOpen(true) : openAuthDialog('login')))}
@@ -777,7 +773,7 @@ export default function EventDashboard() {
                 {isParticipantRoute && isLoggedIn && isParticipantOwner && participantAccessClosed ? (
                     <section className="mt-7 rounded-md border-4 border-black bg-white p-6 shadow-[8px_8px_0px_0px_#000000]">
                         <h2 className="font-heading text-3xl font-black uppercase tracking-tight">Participant dashboard unavailable</h2>
-                        <p className="mt-2 text-sm font-medium text-slate-700">This event is closed, so participant dashboard access is disabled.</p>
+                        <p className="mt-2 text-sm font-medium text-slate-700">Participant dashboard is currently unavailable.</p>
                         <Link to={infoPath} className="mt-4 inline-block">
                             <Button className="border-2 border-black bg-[#FDE047] text-black shadow-neo">View Event Info</Button>
                         </Link>
@@ -798,17 +794,17 @@ export default function EventDashboard() {
                                                 : 'Confirm registration to unlock your participant dashboard and round status.'}
                                         </p>
                                     </div>
-                                    <Button
-                                        data-testid="event-public-open-register-modal-button"
-                                        className="border-2 border-black bg-[#FDE047] text-black shadow-neo"
-                                        onClick={() => setRegistrationDialogOpen(true)}
-                                        disabled={!eventIsOpen}
-                                    >
-                                        <UserPlus className="mr-2 h-4 w-4" />
-                                        {eventIsOpen ? 'Register for Event' : 'Event Closed'}
-                                    </Button>
-                                </div>
-                            </section>
+                                        <Button
+                                            data-testid="event-public-open-register-modal-button"
+                                            className="border-2 border-black bg-[#FDE047] text-black shadow-neo"
+                                            onClick={() => setRegistrationDialogOpen(true)}
+                                            disabled={!registrationOpen}
+                                        >
+                                            <UserPlus className="mr-2 h-4 w-4" />
+                                        {registrationOpen ? 'Register for Event' : 'Registration Closed'}
+                                        </Button>
+                                    </div>
+                                </section>
                         ) : null}
 
                         {isRegistered ? (
@@ -1280,7 +1276,7 @@ export default function EventDashboard() {
                                     data-testid="event-register-confirm-button"
                                     className="border-2 border-black bg-[#FDE047] text-black shadow-neo"
                                     onClick={registerIndividual}
-                                    disabled={!confirmationMatches || registering || !eventIsOpen}
+                                    disabled={!confirmationMatches || registering || !registrationOpen}
                                 >
                                     {registering ? 'Registering...' : 'Confirm Registration'}
                                 </Button>
@@ -1304,7 +1300,7 @@ export default function EventDashboard() {
                                                 type="submit"
                                                 data-testid="event-register-create-team-button"
                                                 className="mt-3 w-full border-2 border-black bg-[#8B5CF6] text-white shadow-neo"
-                                                disabled={creatingTeam || !eventIsOpen}
+                                                disabled={creatingTeam || !registrationOpen}
                                             >
                                                 <Users className="mr-2 h-4 w-4" />
                                                 {creatingTeam ? 'Creating...' : 'Create Team'}
@@ -1327,7 +1323,7 @@ export default function EventDashboard() {
                                                 type="submit"
                                                 data-testid="event-register-join-team-button"
                                                 className="mt-3 w-full border-2 border-black bg-[#FDE047] text-black shadow-neo"
-                                                disabled={joiningTeam || !eventIsOpen}
+                                                disabled={joiningTeam || !registrationOpen}
                                             >
                                                 {joiningTeam ? 'Joining...' : 'Join Team'}
                                             </Button>

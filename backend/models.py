@@ -277,6 +277,7 @@ class PdaEvent(Base):
     team_min_size = Column(Integer, nullable=True)
     team_max_size = Column(Integer, nullable=True)
     is_visible = Column(Boolean, nullable=False, default=True)
+    registration_open = Column(Boolean, nullable=False, default=True)
     status = Column(SQLEnum(PdaEventStatus), nullable=False, default=PdaEventStatus.CLOSED)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

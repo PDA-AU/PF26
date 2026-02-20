@@ -1,5 +1,6 @@
 import csv
 import io
+import math
 import re
 from collections import Counter
 from typing import Dict, List, Optional, Tuple
@@ -45,6 +46,7 @@ from schemas import (
     PdaManagedBadgeResponse,
     PdaManagedEntityTypeEnum,
     PdaManagedEventCreate,
+    PdaManagedEventRegistrationUpdate,
     PdaManagedEventResponse,
     PdaManagedEventStatusUpdate,
     PdaManagedEventVisibilityUpdate,
@@ -93,6 +95,16 @@ def _get_event_or_404(db: Session, slug: str) -> PdaEvent:
     return event
 
 
+def _get_event_round_or_404(db: Session, event_id: int, round_id: int) -> PdaEventRound:
+    round_row = db.query(PdaEventRound).filter(
+        PdaEventRound.id == round_id,
+        PdaEventRound.event_id == event_id,
+    ).first()
+    if not round_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
+    return round_row
+
+
 def _ensure_events_policy_shape(policy: Optional[dict]) -> dict:
     safe = dict(policy or {})
     if not isinstance(safe.get("events"), dict):
@@ -102,6 +114,32 @@ def _ensure_events_policy_shape(policy: Optional[dict]) -> dict:
 
 def _criteria_def(round_obj: PdaEventRound) -> List[dict]:
     return round_obj.evaluation_criteria or [{"name": "Score", "max_marks": 100}]
+
+
+SCORE_RATIO_RE = re.compile(r"^\s*([+-]?\d+(?:\.\d+)?)\s*/\s*([+-]?\d+(?:\.\d+)?)\s*$")
+
+
+def _parse_import_score_value(raw_value, max_marks: float) -> float:
+    if raw_value is None:
+        return 0.0
+    if isinstance(raw_value, (int, float)):
+        value = float(raw_value)
+    else:
+        text = str(raw_value).strip()
+        if not text:
+            return 0.0
+        ratio_match = SCORE_RATIO_RE.match(text)
+        if ratio_match:
+            numerator = float(ratio_match.group(1))
+            denominator = float(ratio_match.group(2))
+            if denominator <= 0:
+                raise ValueError("invalid_denominator")
+            value = (numerator / denominator) * float(max_marks)
+        else:
+            value = float(text)
+    if not math.isfinite(value):
+        raise ValueError("invalid_number")
+    return float(value)
 
 
 def _to_event_type(value) -> PdaEventType:
@@ -336,21 +374,37 @@ def _registered_entities(db: Session, event: PdaEvent):
         .filter(PdaEventRegistration.event_id == event.id, PdaEventRegistration.team_id.isnot(None))
         .all()
     )
+    team_ids = [int(team.id) for _, team in rows]
+    member_count_rows = (
+        db.query(PdaEventTeamMember.team_id, func.count(PdaEventTeamMember.id))
+        .filter(PdaEventTeamMember.team_id.in_(team_ids))
+        .group_by(PdaEventTeamMember.team_id)
+        .all()
+        if team_ids
+        else []
+    )
+    member_count_map = {int(team_id): int(count or 0) for team_id, count in member_count_rows}
     payload = []
     for reg, team in rows:
-        members_count = db.query(PdaEventTeamMember).filter(PdaEventTeamMember.team_id == team.id).count()
         payload.append(
             {
                 "entity_type": "team",
                 "entity_id": team.id,
                 "name": team.team_name,
                 "regno_or_code": team.team_code,
-                "members_count": members_count,
+                "members_count": int(member_count_map.get(int(team.id), 0)),
                 "status": _registration_status_label(reg.status),
                 "participant_status": _registration_status_label(reg.status),
             }
         )
     return payload
+
+
+def _round_scoring_entities(db: Session, event: PdaEvent, round_row: PdaEventRound):
+    entities = _registered_entities(db, event)
+    if not (round_row.is_frozen or round_row.state in {PdaEventRoundState.COMPLETED, PdaEventRoundState.REVEAL}):
+        entities = [item for item in entities if _status_is_active(item.get("status"))]
+    return entities
 
 
 def _unregistered_entities(db: Session, event: PdaEvent):
@@ -471,6 +525,7 @@ def create_managed_event(
         team_min_size=payload.team_min_size,
         team_max_size=payload.team_max_size,
         is_visible=True,
+        registration_open=True,
         status=PdaEventStatus.CLOSED,
     )
     db.add(new_event)
@@ -670,6 +725,29 @@ def update_managed_event_status(
         method="PUT",
         path=f"/pda-admin/events/{slug}/status",
         meta={"slug": slug, "status": payload.status.value},
+    )
+    return PdaManagedEventResponse.model_validate(event)
+
+
+@router.put("/pda-admin/events/{slug}/registration", response_model=PdaManagedEventResponse)
+def update_managed_event_registration(
+    slug: str,
+    payload: PdaManagedEventRegistrationUpdate,
+    admin: PdaUser = Depends(require_pda_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    event.registration_open = bool(payload.registration_open)
+    db.commit()
+    db.refresh(event)
+    _log_event_admin_action(
+        db,
+        admin,
+        event,
+        "update_pda_managed_event_registration",
+        method="PUT",
+        path=f"/pda-admin/events/{slug}/registration",
+        meta={"slug": slug, "registration_open": bool(payload.registration_open)},
     )
     return PdaManagedEventResponse.model_validate(event)
 
@@ -968,62 +1046,138 @@ def participant_rounds(
     if not registration:
         missing_label = "Participant" if entity_type == PdaEventEntityType.USER else "Team"
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{missing_label} not found")
+    params = {"event_id": event.id, "entity_id": user_id}
+    if entity_type == PdaEventEntityType.USER:
+        rows = db.execute(
+            text(
+                """
+                WITH rounds AS (
+                    SELECT id, round_no, name, state
+                    FROM pda_event_rounds
+                    WHERE event_id = :event_id
+                ),
+                target_scores AS (
+                    SELECT
+                        round_id,
+                        is_present,
+                        total_score,
+                        normalized_score
+                    FROM pda_event_scores
+                    WHERE event_id = :event_id
+                      AND entity_type = 'USER'
+                      AND user_id = :entity_id
+                ),
+                ranked_present AS (
+                    SELECT
+                        round_id,
+                        user_id AS entity_id,
+                        DENSE_RANK() OVER (
+                            PARTITION BY round_id
+                            ORDER BY normalized_score DESC
+                        ) AS round_rank
+                    FROM pda_event_scores
+                    WHERE event_id = :event_id
+                      AND entity_type = 'USER'
+                      AND is_present = TRUE
+                )
+                SELECT
+                    r.id AS round_id,
+                    r.round_no,
+                    r.name AS round_name,
+                    r.state AS round_state,
+                    ts.is_present,
+                    ts.total_score,
+                    ts.normalized_score,
+                    rp.round_rank
+                FROM rounds r
+                LEFT JOIN target_scores ts ON ts.round_id = r.id
+                LEFT JOIN ranked_present rp
+                    ON rp.round_id = r.id
+                    AND rp.entity_id = :entity_id
+                ORDER BY r.round_no ASC
+                """
+            ),
+            params,
+        ).mappings().all()
+    else:
+        rows = db.execute(
+            text(
+                """
+                WITH rounds AS (
+                    SELECT id, round_no, name, state
+                    FROM pda_event_rounds
+                    WHERE event_id = :event_id
+                ),
+                target_scores AS (
+                    SELECT
+                        round_id,
+                        is_present,
+                        total_score,
+                        normalized_score
+                    FROM pda_event_scores
+                    WHERE event_id = :event_id
+                      AND entity_type = 'TEAM'
+                      AND team_id = :entity_id
+                ),
+                ranked_present AS (
+                    SELECT
+                        round_id,
+                        team_id AS entity_id,
+                        DENSE_RANK() OVER (
+                            PARTITION BY round_id
+                            ORDER BY normalized_score DESC
+                        ) AS round_rank
+                    FROM pda_event_scores
+                    WHERE event_id = :event_id
+                      AND entity_type = 'TEAM'
+                      AND is_present = TRUE
+                )
+                SELECT
+                    r.id AS round_id,
+                    r.round_no,
+                    r.name AS round_name,
+                    r.state AS round_state,
+                    ts.is_present,
+                    ts.total_score,
+                    ts.normalized_score,
+                    rp.round_rank
+                FROM rounds r
+                LEFT JOIN target_scores ts ON ts.round_id = r.id
+                LEFT JOIN ranked_present rp
+                    ON rp.round_id = r.id
+                    AND rp.entity_id = :entity_id
+                ORDER BY r.round_no ASC
+                """
+            ),
+            params,
+        ).mappings().all()
 
-    rounds = (
-        db.query(PdaEventRound)
-        .filter(PdaEventRound.event_id == event.id)
-        .order_by(PdaEventRound.round_no.asc())
-        .all()
-    )
     items = []
-    for round_row in rounds:
-        score_filters = [
-            PdaEventScore.event_id == event.id,
-            PdaEventScore.round_id == round_row.id,
-            PdaEventScore.entity_type == entity_type,
-        ]
-        if entity_type == PdaEventEntityType.USER:
-            score_filters.append(PdaEventScore.user_id == user_id)
-        else:
-            score_filters.append(PdaEventScore.team_id == user_id)
-        score = db.query(PdaEventScore).filter(*score_filters).first()
-        rank_map = {}
-        ranked_scores = (
-            db.query(PdaEventScore)
-            .filter(
-                PdaEventScore.event_id == event.id,
-                PdaEventScore.round_id == round_row.id,
-                PdaEventScore.entity_type == entity_type,
-                PdaEventScore.is_present == True,  # noqa: E712
-            )
-            .order_by(
-                PdaEventScore.normalized_score.desc(),
-                PdaEventScore.user_id.asc() if entity_type == PdaEventEntityType.USER else PdaEventScore.team_id.asc(),
-            )
-            .all()
-        )
-        for idx, ranked in enumerate(ranked_scores, start=1):
-            ranked_id = int(ranked.user_id) if entity_type == PdaEventEntityType.USER else int(ranked.team_id)
-            rank_map[ranked_id] = idx
-
+    for row in rows:
+        is_present = row["is_present"]
         if registration.status == PdaEventRegistrationStatus.ELIMINATED:
             status_label = "Eliminated"
-        elif score:
-            status_label = "Active" if bool(score.is_present) else "Absent"
-        else:
+        elif is_present is None:
             status_label = "Pending"
+        else:
+            status_label = "Active" if bool(is_present) else "Absent"
+
+        round_state = row["round_state"]
+        round_state_text = str(round_state)
+        if round_state_text.isupper():
+            round_state_text = round_state_text.title()
 
         items.append(
             {
-                "round_id": round_row.id,
-                "round_no": f"PF{int(round_row.round_no):02d}",
-                "round_name": round_row.name,
-                "round_state": round_row.state.value if hasattr(round_row.state, "value") else str(round_row.state),
+                "round_id": int(row["round_id"]),
+                "round_no": f"PF{int(row['round_no']):02d}",
+                "round_name": row["round_name"],
+                "round_state": round_state_text,
                 "status": status_label,
-                "is_present": bool(score.is_present) if score else None,
-                "total_score": float(score.total_score) if score else None,
-                "normalized_score": float(score.normalized_score) if score else None,
-                "round_rank": rank_map.get(user_id),
+                "is_present": bool(is_present) if is_present is not None else None,
+                "total_score": float(row["total_score"]) if row["total_score"] is not None else None,
+                "normalized_score": float(row["normalized_score"]) if row["normalized_score"] is not None else None,
+                "round_rank": int(row["round_rank"]) if row["round_rank"] is not None else None,
             }
         )
     return items
@@ -1054,72 +1208,100 @@ def participant_summary(
     if not registration:
         missing_label = "Participant" if entity_type == PdaEventEntityType.USER else "Team"
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{missing_label} not found")
-
+    params = {"event_id": event.id, "entity_id": user_id}
     if entity_type == PdaEventEntityType.USER:
-        target_total = db.execute(
+        summary_row = db.execute(
             text(
                 """
-                SELECT COALESCE(SUM(normalized_score), 0)
-                FROM pda_event_scores
-                WHERE event_id = :event_id AND entity_type = 'USER' AND user_id = :user_id
+                WITH active_entities AS (
+                    SELECT user_id AS entity_id
+                    FROM pda_event_registrations
+                    WHERE event_id = :event_id
+                      AND entity_type = 'USER'
+                      AND status = 'ACTIVE'
+                      AND user_id IS NOT NULL
+                ),
+                active_totals AS (
+                    SELECT
+                        ae.entity_id,
+                        COALESCE(SUM(s.normalized_score), 0) AS total_points
+                    FROM active_entities ae
+                    LEFT JOIN pda_event_scores s
+                        ON s.event_id = :event_id
+                       AND s.entity_type = 'USER'
+                       AND s.user_id = ae.entity_id
+                    GROUP BY ae.entity_id
+                ),
+                ranked AS (
+                    SELECT
+                        entity_id,
+                        DENSE_RANK() OVER (ORDER BY total_points DESC) AS overall_rank
+                    FROM active_totals
+                ),
+                target_total AS (
+                    SELECT COALESCE(SUM(normalized_score), 0) AS overall_points
+                    FROM pda_event_scores
+                    WHERE event_id = :event_id
+                      AND entity_type = 'USER'
+                      AND user_id = :entity_id
+                )
+                SELECT
+                    tt.overall_points,
+                    r.overall_rank
+                FROM target_total tt
+                LEFT JOIN ranked r ON r.entity_id = :entity_id
                 """
             ),
-            {"event_id": event.id, "user_id": user_id},
-        ).scalar() or 0.0
+            params,
+        ).mappings().first()
     else:
-        target_total = db.execute(
+        summary_row = db.execute(
             text(
                 """
-                SELECT COALESCE(SUM(total_score), 0)
-                FROM pda_event_scores
-                WHERE event_id = :event_id AND entity_type = 'TEAM' AND team_id = :team_id
+                WITH active_entities AS (
+                    SELECT team_id AS entity_id
+                    FROM pda_event_registrations
+                    WHERE event_id = :event_id
+                      AND entity_type = 'TEAM'
+                      AND status = 'ACTIVE'
+                      AND team_id IS NOT NULL
+                ),
+                active_totals AS (
+                    SELECT
+                        ae.entity_id,
+                        COALESCE(SUM(s.total_score), 0) AS total_points
+                    FROM active_entities ae
+                    LEFT JOIN pda_event_scores s
+                        ON s.event_id = :event_id
+                       AND s.entity_type = 'TEAM'
+                       AND s.team_id = ae.entity_id
+                    GROUP BY ae.entity_id
+                ),
+                ranked AS (
+                    SELECT
+                        entity_id,
+                        DENSE_RANK() OVER (ORDER BY total_points DESC) AS overall_rank
+                    FROM active_totals
+                ),
+                target_total AS (
+                    SELECT COALESCE(SUM(total_score), 0) AS overall_points
+                    FROM pda_event_scores
+                    WHERE event_id = :event_id
+                      AND entity_type = 'TEAM'
+                      AND team_id = :entity_id
+                )
+                SELECT
+                    tt.overall_points,
+                    r.overall_rank
+                FROM target_total tt
+                LEFT JOIN ranked r ON r.entity_id = :entity_id
                 """
             ),
-            {"event_id": event.id, "team_id": user_id},
-        ).scalar() or 0.0
-
-    active_rows = (
-        db.query(PdaEventRegistration)
-        .filter(
-            PdaEventRegistration.event_id == event.id,
-            PdaEventRegistration.entity_type == entity_type,
-            PdaEventRegistration.status == PdaEventRegistrationStatus.ACTIVE,
-        )
-        .all()
-    )
-    totals = []
-    for row in active_rows:
-        if entity_type == PdaEventEntityType.USER:
-            total = db.execute(
-                text(
-                    """
-                    SELECT COALESCE(SUM(normalized_score), 0)
-                    FROM pda_event_scores
-                    WHERE event_id = :event_id AND entity_type = 'USER' AND user_id = :user_id
-                    """
-                ),
-                {"event_id": event.id, "user_id": row.user_id},
-            ).scalar() or 0.0
-            entity_id = int(row.user_id)
-        else:
-            total = db.execute(
-                text(
-                    """
-                    SELECT COALESCE(SUM(total_score), 0)
-                    FROM pda_event_scores
-                    WHERE event_id = :event_id AND entity_type = 'TEAM' AND team_id = :team_id
-                    """
-                ),
-                {"event_id": event.id, "team_id": row.team_id},
-            ).scalar() or 0.0
-            entity_id = int(row.team_id)
-        totals.append((entity_id, float(total)))
-    totals.sort(key=lambda item: (-item[1], item[0]))
-    rank = None
-    for idx, item in enumerate(totals, start=1):
-        if item[0] == user_id:
-            rank = idx
-            break
+            params,
+        ).mappings().first()
+    target_total = float((summary_row or {}).get("overall_points") or 0.0)
+    rank_value = (summary_row or {}).get("overall_rank")
+    rank = int(rank_value) if rank_value is not None else None
 
     return {
         "participant_id": user_id,
@@ -1228,16 +1410,17 @@ def delete_team_with_cascade(
 @router.get("/pda-admin/events/{slug}/attendance")
 def event_attendance(
     slug: str,
-    round_id: Optional[int] = None,
+    round_id: int = Query(...),
     _: PdaUser = Depends(require_pda_event_admin),
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
+    _get_event_round_or_404(db, event.id, round_id)
     entities = _registered_entities(db, event)
-    attendance_rows = db.query(PdaEventAttendance).filter(PdaEventAttendance.event_id == event.id)
-    if round_id:
-        attendance_rows = attendance_rows.filter(PdaEventAttendance.round_id == round_id)
-    rows = attendance_rows.all()
+    rows = db.query(PdaEventAttendance).filter(
+        PdaEventAttendance.event_id == event.id,
+        PdaEventAttendance.round_id == round_id,
+    ).all()
     row_map = {}
     for row in rows:
         key = ("user", row.user_id) if row.user_id else ("team", row.team_id)
@@ -1266,6 +1449,9 @@ def mark_attendance(
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
+    if payload.round_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="round_id is required")
+    _get_event_round_or_404(db, event.id, int(payload.round_id))
     entity_type = PdaEventEntityType.USER if payload.entity_type.value == "user" else PdaEventEntityType.TEAM
     if entity_type == PdaEventEntityType.USER and not payload.user_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user_id required for user attendance")
@@ -1320,6 +1506,9 @@ def scan_attendance(
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
+    if payload.round_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="round_id is required")
+    _get_event_round_or_404(db, event.id, int(payload.round_id))
     decoded = decode_token(payload.token)
     if decoded.get("qr") != "pda_event_attendance" or decoded.get("event_slug") != event.slug:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid QR token")
@@ -1675,9 +1864,7 @@ def round_participants(
     round_row = db.query(PdaEventRound).filter(PdaEventRound.id == round_id, PdaEventRound.event_id == event.id).first()
     if not round_row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
-    entities = _registered_entities(db, event)
-    if not (round_row.is_frozen or round_row.state in {PdaEventRoundState.COMPLETED, PdaEventRoundState.REVEAL}):
-        entities = [item for item in entities if _status_is_active(item.get("status"))]
+    entities = _round_scoring_entities(db, event, round_row)
     if search:
         needle = str(search).strip().lower()
         entities = [
@@ -1931,7 +2118,14 @@ def import_scores(
                 idx = headers_norm.get(name.lower())
                 raw = values[idx] if idx is not None else 0
                 try:
-                    score = float(raw or 0)
+                    score = _parse_import_score_value(raw, max_marks)
+                except ValueError as exc:
+                    if str(exc) == "invalid_denominator":
+                        errors.append(f"Row {row_idx}: Invalid score for {name} (denominator must be > 0)")
+                    else:
+                        errors.append(f"Row {row_idx}: Invalid score for {name}")
+                    invalid = True
+                    break
                 except Exception:
                     errors.append(f"Row {row_idx}: Invalid score for {name}")
                     invalid = True
@@ -1974,6 +2168,29 @@ def import_scores(
                     is_present=is_present,
                 )
             )
+
+        attendance_row = db.query(PdaEventAttendance).filter(
+            PdaEventAttendance.event_id == event.id,
+            PdaEventAttendance.round_id == round_id,
+            PdaEventAttendance.entity_type == entity_type,
+            PdaEventAttendance.user_id == user_id,
+            PdaEventAttendance.team_id == team_id,
+        ).first()
+        if attendance_row:
+            attendance_row.is_present = is_present
+            attendance_row.marked_by_user_id = admin.id
+        else:
+            db.add(
+                PdaEventAttendance(
+                    event_id=event.id,
+                    round_id=round_id,
+                    entity_type=entity_type,
+                    user_id=user_id,
+                    team_id=team_id,
+                    is_present=is_present,
+                    marked_by_user_id=admin.id,
+                )
+            )
         imported += 1
 
     db.commit()
@@ -2002,6 +2219,26 @@ def score_template(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
     criteria = _criteria_def(round_row)
     criteria_names = [c["name"] for c in criteria]
+    entities = sorted(
+        _round_scoring_entities(db, event, round_row),
+        key=lambda item: str(item.get("regno_or_code") or "").upper(),
+    )
+    score_rows = db.query(PdaEventScore).filter(
+        PdaEventScore.event_id == event.id,
+        PdaEventScore.round_id == round_id,
+    ).all()
+    score_map = {}
+    for row in score_rows:
+        key = ("user", row.user_id) if row.user_id else ("team", row.team_id)
+        score_map[key] = row
+    attendance_rows = db.query(PdaEventAttendance).filter(
+        PdaEventAttendance.event_id == event.id,
+        PdaEventAttendance.round_id == round_id,
+    ).all()
+    attendance_map = {}
+    for row in attendance_rows:
+        key = ("user", row.user_id) if row.user_id else ("team", row.team_id)
+        attendance_map[key] = row
 
     wb = Workbook()
     ws = wb.active
@@ -2009,8 +2246,17 @@ def score_template(
     id_col = "Register Number" if event.participant_mode == PdaEventParticipantMode.INDIVIDUAL else "Team Code"
     name_col = "Name" if event.participant_mode == PdaEventParticipantMode.INDIVIDUAL else "Team Name"
     ws.append([id_col, name_col, "Present"] + criteria_names)
-    for entity in _registered_entities(db, event):
-        ws.append([entity["regno_or_code"], entity["name"], "Yes"] + [0] * len(criteria_names))
+    for entity in entities:
+        key = (entity["entity_type"], entity["entity_id"])
+        score_row = score_map.get(key)
+        attendance_row = attendance_map.get(key)
+        is_present = bool(attendance_row.is_present) if attendance_row else (bool(score_row.is_present) if score_row else False)
+        criteria_scores = score_row.criteria_scores if (score_row and isinstance(score_row.criteria_scores, dict)) else {}
+        row_scores = []
+        for name in criteria_names:
+            value = criteria_scores.get(name, 0)
+            row_scores.append(0 if value is None else value)
+        ws.append([entity["regno_or_code"], entity["name"], "Yes" if is_present else "No"] + row_scores)
 
     output = io.BytesIO()
     wb.save(output)
@@ -2111,6 +2357,7 @@ def event_leaderboard(
     batch: Optional[str] = None,
     status_filter: Optional[str] = Query(None, alias="status"),
     search: Optional[str] = None,
+    round_ids: Optional[List[int]] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=500),
     response: Response = None,
@@ -2119,6 +2366,39 @@ def event_leaderboard(
 ):
     event = _get_event_or_404(db, slug)
     rows = []
+    round_rows = (
+        db.query(PdaEventRound.id, PdaEventRound.state, PdaEventRound.is_frozen)
+        .filter(PdaEventRound.event_id == event.id)
+        .all()
+    )
+    event_round_ids = {int(row.id) for row in round_rows}
+    eligible_round_ids = {
+        int(row.id)
+        for row in round_rows
+        if bool(row.is_frozen) or row.state == PdaEventRoundState.COMPLETED
+    }
+    requested_round_ids: List[int] = []
+    if round_ids:
+        seen = set()
+        for value in round_ids:
+            round_id = int(value)
+            if round_id not in seen:
+                requested_round_ids.append(round_id)
+                seen.add(round_id)
+    if requested_round_ids:
+        invalid_rounds = sorted([round_id for round_id in requested_round_ids if round_id not in event_round_ids])
+        if invalid_rounds:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid round_ids for this event: {invalid_rounds}",
+            )
+        ineligible_rounds = sorted([round_id for round_id in requested_round_ids if round_id not in eligible_round_ids])
+        if ineligible_rounds:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Only completed or frozen rounds are allowed in round_ids: {ineligible_rounds}",
+            )
+    effective_round_ids = requested_round_ids if requested_round_ids else sorted(eligible_round_ids)
 
     if event.participant_mode == PdaEventParticipantMode.INDIVIDUAL:
         entities = _registered_entities(db, event)
@@ -2147,37 +2427,66 @@ def event_leaderboard(
                 ).lower()
             ]
 
+        entity_ids = [int(item["entity_id"]) for item in entities]
+        if entity_ids and effective_round_ids:
+            score_rows = (
+                db.query(
+                    PdaEventScore.user_id.label("entity_id"),
+                    func.coalesce(func.sum(PdaEventScore.normalized_score), 0.0).label("cumulative_score"),
+                    func.coalesce(func.count(func.distinct(PdaEventScore.round_id)).filter(PdaEventScore.is_present == True), 0).label("rounds_participated"),  # noqa: E712
+                )
+                .filter(
+                    PdaEventScore.event_id == event.id,
+                    PdaEventScore.entity_type == PdaEventEntityType.USER,
+                    PdaEventScore.user_id.in_(entity_ids),
+                    PdaEventScore.round_id.in_(effective_round_ids),
+                )
+                .group_by(PdaEventScore.user_id)
+                .all()
+            )
+            attendance_rows = (
+                db.query(
+                    PdaEventAttendance.user_id.label("entity_id"),
+                    func.count(PdaEventAttendance.id).label("attendance_count"),
+                )
+                .filter(
+                    PdaEventAttendance.event_id == event.id,
+                    PdaEventAttendance.entity_type == PdaEventEntityType.USER,
+                    PdaEventAttendance.is_present == True,  # noqa: E712
+                    PdaEventAttendance.user_id.in_(entity_ids),
+                    PdaEventAttendance.round_id.in_(effective_round_ids),
+                )
+                .group_by(PdaEventAttendance.user_id)
+                .all()
+            )
+        else:
+            score_rows = []
+            attendance_rows = []
+        score_map = {
+            int(row.entity_id): {
+                "cumulative_score": float(row.cumulative_score or 0.0),
+                "rounds_participated": int(row.rounds_participated or 0),
+            }
+            for row in score_rows
+            if row.entity_id is not None
+        }
+        attendance_map = {
+            int(row.entity_id): int(row.attendance_count or 0)
+            for row in attendance_rows
+            if row.entity_id is not None
+        }
+
         for entity in entities:
             user_id = int(entity["entity_id"])
-            score = db.execute(
-                text("SELECT COALESCE(SUM(normalized_score), 0) FROM pda_event_scores WHERE event_id = :event_id AND entity_type = 'USER' AND user_id = :user_id"),
-                {"event_id": event.id, "user_id": user_id},
-            ).fetchone()
-            attendance = db.execute(
-                text("SELECT COALESCE(COUNT(*), 0) FROM pda_event_attendance WHERE event_id = :event_id AND entity_type = 'USER' AND user_id = :user_id AND is_present = true"),
-                {"event_id": event.id, "user_id": user_id},
-            ).fetchone()
-            rounds_participated = db.execute(
-                text(
-                    """
-                    SELECT COALESCE(COUNT(DISTINCT round_id), 0)
-                    FROM pda_event_scores
-                    WHERE event_id = :event_id
-                      AND entity_type = 'USER'
-                      AND user_id = :user_id
-                      AND is_present = true
-                    """
-                ),
-                {"event_id": event.id, "user_id": user_id},
-            ).fetchone()
+            score_info = score_map.get(user_id, {"cumulative_score": 0.0, "rounds_participated": 0})
             rows.append(
                 {
                     **entity,
                     "participant_id": user_id,
                     "register_number": entity.get("regno_or_code"),
-                    "cumulative_score": float((score[0] if score else 0) or 0),
-                    "attendance_count": int((attendance[0] if attendance else 0) or 0),
-                    "rounds_participated": int((rounds_participated[0] if rounds_participated else 0) or 0),
+                    "cumulative_score": float(score_info["cumulative_score"]),
+                    "attendance_count": int(attendance_map.get(user_id, 0)),
+                    "rounds_participated": int(score_info["rounds_participated"]),
                 }
             )
 
@@ -2213,51 +2522,64 @@ def event_leaderboard(
                     ]
                 ).lower()
             ]
+        entity_ids = [int(item["entity_id"]) for item in entities]
+        if entity_ids and effective_round_ids:
+            score_rows = (
+                db.query(
+                    PdaEventScore.team_id.label("entity_id"),
+                    func.coalesce(func.sum(PdaEventScore.total_score), 0.0).label("cumulative_score"),
+                    func.coalesce(func.count(func.distinct(PdaEventScore.round_id)).filter(PdaEventScore.is_present == True), 0).label("rounds_participated"),  # noqa: E712
+                )
+                .filter(
+                    PdaEventScore.event_id == event.id,
+                    PdaEventScore.entity_type == PdaEventEntityType.TEAM,
+                    PdaEventScore.team_id.in_(entity_ids),
+                    PdaEventScore.round_id.in_(effective_round_ids),
+                )
+                .group_by(PdaEventScore.team_id)
+                .all()
+            )
+            attendance_rows = (
+                db.query(
+                    PdaEventAttendance.team_id.label("entity_id"),
+                    func.count(PdaEventAttendance.id).label("attendance_count"),
+                )
+                .filter(
+                    PdaEventAttendance.event_id == event.id,
+                    PdaEventAttendance.entity_type == PdaEventEntityType.TEAM,
+                    PdaEventAttendance.is_present == True,  # noqa: E712
+                    PdaEventAttendance.team_id.in_(entity_ids),
+                    PdaEventAttendance.round_id.in_(effective_round_ids),
+                )
+                .group_by(PdaEventAttendance.team_id)
+                .all()
+            )
+        else:
+            score_rows = []
+            attendance_rows = []
+        score_map = {
+            int(row.entity_id): {
+                "cumulative_score": float(row.cumulative_score or 0.0),
+                "rounds_participated": int(row.rounds_participated or 0),
+            }
+            for row in score_rows
+            if row.entity_id is not None
+        }
+        attendance_map = {
+            int(row.entity_id): int(row.attendance_count or 0)
+            for row in attendance_rows
+            if row.entity_id is not None
+        }
+
         for entity in entities:
-            score = db.execute(
-                text(
-                    """
-                    SELECT COALESCE(SUM(total_score), 0)
-                    FROM pda_event_scores
-                    WHERE event_id = :event_id
-                      AND entity_type = 'TEAM'
-                      AND team_id = :team_id
-                    """
-                ),
-                {"event_id": event.id, "team_id": entity["entity_id"]},
-            ).fetchone()
-            attendance = db.execute(
-                text(
-                    """
-                    SELECT COALESCE(COUNT(*), 0)
-                    FROM pda_event_attendance
-                    WHERE event_id = :event_id
-                      AND entity_type = 'TEAM'
-                      AND team_id = :team_id
-                      AND is_present = true
-                    """
-                ),
-                {"event_id": event.id, "team_id": entity["entity_id"]},
-            ).fetchone()
-            rounds_participated = db.execute(
-                text(
-                    """
-                    SELECT COALESCE(COUNT(DISTINCT round_id), 0)
-                    FROM pda_event_scores
-                    WHERE event_id = :event_id
-                      AND entity_type = 'TEAM'
-                      AND team_id = :team_id
-                      AND is_present = true
-                    """
-                ),
-                {"event_id": event.id, "team_id": entity["entity_id"]},
-            ).fetchone()
+            team_id = int(entity["entity_id"])
+            score_info = score_map.get(team_id, {"cumulative_score": 0.0, "rounds_participated": 0})
             rows.append(
                 {
                     **entity,
-                    "cumulative_score": float((score[0] if score else 0) or 0),
-                    "attendance_count": int((attendance[0] if attendance else 0) or 0),
-                    "rounds_participated": int((rounds_participated[0] if rounds_participated else 0) or 0),
+                    "cumulative_score": float(score_info["cumulative_score"]),
+                    "attendance_count": int(attendance_map.get(team_id, 0)),
+                    "rounds_participated": int(score_info["rounds_participated"]),
                 }
             )
         rows.sort(
@@ -2657,6 +2979,7 @@ def export_leaderboard(
     batch: Optional[str] = None,
     status_filter: Optional[str] = Query(None, alias="status"),
     search: Optional[str] = None,
+    round_ids: Optional[List[int]] = Query(None),
     _: PdaUser = Depends(require_pda_event_admin),
     db: Session = Depends(get_db),
 ):
@@ -2667,6 +2990,7 @@ def export_leaderboard(
         batch=batch,
         status_filter=status_filter,
         search=search,
+        round_ids=round_ids,
         page=1,
         page_size=10000,
         response=None,

@@ -127,9 +127,9 @@ def _get_user_team_for_event(db: Session, event_id: int, user_id: int) -> Option
     return row
 
 
-def _ensure_event_open_for_participant_access(event: PdaEvent) -> None:
-    if event.status != PdaEventStatus.OPEN:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Event is closed")
+def _ensure_registration_open_for_registration_actions(event: PdaEvent) -> None:
+    if not bool(getattr(event, "registration_open", True)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Registration is closed")
 
 
 def _send_registration_email(user: PdaUser, event: PdaEvent, details: str) -> None:
@@ -218,7 +218,6 @@ def get_event_dashboard(
 ):
     event = _get_event_or_404(db, slug)
     _ensure_event_visible_for_public_access(event)
-    _ensure_event_open_for_participant_access(event)
 
     team = _get_user_team_for_event(db, event.id, user.id) if event.participant_mode == PdaEventParticipantMode.TEAM else None
     registration = db.query(PdaEventRegistration).filter(
@@ -279,8 +278,7 @@ def register_individual_event(
 ):
     event = _get_event_or_404(db, slug)
     _ensure_event_visible_for_public_access(event)
-    if event.status != PdaEventStatus.OPEN:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Event is closed")
+    _ensure_registration_open_for_registration_actions(event)
     if event.participant_mode != PdaEventParticipantMode.INDIVIDUAL:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Use team registration for this event")
 
@@ -324,8 +322,7 @@ def create_team(
 ):
     event = _get_event_or_404(db, slug)
     _ensure_event_visible_for_public_access(event)
-    if event.status != PdaEventStatus.OPEN:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Event is closed")
+    _ensure_registration_open_for_registration_actions(event)
     if event.participant_mode != PdaEventParticipantMode.TEAM:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This event is not a team event")
 
@@ -372,8 +369,7 @@ def join_team(
 ):
     event = _get_event_or_404(db, slug)
     _ensure_event_visible_for_public_access(event)
-    if event.status != PdaEventStatus.OPEN:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Event is closed")
+    _ensure_registration_open_for_registration_actions(event)
     if event.participant_mode != PdaEventParticipantMode.TEAM:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This event is not a team event")
 
@@ -425,7 +421,6 @@ def get_my_team(
 ):
     event = _get_event_or_404(db, slug)
     _ensure_event_visible_for_public_access(event)
-    _ensure_event_open_for_participant_access(event)
     if event.participant_mode != PdaEventParticipantMode.TEAM:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This event is not a team event")
     team = _get_user_team_for_event(db, event.id, user.id)
@@ -443,7 +438,6 @@ def invite_to_team(
 ):
     event = _get_event_or_404(db, slug)
     _ensure_event_visible_for_public_access(event)
-    _ensure_event_open_for_participant_access(event)
     if event.participant_mode != PdaEventParticipantMode.TEAM:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This event is not a team event")
 
@@ -509,7 +503,6 @@ def get_event_qr_token(
 ):
     event = _get_event_or_404(db, slug)
     _ensure_event_visible_for_public_access(event)
-    _ensure_event_open_for_participant_access(event)
     entity_type = PdaManagedEntityTypeEnum.USER
     entity_id = user.id
     if event.participant_mode == PdaEventParticipantMode.TEAM:
@@ -613,7 +606,6 @@ def event_me(
 ):
     event = _get_event_or_404(db, slug)
     _ensure_event_visible_for_public_access(event)
-    _ensure_event_open_for_participant_access(event)
     registration = db.query(PdaEventRegistration).filter(
         PdaEventRegistration.event_id == event.id,
         PdaEventRegistration.user_id == user.id,
@@ -648,7 +640,6 @@ def my_round_status(
 ):
     event = _get_event_or_404(db, slug)
     _ensure_event_visible_for_public_access(event)
-    _ensure_event_open_for_participant_access(event)
     registration = None
     entity_type = PdaEventEntityType.USER
     entity_user_id = user.id

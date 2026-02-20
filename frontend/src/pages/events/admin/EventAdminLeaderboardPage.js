@@ -9,6 +9,7 @@ import {
     RefreshCw,
     ChevronLeft,
     ChevronRight,
+    ChevronDown,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -16,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useAuth } from '@/context/AuthContext';
 
 import EventAdminShell, { useEventAdminShell } from './EventAdminShell';
@@ -36,6 +38,8 @@ const DEPARTMENTS = [
     { value: 'Rubber and Plastics Technology', label: 'RPT' },
     { value: 'Information Technology', label: 'IT' },
 ];
+
+const normalizeRoundState = (value) => String(value || '').trim().toLowerCase();
 
 function LeaderboardContent() {
     const { getAuthHeader } = useAuth();
@@ -59,9 +63,11 @@ function LeaderboardContent() {
     const [eliminateAbsent, setEliminateAbsent] = useState(true);
     const [filters, setFilters] = useState({
         department: '',
+        gender: '',
         batch: '',
         status: '',
         search: '',
+        roundIds: [],
     });
 
     const isTeamMode = eventInfo?.participant_mode === 'team';
@@ -78,8 +84,12 @@ function LeaderboardContent() {
             if (filters.status) params.append('status', filters.status);
             if (!isTeamMode) {
                 if (filters.department) params.append('department', filters.department);
+                if (filters.gender) params.append('gender', filters.gender);
                 if (filters.batch) params.append('batch', filters.batch);
             }
+            (filters.roundIds || []).forEach((roundId) => {
+                params.append('round_ids', String(roundId));
+            });
             params.append('page', String(currentPage));
             params.append('page_size', String(PAGE_SIZE));
 
@@ -89,14 +99,21 @@ function LeaderboardContent() {
             const data = Array.isArray(response.data) ? response.data : [];
             setRows(data);
             setTotalRows(Number(response.headers['x-total-count'] || data.length || 0));
+            if (currentPage === 1) {
+                const activeRows = data.filter((row) => String(row?.status || '').toLowerCase() === 'active');
+                setPodium(activeRows.slice(0, 3));
+            }
         } catch (error) {
             toast.error(getErrorMessage(error, 'Failed to load leaderboard'));
             setRows([]);
             setTotalRows(0);
+            if (currentPage === 1) {
+                setPodium([]);
+            }
         } finally {
             setLoading(false);
         }
-    }, [currentPage, eventSlug, filters.batch, filters.department, filters.search, filters.status, getAuthHeader, isTeamMode]);
+    }, [currentPage, eventSlug, filters.batch, filters.department, filters.gender, filters.roundIds, filters.search, filters.status, getAuthHeader, isTeamMode]);
 
     const fetchRounds = useCallback(async () => {
         try {
@@ -109,20 +126,6 @@ function LeaderboardContent() {
         }
     }, [eventSlug, getAuthHeader]);
 
-    const fetchPodium = useCallback(async () => {
-        try {
-            const params = new URLSearchParams();
-            params.append('page', '1');
-            params.append('page_size', '3');
-            const response = await axios.get(`${API}/pda-admin/events/${eventSlug}/leaderboard?${params.toString()}`, {
-                headers: getAuthHeader(),
-            });
-            setPodium(Array.isArray(response.data) ? response.data : []);
-        } catch (error) {
-            setPodium([]);
-        }
-    }, [eventSlug, getAuthHeader]);
-
     useEffect(() => {
         fetchRows();
     }, [fetchRows]);
@@ -132,12 +135,8 @@ function LeaderboardContent() {
     }, [fetchRounds]);
 
     useEffect(() => {
-        fetchPodium();
-    }, [fetchPodium]);
-
-    useEffect(() => {
         setCurrentPage(1);
-    }, [filters.batch, filters.department, filters.search, filters.status]);
+    }, [filters.batch, filters.department, filters.gender, filters.roundIds, filters.search, filters.status]);
 
     const totalPages = Math.max(1, Math.ceil(totalRows / PAGE_SIZE));
 
@@ -151,6 +150,30 @@ function LeaderboardContent() {
         () => rounds.filter((round) => round.is_frozen && round.state !== 'Completed' && round.state !== 'Reveal'),
         [rounds]
     );
+    const eligibleFilterRounds = useMemo(
+        () => rounds.filter((round) => Boolean(round?.is_frozen) || normalizeRoundState(round?.state) === 'completed'),
+        [rounds]
+    );
+    const selectedRoundIdSet = useMemo(
+        () => new Set((filters.roundIds || []).map((value) => Number(value))),
+        [filters.roundIds]
+    );
+    const roundFilterLabel = useMemo(() => {
+        const count = (filters.roundIds || []).length;
+        if (count === 0) return 'All rounds';
+        if (count === 1) return '1 round selected';
+        return `${count} rounds selected`;
+    }, [filters.roundIds]);
+
+    useEffect(() => {
+        const allowedRoundIds = new Set(eligibleFilterRounds.map((round) => Number(round.id)));
+        setFilters((prev) => {
+            const existing = (prev.roundIds || []).map((value) => Number(value));
+            const next = existing.filter((roundId) => allowedRoundIds.has(roundId));
+            if (next.length === existing.length) return prev;
+            return { ...prev, roundIds: next };
+        });
+    }, [eligibleFilterRounds]);
 
     const targetShortlistRound = useMemo(
         () => frozenNotCompletedRounds.reduce((latest, round) => {
@@ -196,8 +219,12 @@ function LeaderboardContent() {
             if (filters.status) params.append('status', filters.status);
             if (!isTeamMode) {
                 if (filters.department) params.append('department', filters.department);
+                if (filters.gender) params.append('gender', filters.gender);
                 if (filters.batch) params.append('batch', filters.batch);
             }
+            (filters.roundIds || []).forEach((roundId) => {
+                params.append('round_ids', String(roundId));
+            });
 
             const response = await axios.get(`${API}/pda-admin/events/${eventSlug}/export/leaderboard?${params.toString()}`, {
                 headers: getAuthHeader(),
@@ -220,11 +247,20 @@ function LeaderboardContent() {
     };
 
     const handleRefresh = () => {
-        fetchRows();
         fetchRounds();
-        fetchPodium();
+        fetchRows();
         toast.success('Leaderboard refreshed');
     };
+
+    const toggleRoundSelection = useCallback((roundId, checked) => {
+        const targetId = Number(roundId);
+        setFilters((prev) => {
+            const nextSet = new Set((prev.roundIds || []).map((value) => Number(value)));
+            if (checked) nextSet.add(targetId);
+            else nextSet.delete(targetId);
+            return { ...prev, roundIds: Array.from(nextSet) };
+        });
+    }, []);
 
     const openEntityModal = async (entry) => {
         const entityId = entry.entity_id || entry.participant_id;
@@ -343,21 +379,21 @@ function LeaderboardContent() {
                         </h1>
                         <p className="text-gray-600">Cumulative scores from completed + frozen rounds</p>
                     </div>
-                    <div className="flex gap-2">
-                        <Button onClick={handleRefresh} variant="outline" className="border-2 border-black shadow-neo">
+                    <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
+                        <Button onClick={handleRefresh} variant="outline" className="w-full border-2 border-black shadow-neo sm:w-auto">
                             <RefreshCw className="w-4 h-4 mr-2" /> Refresh
                         </Button>
-                        <Button onClick={() => handleExport('csv')} variant="outline" className="border-2 border-black shadow-neo">
+                        <Button onClick={() => handleExport('csv')} variant="outline" className="w-full border-2 border-black shadow-neo sm:w-auto">
                             <Download className="w-4 h-4 mr-2" /> CSV
                         </Button>
-                        <Button onClick={() => handleExport('xlsx')} variant="outline" className="border-2 border-black shadow-neo">
+                        <Button onClick={() => handleExport('xlsx')} variant="outline" className="w-full border-2 border-black shadow-neo sm:w-auto">
                             <Download className="w-4 h-4 mr-2" /> Excel
                         </Button>
                     </div>
                 </div>
 
-                <div className={`grid gap-3 ${isTeamMode ? 'grid-cols-1 md:grid-cols-3' : 'grid-cols-1 md:grid-cols-4'}`}>
-                    <div className={`relative ${isTeamMode ? 'md:col-span-2' : 'md:col-span-2'}`}>
+                <div className={`grid gap-3 ${isTeamMode ? 'grid-cols-1 md:grid-cols-3' : 'grid-cols-1 md:grid-cols-3 lg:grid-cols-6'}`}>
+                    <div className={`relative ${isTeamMode ? 'md:col-span-2' : 'md:col-span-3 lg:col-span-2'}`}>
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                         <Input
                             placeholder={`Search ${isTeamMode ? 'team' : 'participant'}...`}
@@ -391,6 +427,17 @@ function LeaderboardContent() {
                         </Select>
                     ) : null}
 
+                    {!isTeamMode ? (
+                        <Select value={filters.gender || 'all'} onValueChange={(value) => setFilters((prev) => ({ ...prev, gender: value === 'all' ? '' : value }))}>
+                            <SelectTrigger className="neo-input"><SelectValue placeholder="Gender" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All Genders</SelectItem>
+                                <SelectItem value="Male">Male</SelectItem>
+                                <SelectItem value="Female">Female</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    ) : null}
+
                     <Select value={filters.status || 'all'} onValueChange={(value) => setFilters((prev) => ({ ...prev, status: value === 'all' ? '' : value }))}>
                         <SelectTrigger className="neo-input"><SelectValue placeholder="Status" /></SelectTrigger>
                         <SelectContent>
@@ -399,6 +446,52 @@ function LeaderboardContent() {
                             <SelectItem value="Eliminated">Eliminated</SelectItem>
                         </SelectContent>
                     </Select>
+
+                    <Popover>
+                        <PopoverTrigger asChild>
+                            <Button type="button" variant="outline" className="neo-input justify-between font-normal">
+                                <span className="truncate">{roundFilterLabel}</span>
+                                <ChevronDown className="h-4 w-4" />
+                            </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-80 border-2 border-black p-3" align="end">
+                            <div className="mb-2 flex items-center justify-between">
+                                <p className="text-sm font-bold">Eligible Rounds</p>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    className="h-7 px-2 text-xs"
+                                    onClick={() => setFilters((prev) => ({ ...prev, roundIds: [] }))}
+                                >
+                                    All rounds
+                                </Button>
+                            </div>
+                            {eligibleFilterRounds.length === 0 ? (
+                                <p className="text-xs text-gray-600">No completed/frozen rounds yet.</p>
+                            ) : (
+                                <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+                                    {eligibleFilterRounds.map((round) => (
+                                        <label key={round.id} className="flex cursor-pointer items-start gap-2 rounded-md border border-black/10 bg-[#fffdf7] px-2 py-2">
+                                            <Checkbox
+                                                checked={selectedRoundIdSet.has(Number(round.id))}
+                                                onCheckedChange={(checked) => toggleRoundSelection(round.id, checked === true)}
+                                                className="mt-0.5 border-2 border-black data-[state=checked]:bg-primary"
+                                            />
+                                            <span className="text-sm">
+                                                <span className="font-semibold">
+                                                    {String(round.round_no || '').toLowerCase().startsWith('pf')
+                                                        ? String(round.round_no)
+                                                        : `PF${String(round.round_no || '').padStart(2, '0')}`}
+                                                </span>
+                                                <span className="mx-1 text-gray-400">-</span>
+                                                <span>{round.name}</span>
+                                            </span>
+                                        </label>
+                                    ))}
+                                </div>
+                            )}
+                        </PopoverContent>
+                    </Popover>
                 </div>
             </div>
 

@@ -99,6 +99,7 @@ function ScoringContent() {
     }, [fetchRoundData]);
 
     const criteria = useMemo(() => round?.evaluation_criteria || [{ name: 'Score', max_marks: 100 }], [round?.evaluation_criteria]);
+    const isRoundActive = String(round?.state || '').trim().toLowerCase() === 'active';
 
     const getTotalScore = useCallback((row) => (
         criteria.reduce((sum, criterion) => {
@@ -395,6 +396,11 @@ function ScoringContent() {
                                 ) : null}
                             </div>
                             <h1 className="font-heading font-bold text-2xl mt-2">{round.name}</h1>
+                            {!isRoundActive ? (
+                                <p className="mt-2 text-xs font-semibold text-slate-600">
+                                    Attendance can be edited only when round is Active.
+                                </p>
+                            ) : null}
                         </div>
                     </div>
 
@@ -403,7 +409,7 @@ function ScoringContent() {
                             <Button onClick={downloadTemplate} variant="outline" className="border-2 border-black shadow-neo">
                                 <Download className="w-4 h-4 mr-2" /> Template
                             </Button>
-                            <input type="file" ref={fileInputRef} accept=".xlsx,.xls" onChange={handleFileUpload} className="hidden" />
+                            <input type="file" ref={fileInputRef} accept=".xlsx" onChange={handleFileUpload} className="hidden" />
                             <Button onClick={() => fileInputRef.current?.click()} disabled={importing} variant="outline" className="border-2 border-black shadow-neo bg-green-50">
                                 <Upload className="w-4 h-4 mr-2" /> {importing ? 'Importing...' : 'Import Excel'}
                             </Button>
@@ -560,7 +566,7 @@ function ScoringContent() {
                                             <Checkbox
                                                 checked={Boolean(row.is_present)}
                                                 onCheckedChange={(checked) => handlePresenceChange(row._entityId, checked)}
-                                                disabled={round.is_frozen}
+                                                disabled={round.is_frozen || !isRoundActive}
                                                 className="border-2 border-black data-[state=checked]:bg-primary"
                                             />
                                         </td>
