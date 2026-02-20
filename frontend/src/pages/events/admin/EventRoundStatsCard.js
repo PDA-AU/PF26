@@ -47,9 +47,9 @@ export default function EventRoundStatsCard({ statsState }) {
 
     return (
         <div className="mb-4">
-            <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center justify-between mb-2">
                 <h4 className="font-heading font-bold text-sm uppercase tracking-wide">Round Stats</h4>
-                <span className="text-xs text-gray-500 break-words">{summary}</span>
+                <span className="text-xs text-gray-500">{summary}</span>
             </div>
             {loading ? (
                 <div className="text-xs text-gray-500">Loading stats...</div>
@@ -77,10 +77,11 @@ export default function EventRoundStatsCard({ statsState }) {
                     </div>
                     <div className="border-2 border-black">
                         <div className="bg-secondary border-b-2 border-black px-2 py-1 text-xs font-bold uppercase">Top 10</div>
-                        <pre className="max-h-40 overflow-x-auto overflow-y-auto px-2 py-2 text-xs whitespace-pre-wrap break-words">{top10Lines}</pre>
+                        <pre className="max-h-40 overflow-y-auto px-2 py-2 text-xs whitespace-pre-wrap">{top10Lines}</pre>
                     </div>
                 </div>
             )}
         </div>
     );
 }
+

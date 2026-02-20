@@ -444,15 +444,15 @@ function DashboardContent() {
                         <h3 className="font-heading font-bold text-base sm:text-lg mb-4 flex items-center gap-2">
                             <Trophy className="w-4 h-4 sm:w-5 sm:h-5" /> Top 3 Male
                         </h3>
-                        <div className="flex gap-3 overflow-x-auto pb-2">
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                             {topMales.length === 0 ? (
                                 <div className="text-sm text-gray-500">No data</div>
                             ) : (
                                 topMales.map((entry, idx) => (
-                                    <div key={entry.entity_id || entry.participant_id} className="min-w-[180px] bg-muted border-2 border-black px-3 py-3">
+                                    <div key={entry.entity_id || entry.participant_id} className="min-w-0 bg-muted border-2 border-black px-3 py-3">
                                         <div className="text-xs text-gray-500 font-bold">#{idx + 1}</div>
-                                        <div className="font-bold text-sm truncate">{entry.name}</div>
-                                        <div className="text-xs text-gray-600">{entry.regno_or_code || entry.register_number}</div>
+                                        <div className="font-bold text-sm break-words">{entry.name}</div>
+                                        <div className="text-xs text-gray-600 break-all">{entry.regno_or_code || entry.register_number}</div>
                                         <div className="mt-2 inline-block bg-primary text-white px-2 py-1 border-2 border-black text-xs font-bold">
                                             {Number(entry.cumulative_score || 0).toFixed(2)}
                                         </div>
@@ -465,15 +465,15 @@ function DashboardContent() {
                         <h3 className="font-heading font-bold text-base sm:text-lg mb-4 flex items-center gap-2">
                             <Trophy className="w-4 h-4 sm:w-5 sm:h-5" /> Top 3 Female
                         </h3>
-                        <div className="flex gap-3 overflow-x-auto pb-2">
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                             {topFemales.length === 0 ? (
                                 <div className="text-sm text-gray-500">No data</div>
                             ) : (
                                 topFemales.map((entry, idx) => (
-                                    <div key={entry.entity_id || entry.participant_id} className="min-w-[180px] bg-muted border-2 border-black px-3 py-3">
+                                    <div key={entry.entity_id || entry.participant_id} className="min-w-0 bg-muted border-2 border-black px-3 py-3">
                                         <div className="text-xs text-gray-500 font-bold">#{idx + 1}</div>
-                                        <div className="font-bold text-sm truncate">{entry.name}</div>
-                                        <div className="text-xs text-gray-600">{entry.regno_or_code || entry.register_number}</div>
+                                        <div className="font-bold text-sm break-words">{entry.name}</div>
+                                        <div className="text-xs text-gray-600 break-all">{entry.regno_or_code || entry.register_number}</div>
                                         <div className="mt-2 inline-block bg-primary text-white px-2 py-1 border-2 border-black text-xs font-bold">
                                             {Number(entry.cumulative_score || 0).toFixed(2)}
                                         </div>

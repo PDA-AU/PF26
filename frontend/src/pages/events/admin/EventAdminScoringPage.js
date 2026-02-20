@@ -12,10 +12,14 @@ import {
     Download,
     FileSpreadsheet,
     Users,
+    Edit2,
+    Plus,
+    X,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -33,6 +37,12 @@ const loadPageSize = (storageKey, fallback, allowedValues) => {
     const parsed = Number.parseInt(raw || '', 10);
     return allowedValues.includes(parsed) ? parsed : fallback;
 };
+
+const createCriterionDraft = (name = '', maxMarks = 0) => ({
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name,
+    max_marks: maxMarks,
+});
 
 function ScoringContent() {
     const navigate = useNavigate();
@@ -52,6 +62,9 @@ function ScoringContent() {
     const [currentPage, setCurrentPage] = useState(1);
     const [pageSize, setPageSize] = useState(() => loadPageSize(SCORING_PAGE_SIZE_KEY, 10, SCORING_PAGE_SIZE_OPTIONS));
     const [freezeDialogOpen, setFreezeDialogOpen] = useState(false);
+    const [criteriaDialogOpen, setCriteriaDialogOpen] = useState(false);
+    const [criteriaDraft, setCriteriaDraft] = useState([]);
+    const [savingCriteria, setSavingCriteria] = useState(false);
     const [importPreviewOpen, setImportPreviewOpen] = useState(false);
     const [importPreview, setImportPreview] = useState(null);
     const [pendingImportFile, setPendingImportFile] = useState(null);
@@ -104,6 +117,13 @@ function ScoringContent() {
 
     const criteria = useMemo(() => round?.evaluation_criteria || [{ name: 'Score', max_marks: 100 }], [round?.evaluation_criteria]);
     const isRoundActive = String(round?.state || '').trim().toLowerCase() === 'active';
+    const criteriaDraftMaxTotal = useMemo(
+        () => criteriaDraft.reduce((sum, criterion) => {
+            const parsed = Number.parseFloat(criterion.max_marks);
+            return sum + (Number.isNaN(parsed) ? 0 : parsed);
+        }, 0),
+        [criteriaDraft]
+    );
 
     const getTotalScore = useCallback((row) => (
         criteria.reduce((sum, criterion) => {
@@ -396,6 +416,64 @@ function ScoringContent() {
         }
     };
 
+    const openCriteriaEditor = () => {
+        const base = (round?.evaluation_criteria && round.evaluation_criteria.length > 0)
+            ? round.evaluation_criteria
+            : [{ name: 'Score', max_marks: 100 }];
+        setCriteriaDraft(base.map((criterion) => createCriterionDraft(criterion.name || '', criterion.max_marks || 0)));
+        setCriteriaDialogOpen(true);
+    };
+
+    const closeCriteriaEditor = () => {
+        if (savingCriteria) return;
+        setCriteriaDialogOpen(false);
+        setCriteriaDraft([]);
+    };
+
+    const saveCriteria = async () => {
+        if (savingCriteria) return;
+        const normalized = criteriaDraft.map((criterion) => ({
+            name: String(criterion.name || '').trim(),
+            max_marks: Number.parseFloat(criterion.max_marks),
+        }));
+
+        if (!normalized.length) {
+            toast.error('Add at least one evaluation criterion');
+            return;
+        }
+
+        if (normalized.some((criterion) => !criterion.name)) {
+            toast.error('Criterion name is required');
+            return;
+        }
+
+        const names = normalized.map((criterion) => criterion.name.toLowerCase());
+        if (new Set(names).size !== names.length) {
+            toast.error('Criterion names must be unique');
+            return;
+        }
+
+        if (normalized.some((criterion) => Number.isNaN(criterion.max_marks) || !Number.isFinite(criterion.max_marks) || criterion.max_marks <= 0)) {
+            toast.error('Max marks must be a number greater than 0');
+            return;
+        }
+
+        setSavingCriteria(true);
+        try {
+            await axios.put(`${API}/pda-admin/events/${eventSlug}/rounds/${roundId}`, {
+                evaluation_criteria: normalized,
+            }, { headers: getAuthHeader() });
+            toast.success('Evaluation criteria updated');
+            setCriteriaDialogOpen(false);
+            setCriteriaDraft([]);
+            fetchRoundData();
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to update criteria'));
+        } finally {
+            setSavingCriteria(false);
+        }
+    };
+
     const previewData = importPreview && typeof importPreview === 'object' ? importPreview : {};
     const previewIdentifiedRows = Array.isArray(previewData.identified_rows) ? previewData.identified_rows : [];
     const previewMismatchedRows = Array.isArray(previewData.mismatched_rows) ? previewData.mismatched_rows : [];
@@ -458,6 +536,9 @@ function ScoringContent() {
 
                     {!round.is_frozen ? (
                         <div className="flex flex-wrap gap-2">
+                            <Button onClick={openCriteriaEditor} variant="outline" className="border-2 border-black shadow-neo">
+                                <Edit2 className="w-4 h-4 mr-2" /> Edit Criteria
+                            </Button>
                             <Button onClick={downloadTemplate} variant="outline" className="border-2 border-black shadow-neo">
                                 <Download className="w-4 h-4 mr-2" /> Template
                             </Button>
@@ -506,6 +587,99 @@ function ScoringContent() {
                     )}
                 </div>
             </div>
+
+            <Dialog
+                open={criteriaDialogOpen}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        closeCriteriaEditor();
+                    } else {
+                        setCriteriaDialogOpen(true);
+                    }
+                }}
+            >
+                <DialogContent className="border-4 border-black max-w-3xl">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading font-bold text-xl">Edit Evaluation Criteria</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <p className="text-sm text-gray-600">
+                            Update the scoring criteria and maximum marks for this round. Unsaved score edits in the table may be reset after refresh.
+                        </p>
+                        <div className="space-y-2">
+                            {criteriaDraft.map((criterion) => (
+                                <div key={criterion.id} className="grid grid-cols-[1fr_130px_auto] gap-2 items-end">
+                                    <div className="space-y-1">
+                                        <Label className="text-xs uppercase tracking-wide text-gray-500">Criterion</Label>
+                                        <Input
+                                            value={criterion.name}
+                                            onChange={(e) => setCriteriaDraft((prev) => prev.map((item) => (
+                                                item.id === criterion.id ? { ...item, name: e.target.value } : item
+                                            )))}
+                                            placeholder="Criteria name"
+                                            className="neo-input"
+                                            disabled={savingCriteria}
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <Label className="text-xs uppercase tracking-wide text-gray-500">Max Marks</Label>
+                                        <Input
+                                            type="number"
+                                            value={criterion.max_marks}
+                                            onChange={(e) => setCriteriaDraft((prev) => prev.map((item) => (
+                                                item.id === criterion.id ? { ...item, max_marks: e.target.value } : item
+                                            )))}
+                                            min={0}
+                                            step="0.01"
+                                            placeholder="100"
+                                            className="neo-input"
+                                            disabled={savingCriteria}
+                                        />
+                                    </div>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="border-2 border-black"
+                                        onClick={() => setCriteriaDraft((prev) => (prev.length > 1 ? prev.filter((item) => item.id !== criterion.id) : prev))}
+                                        disabled={savingCriteria || criteriaDraft.length === 1}
+                                    >
+                                        <X className="w-4 h-4" />
+                                    </Button>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="border-2 border-black"
+                                onClick={() => setCriteriaDraft((prev) => [...prev, createCriterionDraft('', 0)])}
+                                disabled={savingCriteria}
+                            >
+                                <Plus className="w-4 h-4 mr-2" /> Add Criterion
+                            </Button>
+                            <p className="text-sm font-semibold text-gray-700">Total Max: {criteriaDraftMaxTotal}</p>
+                        </div>
+                        <div className="flex gap-2">
+                            <Button
+                                onClick={closeCriteriaEditor}
+                                variant="outline"
+                                className="flex-1 border-2 border-black"
+                                disabled={savingCriteria}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={saveCriteria}
+                                className="flex-1 bg-primary text-white border-2 border-black"
+                                disabled={savingCriteria}
+                            >
+                                {savingCriteria ? 'Updating...' : 'Update Criteria'}
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
 
             {!round.is_frozen ? (
                 <div className="neo-card mb-6 bg-blue-50 border-blue-500">
