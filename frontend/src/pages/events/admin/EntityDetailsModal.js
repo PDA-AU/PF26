@@ -1,5 +1,7 @@
 import React from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Trash2 } from 'lucide-react';
 
 const safeText = (value) => (value === null || value === undefined || value === '' ? '—' : value);
 
@@ -15,6 +17,9 @@ export default function EntityDetailsModal({
     entityMode,
     teamMembers = [],
     departmentLabel,
+    showDeleteAction = false,
+    deleteActionLabel = 'Delete',
+    onDeleteRequest,
 }) {
     if (!entity) {
         return null;
@@ -102,6 +107,19 @@ export default function EntityDetailsModal({
                                     )}
                                 </div>
                             ) : null}
+                            {showDeleteAction && typeof onDeleteRequest === 'function' ? (
+                                <div className="mt-3">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="w-full border-2 border-red-500 text-red-700 hover:bg-red-50"
+                                        onClick={onDeleteRequest}
+                                    >
+                                        <Trash2 className="w-4 h-4 mr-2" />
+                                        {deleteActionLabel}
+                                    </Button>
+                                </div>
+                            ) : null}
                         </div>
                     </div>
 
@@ -149,4 +167,3 @@ export default function EntityDetailsModal({
         </Dialog>
     );
 }
-

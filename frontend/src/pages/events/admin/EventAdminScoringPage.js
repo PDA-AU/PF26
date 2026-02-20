@@ -52,6 +52,10 @@ function ScoringContent() {
     const [currentPage, setCurrentPage] = useState(1);
     const [pageSize, setPageSize] = useState(() => loadPageSize(SCORING_PAGE_SIZE_KEY, 10, SCORING_PAGE_SIZE_OPTIONS));
     const [freezeDialogOpen, setFreezeDialogOpen] = useState(false);
+    const [importPreviewOpen, setImportPreviewOpen] = useState(false);
+    const [importPreview, setImportPreview] = useState(null);
+    const [pendingImportFile, setPendingImportFile] = useState(null);
+    const [confirmingImport, setConfirmingImport] = useState(false);
     const fileInputRef = useRef(null);
 
     const getErrorMessage = (error, fallback) => (
@@ -300,17 +304,54 @@ function ScoringContent() {
         try {
             const response = await axios.post(`${API}/pda-admin/events/${eventSlug}/rounds/${roundId}/import-scores`, formData, {
                 headers: { ...getAuthHeader(), 'Content-Type': 'multipart/form-data' },
+                params: { preview: true },
             });
-            toast.success(`Imported ${response.data.imported || 0} rows`);
-            if (Array.isArray(response.data.errors) && response.data.errors.length > 0) {
-                response.data.errors.forEach((msg) => toast.error(msg));
+            setImportPreview(response.data || null);
+            setPendingImportFile(file);
+            setImportPreviewOpen(true);
+            toast.success('Import preview ready');
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to validate import file'));
+        } finally {
+            setImporting(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+    };
+
+    const closeImportPreview = () => {
+        if (confirmingImport) return;
+        setImportPreviewOpen(false);
+        setImportPreview(null);
+        setPendingImportFile(null);
+    };
+
+    const confirmImportUpdate = async () => {
+        if (!pendingImportFile) return;
+        setConfirmingImport(true);
+        const formData = new FormData();
+        formData.append('file', pendingImportFile);
+        try {
+            const response = await axios.post(`${API}/pda-admin/events/${eventSlug}/rounds/${roundId}/import-scores`, formData, {
+                headers: { ...getAuthHeader(), 'Content-Type': 'multipart/form-data' },
+            });
+            const imported = Number(response.data?.imported || 0);
+            const totalRows = Number(response.data?.total_rows || 0);
+            const skipped = Math.max(totalRows - imported, 0);
+            toast.success(`Imported ${imported} row${imported === 1 ? '' : 's'}`);
+            if (skipped > 0) {
+                toast.error(`Skipped ${skipped} row${skipped === 1 ? '' : 's'} due to validation issues`);
             }
+            if (Array.isArray(response.data?.errors) && response.data.errors.length > 0) {
+                response.data.errors.slice(0, 5).forEach((msg) => toast.error(msg));
+            }
+            setImportPreviewOpen(false);
+            setImportPreview(null);
+            setPendingImportFile(null);
             fetchRoundData();
         } catch (error) {
             toast.error(getErrorMessage(error, 'Import failed'));
         } finally {
-            setImporting(false);
-            if (fileInputRef.current) fileInputRef.current.value = '';
+            setConfirmingImport(false);
         }
     };
 
@@ -354,6 +395,17 @@ function ScoringContent() {
             toast.error(getErrorMessage(error, 'Failed to unfreeze round'));
         }
     };
+
+    const previewData = importPreview && typeof importPreview === 'object' ? importPreview : {};
+    const previewIdentifiedRows = Array.isArray(previewData.identified_rows) ? previewData.identified_rows : [];
+    const previewMismatchedRows = Array.isArray(previewData.mismatched_rows) ? previewData.mismatched_rows : [];
+    const previewUnidentifiedRows = Array.isArray(previewData.unidentified_rows) ? previewData.unidentified_rows : [];
+    const previewOtherRequiredRows = Array.isArray(previewData.other_required_rows) ? previewData.other_required_rows : [];
+    const previewIdentifiedCount = Number(previewData.identified_count || 0);
+    const previewMismatchedCount = Number(previewData.mismatched_count || 0);
+    const previewUnidentifiedCount = Number(previewData.unidentified_count || 0);
+    const previewOtherRequiredCount = Number(previewData.other_required_count || 0);
+    const previewReadyCount = Number(previewData.ready_to_import || 0);
 
     if (loading) {
         return (
@@ -410,8 +462,8 @@ function ScoringContent() {
                                 <Download className="w-4 h-4 mr-2" /> Template
                             </Button>
                             <input type="file" ref={fileInputRef} accept=".xlsx" onChange={handleFileUpload} className="hidden" />
-                            <Button onClick={() => fileInputRef.current?.click()} disabled={importing} variant="outline" className="border-2 border-black shadow-neo bg-green-50">
-                                <Upload className="w-4 h-4 mr-2" /> {importing ? 'Importing...' : 'Import Excel'}
+                            <Button onClick={() => fileInputRef.current?.click()} disabled={importing || confirmingImport} variant="outline" className="border-2 border-black shadow-neo bg-green-50">
+                                <Upload className="w-4 h-4 mr-2" /> {importing ? 'Validating...' : 'Import Excel'}
                             </Button>
                             <Button onClick={saveScores} disabled={saving} className="bg-primary text-white border-2 border-black shadow-neo">
                                 <Save className="w-4 h-4 mr-2" /> {saving ? 'Saving...' : 'Save'}
@@ -461,11 +513,117 @@ function ScoringContent() {
                         <FileSpreadsheet className="w-8 h-8 text-blue-600 flex-shrink-0" />
                         <div>
                             <h3 className="font-heading font-bold text-lg">Bulk Score Import</h3>
-                            <p className="text-gray-600 text-sm">1. Download template → 2. Fill scores → 3. Upload Excel</p>
+                            <p className="text-gray-600 text-sm">1. Download template → 2. Fill code + scores → 3. Upload Excel → 4. Review & Confirm</p>
                         </div>
                     </div>
                 </div>
             ) : null}
+
+            <Dialog
+                open={importPreviewOpen}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        closeImportPreview();
+                    } else {
+                        setImportPreviewOpen(true);
+                    }
+                }}
+            >
+                <DialogContent className="border-4 border-black max-w-4xl">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading font-bold text-xl">Import Preview</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                            <div className="rounded border-2 border-black bg-white p-3">
+                                <p className="text-xs uppercase tracking-wide text-gray-500">Rows Identified</p>
+                                <p className="text-xl font-bold">{previewIdentifiedCount}</p>
+                            </div>
+                            <div className="rounded border-2 border-black bg-white p-3">
+                                <p className="text-xs uppercase tracking-wide text-gray-500">Mismatched</p>
+                                <p className="text-xl font-bold">{previewMismatchedCount}</p>
+                            </div>
+                            <div className="rounded border-2 border-black bg-white p-3">
+                                <p className="text-xs uppercase tracking-wide text-gray-500">Unidentified</p>
+                                <p className="text-xl font-bold">{previewUnidentifiedCount}</p>
+                            </div>
+                            <div className="rounded border-2 border-black bg-white p-3">
+                                <p className="text-xs uppercase tracking-wide text-gray-500">Required/Invalid</p>
+                                <p className="text-xl font-bold">{previewOtherRequiredCount}</p>
+                            </div>
+                            <div className="rounded border-2 border-black bg-white p-3">
+                                <p className="text-xs uppercase tracking-wide text-gray-500">Ready</p>
+                                <p className="text-xl font-bold">{previewReadyCount}</p>
+                            </div>
+                        </div>
+
+                        {previewIdentifiedRows.length > 0 ? (
+                            <div className="rounded border-2 border-black bg-white p-3">
+                                <p className="font-semibold mb-2">Identified Rows</p>
+                                <div className="max-h-32 overflow-y-auto text-sm space-y-1">
+                                    {previewIdentifiedRows.map((item, index) => (
+                                        <p key={`identified-${index}`}>
+                                            Row {item.row}: {item.identifier} {item.name ? `(${item.name})` : ''}
+                                        </p>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : null}
+
+                        {previewMismatchedRows.length > 0 ? (
+                            <div className="rounded border-2 border-amber-400 bg-amber-50 p-3">
+                                <p className="font-semibold mb-2">Mismatched Rows</p>
+                                <div className="max-h-32 overflow-y-auto text-sm space-y-1">
+                                    {previewMismatchedRows.map((item, index) => (
+                                        <p key={`mismatch-${index}`}>
+                                            Row {item.row}: {item.identifier} - Provided "{item.provided_name || '—'}", Expected "{item.expected_name || '—'}"
+                                        </p>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : null}
+
+                        {previewUnidentifiedRows.length > 0 ? (
+                            <div className="rounded border-2 border-red-500 bg-red-50 p-3">
+                                <p className="font-semibold mb-2">Unidentified Rows</p>
+                                <div className="max-h-32 overflow-y-auto text-sm space-y-1">
+                                    {previewUnidentifiedRows.map((item, index) => (
+                                        <p key={`unidentified-${index}`}>
+                                            Row {item.row}: {item.identifier || '—'} - {item.reason}
+                                        </p>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : null}
+
+                        {previewOtherRequiredRows.length > 0 ? (
+                            <div className="rounded border-2 border-red-500 bg-red-50 p-3">
+                                <p className="font-semibold mb-2">Required/Invalid Rows</p>
+                                <div className="max-h-32 overflow-y-auto text-sm space-y-1">
+                                    {previewOtherRequiredRows.map((item, index) => (
+                                        <p key={`required-${index}`}>
+                                            Row {item.row}: {item.identifier || '—'} - {item.reason}
+                                        </p>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : null}
+
+                        <div className="flex gap-2">
+                            <Button onClick={closeImportPreview} variant="outline" className="flex-1 border-2 border-black" disabled={confirmingImport}>
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={confirmImportUpdate}
+                                className="flex-1 bg-primary text-white border-2 border-black"
+                                disabled={confirmingImport || !pendingImportFile || previewReadyCount <= 0}
+                            >
+                                {confirmingImport ? 'Updating...' : `Confirm Update (${previewReadyCount})`}
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
 
             <div className="neo-card mb-6">
                 <div className="flex gap-2 mb-4">

@@ -142,6 +142,10 @@ def _parse_import_score_value(raw_value, max_marks: float) -> float:
     return float(value)
 
 
+def _normalize_compare_text(value) -> str:
+    return str(value or "").strip().lower()
+
+
 def _to_event_type(value) -> PdaEventType:
     return PdaEventType[value.name] if hasattr(value, "name") else PdaEventType(value)
 
@@ -1019,6 +1023,68 @@ def update_participant_status(
         meta={"user_id": user_id, "status": normalized},
     )
     return {"message": "Status updated"}
+
+
+@router.delete("/pda-admin/events/{slug}/participants/{user_id}")
+def delete_participant_with_cascade(
+    slug: str,
+    user_id: int,
+    admin: PdaUser = Depends(require_pda_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    if event.participant_mode != PdaEventParticipantMode.INDIVIDUAL:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Participant deletion is only available for individual events")
+
+    registration = db.query(PdaEventRegistration).filter(
+        PdaEventRegistration.event_id == event.id,
+        PdaEventRegistration.entity_type == PdaEventEntityType.USER,
+        PdaEventRegistration.user_id == user_id,
+    ).first()
+    if not registration:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Participant not found")
+
+    participant = db.query(PdaUser).filter(PdaUser.id == user_id).first()
+    participant_name = participant.name if participant else None
+    participant_regno = participant.regno if participant else None
+
+    db.query(PdaEventInvite).filter(
+        PdaEventInvite.event_id == event.id,
+        PdaEventInvite.invited_user_id == user_id,
+    ).delete(synchronize_session=False)
+    db.query(PdaEventInvite).filter(
+        PdaEventInvite.event_id == event.id,
+        PdaEventInvite.invited_by_user_id == user_id,
+    ).delete(synchronize_session=False)
+    db.query(PdaEventBadge).filter(
+        PdaEventBadge.event_id == event.id,
+        PdaEventBadge.user_id == user_id,
+    ).delete(synchronize_session=False)
+    db.query(PdaEventScore).filter(
+        PdaEventScore.event_id == event.id,
+        PdaEventScore.user_id == user_id,
+    ).delete(synchronize_session=False)
+    db.query(PdaEventAttendance).filter(
+        PdaEventAttendance.event_id == event.id,
+        PdaEventAttendance.user_id == user_id,
+    ).delete(synchronize_session=False)
+    db.query(PdaEventRegistration).filter(
+        PdaEventRegistration.event_id == event.id,
+        PdaEventRegistration.entity_type == PdaEventEntityType.USER,
+        PdaEventRegistration.user_id == user_id,
+    ).delete(synchronize_session=False)
+    db.commit()
+
+    _log_event_admin_action(
+        db,
+        admin,
+        event,
+        "delete_pda_event_participant",
+        method="DELETE",
+        path=f"/pda-admin/events/{slug}/participants/{user_id}",
+        meta={"user_id": user_id, "regno": participant_regno, "name": participant_name},
+    )
+    return {"message": "Participant deleted", "participant_id": user_id}
 
 
 @router.get("/pda-admin/events/{slug}/participants/{user_id}/rounds")
@@ -2035,6 +2101,7 @@ def import_scores(
     slug: str,
     round_id: int,
     file: UploadFile = File(...),
+    preview: bool = Query(False),
     admin: PdaUser = Depends(require_pda_event_admin),
     db: Session = Depends(get_db),
 ):
@@ -2052,96 +2119,226 @@ def import_scores(
     headers = [str(cell.value or "").strip() for cell in ws[1]]
     headers_norm = {h.lower(): idx for idx, h in enumerate(headers)}
     id_col_name = "register number" if event.participant_mode == PdaEventParticipantMode.INDIVIDUAL else "team code"
+    name_col_name = "name" if event.participant_mode == PdaEventParticipantMode.INDIVIDUAL else "team name"
     if id_col_name not in headers_norm:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Missing '{id_col_name}' column")
 
     criteria = _criteria_def(round_row)
     criteria_max = {c["name"]: float(c.get("max_marks", 0) or 0) for c in criteria}
+    missing_criteria_headers = [name for name in criteria_max.keys() if name.lower() not in headers_norm]
+    if missing_criteria_headers:
+        missing = ", ".join(missing_criteria_headers)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Missing criteria columns: {missing}")
     max_total = sum(criteria_max.values()) if criteria_max else 100
 
-    imported = 0
+    entities = _round_scoring_entities(db, event, round_row)
+    entity_by_identifier = {}
+    for entity in entities:
+        identifier_key = str(entity.get("regno_or_code") or "").strip().upper()
+        if identifier_key:
+            entity_by_identifier[identifier_key] = entity
+
+    id_idx = headers_norm.get(id_col_name)
+    name_idx = headers_norm.get(name_col_name)
+    present_idx = headers_norm.get("present")
+    criteria_indices = {name: headers_norm.get(name.lower()) for name in criteria_max.keys()}
+
+    truthy_values = {"yes", "y", "1", "true", "present"}
+    falsy_values = {"no", "n", "0", "false", "absent"}
+
+    total_rows = 0
+    valid_rows = []
+    identified_rows = []
+    mismatched_rows = []
+    unidentified_rows = []
+    other_required_rows = []
     errors = []
+
+    def _append_error(message: str) -> None:
+        if len(errors) < 50:
+            errors.append(message)
+
     for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
         values = [row[idx] if idx < len(row) else None for idx in range(len(headers))]
-        raw_identifier = values[headers_norm[id_col_name]]
-        identifier = str(raw_identifier or "").strip().upper()
-        if not identifier:
+
+        has_data = False
+        for value in values:
+            if value is None:
+                continue
+            if isinstance(value, str):
+                if value.strip():
+                    has_data = True
+                    break
+            else:
+                has_data = True
+                break
+        if not has_data:
             continue
 
-        user_id = None
-        team_id = None
-        entity_type = PdaEventEntityType.USER
-        if event.participant_mode == PdaEventParticipantMode.INDIVIDUAL:
-            person = db.query(PdaUser).filter(PdaUser.regno == identifier).first()
-            if not person:
-                errors.append(f"Row {row_idx}: Register number {identifier} not found")
-                continue
-            user_id = person.id
-            registration_row = db.query(PdaEventRegistration).filter(
-                PdaEventRegistration.event_id == event.id,
-                PdaEventRegistration.entity_type == PdaEventEntityType.USER,
-                PdaEventRegistration.user_id == user_id,
-            ).first()
-            if not registration_row:
-                errors.append(f"Row {row_idx}: Register number {identifier} not registered")
-                continue
-            if registration_row.status == PdaEventRegistrationStatus.ELIMINATED:
-                errors.append(f"Row {row_idx}: Register number {identifier} is eliminated")
-                continue
-        else:
-            team = db.query(PdaEventTeam).filter(PdaEventTeam.event_id == event.id, PdaEventTeam.team_code == identifier).first()
-            if not team:
-                errors.append(f"Row {row_idx}: Team code {identifier} not found")
-                continue
-            entity_type = PdaEventEntityType.TEAM
-            team_id = team.id
-            registration_row = db.query(PdaEventRegistration).filter(
-                PdaEventRegistration.event_id == event.id,
-                PdaEventRegistration.entity_type == PdaEventEntityType.TEAM,
-                PdaEventRegistration.team_id == team_id,
-            ).first()
-            if not registration_row:
-                errors.append(f"Row {row_idx}: Team code {identifier} not registered")
-                continue
-            if registration_row.status == PdaEventRegistrationStatus.ELIMINATED:
-                errors.append(f"Row {row_idx}: Team code {identifier} is eliminated")
+        total_rows += 1
+        raw_identifier = values[id_idx] if id_idx is not None else None
+        identifier = str(raw_identifier or "").strip().upper()
+        provided_name = str(values[name_idx] or "").strip() if name_idx is not None else ""
+
+        if not identifier:
+            reason = f"Missing {id_col_name.title()}"
+            other_required_rows.append({
+                "row": row_idx,
+                "identifier": "",
+                "name": provided_name,
+                "reason": reason,
+            })
+            _append_error(f"Row {row_idx}: {reason}")
+            continue
+
+        entity = entity_by_identifier.get(identifier)
+        if not entity:
+            reason = f"{id_col_name.title()} {identifier} not found in current round participants"
+            unidentified_rows.append({
+                "row": row_idx,
+                "identifier": identifier,
+                "name": provided_name,
+                "reason": reason,
+            })
+            _append_error(f"Row {row_idx}: {reason}")
+            continue
+
+        entity_type = PdaEventEntityType.USER if entity.get("entity_type") == "user" else PdaEventEntityType.TEAM
+        user_id = int(entity["entity_id"]) if entity_type == PdaEventEntityType.USER else None
+        team_id = int(entity["entity_id"]) if entity_type == PdaEventEntityType.TEAM else None
+
+        has_any_score_input = False
+        for name in criteria_max.keys():
+            idx = criteria_indices.get(name)
+            raw = values[idx] if idx is not None else None
+            if raw is not None and str(raw).strip() != "":
+                has_any_score_input = True
+                break
+
+        is_present = has_any_score_input
+        if present_idx is not None:
+            present_raw = values[present_idx]
+            present_text = str(present_raw or "").strip().lower()
+            if not present_text:
+                is_present = has_any_score_input
+            elif present_text in truthy_values:
+                is_present = True
+            elif present_text in falsy_values:
+                is_present = has_any_score_input
+            else:
+                reason = "Invalid Present value (use Yes/No)"
+                other_required_rows.append({
+                    "row": row_idx,
+                    "identifier": identifier,
+                    "name": provided_name,
+                    "reason": reason,
+                })
+                _append_error(f"Row {row_idx}: {reason}")
                 continue
 
-        present_idx = headers_norm.get("present")
-        present_val = str(values[present_idx] if present_idx is not None else "Yes").strip().lower()
-        is_present = present_val in {"yes", "y", "1", "true", "present"}
-
+        row_errors = []
         scores = {}
         if is_present:
-            invalid = False
             for name, max_marks in criteria_max.items():
-                idx = headers_norm.get(name.lower())
-                raw = values[idx] if idx is not None else 0
+                idx = criteria_indices.get(name)
+                raw = values[idx] if idx is not None else None
+                if raw is None or str(raw).strip() == "":
+                    row_errors.append(f"{name} is required")
+                    continue
                 try:
                     score = _parse_import_score_value(raw, max_marks)
                 except ValueError as exc:
                     if str(exc) == "invalid_denominator":
-                        errors.append(f"Row {row_idx}: Invalid score for {name} (denominator must be > 0)")
+                        row_errors.append(f"Invalid score for {name} (denominator must be > 0)")
                     else:
-                        errors.append(f"Row {row_idx}: Invalid score for {name}")
-                    invalid = True
-                    break
+                        row_errors.append(f"Invalid score for {name}")
+                    continue
                 except Exception:
-                    errors.append(f"Row {row_idx}: Invalid score for {name}")
-                    invalid = True
-                    break
+                    row_errors.append(f"Invalid score for {name}")
+                    continue
                 if score < 0 or score > max_marks:
-                    errors.append(f"Row {row_idx}: {name} must be between 0 and {max_marks}")
-                    invalid = True
-                    break
+                    row_errors.append(f"{name} must be between 0 and {max_marks}")
+                    continue
                 scores[name] = score
-            if invalid:
-                continue
         else:
             scores = {name: 0.0 for name in criteria_max.keys()}
 
+        if row_errors:
+            reason = "; ".join(row_errors)
+            other_required_rows.append({
+                "row": row_idx,
+                "identifier": identifier,
+                "name": provided_name,
+                "reason": reason,
+            })
+            _append_error(f"Row {row_idx}: {reason}")
+            continue
+
         total = float(sum(scores.values())) if is_present else 0.0
         normalized = float((total / max_total * 100) if max_total > 0 and is_present else 0.0)
+        canonical_name = str(entity.get("name") or "").strip()
+        mismatch = bool(
+            provided_name
+            and canonical_name
+            and _normalize_compare_text(provided_name) != _normalize_compare_text(canonical_name)
+        )
+
+        row_payload = {
+            "row": row_idx,
+            "identifier": identifier,
+            "provided_name": provided_name,
+            "expected_name": canonical_name,
+            "is_present": is_present,
+            "entity_type": entity_type,
+            "user_id": user_id,
+            "team_id": team_id,
+            "scores": scores,
+            "total": total,
+            "normalized": normalized,
+        }
+        valid_rows.append(row_payload)
+
+        if mismatch:
+            mismatched_rows.append({
+                "row": row_idx,
+                "identifier": identifier,
+                "provided_name": provided_name,
+                "expected_name": canonical_name,
+                "reason": "Name does not match canonical record",
+            })
+        else:
+            identified_rows.append({
+                "row": row_idx,
+                "identifier": identifier,
+                "name": canonical_name or provided_name,
+            })
+
+    ready_to_import = len(valid_rows)
+
+    def _response_payload(imported_count: int):
+        return {
+            "preview": bool(preview),
+            "total_rows": total_rows,
+            "identified_count": len(identified_rows),
+            "mismatched_count": len(mismatched_rows),
+            "unidentified_count": len(unidentified_rows),
+            "other_required_count": len(other_required_rows),
+            "ready_to_import": ready_to_import,
+            "identified_rows": identified_rows[:200],
+            "mismatched_rows": mismatched_rows[:200],
+            "unidentified_rows": unidentified_rows[:200],
+            "other_required_rows": other_required_rows[:200],
+            "imported": imported_count,
+            "errors": errors[:50],
+        }
+
+    if preview:
+        return _response_payload(imported_count=0)
+
+    for item in valid_rows:
+        entity_type = item["entity_type"]
+        user_id = item["user_id"]
+        team_id = item["team_id"]
         existing = db.query(PdaEventScore).filter(
             PdaEventScore.event_id == event.id,
             PdaEventScore.round_id == round_id,
@@ -2150,10 +2347,10 @@ def import_scores(
             PdaEventScore.team_id == team_id,
         ).first()
         if existing:
-            existing.criteria_scores = scores
-            existing.total_score = total
-            existing.normalized_score = normalized
-            existing.is_present = is_present
+            existing.criteria_scores = item["scores"]
+            existing.total_score = item["total"]
+            existing.normalized_score = item["normalized"]
+            existing.is_present = item["is_present"]
         else:
             db.add(
                 PdaEventScore(
@@ -2162,10 +2359,10 @@ def import_scores(
                     entity_type=entity_type,
                     user_id=user_id,
                     team_id=team_id,
-                    criteria_scores=scores,
-                    total_score=total,
-                    normalized_score=normalized,
-                    is_present=is_present,
+                    criteria_scores=item["scores"],
+                    total_score=item["total"],
+                    normalized_score=item["normalized"],
+                    is_present=item["is_present"],
                 )
             )
 
@@ -2177,7 +2374,7 @@ def import_scores(
             PdaEventAttendance.team_id == team_id,
         ).first()
         if attendance_row:
-            attendance_row.is_present = is_present
+            attendance_row.is_present = item["is_present"]
             attendance_row.marked_by_user_id = admin.id
         else:
             db.add(
@@ -2187,11 +2384,10 @@ def import_scores(
                     entity_type=entity_type,
                     user_id=user_id,
                     team_id=team_id,
-                    is_present=is_present,
+                    is_present=item["is_present"],
                     marked_by_user_id=admin.id,
                 )
             )
-        imported += 1
 
     db.commit()
     _log_event_admin_action(
@@ -2201,9 +2397,17 @@ def import_scores(
         "import_pda_event_scores",
         method="POST",
         path=f"/pda-admin/events/{slug}/rounds/{round_id}/import-scores",
-        meta={"imported": imported, "errors": len(errors)},
+        meta={
+            "preview": False,
+            "total_rows": total_rows,
+            "ready_to_import": ready_to_import,
+            "imported": ready_to_import,
+            "unidentified": len(unidentified_rows),
+            "other_required": len(other_required_rows),
+            "mismatched": len(mismatched_rows),
+        },
     )
-    return {"imported": imported, "errors": errors[:20]}
+    return _response_payload(imported_count=ready_to_import)
 
 
 @router.get("/pda-admin/events/{slug}/rounds/{round_id}/score-template")
@@ -2219,44 +2423,13 @@ def score_template(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
     criteria = _criteria_def(round_row)
     criteria_names = [c["name"] for c in criteria]
-    entities = sorted(
-        _round_scoring_entities(db, event, round_row),
-        key=lambda item: str(item.get("regno_or_code") or "").upper(),
-    )
-    score_rows = db.query(PdaEventScore).filter(
-        PdaEventScore.event_id == event.id,
-        PdaEventScore.round_id == round_id,
-    ).all()
-    score_map = {}
-    for row in score_rows:
-        key = ("user", row.user_id) if row.user_id else ("team", row.team_id)
-        score_map[key] = row
-    attendance_rows = db.query(PdaEventAttendance).filter(
-        PdaEventAttendance.event_id == event.id,
-        PdaEventAttendance.round_id == round_id,
-    ).all()
-    attendance_map = {}
-    for row in attendance_rows:
-        key = ("user", row.user_id) if row.user_id else ("team", row.team_id)
-        attendance_map[key] = row
 
     wb = Workbook()
     ws = wb.active
     ws.title = f"{event.event_code}-R{round_row.round_no}"
     id_col = "Register Number" if event.participant_mode == PdaEventParticipantMode.INDIVIDUAL else "Team Code"
     name_col = "Name" if event.participant_mode == PdaEventParticipantMode.INDIVIDUAL else "Team Name"
-    ws.append([id_col, name_col, "Present"] + criteria_names)
-    for entity in entities:
-        key = (entity["entity_type"], entity["entity_id"])
-        score_row = score_map.get(key)
-        attendance_row = attendance_map.get(key)
-        is_present = bool(attendance_row.is_present) if attendance_row else (bool(score_row.is_present) if score_row else False)
-        criteria_scores = score_row.criteria_scores if (score_row and isinstance(score_row.criteria_scores, dict)) else {}
-        row_scores = []
-        for name in criteria_names:
-            value = criteria_scores.get(name, 0)
-            row_scores.append(0 if value is None else value)
-        ws.append([entity["regno_or_code"], entity["name"], "Yes" if is_present else "No"] + row_scores)
+    ws.append([id_col, name_col] + criteria_names)
 
     output = io.BytesIO()
     wb.save(output)

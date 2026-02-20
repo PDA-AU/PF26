@@ -340,7 +340,7 @@ function RoundsContent() {
                             Create Round
                         </Button>
                     </DialogTrigger>
-                    <DialogContent className="border-4 border-black max-h-[90vh] overflow-y-auto">
+                    <DialogContent className="w-[calc(100vw-1rem)] max-w-3xl max-h-[calc(100vh-2rem)] overflow-x-hidden overflow-y-auto border-4 border-black p-4 sm:p-6">
                         <DialogHeader>
                             <DialogTitle className="font-heading font-bold text-2xl">{editingRound ? 'Edit Round' : 'Create Round'}</DialogTitle>
                         </DialogHeader>
@@ -591,7 +591,7 @@ function RoundsContent() {
                     if (!open && !revealing) setRevealRound(null);
                 }}
             >
-                <DialogContent className="border-4 border-black">
+                <DialogContent className="w-[calc(100vw-1rem)] max-w-md max-h-[calc(100vh-2rem)] overflow-x-hidden overflow-y-auto border-4 border-black p-4 sm:p-6">
                     <DialogHeader>
                         <DialogTitle className="font-heading font-bold text-xl">Reveal Round Results</DialogTitle>
                     </DialogHeader>

@@ -61,6 +61,10 @@ function ParticipantsContent() {
     const [teamDeleteDialogOpen, setTeamDeleteDialogOpen] = useState(false);
     const [teamDeleteTarget, setTeamDeleteTarget] = useState(null);
     const [deletingTeam, setDeletingTeam] = useState(false);
+    const [participantDeleteDialogOpen, setParticipantDeleteDialogOpen] = useState(false);
+    const [participantDeleteTarget, setParticipantDeleteTarget] = useState(null);
+    const [participantDeleteConfirmText, setParticipantDeleteConfirmText] = useState('');
+    const [deletingParticipant, setDeletingParticipant] = useState(false);
     const [filters, setFilters] = useState({
         department: '',
         gender: '',
@@ -194,6 +198,24 @@ function ParticipantsContent() {
         }
     };
 
+    const handleParticipantDelete = async (participantId) => {
+        setDeletingParticipant(true);
+        try {
+            await axios.delete(`${API}/pda-admin/events/${eventSlug}/participants/${participantId}`, {
+                headers: getAuthHeader(),
+            });
+            toast.success('Participant deleted');
+            if (selectedEntity?.entity_id === participantId) {
+                setSelectedEntity(null);
+            }
+            fetchRows();
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to delete participant'));
+        } finally {
+            setDeletingParticipant(false);
+        }
+    };
+
     const openStatusDialog = (row, newStatus) => {
         setStatusTarget(row);
         setPendingStatus(newStatus);
@@ -203,6 +225,13 @@ function ParticipantsContent() {
     const openTeamDeleteDialog = (row) => {
         setTeamDeleteTarget(row);
         setTeamDeleteDialogOpen(true);
+    };
+
+    const openParticipantDeleteDialog = (row) => {
+        if (!row) return;
+        setParticipantDeleteTarget(row);
+        setParticipantDeleteConfirmText('');
+        setParticipantDeleteDialogOpen(true);
     };
 
     const openEntityModal = async (row) => {
@@ -522,6 +551,61 @@ function ParticipantsContent() {
                 </DialogContent>
             </Dialog>
 
+            <Dialog open={participantDeleteDialogOpen} onOpenChange={setParticipantDeleteDialogOpen}>
+                <DialogContent className="border-4 border-black">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading font-bold text-xl">Delete Participant</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <p className="text-gray-600">
+                            Delete <span className="font-semibold">{participantDeleteTarget?.name || 'this participant'}</span> ({participantDeleteTarget?.regno_or_code || '-'})?
+                            This will cascade-remove registration, attendance, scores, badges, and invites for this event.
+                        </p>
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-gray-700" htmlFor="confirm-participant-delete-input">
+                                Type <span className="font-bold">DELETE</span> to confirm
+                            </label>
+                            <Input
+                                id="confirm-participant-delete-input"
+                                className="neo-input"
+                                value={participantDeleteConfirmText}
+                                onChange={(e) => setParticipantDeleteConfirmText(e.target.value)}
+                                placeholder="DELETE"
+                                autoComplete="off"
+                            />
+                        </div>
+                        <div className="flex gap-2">
+                            <Button
+                                variant="outline"
+                                className="flex-1 border-2 border-black"
+                                onClick={() => {
+                                    if (deletingParticipant) return;
+                                    setParticipantDeleteDialogOpen(false);
+                                    setParticipantDeleteTarget(null);
+                                    setParticipantDeleteConfirmText('');
+                                }}
+                                disabled={deletingParticipant}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                className="flex-1 bg-red-500 text-white border-2 border-black"
+                                disabled={!participantDeleteTarget || deletingParticipant || participantDeleteConfirmText.trim() !== 'DELETE'}
+                                onClick={async () => {
+                                    if (!participantDeleteTarget) return;
+                                    await handleParticipantDelete(participantDeleteTarget.entity_id);
+                                    setParticipantDeleteDialogOpen(false);
+                                    setParticipantDeleteTarget(null);
+                                    setParticipantDeleteConfirmText('');
+                                }}
+                            >
+                                {deletingParticipant ? 'Deleting...' : 'Delete Participant'}
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
             {!loading && totalRows > 0 ? (
                 <div className="mt-4 flex items-center justify-between">
                     <p className="text-sm text-gray-600">
@@ -565,6 +649,12 @@ function ParticipantsContent() {
                 entityMode={isTeamMode ? 'team' : 'individual'}
                 teamMembers={teamMembers}
                 departmentLabel={departmentLabel}
+                showDeleteAction={!isTeamMode}
+                deleteActionLabel="Delete Participant"
+                onDeleteRequest={() => {
+                    setSelectedEntity(null);
+                    openParticipantDeleteDialog(selectedEntity);
+                }}
             />
         </>
     );
