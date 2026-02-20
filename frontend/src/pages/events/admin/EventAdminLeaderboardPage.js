@@ -389,7 +389,7 @@ function LeaderboardContent() {
         } finally {
             setLoading(false);
         }
-    }, [currentPage, eventSlug, filters.batch, filters.department, filters.gender, filters.roundIds, filters.search, filters.status, getAuthHeader, isTeamMode, pageSize]);
+    }, [currentPage, eventSlug, filters.batch, filters.department, filters.gender, filters.roundIds, filters.search, filters.status, getAuthHeader, isTeamMode, pageSize, sortOption]);
 
     const fetchRounds = useCallback(async () => {
         try {
@@ -412,7 +412,7 @@ function LeaderboardContent() {
 
     useEffect(() => {
         setCurrentPage(1);
-    }, [filters.batch, filters.department, filters.gender, filters.roundIds, filters.search, filters.status]);
+    }, [filters.batch, filters.department, filters.gender, filters.roundIds, filters.search, filters.status, sortOption]);
 
     const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
 
@@ -480,43 +480,6 @@ function LeaderboardContent() {
             setCurrentPage(1);
         }
     }, [pageSize]);
-
-    const sortedRows = useMemo(() => {
-        const items = [...rows];
-        const byNameAsc = (a, b) => String(a?.name || '').localeCompare(String(b?.name || ''), undefined, { sensitivity: 'base' });
-        const numberValue = (value) => {
-            const parsed = Number(value);
-            return Number.isFinite(parsed) ? parsed : 0;
-        };
-        const rankValue = (entry) => (entry?.rank === null || entry?.rank === undefined ? Number.POSITIVE_INFINITY : numberValue(entry.rank));
-
-        switch (sortOption) {
-        case 'score_desc':
-            items.sort((a, b) => numberValue(b?.cumulative_score) - numberValue(a?.cumulative_score) || byNameAsc(a, b));
-            break;
-        case 'score_asc':
-            items.sort((a, b) => numberValue(a?.cumulative_score) - numberValue(b?.cumulative_score) || byNameAsc(a, b));
-            break;
-        case 'name_asc':
-            items.sort((a, b) => byNameAsc(a, b));
-            break;
-        case 'name_desc':
-            items.sort((a, b) => byNameAsc(b, a));
-            break;
-        case 'rounds_desc':
-            items.sort((a, b) => numberValue(b?.rounds_participated) - numberValue(a?.rounds_participated) || byNameAsc(a, b));
-            break;
-        case 'rounds_asc':
-            items.sort((a, b) => numberValue(a?.rounds_participated) - numberValue(b?.rounds_participated) || byNameAsc(a, b));
-            break;
-        case 'rank':
-        default:
-            items.sort((a, b) => rankValue(a) - rankValue(b) || byNameAsc(a, b));
-            break;
-        }
-
-        return items;
-    }, [rows, sortOption]);
 
     const handleShortlist = async () => {
         if (!targetShortlistRound) return;
@@ -953,7 +916,7 @@ function LeaderboardContent() {
                             </tr>
                         </thead>
                         <tbody>
-                            {sortedRows.map((entry) => (
+                            {rows.map((entry) => (
                                 <tr
                                     key={`${entry.entity_type}-${entry.entity_id}`}
                                     className="cursor-pointer hover:bg-secondary"
