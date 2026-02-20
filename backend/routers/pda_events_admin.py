@@ -2798,6 +2798,7 @@ def event_leaderboard(
     status_filter: Optional[str] = Query(None, alias="status"),
     search: Optional[str] = None,
     round_ids: Optional[List[int]] = Query(None),
+    sort: Optional[str] = Query("rank"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=500),
     response: Response = None,
@@ -2805,6 +2806,7 @@ def event_leaderboard(
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
+    sort_option = _normalize_leaderboard_sort(sort)
     rows = []
     round_rows = (
         db.query(PdaEventRound.id, PdaEventRound.state, PdaEventRound.is_frozen)
@@ -3036,6 +3038,8 @@ def event_leaderboard(
                 row["rank"] = active_rank
             else:
                 row["rank"] = None
+
+    _apply_leaderboard_sort(rows, sort_option)
 
     total = len(rows)
     start = (page - 1) * page_size
@@ -3377,6 +3381,51 @@ def _official_shortlist_heading(db: Session, event: PdaEvent) -> str:
     return f"ROUND {_official_shortlist_round_number(db, event)} SHORTLISTED"
 
 
+def _normalize_leaderboard_sort(sort_value: Optional[str]) -> str:
+    candidate = str(sort_value or "rank").strip().lower()
+    allowed = {"rank", "score_desc", "score_asc", "name_asc", "name_desc", "rounds_desc", "rounds_asc"}
+    if candidate not in allowed:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid sort option: {candidate}")
+    return candidate
+
+
+def _apply_leaderboard_sort(rows: List[dict], sort_option: str) -> None:
+    def _num(value) -> float:
+        try:
+            return float(value or 0)
+        except Exception:
+            return 0.0
+
+    def _name(item: dict) -> str:
+        return str(item.get("name") or "").strip().lower()
+
+    if sort_option == "score_desc":
+        rows.sort(key=lambda item: (-_num(item.get("cumulative_score")), _name(item)))
+        return
+    if sort_option == "score_asc":
+        rows.sort(key=lambda item: (_num(item.get("cumulative_score")), _name(item)))
+        return
+    if sort_option == "name_asc":
+        rows.sort(key=lambda item: _name(item))
+        return
+    if sort_option == "name_desc":
+        rows.sort(key=lambda item: _name(item), reverse=True)
+        return
+    if sort_option == "rounds_desc":
+        rows.sort(key=lambda item: (-_num(item.get("rounds_participated")), _name(item)))
+        return
+    if sort_option == "rounds_asc":
+        rows.sort(key=lambda item: (_num(item.get("rounds_participated")), _name(item)))
+        return
+
+    rows.sort(
+        key=lambda item: (
+            int(item.get("rank")) if item.get("rank") is not None else 10**9,
+            _name(item),
+        )
+    )
+
+
 def _official_logo_url(db: Session, event: PdaEvent) -> Optional[str]:
     candidate_ids: List[int] = []
     try:
@@ -3667,6 +3716,7 @@ def export_leaderboard(
     status_filter: Optional[str] = Query(None, alias="status"),
     search: Optional[str] = None,
     round_ids: Optional[List[int]] = Query(None),
+    sort: Optional[str] = Query("rank"),
     _: PdaUser = Depends(require_pda_event_admin),
     db: Session = Depends(get_db),
 ):
@@ -3678,6 +3728,7 @@ def export_leaderboard(
         status_filter=status_filter,
         search=search,
         round_ids=round_ids,
+        sort=sort,
         page=1,
         page_size=10000,
         response=None,

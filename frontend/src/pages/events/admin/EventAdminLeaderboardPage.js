@@ -362,6 +362,7 @@ function LeaderboardContent() {
                 if (filters.gender) params.append('gender', filters.gender);
                 if (filters.batch) params.append('batch', filters.batch);
             }
+            if (sortOption) params.append('sort', sortOption);
             (filters.roundIds || []).forEach((roundId) => {
                 params.append('round_ids', String(roundId));
             });
