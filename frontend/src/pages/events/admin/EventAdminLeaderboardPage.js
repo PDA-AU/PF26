@@ -25,7 +25,7 @@ import EntityDetailsModal from './EntityDetailsModal';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const DEFAULT_PAGE_SIZE = 10;
-const MIN_PAGE_SIZE = 1;
+const PAGE_SIZE_OPTIONS = [10, 50, 100, 200, 500];
 const MAX_PAGE_SIZE = 500;
 const OFFICIAL_LEFT_LOGO_URL = 'https://pda-uploads.s3.ap-south-1.amazonaws.com/pda/letterhead/left-logo/mit-logo-20260220125851.png';
 const LEADERBOARD_SORT_OPTIONS = [
@@ -317,10 +317,8 @@ function LeaderboardContent() {
     const [podium, setPodium] = useState([]);
     const [rounds, setRounds] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [totalRows, setTotalRows] = useState(0);
     const [currentPage, setCurrentPage] = useState(1);
     const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
-    const [pageSizeInput, setPageSizeInput] = useState(String(DEFAULT_PAGE_SIZE));
     const [sortOption, setSortOption] = useState('rank');
     const [selectedEntry, setSelectedEntry] = useState(null);
     const [roundStats, setRoundStats] = useState([]);
@@ -337,7 +335,7 @@ function LeaderboardContent() {
         department: '',
         gender: '',
         batch: '',
-        status: '',
+        status: 'Active',
         search: '',
         roundIds: [],
     });
@@ -354,42 +352,56 @@ function LeaderboardContent() {
     const fetchRows = useCallback(async () => {
         setLoading(true);
         try {
-            const params = new URLSearchParams();
-            if (filters.search) params.append('search', filters.search);
-            if (filters.status) params.append('status', filters.status);
-            if (!isTeamMode) {
-                if (filters.department) params.append('department', filters.department);
-                if (filters.gender) params.append('gender', filters.gender);
-                if (filters.batch) params.append('batch', filters.batch);
-            }
-            if (sortOption) params.append('sort', sortOption);
-            (filters.roundIds || []).forEach((roundId) => {
-                params.append('round_ids', String(roundId));
-            });
-            params.append('page', String(currentPage));
-            params.append('page_size', String(pageSize));
+            const buildParams = (page) => {
+                const params = new URLSearchParams();
+                if (filters.status) params.append('status', filters.status);
+                if (!isTeamMode) {
+                    if (filters.department) params.append('department', filters.department);
+                    if (filters.gender) params.append('gender', filters.gender);
+                    if (filters.batch) params.append('batch', filters.batch);
+                }
+                if (sortOption) params.append('sort', sortOption);
+                (filters.roundIds || []).forEach((roundId) => {
+                    params.append('round_ids', String(roundId));
+                });
+                params.append('page', String(page));
+                params.append('page_size', String(MAX_PAGE_SIZE));
+                return params;
+            };
 
-            const response = await axios.get(`${API}/pda-admin/events/${eventSlug}/leaderboard?${params.toString()}`, {
+            const firstResponse = await axios.get(`${API}/pda-admin/events/${eventSlug}/leaderboard?${buildParams(1).toString()}`, {
                 headers: getAuthHeader(),
             });
-            const data = Array.isArray(response.data) ? response.data : [];
-            setRows(data);
-            setTotalRows(Number(response.headers['x-total-count'] || data.length || 0));
-            if (currentPage === 1) {
-                const activeRows = data.filter((row) => String(row?.status || '').toLowerCase() === 'active');
-                setPodium(activeRows.slice(0, 3));
+            const firstPageRows = Array.isArray(firstResponse.data) ? firstResponse.data : [];
+            const totalCount = Number(firstResponse.headers['x-total-count'] || firstPageRows.length || 0);
+            const totalBackendPages = Math.max(1, Math.ceil(totalCount / MAX_PAGE_SIZE));
+            let allRows = firstPageRows;
+
+            if (totalBackendPages > 1) {
+                const remainingResponses = await Promise.all(
+                    Array.from({ length: totalBackendPages - 1 }, (_, index) => (
+                        axios.get(`${API}/pda-admin/events/${eventSlug}/leaderboard?${buildParams(index + 2).toString()}`, {
+                            headers: getAuthHeader(),
+                        })
+                    ))
+                );
+                const remainingRows = remainingResponses.flatMap((response) => (
+                    Array.isArray(response.data) ? response.data : []
+                ));
+                allRows = [...firstPageRows, ...remainingRows];
             }
+
+            setRows(allRows);
+            const activeRows = allRows.filter((row) => String(row?.status || '').toLowerCase() === 'active');
+            setPodium(activeRows.slice(0, 3));
         } catch (error) {
             toast.error(getErrorMessage(error, 'Failed to load leaderboard'));
             setRows([]);
-            setTotalRows(0);
-            if (currentPage === 1) {
-                setPodium([]);
-            }
+            setPodium([]);
         } finally {
             setLoading(false);
         }
-    }, [currentPage, eventSlug, filters.batch, filters.department, filters.gender, filters.roundIds, filters.search, filters.status, getAuthHeader, isTeamMode, pageSize, sortOption]);
+    }, [eventSlug, filters.batch, filters.department, filters.gender, filters.roundIds, filters.status, getAuthHeader, isTeamMode, sortOption]);
 
     const fetchRounds = useCallback(async () => {
         try {
@@ -413,14 +425,6 @@ function LeaderboardContent() {
     useEffect(() => {
         setCurrentPage(1);
     }, [filters.batch, filters.department, filters.gender, filters.roundIds, filters.search, filters.status, sortOption]);
-
-    const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
-
-    useEffect(() => {
-        if (currentPage > totalPages) {
-            setCurrentPage(totalPages);
-        }
-    }, [currentPage, totalPages]);
 
     const frozenNotCompletedRounds = useMemo(
         () => rounds.filter((round) => round.is_frozen && round.state !== 'Completed' && round.state !== 'Reveal'),
@@ -466,20 +470,32 @@ function LeaderboardContent() {
         });
         return Array.from(values).sort();
     }, [rows]);
+    const displayedRows = useMemo(() => {
+        const needle = String(filters.search || '').trim().toLowerCase();
+        if (!needle) return rows;
+        return rows.filter((entry) => {
+            const haystack = [
+                String(entry.name || ''),
+                String(entry.regno_or_code || entry.register_number || ''),
+                String(entry.department || ''),
+                String(entry.batch || ''),
+                String(entry.status || ''),
+            ].join(' ').toLowerCase();
+            return haystack.includes(needle);
+        });
+    }, [filters.search, rows]);
+    const totalRows = displayedRows.length;
+    const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+    const pagedRows = useMemo(() => {
+        const start = (currentPage - 1) * pageSize;
+        return displayedRows.slice(start, start + pageSize);
+    }, [currentPage, displayedRows, pageSize]);
 
-    const applyPageSize = useCallback((rawValue) => {
-        const parsed = Number(rawValue);
-        if (!Number.isFinite(parsed)) {
-            setPageSizeInput(String(pageSize));
-            return;
+    useEffect(() => {
+        if (currentPage > totalPages) {
+            setCurrentPage(totalPages);
         }
-        const nextSize = Math.min(MAX_PAGE_SIZE, Math.max(MIN_PAGE_SIZE, Math.round(parsed)));
-        setPageSizeInput(String(nextSize));
-        if (nextSize !== pageSize) {
-            setPageSize(nextSize);
-            setCurrentPage(1);
-        }
-    }, [pageSize]);
+    }, [currentPage, totalPages]);
 
     const handleShortlist = async () => {
         if (!targetShortlistRound) return;
@@ -508,7 +524,6 @@ function LeaderboardContent() {
         try {
             const params = new URLSearchParams();
             params.append('format', format);
-            if (filters.search) params.append('search', filters.search);
             if (filters.status) params.append('status', filters.status);
             if (!isTeamMode) {
                 if (filters.department) params.append('department', filters.department);
@@ -901,6 +916,12 @@ function LeaderboardContent() {
                     <h3 className="font-heading font-bold text-xl mb-2">No Leaderboard Data</h3>
                     <p className="text-gray-600">Freeze rounds to see the leaderboard.</p>
                 </div>
+            ) : displayedRows.length === 0 ? (
+                <div className="neo-card text-center py-12">
+                    <Trophy className="w-16 h-16 mx-auto mb-4 text-gray-400" />
+                    <h3 className="font-heading font-bold text-xl mb-2">No Matching Entries</h3>
+                    <p className="text-gray-600">Try a different search term.</p>
+                </div>
             ) : (
                 <div className="overflow-x-auto">
                     <table className="neo-table">
@@ -917,7 +938,7 @@ function LeaderboardContent() {
                             </tr>
                         </thead>
                         <tbody>
-                            {rows.map((entry) => (
+                            {pagedRows.map((entry) => (
                                 <tr
                                     key={`${entry.entity_type}-${entry.entity_id}`}
                                     className="cursor-pointer hover:bg-secondary"
@@ -957,26 +978,30 @@ function LeaderboardContent() {
             {!loading && totalRows > 0 ? (
                 <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <p className="text-sm text-gray-600">
-                        Showing {(currentPage - 1) * pageSize + 1}-{Math.min((currentPage - 1) * pageSize + rows.length, totalRows)} of {totalRows}
+                        Showing {(currentPage - 1) * pageSize + 1}-{Math.min((currentPage - 1) * pageSize + pagedRows.length, totalRows)} of {totalRows}
                     </p>
                     <div className="flex flex-wrap items-center gap-2">
                         <div className="flex items-center gap-2">
                             <span className="text-sm text-gray-600">Rows / page</span>
-                            <Input
-                                type="number"
-                                min={MIN_PAGE_SIZE}
-                                max={MAX_PAGE_SIZE}
-                                value={pageSizeInput}
-                                onChange={(e) => setPageSizeInput(e.target.value)}
-                                onBlur={() => applyPageSize(pageSizeInput)}
-                                onKeyDown={(event) => {
-                                    if (event.key === 'Enter') {
-                                        event.preventDefault();
-                                        applyPageSize(pageSizeInput);
-                                    }
+                            <Select
+                                value={String(pageSize)}
+                                onValueChange={(value) => {
+                                    const nextSize = Number.parseInt(value, 10);
+                                    if (!PAGE_SIZE_OPTIONS.includes(nextSize)) return;
+                                    if (nextSize === pageSize) return;
+                                    setPageSize(nextSize);
+                                    setCurrentPage(1);
                                 }}
-                                className="neo-input h-9 w-24"
-                            />
+                            >
+                                <SelectTrigger className="neo-input h-9 w-24">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {PAGE_SIZE_OPTIONS.map((size) => (
+                                        <SelectItem key={size} value={String(size)}>{size}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
                         </div>
                         <Button type="button" variant="outline" size="icon" onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))} disabled={currentPage === 1} className="border-2 border-black shadow-neo disabled:opacity-50">
                             <ChevronLeft className="h-4 w-4" />

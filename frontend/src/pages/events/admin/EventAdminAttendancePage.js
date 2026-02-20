@@ -58,6 +58,11 @@ const normalizeEntityType = (value) => {
     return text;
 };
 
+const normalizeRoundState = (value) => String(value || '').trim().toLowerCase();
+const EDITABLE_ROUND_STATES = new Set(['active']);
+const READ_ONLY_ROUND_STATES = new Set(['completed', 'reveal']);
+const VISIBLE_ROUND_STATES = new Set([...EDITABLE_ROUND_STATES, ...READ_ONLY_ROUND_STATES]);
+
 function AttendanceContent() {
     const { getAuthHeader } = useAuth();
     const { eventSlug } = useEventAdminShell();
@@ -88,25 +93,39 @@ function AttendanceContent() {
     const getErrorMessage = (error, fallback) => (
         error?.response?.data?.detail || error?.response?.data?.message || fallback
     );
-    const activeRounds = useMemo(
-        () => rounds.filter((round) => String(round.state || '').trim().toLowerCase() === 'active'),
+    const attendanceRounds = useMemo(
+        () => rounds.filter((round) => VISIBLE_ROUND_STATES.has(normalizeRoundState(round.state))),
         [rounds]
     );
-    const hasActiveRounds = activeRounds.length > 0;
+    const selectedRound = useMemo(
+        () => attendanceRounds.find((round) => String(round.id) === String(attendanceRoundId)) || null,
+        [attendanceRoundId, attendanceRounds]
+    );
+    const isSelectedRoundEditable = EDITABLE_ROUND_STATES.has(normalizeRoundState(selectedRound?.state));
+    const isSelectedRoundReadOnly = READ_ONLY_ROUND_STATES.has(normalizeRoundState(selectedRound?.state));
+    const hasManageableRoundSelection = attendanceRounds.length > 0;
 
     const fetchRounds = useCallback(async () => {
         try {
             const response = await axios.get(`${API}/pda-admin/events/${eventSlug}/rounds`, { headers: getAuthHeader() });
             const roundRows = response.data || [];
             setRounds(roundRows);
-            const activeRoundRows = roundRows.filter((round) => String(round.state || '').trim().toLowerCase() === 'active');
-            if (activeRoundRows.length === 0) {
+            const attendanceRoundRows = roundRows.filter((round) => VISIBLE_ROUND_STATES.has(normalizeRoundState(round.state)));
+            const activeRoundRows = attendanceRoundRows.filter((round) => EDITABLE_ROUND_STATES.has(normalizeRoundState(round.state)));
+            const readOnlyRoundRows = attendanceRoundRows.filter((round) => READ_ONLY_ROUND_STATES.has(normalizeRoundState(round.state)));
+            if (attendanceRoundRows.length === 0) {
                 setAttendanceRoundId('');
                 setRows([]);
                 return;
             }
-            if (!attendanceRoundId || !activeRoundRows.some((round) => String(round.id) === String(attendanceRoundId))) {
-                setAttendanceRoundId(String(activeRoundRows[0].id));
+            const currentVisibleRound = attendanceRoundRows.find((round) => String(round.id) === String(attendanceRoundId));
+            if (!currentVisibleRound) {
+                if (activeRoundRows.length > 0) {
+                    setAttendanceRoundId(String(activeRoundRows[0].id));
+                    return;
+                }
+                const latestReadOnlyRound = [...readOnlyRoundRows].sort((a, b) => Number(b.round_no || 0) - Number(a.round_no || 0))[0];
+                setAttendanceRoundId(latestReadOnlyRound ? String(latestReadOnlyRound.id) : '');
             }
         } catch (error) {
             setRounds([]);
@@ -148,6 +167,7 @@ function AttendanceContent() {
     }, [fetchAttendance]);
 
     function markFromToken(rawToken) {
+        if (!isSelectedRoundEditable) return;
         const token = String(rawToken || '').trim();
         if (!token) return;
         const decoded = decodeAttendanceTokenPayload(token);
@@ -415,6 +435,7 @@ function AttendanceContent() {
     }, [presenceDraft]);
 
     const handlePresenceChange = useCallback((row, checked) => {
+        if (!isSelectedRoundEditable) return;
         const key = `${row.entity_type}-${row.entity_id}`;
         const nextValue = checked === true;
         const originalValue = Boolean(rowPresenceMap[key]);
@@ -427,12 +448,13 @@ function AttendanceContent() {
             }
             return next;
         });
-    }, [rowPresenceMap]);
+    }, [isSelectedRoundEditable, rowPresenceMap]);
 
     const areAllPageRowsChecked = pagedRows.length > 0 && pagedRows.every((row) => getPresentValue(row));
     const hasSomePageRowsChecked = pagedRows.some((row) => getPresentValue(row));
 
     const handleToggleAllCurrentPage = useCallback((checked) => {
+        if (!isSelectedRoundEditable) return;
         const nextValue = checked === true;
         setPresenceDraft((prev) => {
             const next = { ...prev };
@@ -447,7 +469,7 @@ function AttendanceContent() {
             });
             return next;
         });
-    }, [pagedRows, rowPresenceMap]);
+    }, [isSelectedRoundEditable, pagedRows, rowPresenceMap]);
 
     const dirtyCount = Object.keys(presenceDraft).length;
 
@@ -487,6 +509,7 @@ function AttendanceContent() {
     }, [attendanceRoundId, requestNavigation]);
 
     const saveAttendanceChanges = useCallback(async () => {
+        if (!isSelectedRoundEditable) return;
         if (!dirtyCount) return;
         setSavingChanges(true);
         try {
@@ -517,7 +540,13 @@ function AttendanceContent() {
         } finally {
             setSavingChanges(false);
         }
-    }, [attendanceRoundId, dirtyCount, eventSlug, fetchAttendance, getAuthHeader, presenceDraft, rows]);
+    }, [attendanceRoundId, dirtyCount, eventSlug, fetchAttendance, getAuthHeader, isSelectedRoundEditable, presenceDraft, rows]);
+
+    useEffect(() => {
+        if (isScanning && !isSelectedRoundEditable) {
+            stopScanner();
+        }
+    }, [isScanning, isSelectedRoundEditable]);
 
     const handlePageSizeChange = (value) => {
         const nextSize = Number.parseInt(value, 10);
@@ -542,25 +571,25 @@ function AttendanceContent() {
                 <div className="flex flex-wrap items-end gap-3">
                     <div>
                         <Label>Round</Label>
-                        <Select value={attendanceRoundId} onValueChange={handleRoundChange} disabled={!hasActiveRounds}>
+                        <Select value={attendanceRoundId} onValueChange={handleRoundChange} disabled={!hasManageableRoundSelection}>
                             <SelectTrigger className="w-[260px] neo-input"><SelectValue /></SelectTrigger>
                             <SelectContent>
-                                {activeRounds.map((round) => (
+                                {attendanceRounds.map((round) => (
                                     <SelectItem key={round.id} value={String(round.id)}>Round {round.round_no}: {round.name}</SelectItem>
                                 ))}
                             </SelectContent>
                         </Select>
                     </div>
-                    <Button onClick={fetchAttendance} disabled={!hasActiveRounds || !attendanceRoundId}>Refresh</Button>
-                    <Button variant="outline" className="border-black/20" onClick={startScanner} disabled={!hasActiveRounds || !attendanceRoundId}>
+                    <Button onClick={fetchAttendance} disabled={!attendanceRoundId}>Refresh</Button>
+                    <Button variant="outline" className="border-black/20" onClick={startScanner} disabled={!attendanceRoundId || !isSelectedRoundEditable}>
                         <Camera className="mr-2 h-4 w-4" /> Scan QR
                     </Button>
-                    <Button variant="outline" className="border-black/20" onClick={() => qrImageInputRef.current?.click()} disabled={!hasActiveRounds || !attendanceRoundId}>
+                    <Button variant="outline" className="border-black/20" onClick={() => qrImageInputRef.current?.click()} disabled={!attendanceRoundId || !isSelectedRoundEditable}>
                         Upload QR Image
                     </Button>
                     <Button
                         onClick={saveAttendanceChanges}
-                        disabled={!hasActiveRounds || !attendanceRoundId || !dirtyCount || savingChanges}
+                        disabled={!attendanceRoundId || !isSelectedRoundEditable || !dirtyCount || savingChanges}
                         className="bg-primary text-white border-2 border-black shadow-neo"
                     >
                         <Save className="mr-2 h-4 w-4" />
@@ -594,9 +623,14 @@ function AttendanceContent() {
                     </div>
                 ) : null}
                 <div className="mt-3 flex gap-2">
-                    <Input value={scanToken} onChange={(e) => setScanToken(e.target.value)} placeholder="Manual token input" disabled={!hasActiveRounds || !attendanceRoundId} />
-                    <Button onClick={() => markFromToken(scanToken)} disabled={!hasActiveRounds || !attendanceRoundId}>Mark Locally</Button>
+                    <Input value={scanToken} onChange={(e) => setScanToken(e.target.value)} placeholder="Manual token input" disabled={!attendanceRoundId || !isSelectedRoundEditable} />
+                    <Button onClick={() => markFromToken(scanToken)} disabled={!attendanceRoundId || !isSelectedRoundEditable}>Mark Locally</Button>
                 </div>
+                {isSelectedRoundReadOnly ? (
+                    <p className="mt-3 text-sm font-medium text-amber-700">
+                        Round is completed/reveal. Attendance is view-only.
+                    </p>
+                ) : null}
             </div>
 
             {loading ? (
@@ -606,7 +640,7 @@ function AttendanceContent() {
                 </div>
             ) : !attendanceRoundId ? (
                 <div className="neo-card text-center py-12">
-                    <p className="mt-1 text-slate-600">No active rounds found. Set a round state to Active to manage attendance.</p>
+                    <p className="mt-1 text-slate-600">No active/completed/reveal rounds available for attendance.</p>
                 </div>
             ) : (
                 <div className="overflow-x-auto">
@@ -622,6 +656,7 @@ function AttendanceContent() {
                                         <Checkbox
                                             checked={areAllPageRowsChecked ? true : (hasSomePageRowsChecked ? 'indeterminate' : false)}
                                             onCheckedChange={handleToggleAllCurrentPage}
+                                            disabled={!isSelectedRoundEditable}
                                         />
                                     </div>
                                 </th>
@@ -642,6 +677,7 @@ function AttendanceContent() {
                                         <Checkbox
                                             checked={getPresentValue(row)}
                                             onCheckedChange={(checked) => handlePresenceChange(row, checked)}
+                                            disabled={!isSelectedRoundEditable}
                                         />
                                             </td>
                                         </tr>
