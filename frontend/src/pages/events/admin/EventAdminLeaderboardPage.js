@@ -24,8 +24,19 @@ import EventAdminShell, { useEventAdminShell } from './EventAdminShell';
 import EntityDetailsModal from './EntityDetailsModal';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-const PAGE_SIZE = 10;
+const DEFAULT_PAGE_SIZE = 10;
+const MIN_PAGE_SIZE = 1;
+const MAX_PAGE_SIZE = 500;
 const OFFICIAL_LEFT_LOGO_URL = 'https://pda-uploads.s3.ap-south-1.amazonaws.com/pda/letterhead/left-logo/mit-logo-20260220125851.png';
+const LEADERBOARD_SORT_OPTIONS = [
+    { value: 'rank', label: 'Rank (Default)' },
+    { value: 'score_desc', label: 'Score: High to Low' },
+    { value: 'score_asc', label: 'Score: Low to High' },
+    { value: 'name_asc', label: 'Name: A to Z' },
+    { value: 'name_desc', label: 'Name: Z to A' },
+    { value: 'rounds_desc', label: 'Rounds: High to Low' },
+    { value: 'rounds_asc', label: 'Rounds: Low to High' },
+];
 
 const DEPARTMENTS = [
     { value: 'Artificial Intelligence and Data Science', label: 'AI & DS' },
@@ -308,6 +319,9 @@ function LeaderboardContent() {
     const [loading, setLoading] = useState(true);
     const [totalRows, setTotalRows] = useState(0);
     const [currentPage, setCurrentPage] = useState(1);
+    const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+    const [pageSizeInput, setPageSizeInput] = useState(String(DEFAULT_PAGE_SIZE));
+    const [sortOption, setSortOption] = useState('rank');
     const [selectedEntry, setSelectedEntry] = useState(null);
     const [roundStats, setRoundStats] = useState([]);
     const [roundStatsLoading, setRoundStatsLoading] = useState(false);
@@ -352,7 +366,7 @@ function LeaderboardContent() {
                 params.append('round_ids', String(roundId));
             });
             params.append('page', String(currentPage));
-            params.append('page_size', String(PAGE_SIZE));
+            params.append('page_size', String(pageSize));
 
             const response = await axios.get(`${API}/pda-admin/events/${eventSlug}/leaderboard?${params.toString()}`, {
                 headers: getAuthHeader(),
@@ -374,7 +388,7 @@ function LeaderboardContent() {
         } finally {
             setLoading(false);
         }
-    }, [currentPage, eventSlug, filters.batch, filters.department, filters.gender, filters.roundIds, filters.search, filters.status, getAuthHeader, isTeamMode]);
+    }, [currentPage, eventSlug, filters.batch, filters.department, filters.gender, filters.roundIds, filters.search, filters.status, getAuthHeader, isTeamMode, pageSize]);
 
     const fetchRounds = useCallback(async () => {
         try {
@@ -399,7 +413,7 @@ function LeaderboardContent() {
         setCurrentPage(1);
     }, [filters.batch, filters.department, filters.gender, filters.roundIds, filters.search, filters.status]);
 
-    const totalPages = Math.max(1, Math.ceil(totalRows / PAGE_SIZE));
+    const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
 
     useEffect(() => {
         if (currentPage > totalPages) {
@@ -451,6 +465,57 @@ function LeaderboardContent() {
         });
         return Array.from(values).sort();
     }, [rows]);
+
+    const applyPageSize = useCallback((rawValue) => {
+        const parsed = Number(rawValue);
+        if (!Number.isFinite(parsed)) {
+            setPageSizeInput(String(pageSize));
+            return;
+        }
+        const nextSize = Math.min(MAX_PAGE_SIZE, Math.max(MIN_PAGE_SIZE, Math.round(parsed)));
+        setPageSizeInput(String(nextSize));
+        if (nextSize !== pageSize) {
+            setPageSize(nextSize);
+            setCurrentPage(1);
+        }
+    }, [pageSize]);
+
+    const sortedRows = useMemo(() => {
+        const items = [...rows];
+        const byNameAsc = (a, b) => String(a?.name || '').localeCompare(String(b?.name || ''), undefined, { sensitivity: 'base' });
+        const numberValue = (value) => {
+            const parsed = Number(value);
+            return Number.isFinite(parsed) ? parsed : 0;
+        };
+        const rankValue = (entry) => (entry?.rank === null || entry?.rank === undefined ? Number.POSITIVE_INFINITY : numberValue(entry.rank));
+
+        switch (sortOption) {
+        case 'score_desc':
+            items.sort((a, b) => numberValue(b?.cumulative_score) - numberValue(a?.cumulative_score) || byNameAsc(a, b));
+            break;
+        case 'score_asc':
+            items.sort((a, b) => numberValue(a?.cumulative_score) - numberValue(b?.cumulative_score) || byNameAsc(a, b));
+            break;
+        case 'name_asc':
+            items.sort((a, b) => byNameAsc(a, b));
+            break;
+        case 'name_desc':
+            items.sort((a, b) => byNameAsc(b, a));
+            break;
+        case 'rounds_desc':
+            items.sort((a, b) => numberValue(b?.rounds_participated) - numberValue(a?.rounds_participated) || byNameAsc(a, b));
+            break;
+        case 'rounds_asc':
+            items.sort((a, b) => numberValue(a?.rounds_participated) - numberValue(b?.rounds_participated) || byNameAsc(a, b));
+            break;
+        case 'rank':
+        default:
+            items.sort((a, b) => rankValue(a) - rankValue(b) || byNameAsc(a, b));
+            break;
+        }
+
+        return items;
+    }, [rows, sortOption]);
 
     const handleShortlist = async () => {
         if (!targetShortlistRound) return;
@@ -739,6 +804,15 @@ function LeaderboardContent() {
                         </SelectContent>
                     </Select>
 
+                    <Select value={sortOption} onValueChange={setSortOption}>
+                        <SelectTrigger className="neo-input"><SelectValue placeholder="Sort" /></SelectTrigger>
+                        <SelectContent>
+                            {LEADERBOARD_SORT_OPTIONS.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+
                     <Popover>
                         <PopoverTrigger asChild>
                             <Button type="button" variant="outline" className="neo-input justify-between font-normal">
@@ -878,7 +952,7 @@ function LeaderboardContent() {
                             </tr>
                         </thead>
                         <tbody>
-                            {rows.map((entry) => (
+                            {sortedRows.map((entry) => (
                                 <tr
                                     key={`${entry.entity_type}-${entry.entity_id}`}
                                     className="cursor-pointer hover:bg-secondary"
@@ -916,11 +990,29 @@ function LeaderboardContent() {
             )}
 
             {!loading && totalRows > 0 ? (
-                <div className="mt-4 flex items-center justify-between">
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <p className="text-sm text-gray-600">
-                        Showing {(currentPage - 1) * PAGE_SIZE + 1}-{Math.min((currentPage - 1) * PAGE_SIZE + rows.length, totalRows)} of {totalRows}
+                        Showing {(currentPage - 1) * pageSize + 1}-{Math.min((currentPage - 1) * pageSize + rows.length, totalRows)} of {totalRows}
                     </p>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm text-gray-600">Rows / page</span>
+                            <Input
+                                type="number"
+                                min={MIN_PAGE_SIZE}
+                                max={MAX_PAGE_SIZE}
+                                value={pageSizeInput}
+                                onChange={(e) => setPageSizeInput(e.target.value)}
+                                onBlur={() => applyPageSize(pageSizeInput)}
+                                onKeyDown={(event) => {
+                                    if (event.key === 'Enter') {
+                                        event.preventDefault();
+                                        applyPageSize(pageSizeInput);
+                                    }
+                                }}
+                                className="neo-input h-9 w-24"
+                            />
+                        </div>
                         <Button type="button" variant="outline" size="icon" onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))} disabled={currentPage === 1} className="border-2 border-black shadow-neo disabled:opacity-50">
                             <ChevronLeft className="h-4 w-4" />
                         </Button>
