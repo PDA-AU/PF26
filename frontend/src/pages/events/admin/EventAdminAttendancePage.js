@@ -57,6 +57,21 @@ const normalizeEntityType = (value) => {
     if (text.includes('team')) return 'team';
     return text;
 };
+const formatMarkedAtIst = (value) => {
+    if (!value) return '—';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '—';
+    return parsed.toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true,
+    });
+};
 
 const normalizeRoundState = (value) => String(value || '').trim().toLowerCase();
 const EDITABLE_ROUND_STATES = new Set(['active']);
@@ -650,6 +665,7 @@ function AttendanceContent() {
                                 <th>Type</th>
                                 <th>Name</th>
                                 <th>Code</th>
+                                <th>Marked At (IST)</th>
                                 <th>
                                     <div className="flex items-center gap-2">
                                         <span>Present</span>
@@ -673,6 +689,7 @@ function AttendanceContent() {
                                             <td className={tdClassName}>{row.entity_type}</td>
                                             <td className={tdClassName}>{row.name}</td>
                                             <td className={tdClassName}>{row.regno_or_code}</td>
+                                            <td className={tdClassName}>{formatMarkedAtIst(row.marked_at)}</td>
                                             <td className={tdClassName}>
                                         <Checkbox
                                             checked={getPresentValue(row)}
