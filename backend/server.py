@@ -39,6 +39,7 @@ from migrations import (
     ensure_pda_event_tables,
     ensure_pda_event_registration_open_column,
     ensure_pda_event_round_submission_tables,
+    ensure_pda_event_panel_tables,
     ensure_community_event_tables,
     backfill_pda_event_round_count_once,
     remove_legacy_persofest_once,
@@ -145,6 +146,7 @@ async def startup_event():
     ensure_pda_event_tables(engine)
     ensure_pda_event_registration_open_column(engine)
     ensure_pda_event_round_submission_tables(engine)
+    ensure_pda_event_panel_tables(engine)
     ensure_community_event_tables(engine)
     backfill_pda_event_round_count_once(engine)
     ensure_persohub_tables(engine)
@@ -152,6 +154,7 @@ async def startup_event():
     ensure_system_config_recruit_url_column(engine)
 
     Base.metadata.create_all(bind=engine)
+    ensure_pda_event_panel_tables(engine)
 
     migrate_legacy_recruitment_json_once(engine)
     remove_legacy_persofest_once(engine)

@@ -3,11 +3,12 @@ import io
 import math
 import re
 import base64
+import hashlib
 import ssl
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, Response, UploadFile, status
@@ -37,6 +38,9 @@ from models import (
     PdaTeam,
     PdaEventRound,
     PdaEventRoundState,
+    PdaEventRoundPanel,
+    PdaEventRoundPanelMember,
+    PdaEventRoundPanelAssignment,
     PdaEventAttendance,
     PdaEventScore,
     PdaEventRoundSubmission,
@@ -62,11 +66,21 @@ from schemas import (
     PdaEventLogResponse,
     PdaManagedRoundResponse,
     PdaManagedRoundUpdate,
+    PdaManagedRegistrationStatusBulkRequest,
+    PdaManagedRegistrationStatusBulkResponse,
     PdaRoundSubmissionAdminListItem,
     PdaRoundSubmissionAdminUpdate,
     PdaManagedScoreEntry,
     PdaManagedTeamResponse,
     EventBulkEmailRequest,
+    PdaRoundPanelListResponse,
+    PdaRoundPanelsUpdateRequest,
+    PdaRoundPanelsAutoAssignRequest,
+    PdaRoundPanelAssignmentsUpdateRequest,
+    PdaRoundPanelEmailRequest,
+    PdaRoundPanelResponse,
+    PdaRoundPanelMemberResponse,
+    PdaRoundPanelAdminOption,
 )
 from emailer import send_bulk_email
 from email_bulk import render_email_template, derive_text_from_html, extract_batch
@@ -136,6 +150,114 @@ def _default_round_allowed_mime_types() -> List[str]:
         "image/webp",
         "application/zip",
     ]
+
+
+PANEL_TEAM_DISTRIBUTION_MODES = {"team_count", "member_count_weighted"}
+
+
+def _normalize_panel_distribution_mode(value) -> str:
+    raw = str(value or "team_count").strip().lower()
+    return raw if raw in PANEL_TEAM_DISTRIBUTION_MODES else "team_count"
+
+
+def _is_superadmin_user(db: Session, user: PdaUser) -> bool:
+    admin_row = db.query(PdaAdmin).filter(PdaAdmin.user_id == user.id).first()
+    policy = admin_row.policy if admin_row and isinstance(admin_row.policy, dict) else {}
+    return bool(admin_row and policy.get("superAdmin"))
+
+
+def _panel_entity_key(entity_type: str, entity_id: int) -> Tuple[str, int]:
+    return (str(entity_type or "").strip().lower(), int(entity_id))
+
+
+def _round_panel_maps(db: Session, round_row: PdaEventRound) -> Tuple[Dict[int, PdaEventRoundPanel], Dict[Tuple[str, int], PdaEventRoundPanelAssignment]]:
+    panels = db.query(PdaEventRoundPanel).filter(
+        PdaEventRoundPanel.event_id == round_row.event_id,
+        PdaEventRoundPanel.round_id == round_row.id,
+    ).all()
+    panel_map = {int(panel.id): panel for panel in panels}
+    assignments = db.query(PdaEventRoundPanelAssignment).filter(
+        PdaEventRoundPanelAssignment.event_id == round_row.event_id,
+        PdaEventRoundPanelAssignment.round_id == round_row.id,
+    ).all()
+    assignment_map: Dict[Tuple[str, int], PdaEventRoundPanelAssignment] = {}
+    for assignment in assignments:
+        if assignment.entity_type == PdaEventEntityType.USER and assignment.user_id is not None:
+            assignment_map[_panel_entity_key("user", int(assignment.user_id))] = assignment
+        if assignment.entity_type == PdaEventEntityType.TEAM and assignment.team_id is not None:
+            assignment_map[_panel_entity_key("team", int(assignment.team_id))] = assignment
+    return panel_map, assignment_map
+
+
+def _round_admin_panel_scope(
+    db: Session,
+    round_row: PdaEventRound,
+    admin: PdaUser,
+) -> Dict[str, object]:
+    panel_mode_enabled = bool(round_row.panel_mode_enabled)
+    is_superadmin = _is_superadmin_user(db, admin)
+    panel_ids: Set[int] = set()
+    if panel_mode_enabled and not is_superadmin:
+        panel_ids = {
+            int(row.panel_id)
+            for row in db.query(PdaEventRoundPanelMember.panel_id).filter(
+                PdaEventRoundPanelMember.event_id == round_row.event_id,
+                PdaEventRoundPanelMember.round_id == round_row.id,
+                PdaEventRoundPanelMember.admin_user_id == admin.id,
+            ).all()
+            if row.panel_id is not None
+        }
+    allowed_entities: Optional[Set[Tuple[str, int]]] = None
+    if panel_mode_enabled and not is_superadmin:
+        assignments = db.query(PdaEventRoundPanelAssignment).filter(
+            PdaEventRoundPanelAssignment.event_id == round_row.event_id,
+            PdaEventRoundPanelAssignment.round_id == round_row.id,
+        )
+        if panel_ids:
+            assignments = assignments.filter(PdaEventRoundPanelAssignment.panel_id.in_(panel_ids))
+        else:
+            assignments = assignments.filter(text("1=0"))
+        allowed_entities = set()
+        for assignment in assignments.all():
+            if assignment.entity_type == PdaEventEntityType.USER and assignment.user_id is not None:
+                allowed_entities.add(_panel_entity_key("user", int(assignment.user_id)))
+            elif assignment.entity_type == PdaEventEntityType.TEAM and assignment.team_id is not None:
+                allowed_entities.add(_panel_entity_key("team", int(assignment.team_id)))
+    return {
+        "panel_mode_enabled": panel_mode_enabled,
+        "is_superadmin": is_superadmin,
+        "panel_ids": panel_ids,
+        "allowed_entities": allowed_entities,
+    }
+
+
+def _is_entity_editable_by_admin(scope: Dict[str, object], entity_type: str, entity_id: int, panel_id: Optional[int]) -> bool:
+    if not bool(scope.get("panel_mode_enabled")):
+        return True
+    if bool(scope.get("is_superadmin")):
+        return True
+    panel_ids = scope.get("panel_ids") if isinstance(scope.get("panel_ids"), set) else set()
+    if not panel_ids:
+        return False
+    if panel_id is None:
+        return False
+    return int(panel_id) in panel_ids
+
+
+def _assert_panel_editable_entity(
+    scope: Dict[str, object],
+    entity_type: str,
+    entity_id: int,
+) -> None:
+    if not bool(scope.get("panel_mode_enabled")) or bool(scope.get("is_superadmin")):
+        return
+    allowed_entities = scope.get("allowed_entities") if isinstance(scope.get("allowed_entities"), set) else set()
+    key = _panel_entity_key(entity_type, entity_id)
+    if key not in allowed_entities:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Scoring access denied for {entity_type} {entity_id} in panel mode",
+        )
 
 
 def _round_submission_deadline_has_passed(round_row: PdaEventRound) -> bool:
@@ -1109,6 +1231,84 @@ def update_participant_status(
     return {"message": "Status updated"}
 
 
+@router.put(
+    "/pda-admin/events/{slug}/registrations/status-bulk",
+    response_model=PdaManagedRegistrationStatusBulkResponse,
+)
+def update_registration_status_bulk(
+    slug: str,
+    payload: PdaManagedRegistrationStatusBulkRequest,
+    admin: PdaUser = Depends(require_pda_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    raw_updates = list(payload.updates or [])
+    if not raw_updates:
+        return PdaManagedRegistrationStatusBulkResponse(updated_count=0)
+
+    is_team_mode = event.participant_mode == PdaEventParticipantMode.TEAM
+    expected_entity_type = "team" if is_team_mode else "user"
+    expected_entity_enum = PdaEventEntityType.TEAM if is_team_mode else PdaEventEntityType.USER
+
+    deduped_updates: Dict[int, str] = {}
+    for item in raw_updates:
+        item_entity_type = str(item.entity_type.value if hasattr(item.entity_type, "value") else item.entity_type).strip().lower()
+        if item_entity_type != expected_entity_type:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Entity type must be {expected_entity_type} for this event",
+            )
+        status_text = str(item.status.value if hasattr(item.status, "value") else item.status).strip()
+        if status_text not in {"Active", "Eliminated"}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="status must be Active or Eliminated")
+        deduped_updates[int(item.entity_id)] = status_text
+
+    if not deduped_updates:
+        return PdaManagedRegistrationStatusBulkResponse(updated_count=0)
+
+    entity_ids = list(deduped_updates.keys())
+    query = db.query(PdaEventRegistration).filter(
+        PdaEventRegistration.event_id == event.id,
+        PdaEventRegistration.entity_type == expected_entity_enum,
+    )
+    if is_team_mode:
+        query = query.filter(PdaEventRegistration.team_id.in_(entity_ids))
+    else:
+        query = query.filter(PdaEventRegistration.user_id.in_(entity_ids))
+    rows = query.all()
+
+    updated_count = 0
+    for row in rows:
+        target_id = int(row.team_id) if is_team_mode else int(row.user_id)
+        target_status = deduped_updates.get(target_id)
+        if target_status is None:
+            continue
+        next_status = (
+            PdaEventRegistrationStatus.ACTIVE
+            if target_status == "Active"
+            else PdaEventRegistrationStatus.ELIMINATED
+        )
+        if row.status != next_status:
+            row.status = next_status
+            updated_count += 1
+
+    db.commit()
+    _log_event_admin_action(
+        db,
+        admin,
+        event,
+        "bulk_update_pda_event_registration_status",
+        method="PUT",
+        path=f"/pda-admin/events/{slug}/registrations/status-bulk",
+        meta={
+            "entity_type": expected_entity_type,
+            "requested_updates": len(deduped_updates),
+            "updated_count": updated_count,
+        },
+    )
+    return PdaManagedRegistrationStatusBulkResponse(updated_count=updated_count)
+
+
 @router.delete("/pda-admin/events/{slug}/participants/{user_id}")
 def delete_participant_with_cascade(
     slug: str,
@@ -1722,6 +1922,12 @@ def create_round(
         submission_deadline=payload.submission_deadline,
         allowed_mime_types=list(payload.allowed_mime_types or _default_round_allowed_mime_types()),
         max_file_size_mb=int(payload.max_file_size_mb or 25),
+        panel_mode_enabled=bool(payload.panel_mode_enabled),
+        panel_team_distribution_mode=_normalize_panel_distribution_mode(
+            payload.panel_team_distribution_mode.value
+            if hasattr(payload.panel_team_distribution_mode, "value")
+            else payload.panel_team_distribution_mode
+        ),
     )
     db.add(round_row)
     _sync_event_round_count(db, event.id)
@@ -1773,6 +1979,12 @@ def update_round(
         )
     if "allowed_mime_types" in updates:
         updates["allowed_mime_types"] = list(payload.allowed_mime_types or _default_round_allowed_mime_types())
+    if "panel_team_distribution_mode" in updates:
+        updates["panel_team_distribution_mode"] = _normalize_panel_distribution_mode(
+            payload.panel_team_distribution_mode.value
+            if hasattr(payload.panel_team_distribution_mode, "value")
+            else payload.panel_team_distribution_mode
+        )
 
     if requested_round_no is not None:
         next_round_no = int(requested_round_no)
@@ -1938,6 +2150,773 @@ def delete_round(
     return {"message": "Round deleted"}
 
 
+def _event_admin_options(db: Session, event: PdaEvent) -> List[PdaRoundPanelAdminOption]:
+    joined = (
+        db.query(PdaAdmin, PdaUser)
+        .join(PdaUser, PdaAdmin.user_id == PdaUser.id)
+        .order_by(PdaUser.name.asc(), PdaUser.regno.asc())
+        .all()
+    )
+    options: List[PdaRoundPanelAdminOption] = []
+    for admin_row, user in joined:
+        policy = admin_row.policy if isinstance(admin_row.policy, dict) else {}
+        events = policy.get("events") if isinstance(policy.get("events"), dict) else {}
+        is_superadmin = bool(policy.get("superAdmin"))
+        if is_superadmin:
+            continue
+        if not bool(events.get(event.slug)):
+            continue
+        options.append(
+            PdaRoundPanelAdminOption(
+                admin_user_id=int(user.id),
+                regno=str(user.regno or ""),
+                name=str(user.name or user.regno or f"User {user.id}"),
+                email=str(user.email or "").strip() or None,
+            )
+        )
+    return options
+
+
+def _build_round_panel_list_response(
+    db: Session,
+    event: PdaEvent,
+    round_row: PdaEventRound,
+    admin: PdaUser,
+) -> PdaRoundPanelListResponse:
+    is_superadmin = _is_superadmin_user(db, admin)
+    panels = (
+        db.query(PdaEventRoundPanel)
+        .filter(
+            PdaEventRoundPanel.event_id == event.id,
+            PdaEventRoundPanel.round_id == round_row.id,
+        )
+        .order_by(PdaEventRoundPanel.panel_no.asc(), PdaEventRoundPanel.id.asc())
+        .all()
+    )
+    panel_ids = [int(panel.id) for panel in panels]
+    members = (
+        db.query(PdaEventRoundPanelMember, PdaUser, PdaAdmin)
+        .join(PdaUser, PdaEventRoundPanelMember.admin_user_id == PdaUser.id)
+        .outerjoin(PdaAdmin, PdaAdmin.user_id == PdaUser.id)
+        .filter(
+            PdaEventRoundPanelMember.event_id == event.id,
+            PdaEventRoundPanelMember.round_id == round_row.id,
+            PdaEventRoundPanelMember.panel_id.in_(panel_ids),
+        )
+        .all()
+        if panel_ids
+        else []
+    )
+    member_map: Dict[int, List[PdaRoundPanelMemberResponse]] = {}
+    for member_row, user, admin_row in members:
+        policy = admin_row.policy if admin_row and isinstance(admin_row.policy, dict) else {}
+        if bool(policy.get("superAdmin")):
+            continue
+        panel_id = int(member_row.panel_id)
+        member_map.setdefault(panel_id, []).append(
+            PdaRoundPanelMemberResponse(
+                admin_user_id=int(user.id),
+                regno=str(user.regno or ""),
+                name=str(user.name or user.regno or f"User {user.id}"),
+                email=str(user.email or "").strip() or None,
+            )
+        )
+    for panel_id, member_rows in member_map.items():
+        member_rows.sort(key=lambda row: (row.name.lower(), row.regno))
+
+    assignment_count_rows = (
+        db.query(
+            PdaEventRoundPanelAssignment.panel_id.label("panel_id"),
+            func.count(PdaEventRoundPanelAssignment.id).label("count"),
+        )
+        .filter(
+            PdaEventRoundPanelAssignment.event_id == event.id,
+            PdaEventRoundPanelAssignment.round_id == round_row.id,
+            PdaEventRoundPanelAssignment.panel_id.in_(panel_ids),
+        )
+        .group_by(PdaEventRoundPanelAssignment.panel_id)
+        .all()
+        if panel_ids
+        else []
+    )
+    assignment_count_map = {
+        int(row.panel_id): int(row.count or 0)
+        for row in assignment_count_rows
+        if row.panel_id is not None
+    }
+    my_panel_ids = {
+        int(value.panel_id)
+        for value in db.query(PdaEventRoundPanelMember.panel_id).filter(
+            PdaEventRoundPanelMember.event_id == event.id,
+            PdaEventRoundPanelMember.round_id == round_row.id,
+            PdaEventRoundPanelMember.admin_user_id == admin.id,
+        ).all()
+        if value.panel_id is not None
+    }
+    panel_rows = [
+        PdaRoundPanelResponse(
+            id=int(panel.id),
+            event_id=int(panel.event_id),
+            round_id=int(panel.round_id),
+            panel_no=int(panel.panel_no),
+            panel_name=str(panel.name or "").strip() or None,
+            panel_link=str(panel.panel_link or "").strip() or None,
+            panel_time=panel.panel_time,
+            instructions=str(panel.instructions or "").strip() or None,
+            members=member_map.get(int(panel.id), []),
+            assignment_count=int(assignment_count_map.get(int(panel.id), 0)),
+        )
+        for panel in panels
+    ]
+    return PdaRoundPanelListResponse(
+        panel_mode_enabled=bool(round_row.panel_mode_enabled),
+        panel_team_distribution_mode=_normalize_panel_distribution_mode(round_row.panel_team_distribution_mode),
+        current_admin_is_superadmin=is_superadmin,
+        my_panel_ids=sorted(my_panel_ids),
+        available_admins=_event_admin_options(db, event),
+        panels=panel_rows,
+    )
+
+
+def _send_round_panel_email_background(
+    recipients: List[Tuple[str, Dict[str, object]]],
+    subject: str,
+    html: str,
+    text: Optional[str],
+    admin_id: int,
+    event_id: int,
+    event_slug: str,
+    round_id: int,
+    request_method: Optional[str],
+    request_path: Optional[str],
+) -> None:
+    db = SessionLocal()
+    sent = 0
+    failed = 0
+    errors: List[Dict[str, str]] = []
+    try:
+        for email_value, context in recipients:
+            try:
+                rendered_html = render_email_template(html, context, html_mode=True)
+                rendered_text = render_email_template(text, context, html_mode=False) if text else None
+                text_content = rendered_text if rendered_text is not None else derive_text_from_html(rendered_html)
+                send_bulk_email(email_value, subject, rendered_html, text_content)
+                sent += 1
+            except Exception as exc:
+                failed += 1
+                if len(errors) < 10:
+                    errors.append({"email": email_value, "error": str(exc)})
+        admin = db.query(PdaUser).filter(PdaUser.id == admin_id).first()
+        event = db.query(PdaEvent).filter(PdaEvent.id == event_id).first()
+        if admin and event:
+            _log_event_admin_action(
+                db,
+                admin,
+                event,
+                "send_pda_event_round_panel_email",
+                method=request_method or "POST",
+                path=request_path or f"/pda-admin/events/{event_slug}/rounds/{round_id}/panels/email",
+                meta={
+                    "round_id": round_id,
+                    "queued": len(recipients),
+                    "sent": sent,
+                    "failed": failed,
+                    "errors": errors,
+                },
+            )
+    finally:
+        db.close()
+
+
+@router.get("/pda-admin/events/{slug}/rounds/{round_id}/panels", response_model=PdaRoundPanelListResponse)
+def get_round_panels(
+    slug: str,
+    round_id: int,
+    admin: PdaUser = Depends(require_pda_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    round_row = _get_event_round_or_404(db, event.id, round_id)
+    return _build_round_panel_list_response(db, event, round_row, admin)
+
+
+@router.put("/pda-admin/events/{slug}/rounds/{round_id}/panels", response_model=PdaRoundPanelListResponse)
+def update_round_panels(
+    slug: str,
+    round_id: int,
+    payload: PdaRoundPanelsUpdateRequest,
+    admin: PdaUser = Depends(require_pda_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    round_row = _get_event_round_or_404(db, event.id, round_id)
+    panel_defs = list(payload.panels or [])
+    panel_nos = [int(item.panel_no) for item in panel_defs]
+    if len(panel_nos) != len(set(panel_nos)):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="panel_no must be unique")
+
+    existing_panels = (
+        db.query(PdaEventRoundPanel)
+        .filter(
+            PdaEventRoundPanel.event_id == event.id,
+            PdaEventRoundPanel.round_id == round_row.id,
+        )
+        .all()
+    )
+    existing_by_id = {int(panel.id): panel for panel in existing_panels}
+    kept_existing_panel_ids: Set[int] = set()
+    panel_member_targets: Dict[int, Set[int]] = {}
+    desired_panel_no_by_id: Dict[int, int] = {}
+    touched_existing_panel_ids: List[int] = []
+    pending_new_panels: List[Dict[str, object]] = []
+    target_admin_ids: Set[int] = set()
+
+    for panel_def in panel_defs:
+        try:
+            target_panel_no = int(panel_def.panel_no)
+        except Exception:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="panel_no is required and must be a positive integer")
+        if target_panel_no < 1:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="panel_no must be >= 1")
+
+        panel_name = str(panel_def.panel_name or "").strip() or None
+        panel_link = str(panel_def.panel_link or "").strip() or None
+        panel_time = panel_def.panel_time
+        instructions = str(panel_def.instructions or "").strip() or None
+        member_admin_user_ids = {int(user_id) for user_id in (panel_def.member_admin_user_ids or [])}
+        target_admin_ids.update(member_admin_user_ids)
+
+        if panel_def.id is not None:
+            panel_row = existing_by_id.get(int(panel_def.id))
+            if not panel_row:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Panel {panel_def.id} not found")
+            panel_row.name = panel_name
+            panel_row.panel_link = panel_link
+            panel_row.panel_time = panel_time
+            panel_row.instructions = instructions
+            kept_existing_panel_ids.add(int(panel_row.id))
+            panel_member_targets[int(panel_row.id)] = member_admin_user_ids
+            desired_panel_no_by_id[int(panel_row.id)] = target_panel_no
+            touched_existing_panel_ids.append(int(panel_row.id))
+            continue
+
+        pending_new_panels.append(
+            {
+                "panel_no": target_panel_no,
+                "name": panel_name,
+                "panel_link": panel_link,
+                "panel_time": panel_time,
+                "instructions": instructions,
+                "member_admin_user_ids": member_admin_user_ids,
+            }
+        )
+
+    allowed_admin_ids = {
+        int(option.admin_user_id)
+        for option in _event_admin_options(db, event)
+    }
+    invalid_admin_ids = sorted([value for value in target_admin_ids if value not in allowed_admin_ids])
+    if invalid_admin_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid admin_user_id for this event: {invalid_admin_ids}",
+        )
+
+    removable_panel_ids = [panel_id for panel_id in existing_by_id.keys() if panel_id not in kept_existing_panel_ids]
+    if removable_panel_ids:
+        db.query(PdaEventRoundPanelAssignment).filter(
+            PdaEventRoundPanelAssignment.event_id == event.id,
+            PdaEventRoundPanelAssignment.round_id == round_row.id,
+            PdaEventRoundPanelAssignment.panel_id.in_(removable_panel_ids),
+        ).delete(synchronize_session=False)
+        db.query(PdaEventRoundPanelMember).filter(
+            PdaEventRoundPanelMember.event_id == event.id,
+            PdaEventRoundPanelMember.round_id == round_row.id,
+            PdaEventRoundPanelMember.panel_id.in_(removable_panel_ids),
+        ).delete(synchronize_session=False)
+        db.query(PdaEventRoundPanel).filter(
+            PdaEventRoundPanel.event_id == event.id,
+            PdaEventRoundPanel.round_id == round_row.id,
+            PdaEventRoundPanel.id.in_(removable_panel_ids),
+        ).delete(synchronize_session=False)
+
+    # Avoid transient unique conflicts for (round_id, panel_no) during re-order/swap updates.
+    # Example: panel 1->2 and panel 2->1 would collide without two-phase renumbering.
+    for idx, panel_id in enumerate(sorted(set(touched_existing_panel_ids))):
+        panel_row = existing_by_id.get(panel_id)
+        if panel_row is None:
+            continue
+        panel_row.panel_no = -1000000 - idx
+    if touched_existing_panel_ids:
+        db.flush()
+        for panel_id in sorted(set(touched_existing_panel_ids)):
+            panel_row = existing_by_id.get(panel_id)
+            if panel_row is None:
+                continue
+            panel_row.panel_no = int(desired_panel_no_by_id.get(panel_id, panel_row.panel_no))
+
+    for pending in pending_new_panels:
+        panel_row = PdaEventRoundPanel(
+            event_id=event.id,
+            round_id=round_row.id,
+            panel_no=int(pending.get("panel_no") or 0),
+            name=pending.get("name"),
+            panel_link=pending.get("panel_link"),
+            panel_time=pending.get("panel_time"),
+            instructions=pending.get("instructions"),
+        )
+        db.add(panel_row)
+        db.flush()
+        panel_member_targets[int(panel_row.id)] = set(pending.get("member_admin_user_ids") or [])
+
+    for panel_id, member_ids in panel_member_targets.items():
+        db.query(PdaEventRoundPanelMember).filter(
+            PdaEventRoundPanelMember.event_id == event.id,
+            PdaEventRoundPanelMember.round_id == round_row.id,
+            PdaEventRoundPanelMember.panel_id == panel_id,
+            ~PdaEventRoundPanelMember.admin_user_id.in_(member_ids or {-1}),
+        ).delete(synchronize_session=False)
+        existing_members = {
+            int(row.admin_user_id)
+            for row in db.query(PdaEventRoundPanelMember.admin_user_id).filter(
+                PdaEventRoundPanelMember.event_id == event.id,
+                PdaEventRoundPanelMember.round_id == round_row.id,
+                PdaEventRoundPanelMember.panel_id == panel_id,
+            ).all()
+            if row.admin_user_id is not None
+        }
+        for admin_user_id in sorted(member_ids):
+            if admin_user_id in existing_members:
+                continue
+            db.add(
+                PdaEventRoundPanelMember(
+                    event_id=event.id,
+                    round_id=round_row.id,
+                    panel_id=panel_id,
+                    admin_user_id=admin_user_id,
+                )
+            )
+
+    db.commit()
+    _log_event_admin_action(
+        db,
+        admin,
+        event,
+        "update_pda_event_round_panels",
+        method="PUT",
+        path=f"/pda-admin/events/{slug}/rounds/{round_id}/panels",
+        meta={"round_id": round_id, "panel_count": len(panel_defs)},
+    )
+    return _build_round_panel_list_response(db, event, round_row, admin)
+
+
+@router.post("/pda-admin/events/{slug}/rounds/{round_id}/panels/auto-assign")
+def auto_assign_round_panels(
+    slug: str,
+    round_id: int,
+    payload: PdaRoundPanelsAutoAssignRequest,
+    admin: PdaUser = Depends(require_pda_event_admin),
+    db: Session = Depends(get_db),
+):
+    import random
+
+    event = _get_event_or_404(db, slug)
+    round_row = _get_event_round_or_404(db, event.id, round_id)
+    if not bool(round_row.panel_mode_enabled):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Enable panel mode for this round first")
+
+    panels = (
+        db.query(PdaEventRoundPanel)
+        .filter(
+            PdaEventRoundPanel.event_id == event.id,
+            PdaEventRoundPanel.round_id == round_row.id,
+        )
+        .order_by(PdaEventRoundPanel.panel_no.asc(), PdaEventRoundPanel.id.asc())
+        .all()
+    )
+    if not panels:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Configure at least one panel before auto-assign")
+
+    entities = [item for item in _round_scoring_entities(db, event, round_row) if _status_is_active(item.get("status"))]
+    if event.participant_mode == PdaEventParticipantMode.INDIVIDUAL:
+        entity_type_key = "user"
+        entity_ids = [int(item.get("entity_id")) for item in entities if item.get("entity_id") is not None]
+        score_rows = (
+            db.query(
+                PdaEventScore.user_id.label("entity_id"),
+                func.coalesce(func.sum(PdaEventScore.normalized_score), 0.0).label("score"),
+            )
+            .filter(
+                PdaEventScore.event_id == event.id,
+                PdaEventScore.entity_type == PdaEventEntityType.USER,
+                PdaEventScore.user_id.in_(entity_ids),
+            )
+            .group_by(PdaEventScore.user_id)
+            .all()
+            if entity_ids
+            else []
+        )
+        score_map = {int(row.entity_id): float(row.score or 0.0) for row in score_rows if row.entity_id is not None}
+        weighted_member_map = {int(entity_id): 1 for entity_id in entity_ids}
+    else:
+        entity_type_key = "team"
+        entity_ids = [int(item.get("entity_id")) for item in entities if item.get("entity_id") is not None]
+        score_rows = (
+            db.query(
+                PdaEventScore.team_id.label("entity_id"),
+                func.coalesce(func.sum(PdaEventScore.total_score), 0.0).label("score"),
+            )
+            .filter(
+                PdaEventScore.event_id == event.id,
+                PdaEventScore.entity_type == PdaEventEntityType.TEAM,
+                PdaEventScore.team_id.in_(entity_ids),
+            )
+            .group_by(PdaEventScore.team_id)
+            .all()
+            if entity_ids
+            else []
+        )
+        score_map = {int(row.entity_id): float(row.score or 0.0) for row in score_rows if row.entity_id is not None}
+        member_count_rows = (
+            db.query(PdaEventTeamMember.team_id, func.count(PdaEventTeamMember.id))
+            .filter(PdaEventTeamMember.team_id.in_(entity_ids))
+            .group_by(PdaEventTeamMember.team_id)
+            .all()
+            if entity_ids
+            else []
+        )
+        weighted_member_map = {
+            int(team_id): max(1, int(count or 0))
+            for team_id, count in member_count_rows
+        }
+        for entity_id in entity_ids:
+            weighted_member_map.setdefault(int(entity_id), 1)
+
+    assignment_rows = (
+        db.query(PdaEventRoundPanelAssignment)
+        .filter(
+            PdaEventRoundPanelAssignment.event_id == event.id,
+            PdaEventRoundPanelAssignment.round_id == round_row.id,
+            PdaEventRoundPanelAssignment.entity_type == (
+                PdaEventEntityType.USER if entity_type_key == "user" else PdaEventEntityType.TEAM
+            ),
+        )
+        .all()
+    )
+    existing_assignment_map = {}
+    for row in assignment_rows:
+        if entity_type_key == "user" and row.user_id is not None:
+            existing_assignment_map[int(row.user_id)] = row
+        elif entity_type_key == "team" and row.team_id is not None:
+            existing_assignment_map[int(row.team_id)] = row
+
+    candidate_rows = []
+    for entity in entities:
+        entity_id = int(entity.get("entity_id"))
+        if payload.include_unassigned_only and entity_id in existing_assignment_map:
+            continue
+        candidate_rows.append(
+            {
+                "entity_id": entity_id,
+                "score": float(score_map.get(entity_id, 0.0)),
+                "members_count": int(weighted_member_map.get(entity_id, 1)),
+            }
+        )
+    if not candidate_rows:
+        return {
+            "assigned_count": 0,
+            "panel_count": len(panels),
+            "distribution_mode": _normalize_panel_distribution_mode(round_row.panel_team_distribution_mode),
+        }
+
+    distribution_mode = _normalize_panel_distribution_mode(round_row.panel_team_distribution_mode)
+    weighted_mode = (
+        event.participant_mode == PdaEventParticipantMode.TEAM
+        and distribution_mode == "member_count_weighted"
+    )
+
+    panel_state = {
+        int(panel.id): {"score_sum": 0.0, "entity_count": 0, "members_sum": 0}
+        for panel in panels
+    }
+    panel_ids = [int(panel.id) for panel in panels]
+    candidate_signature = "|".join(
+        f"{int(item['entity_id'])}:{round(float(item['score']), 6):.6f}:{int(item['members_count'])}"
+        for item in sorted(candidate_rows, key=lambda value: int(value["entity_id"]))
+    )
+    seed_material = (
+        f"event:{int(event.id)}|round:{int(round_row.id)}|entity:{entity_type_key}"
+        f"|mode:{distribution_mode}|weighted:{int(weighted_mode)}"
+        f"|only_unassigned:{int(bool(payload.include_unassigned_only))}"
+        f"|panels:{','.join(str(value) for value in panel_ids)}"
+        f"|candidates:{candidate_signature}"
+    )
+    seed_int = int(hashlib.sha256(seed_material.encode("utf-8")).hexdigest()[:16], 16)
+    rng = random.Random(seed_int)
+
+    bucket_map: Dict[float, List[dict]] = {}
+    for item in candidate_rows:
+        bucket_key = round(float(item["score"]), 6)
+        bucket_map.setdefault(bucket_key, []).append(item)
+    sorted_buckets = sorted(bucket_map.keys(), reverse=True)
+
+    assignment_targets = []
+    for bucket_score in sorted_buckets:
+        bucket_items = sorted(bucket_map[bucket_score], key=lambda value: int(value["entity_id"]))
+        rng.shuffle(bucket_items)
+        for item in bucket_items:
+            scoring_keys = {}
+            for panel_id in panel_ids:
+                state = panel_state[panel_id]
+                load_value = state["members_sum"] if weighted_mode else state["entity_count"]
+                scoring_keys[panel_id] = (float(state["score_sum"]), int(load_value))
+            min_key = min(scoring_keys.values())
+            candidate_panel_ids = [panel_id for panel_id in panel_ids if scoring_keys[panel_id] == min_key]
+            selected_panel_id = int(rng.choice(candidate_panel_ids))
+            state = panel_state[selected_panel_id]
+            state["score_sum"] += float(item["score"])
+            state["entity_count"] += 1
+            state["members_sum"] += int(item["members_count"])
+            assignment_targets.append((int(item["entity_id"]), selected_panel_id))
+
+    created = 0
+    updated = 0
+    for entity_id, panel_id in assignment_targets:
+        existing_row = existing_assignment_map.get(entity_id)
+        if existing_row:
+            if int(existing_row.panel_id or 0) != panel_id:
+                existing_row.panel_id = panel_id
+                existing_row.assigned_by_user_id = admin.id
+                updated += 1
+            continue
+        db.add(
+            PdaEventRoundPanelAssignment(
+                event_id=event.id,
+                round_id=round_row.id,
+                panel_id=panel_id,
+                entity_type=PdaEventEntityType.USER if entity_type_key == "user" else PdaEventEntityType.TEAM,
+                user_id=entity_id if entity_type_key == "user" else None,
+                team_id=entity_id if entity_type_key == "team" else None,
+                assigned_by_user_id=admin.id,
+            )
+        )
+        created += 1
+
+    db.commit()
+    _log_event_admin_action(
+        db,
+        admin,
+        event,
+        "auto_assign_pda_event_round_panels",
+        method="POST",
+        path=f"/pda-admin/events/{slug}/rounds/{round_id}/panels/auto-assign",
+        meta={
+            "round_id": round_id,
+            "assigned_count": len(assignment_targets),
+            "created": created,
+            "updated": updated,
+            "distribution_mode": distribution_mode,
+            "include_unassigned_only": bool(payload.include_unassigned_only),
+        },
+    )
+    return {
+        "assigned_count": len(assignment_targets),
+        "created": created,
+        "updated": updated,
+        "panel_count": len(panels),
+        "distribution_mode": distribution_mode,
+    }
+
+
+@router.put("/pda-admin/events/{slug}/rounds/{round_id}/panels/assignments")
+def update_round_panel_assignments(
+    slug: str,
+    round_id: int,
+    payload: PdaRoundPanelAssignmentsUpdateRequest,
+    admin: PdaUser = Depends(require_pda_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    round_row = _get_event_round_or_404(db, event.id, round_id)
+    panel_ids = {
+        int(value.id)
+        for value in db.query(PdaEventRoundPanel.id).filter(
+            PdaEventRoundPanel.event_id == event.id,
+            PdaEventRoundPanel.round_id == round_row.id,
+        ).all()
+    }
+    if not panel_ids and payload.assignments:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Configure panels before assignments")
+
+    entities = _round_scoring_entities(db, event, round_row)
+    valid_entities = {
+        _panel_entity_key(item.get("entity_type"), int(item.get("entity_id")))
+        for item in entities
+        if item.get("entity_id") is not None
+    }
+    existing_rows = (
+        db.query(PdaEventRoundPanelAssignment)
+        .filter(
+            PdaEventRoundPanelAssignment.event_id == event.id,
+            PdaEventRoundPanelAssignment.round_id == round_row.id,
+        )
+        .all()
+    )
+    existing_map: Dict[Tuple[str, int], PdaEventRoundPanelAssignment] = {}
+    for row in existing_rows:
+        if row.entity_type == PdaEventEntityType.USER and row.user_id is not None:
+            existing_map[_panel_entity_key("user", int(row.user_id))] = row
+        if row.entity_type == PdaEventEntityType.TEAM and row.team_id is not None:
+            existing_map[_panel_entity_key("team", int(row.team_id))] = row
+
+    updated = 0
+    removed = 0
+    created = 0
+    for item in payload.assignments or []:
+        entity_type = str(item.entity_type.value if hasattr(item.entity_type, "value") else item.entity_type).strip().lower()
+        entity_id = int(item.entity_id)
+        key = _panel_entity_key(entity_type, entity_id)
+        if key not in valid_entities:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid scoring entity for assignment: {entity_type} {entity_id}",
+            )
+        existing_row = existing_map.get(key)
+        panel_id = int(item.panel_id) if item.panel_id is not None else None
+        if panel_id is None:
+            if existing_row is not None:
+                db.delete(existing_row)
+                removed += 1
+            continue
+        if panel_id not in panel_ids:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid panel_id: {panel_id}")
+        if existing_row is not None:
+            if int(existing_row.panel_id or 0) != panel_id:
+                existing_row.panel_id = panel_id
+                existing_row.assigned_by_user_id = admin.id
+                updated += 1
+            continue
+        db.add(
+            PdaEventRoundPanelAssignment(
+                event_id=event.id,
+                round_id=round_row.id,
+                panel_id=panel_id,
+                entity_type=PdaEventEntityType.USER if entity_type == "user" else PdaEventEntityType.TEAM,
+                user_id=entity_id if entity_type == "user" else None,
+                team_id=entity_id if entity_type == "team" else None,
+                assigned_by_user_id=admin.id,
+            )
+        )
+        created += 1
+    db.commit()
+    _log_event_admin_action(
+        db,
+        admin,
+        event,
+        "update_pda_event_round_panel_assignments",
+        method="PUT",
+        path=f"/pda-admin/events/{slug}/rounds/{round_id}/panels/assignments",
+        meta={"round_id": round_id, "created": created, "updated": updated, "removed": removed},
+    )
+    return {"created": created, "updated": updated, "removed": removed}
+
+
+@router.post("/pda-admin/events/{slug}/rounds/{round_id}/panels/email")
+def send_round_panel_email(
+    slug: str,
+    round_id: int,
+    payload: PdaRoundPanelEmailRequest,
+    background_tasks: BackgroundTasks,
+    admin: PdaUser = Depends(require_pda_event_admin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    event = _get_event_or_404(db, slug)
+    round_row = _get_event_round_or_404(db, event.id, round_id)
+    subject = str(payload.subject or "").strip()
+    html = str(payload.html or "").strip()
+    if not subject or not html:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Subject and HTML are required")
+
+    panel_query = db.query(PdaEventRoundPanel).filter(
+        PdaEventRoundPanel.event_id == event.id,
+        PdaEventRoundPanel.round_id == round_row.id,
+    )
+    if payload.panel_ids:
+        unique_panel_ids = sorted({int(value) for value in payload.panel_ids})
+        panel_query = panel_query.filter(PdaEventRoundPanel.id.in_(unique_panel_ids))
+    panels = panel_query.order_by(PdaEventRoundPanel.panel_no.asc()).all()
+    if not panels:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No panel rows found for email")
+    panel_ids = [int(panel.id) for panel in panels]
+    panel_map = {int(panel.id): panel for panel in panels}
+
+    member_rows = (
+        db.query(PdaEventRoundPanelMember, PdaUser)
+        .join(PdaUser, PdaEventRoundPanelMember.admin_user_id == PdaUser.id)
+        .filter(
+            PdaEventRoundPanelMember.event_id == event.id,
+            PdaEventRoundPanelMember.round_id == round_row.id,
+            PdaEventRoundPanelMember.panel_id.in_(panel_ids),
+        )
+        .all()
+    )
+    recipients: List[Tuple[str, Dict[str, object]]] = []
+    for member_row, user in member_rows:
+        email_value = str(user.email or "").strip().lower()
+        if not email_value:
+            continue
+        panel = panel_map.get(int(member_row.panel_id))
+        if not panel:
+            continue
+        context = {
+            "name": user.name,
+            "profile_name": user.profile_name,
+            "regno": user.regno,
+            "email": user.email,
+            "dept": user.dept,
+            "gender": user.gender,
+            "phno": user.phno,
+            "dob": user.dob,
+            "photo_url": user.image_url,
+            "is_member": bool(user.is_member),
+            "email_verified": bool(user.email_verified_at),
+            "created_at": user.created_at,
+            "updated_at": user.updated_at,
+            "batch": extract_batch(user.regno),
+            "event_title": event.title,
+            "event_code": event.event_code,
+            "round_name": round_row.name,
+            "round_no": round_row.round_no,
+            "panel_no": panel.panel_no,
+            "panel_name": panel.name or f"Panel {panel.panel_no}",
+            "panel_link": panel.panel_link,
+            "panel_time": panel.panel_time.isoformat() if panel.panel_time else "",
+            "panel_instructions": panel.instructions or "",
+        }
+        recipients.append((email_value, context))
+    if not recipients:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No panel members with valid email found")
+
+    background_tasks.add_task(
+        _send_round_panel_email_background,
+        recipients,
+        subject,
+        html,
+        payload.text,
+        admin.id,
+        event.id,
+        event.slug,
+        round_row.id,
+        request.method if request else "POST",
+        request.url.path if request else f"/pda-admin/events/{slug}/rounds/{round_id}/panels/email",
+    )
+    return {
+        "queued": len(recipients),
+        "panel_count": len(panel_ids),
+    }
+
+
 @router.get("/pda-admin/events/{slug}/rounds/{round_id}/stats")
 def round_stats(
     slug: str,
@@ -2024,13 +3003,15 @@ def round_participants(
     slug: str,
     round_id: int,
     search: Optional[str] = None,
-    _: PdaUser = Depends(require_pda_event_admin),
+    admin: PdaUser = Depends(require_pda_event_admin),
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
     round_row = db.query(PdaEventRound).filter(PdaEventRound.id == round_id, PdaEventRound.event_id == event.id).first()
     if not round_row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
+    scope = _round_admin_panel_scope(db, round_row, admin)
+    panel_map, assignment_map = _round_panel_maps(db, round_row) if bool(round_row.panel_mode_enabled) else ({}, {})
     entities = _round_scoring_entities(db, event, round_row)
     if search:
         needle = str(search).strip().lower()
@@ -2072,6 +3053,9 @@ def round_participants(
         row = score_map.get(key)
         attendance_row = attendance_map.get(key)
         submission_row = submission_map.get(key)
+        panel_assignment = assignment_map.get(_panel_entity_key(entity.get("entity_type"), int(entity.get("entity_id"))))
+        panel_row = panel_map.get(int(panel_assignment.panel_id)) if panel_assignment and panel_assignment.panel_id is not None else None
+        panel_id = int(panel_assignment.panel_id) if panel_assignment and panel_assignment.panel_id is not None else None
         is_present = bool(attendance_row.is_present) if attendance_row else (bool(row.is_present) if row else False)
         payload = {
             **entity,
@@ -2085,6 +3069,15 @@ def round_participants(
             "submission_file_url": submission_row.file_url if submission_row else None,
             "submission_link_url": submission_row.link_url if submission_row else None,
             "submission_is_locked": bool(submission_row.is_locked) if submission_row else False,
+            "panel_id": panel_id,
+            "panel_no": int(panel_row.panel_no) if panel_row and panel_row.panel_no is not None else None,
+            "panel_name": (str(panel_row.name or "").strip() or None) if panel_row else None,
+            "is_score_editable_by_current_admin": _is_entity_editable_by_admin(
+                scope,
+                str(entity.get("entity_type")),
+                int(entity.get("entity_id")),
+                panel_id,
+            ),
         }
         if event.participant_mode == PdaEventParticipantMode.INDIVIDUAL:
             payload.setdefault("participant_id", entity["entity_id"])
@@ -2265,34 +3258,107 @@ def save_scores(
     criteria = _criteria_def(round_row)
     criteria_max = {c["name"]: float(c.get("max_marks", 0) or 0) for c in criteria}
     max_total = sum(criteria_max.values()) if criteria_max else 100
+    panel_scope = _round_admin_panel_scope(db, round_row, admin)
 
+    parsed_entries = []
+    user_ids: Set[int] = set()
+    team_ids: Set[int] = set()
     for entry in entries:
         payload = entry.model_dump()
         entity_type, user_id, team_id = _entity_from_payload(event, payload)
-        reg_filter = [
-            PdaEventRegistration.event_id == event.id,
-            PdaEventRegistration.entity_type == entity_type,
-        ]
-        if entity_type == PdaEventEntityType.USER:
-            reg_filter.append(PdaEventRegistration.user_id == user_id)
-        else:
-            reg_filter.append(PdaEventRegistration.team_id == team_id)
-        reg_row = db.query(PdaEventRegistration).filter(*reg_filter).first()
+        entity_type_key = "user" if entity_type == PdaEventEntityType.USER else "team"
+        entity_id_value = int(user_id) if entity_type == PdaEventEntityType.USER else int(team_id)
+        _assert_panel_editable_entity(panel_scope, entity_type_key, entity_id_value)
+        parsed_entries.append((entry, entity_type, user_id, team_id))
+        if entity_type == PdaEventEntityType.USER and user_id is not None:
+            user_ids.add(int(user_id))
+        if entity_type == PdaEventEntityType.TEAM and team_id is not None:
+            team_ids.add(int(team_id))
+
+    reg_user_map: Dict[int, PdaEventRegistration] = {}
+    reg_team_map: Dict[int, PdaEventRegistration] = {}
+    score_user_map: Dict[int, PdaEventScore] = {}
+    score_team_map: Dict[int, PdaEventScore] = {}
+    attendance_user_map: Dict[int, PdaEventAttendance] = {}
+    attendance_team_map: Dict[int, PdaEventAttendance] = {}
+
+    if user_ids:
+        reg_user_map = {
+            int(row.user_id): row
+            for row in db.query(PdaEventRegistration).filter(
+                PdaEventRegistration.event_id == event.id,
+                PdaEventRegistration.entity_type == PdaEventEntityType.USER,
+                PdaEventRegistration.user_id.in_(user_ids),
+            ).all()
+            if row.user_id is not None
+        }
+        score_user_map = {
+            int(row.user_id): row
+            for row in db.query(PdaEventScore).filter(
+                PdaEventScore.event_id == event.id,
+                PdaEventScore.round_id == round_id,
+                PdaEventScore.entity_type == PdaEventEntityType.USER,
+                PdaEventScore.user_id.in_(user_ids),
+            ).all()
+            if row.user_id is not None
+        }
+        attendance_user_map = {
+            int(row.user_id): row
+            for row in db.query(PdaEventAttendance).filter(
+                PdaEventAttendance.event_id == event.id,
+                PdaEventAttendance.round_id == round_id,
+                PdaEventAttendance.entity_type == PdaEventEntityType.USER,
+                PdaEventAttendance.user_id.in_(user_ids),
+            ).all()
+            if row.user_id is not None
+        }
+
+    if team_ids:
+        reg_team_map = {
+            int(row.team_id): row
+            for row in db.query(PdaEventRegistration).filter(
+                PdaEventRegistration.event_id == event.id,
+                PdaEventRegistration.entity_type == PdaEventEntityType.TEAM,
+                PdaEventRegistration.team_id.in_(team_ids),
+            ).all()
+            if row.team_id is not None
+        }
+        score_team_map = {
+            int(row.team_id): row
+            for row in db.query(PdaEventScore).filter(
+                PdaEventScore.event_id == event.id,
+                PdaEventScore.round_id == round_id,
+                PdaEventScore.entity_type == PdaEventEntityType.TEAM,
+                PdaEventScore.team_id.in_(team_ids),
+            ).all()
+            if row.team_id is not None
+        }
+        attendance_team_map = {
+            int(row.team_id): row
+            for row in db.query(PdaEventAttendance).filter(
+                PdaEventAttendance.event_id == event.id,
+                PdaEventAttendance.round_id == round_id,
+                PdaEventAttendance.entity_type == PdaEventEntityType.TEAM,
+                PdaEventAttendance.team_id.in_(team_ids),
+            ).all()
+            if row.team_id is not None
+        }
+
+    for entry, entity_type, user_id, team_id in parsed_entries:
+        is_user = entity_type == PdaEventEntityType.USER
+        entity_id_value = int(user_id) if is_user else int(team_id)
+        reg_row = reg_user_map.get(entity_id_value) if is_user else reg_team_map.get(entity_id_value)
         if not reg_row:
-            label = "user_id" if entity_type == PdaEventEntityType.USER else "team_id"
-            value = user_id if entity_type == PdaEventEntityType.USER else team_id
+            label = "user_id" if is_user else "team_id"
+            value = user_id if is_user else team_id
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Registration not found for {label}={value}")
         if reg_row.status == PdaEventRegistrationStatus.ELIMINATED:
-            label = "User" if entity_type == PdaEventEntityType.USER else "Team"
-            value = user_id if entity_type == PdaEventEntityType.USER else team_id
+            label = "User" if is_user else "Team"
+            value = user_id if is_user else team_id
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{label} {value} is eliminated")
-        score_row = db.query(PdaEventScore).filter(
-            PdaEventScore.event_id == event.id,
-            PdaEventScore.round_id == round_id,
-            PdaEventScore.entity_type == entity_type,
-            PdaEventScore.user_id == user_id,
-            PdaEventScore.team_id == team_id,
-        ).first()
+
+        score_row = score_user_map.get(entity_id_value) if is_user else score_team_map.get(entity_id_value)
+        attendance_row = attendance_user_map.get(entity_id_value) if is_user else attendance_team_map.get(entity_id_value)
 
         if not entry.is_present:
             safe_scores = {name: 0.0 for name in criteria_max.keys()}
@@ -2314,42 +3380,41 @@ def save_scores(
             score_row.normalized_score = normalized
             score_row.is_present = bool(entry.is_present)
         else:
-            db.add(
-                PdaEventScore(
-                    event_id=event.id,
-                    round_id=round_id,
-                    entity_type=entity_type,
-                    user_id=user_id,
-                    team_id=team_id,
-                    criteria_scores=safe_scores,
-                    total_score=total,
-                    normalized_score=normalized,
-                    is_present=bool(entry.is_present),
-                )
+            score_row = PdaEventScore(
+                event_id=event.id,
+                round_id=round_id,
+                entity_type=entity_type,
+                user_id=user_id,
+                team_id=team_id,
+                criteria_scores=safe_scores,
+                total_score=total,
+                normalized_score=normalized,
+                is_present=bool(entry.is_present),
             )
+            db.add(score_row)
+            if is_user:
+                score_user_map[entity_id_value] = score_row
+            else:
+                score_team_map[entity_id_value] = score_row
 
-        attendance_row = db.query(PdaEventAttendance).filter(
-            PdaEventAttendance.event_id == event.id,
-            PdaEventAttendance.round_id == round_id,
-            PdaEventAttendance.entity_type == entity_type,
-            PdaEventAttendance.user_id == user_id,
-            PdaEventAttendance.team_id == team_id,
-        ).first()
         if attendance_row:
             attendance_row.is_present = bool(entry.is_present)
             attendance_row.marked_by_user_id = admin.id
         else:
-            db.add(
-                PdaEventAttendance(
-                    event_id=event.id,
-                    round_id=round_id,
-                    entity_type=entity_type,
-                    user_id=user_id,
-                    team_id=team_id,
-                    is_present=bool(entry.is_present),
-                    marked_by_user_id=admin.id,
-                )
+            attendance_row = PdaEventAttendance(
+                event_id=event.id,
+                round_id=round_id,
+                entity_type=entity_type,
+                user_id=user_id,
+                team_id=team_id,
+                is_present=bool(entry.is_present),
+                marked_by_user_id=admin.id,
             )
+            db.add(attendance_row)
+            if is_user:
+                attendance_user_map[entity_id_value] = attendance_row
+            else:
+                attendance_team_map[entity_id_value] = attendance_row
     db.commit()
     _log_event_admin_action(
         db,
@@ -2397,6 +3462,7 @@ def import_scores(
         missing = ", ".join(missing_criteria_headers)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Missing criteria columns: {missing}")
     max_total = sum(criteria_max.values()) if criteria_max else 100
+    panel_scope = _round_admin_panel_scope(db, round_row, admin)
 
     entities = _round_scoring_entities(db, event, round_row)
     entity_by_identifier = {}
@@ -2473,6 +3539,20 @@ def import_scores(
         entity_type = PdaEventEntityType.USER if entity.get("entity_type") == "user" else PdaEventEntityType.TEAM
         user_id = int(entity["entity_id"]) if entity_type == PdaEventEntityType.USER else None
         team_id = int(entity["entity_id"]) if entity_type == PdaEventEntityType.TEAM else None
+        entity_type_key = "user" if entity_type == PdaEventEntityType.USER else "team"
+        entity_id_value = int(user_id) if entity_type == PdaEventEntityType.USER else int(team_id)
+        try:
+            _assert_panel_editable_entity(panel_scope, entity_type_key, entity_id_value)
+        except HTTPException:
+            reason = "Scoring access denied for this row in panel mode"
+            other_required_rows.append({
+                "row": row_idx,
+                "identifier": identifier,
+                "name": provided_name or str(entity.get("name") or ""),
+                "reason": reason,
+            })
+            _append_error(f"Row {row_idx}: {reason}")
+            continue
 
         has_any_score_input = False
         for name in criteria_max.keys():

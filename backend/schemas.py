@@ -1274,6 +1274,11 @@ class PdaManagedBadgePlaceEnum(str, Enum):
     SPECIAL_MENTION = "SpecialMention"
 
 
+class PdaManagedPanelTeamDistributionModeEnum(str, Enum):
+    TEAM_COUNT = "team_count"
+    MEMBER_COUNT_WEIGHTED = "member_count_weighted"
+
+
 def _normalize_optional_http_url(value: Optional[str], field_name: str) -> Optional[str]:
     if value is None:
         return None
@@ -1477,6 +1482,8 @@ class PdaManagedRoundCreate(BaseModel):
         ]
     )
     max_file_size_mb: int = Field(default=25, ge=1, le=500)
+    panel_mode_enabled: bool = False
+    panel_team_distribution_mode: PdaManagedPanelTeamDistributionModeEnum = PdaManagedPanelTeamDistributionModeEnum.TEAM_COUNT
 
     @model_validator(mode="before")
     @classmethod
@@ -1518,6 +1525,8 @@ class PdaManagedRoundUpdate(BaseModel):
     submission_deadline: Optional[datetime] = None
     allowed_mime_types: Optional[List[str]] = None
     max_file_size_mb: Optional[int] = Field(default=None, ge=1, le=500)
+    panel_mode_enabled: Optional[bool] = None
+    panel_team_distribution_mode: Optional[PdaManagedPanelTeamDistributionModeEnum] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -1559,6 +1568,8 @@ class PdaManagedRoundResponse(BaseModel):
     submission_deadline: Optional[datetime] = None
     allowed_mime_types: Optional[List[str]] = Field(default_factory=list)
     max_file_size_mb: int = 25
+    panel_mode_enabled: bool = False
+    panel_team_distribution_mode: PdaManagedPanelTeamDistributionModeEnum = PdaManagedPanelTeamDistributionModeEnum.TEAM_COUNT
     is_frozen: bool
     created_at: datetime
 
@@ -1682,12 +1693,110 @@ class PdaManagedAttendanceResponse(BaseModel):
         from_attributes = True
 
 
+class PdaManagedRegistrationStatusBulkUpdate(BaseModel):
+    entity_type: PdaManagedEntityTypeEnum
+    entity_id: int = Field(..., ge=1)
+    status: ParticipantStatusEnum
+
+
+class PdaManagedRegistrationStatusBulkRequest(BaseModel):
+    updates: List[PdaManagedRegistrationStatusBulkUpdate] = Field(default_factory=list)
+
+
+class PdaManagedRegistrationStatusBulkResponse(BaseModel):
+    updated_count: int = 0
+
+
 class PdaManagedScoreEntry(BaseModel):
     entity_type: PdaManagedEntityTypeEnum
     user_id: Optional[int] = None
     team_id: Optional[int] = None
     criteria_scores: Dict[str, float] = Field(default_factory=dict)
     is_present: bool = True
+
+
+class PdaRoundPanelAdminOption(BaseModel):
+    admin_user_id: int
+    regno: str
+    name: str
+    email: Optional[str] = None
+
+
+class PdaRoundPanelMemberResponse(BaseModel):
+    admin_user_id: int
+    regno: str
+    name: str
+    email: Optional[str] = None
+
+
+class PdaRoundPanelDefinition(BaseModel):
+    id: Optional[int] = None
+    panel_no: int = Field(..., ge=1, le=1000)
+    panel_name: Optional[str] = None
+    panel_link: Optional[str] = None
+    panel_time: Optional[datetime] = None
+    instructions: Optional[str] = None
+    member_admin_user_ids: List[int] = Field(default_factory=list)
+
+    @field_validator("panel_name", "instructions", mode="before")
+    @classmethod
+    def normalize_optional_text(cls, value):
+        if value is None:
+            return None
+        cleaned = str(value).strip()
+        return cleaned or None
+
+    @field_validator("panel_link", mode="before")
+    @classmethod
+    def normalize_optional_panel_link(cls, value):
+        return _normalize_optional_http_url(value, "panel_link")
+
+
+class PdaRoundPanelResponse(BaseModel):
+    id: int
+    event_id: int
+    round_id: int
+    panel_no: int
+    panel_name: Optional[str] = None
+    panel_link: Optional[str] = None
+    panel_time: Optional[datetime] = None
+    instructions: Optional[str] = None
+    members: List[PdaRoundPanelMemberResponse] = Field(default_factory=list)
+    assignment_count: int = 0
+
+
+class PdaRoundPanelListResponse(BaseModel):
+    panel_mode_enabled: bool = False
+    panel_team_distribution_mode: PdaManagedPanelTeamDistributionModeEnum = PdaManagedPanelTeamDistributionModeEnum.TEAM_COUNT
+    current_admin_is_superadmin: bool = False
+    my_panel_ids: List[int] = Field(default_factory=list)
+    available_admins: List[PdaRoundPanelAdminOption] = Field(default_factory=list)
+    panels: List[PdaRoundPanelResponse] = Field(default_factory=list)
+
+
+class PdaRoundPanelsUpdateRequest(BaseModel):
+    panels: List[PdaRoundPanelDefinition] = Field(default_factory=list)
+
+
+class PdaRoundPanelsAutoAssignRequest(BaseModel):
+    include_unassigned_only: bool = False
+
+
+class PdaRoundPanelAssignmentItem(BaseModel):
+    entity_type: PdaManagedEntityTypeEnum
+    entity_id: int = Field(..., ge=1)
+    panel_id: Optional[int] = None
+
+
+class PdaRoundPanelAssignmentsUpdateRequest(BaseModel):
+    assignments: List[PdaRoundPanelAssignmentItem] = Field(default_factory=list)
+
+
+class PdaRoundPanelEmailRequest(BaseModel):
+    subject: str = Field(..., min_length=1)
+    html: str = Field(..., min_length=1)
+    text: Optional[str] = None
+    panel_ids: Optional[List[int]] = None
 
 
 class PdaManagedScoreResponse(BaseModel):

@@ -311,7 +311,12 @@ ${pagesHtml}
 
 function LeaderboardContent() {
     const { getAuthHeader } = useAuth();
-    const { eventInfo, eventSlug } = useEventAdminShell();
+    const {
+        eventInfo,
+        eventSlug,
+        pushLocalUndo,
+        pushSavedUndo,
+    } = useEventAdminShell();
 
     const [rows, setRows] = useState([]);
     const [podium, setPodium] = useState([]);
@@ -423,6 +428,16 @@ function LeaderboardContent() {
     }, [fetchRounds]);
 
     useEffect(() => {
+        const onUndoApplied = (event) => {
+            if (event?.detail?.eventSlug !== eventSlug) return;
+            fetchRounds();
+            fetchRows();
+        };
+        window.addEventListener('event-admin-undo-applied', onUndoApplied);
+        return () => window.removeEventListener('event-admin-undo-applied', onUndoApplied);
+    }, [eventSlug, fetchRows, fetchRounds]);
+
+    useEffect(() => {
         setCurrentPage(1);
     }, [filters.batch, filters.department, filters.gender, filters.roundIds, filters.search, filters.status, sortOption]);
 
@@ -484,6 +499,24 @@ function LeaderboardContent() {
             return haystack.includes(needle);
         });
     }, [filters.search, rows]);
+    const activeRowsForShortlistPreview = useMemo(
+        () => rows.filter((entry) => String(entry?.status || '').toLowerCase() === 'active'),
+        [rows]
+    );
+    const shortlistEligibleCount = useMemo(() => {
+        const ruleType = String(eliminationConfig.type || 'top_k').toLowerCase();
+        const rawValue = Number(eliminationConfig.value || 0);
+        if (ruleType === 'top_k') {
+            const keepCount = Math.max(0, Math.floor(rawValue));
+            return Math.min(keepCount, activeRowsForShortlistPreview.length);
+        }
+        if (ruleType === 'min_score') {
+            return activeRowsForShortlistPreview.filter(
+                (entry) => Number(entry?.cumulative_score || 0) >= rawValue
+            ).length;
+        }
+        return 0;
+    }, [activeRowsForShortlistPreview, eliminationConfig.type, eliminationConfig.value]);
     const totalRows = displayedRows.length;
     const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
     const pagedRows = useMemo(() => {
@@ -499,6 +532,21 @@ function LeaderboardContent() {
 
     const handleShortlist = async () => {
         if (!targetShortlistRound) return;
+        const previousRoundState = targetShortlistRound.state;
+        const restoreUpdates = rows
+            .map((entry) => {
+                const entityType = String(entry.entity_type || '').trim().toLowerCase();
+                const entityId = Number(entry.entity_id);
+                const statusText = String(entry.status || '').trim();
+                if (!['user', 'team'].includes(entityType) || !Number.isFinite(entityId)) return null;
+                if (!['Active', 'Eliminated'].includes(statusText)) return null;
+                return {
+                    entity_type: entityType,
+                    entity_id: entityId,
+                    status: statusText,
+                };
+            })
+            .filter(Boolean);
         setShortlisting(true);
         try {
             await axios.put(`${API}/pda-admin/events/${eventSlug}/rounds/${targetShortlistRound.id}`, {
@@ -506,6 +554,17 @@ function LeaderboardContent() {
                 elimination_value: eliminationConfig.value,
                 eliminate_absent: eliminateAbsent,
             }, { headers: getAuthHeader() });
+            pushSavedUndo({
+                label: `Undo round ${targetShortlistRound.round_no} shortlist`,
+                command: {
+                    type: 'participant_status_bulk_restore',
+                    updates: restoreUpdates,
+                    round_restore: {
+                        round_id: Number(targetShortlistRound.id),
+                        state: previousRoundState,
+                    },
+                },
+            });
             toast.success('Shortlist completed');
             setShortlistDialogOpen(false);
             fetchRows();
@@ -564,14 +623,17 @@ function LeaderboardContent() {
     };
 
     const toggleRoundSelection = useCallback((roundId, checked) => {
+        const previous = { ...filters, roundIds: [...(filters.roundIds || [])] };
         const targetId = Number(roundId);
-        setFilters((prev) => {
-            const nextSet = new Set((prev.roundIds || []).map((value) => Number(value)));
-            if (checked) nextSet.add(targetId);
-            else nextSet.delete(targetId);
-            return { ...prev, roundIds: Array.from(nextSet) };
+        const nextSet = new Set((previous.roundIds || []).map((value) => Number(value)));
+        if (checked) nextSet.add(targetId);
+        else nextSet.delete(targetId);
+        setFilters({ ...previous, roundIds: Array.from(nextSet) });
+        pushLocalUndo({
+            label: 'Undo round filter change',
+            undoFn: () => setFilters(previous),
         });
-    }, []);
+    }, [filters, pushLocalUndo]);
 
     const openEntityModal = async (entry) => {
         const entityId = entry.entity_id || entry.participant_id;
@@ -660,6 +722,11 @@ function LeaderboardContent() {
                                             onChange={(e) => setEliminationConfig((prev) => ({ ...prev, value: parseFloat(e.target.value) || 0 }))}
                                             className="neo-input"
                                         />
+                                        <p className="text-xs text-gray-600">
+                                            {shortlistEligibleCount} {isTeamMode ? 'team' : 'participant'}
+                                            {shortlistEligibleCount === 1 ? '' : 's'} currently fulfill this criteria
+                                            (from {activeRowsForShortlistPreview.length} active total).
+                                        </p>
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <Checkbox
@@ -735,13 +802,32 @@ function LeaderboardContent() {
                         <Input
                             placeholder={`Search ${isTeamMode ? 'team' : 'participant'}...`}
                             value={filters.search}
-                            onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
+                            onChange={(e) => {
+                                const previous = { ...filters, roundIds: [...(filters.roundIds || [])] };
+                                const nextValue = e.target.value;
+                                setFilters({ ...previous, search: nextValue });
+                                pushLocalUndo({
+                                    label: 'Undo leaderboard search change',
+                                    undoFn: () => setFilters(previous),
+                                });
+                            }}
                             className="neo-input pl-10"
                         />
                     </div>
 
                     {!isTeamMode ? (
-                        <Select value={filters.department || 'all'} onValueChange={(value) => setFilters((prev) => ({ ...prev, department: value === 'all' ? '' : value }))}>
+                        <Select
+                            value={filters.department || 'all'}
+                            onValueChange={(value) => {
+                                const previous = { ...filters, roundIds: [...(filters.roundIds || [])] };
+                                const nextValue = value === 'all' ? '' : value;
+                                setFilters({ ...previous, department: nextValue });
+                                pushLocalUndo({
+                                    label: 'Undo leaderboard department filter',
+                                    undoFn: () => setFilters(previous),
+                                });
+                            }}
+                        >
                             <SelectTrigger className="neo-input"><SelectValue placeholder="Department" /></SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="all">All Departments</SelectItem>
@@ -753,7 +839,18 @@ function LeaderboardContent() {
                     ) : null}
 
                     {!isTeamMode ? (
-                        <Select value={filters.batch || 'all'} onValueChange={(value) => setFilters((prev) => ({ ...prev, batch: value === 'all' ? '' : value }))}>
+                        <Select
+                            value={filters.batch || 'all'}
+                            onValueChange={(value) => {
+                                const previous = { ...filters, roundIds: [...(filters.roundIds || [])] };
+                                const nextValue = value === 'all' ? '' : value;
+                                setFilters({ ...previous, batch: nextValue });
+                                pushLocalUndo({
+                                    label: 'Undo leaderboard batch filter',
+                                    undoFn: () => setFilters(previous),
+                                });
+                            }}
+                        >
                             <SelectTrigger className="neo-input"><SelectValue placeholder="Batch" /></SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="all">All Batches</SelectItem>
@@ -765,7 +862,18 @@ function LeaderboardContent() {
                     ) : null}
 
                     {!isTeamMode ? (
-                        <Select value={filters.gender || 'all'} onValueChange={(value) => setFilters((prev) => ({ ...prev, gender: value === 'all' ? '' : value }))}>
+                        <Select
+                            value={filters.gender || 'all'}
+                            onValueChange={(value) => {
+                                const previous = { ...filters, roundIds: [...(filters.roundIds || [])] };
+                                const nextValue = value === 'all' ? '' : value;
+                                setFilters({ ...previous, gender: nextValue });
+                                pushLocalUndo({
+                                    label: 'Undo leaderboard gender filter',
+                                    undoFn: () => setFilters(previous),
+                                });
+                            }}
+                        >
                             <SelectTrigger className="neo-input"><SelectValue placeholder="Gender" /></SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="all">All Genders</SelectItem>
@@ -775,7 +883,18 @@ function LeaderboardContent() {
                         </Select>
                     ) : null}
 
-                    <Select value={filters.status || 'all'} onValueChange={(value) => setFilters((prev) => ({ ...prev, status: value === 'all' ? '' : value }))}>
+                    <Select
+                        value={filters.status || 'all'}
+                        onValueChange={(value) => {
+                            const previous = { ...filters, roundIds: [...(filters.roundIds || [])] };
+                            const nextValue = value === 'all' ? '' : value;
+                            setFilters({ ...previous, status: nextValue });
+                            pushLocalUndo({
+                                label: 'Undo leaderboard status filter',
+                                undoFn: () => setFilters(previous),
+                            });
+                        }}
+                    >
                         <SelectTrigger className="neo-input"><SelectValue placeholder="Status" /></SelectTrigger>
                         <SelectContent>
                             <SelectItem value="all">All Statuses</SelectItem>
@@ -784,7 +903,17 @@ function LeaderboardContent() {
                         </SelectContent>
                     </Select>
 
-                    <Select value={sortOption} onValueChange={setSortOption}>
+                    <Select
+                        value={sortOption}
+                        onValueChange={(value) => {
+                            const previous = sortOption;
+                            setSortOption(value);
+                            pushLocalUndo({
+                                label: 'Undo leaderboard sort change',
+                                undoFn: () => setSortOption(previous),
+                            });
+                        }}
+                    >
                         <SelectTrigger className="neo-input"><SelectValue placeholder="Sort" /></SelectTrigger>
                         <SelectContent>
                             {LEADERBOARD_SORT_OPTIONS.map((option) => (
@@ -807,7 +936,14 @@ function LeaderboardContent() {
                                     type="button"
                                     variant="ghost"
                                     className="h-7 px-2 text-xs"
-                                    onClick={() => setFilters((prev) => ({ ...prev, roundIds: [] }))}
+                                    onClick={() => {
+                                        const previous = { ...filters, roundIds: [...(filters.roundIds || [])] };
+                                        setFilters({ ...previous, roundIds: [] });
+                                        pushLocalUndo({
+                                            label: 'Undo clear round filters',
+                                            undoFn: () => setFilters(previous),
+                                        });
+                                    }}
                                 >
                                     All rounds
                                 </Button>
@@ -989,8 +1125,16 @@ function LeaderboardContent() {
                                     const nextSize = Number.parseInt(value, 10);
                                     if (!PAGE_SIZE_OPTIONS.includes(nextSize)) return;
                                     if (nextSize === pageSize) return;
+                                    const previous = pageSize;
                                     setPageSize(nextSize);
                                     setCurrentPage(1);
+                                    pushLocalUndo({
+                                        label: 'Undo leaderboard page size change',
+                                        undoFn: () => {
+                                            setPageSize(previous);
+                                            setCurrentPage(1);
+                                        },
+                                    });
                                 }}
                             >
                                 <SelectTrigger className="neo-input h-9 w-24">

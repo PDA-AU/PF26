@@ -57,12 +57,30 @@ const normalizeEntityType = (value) => {
     if (text.includes('team')) return 'team';
     return text;
 };
+const parseUtcTimestamp = (value) => {
+    if (!value) return null;
+    const raw = String(value).trim();
+    if (!raw) return null;
+
+    let normalized = raw.replace(/\.(\d{3})\d+/, '.$1');
+    const hasTimezone = /([zZ]|[+-]\d{2}:\d{2})$/.test(normalized);
+    if (!hasTimezone && /^\d{4}-\d{2}-\d{2}T/.test(normalized)) {
+        normalized = `${normalized}Z`;
+    }
+
+    const parsed = new Date(normalized);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed;
+};
 const formatMarkedAtIst = (value) => {
-    if (!value) return '—';
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return '—';
-    return parsed.toLocaleString('en-IN', {
-        timeZone: 'Asia/Kolkata',
+    const parsedUtc = parseUtcTimestamp(value);
+    if (!parsedUtc) return '—';
+
+    // Force UTC -> IST (+05:30) to avoid browser-dependent timezone parsing.
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+    const istInstant = new Date(parsedUtc.getTime() + IST_OFFSET_MS);
+    return `${istInstant.toLocaleString('en-IN', {
+        timeZone: 'UTC',
         day: '2-digit',
         month: 'short',
         year: 'numeric',
@@ -70,7 +88,7 @@ const formatMarkedAtIst = (value) => {
         minute: '2-digit',
         second: '2-digit',
         hour12: true,
-    });
+    })} IST`;
 };
 
 const normalizeRoundState = (value) => String(value || '').trim().toLowerCase();
@@ -80,7 +98,11 @@ const VISIBLE_ROUND_STATES = new Set([...EDITABLE_ROUND_STATES, ...READ_ONLY_ROU
 
 function AttendanceContent() {
     const { getAuthHeader } = useAuth();
-    const { eventSlug } = useEventAdminShell();
+    const {
+        eventSlug,
+        pushLocalUndo,
+        pushSavedUndo,
+    } = useEventAdminShell();
     const [rows, setRows] = useState([]);
     const [rounds, setRounds] = useState([]);
     const [attendanceRoundId, setAttendanceRoundId] = useState('');
@@ -174,6 +196,16 @@ function AttendanceContent() {
     }, [attendanceRoundId, eventSlug, getAuthHeader]);
 
     useEffect(() => {
+        const onUndoApplied = (event) => {
+            if (event?.detail?.eventSlug !== eventSlug) return;
+            fetchRounds();
+            fetchAttendance();
+        };
+        window.addEventListener('event-admin-undo-applied', onUndoApplied);
+        return () => window.removeEventListener('event-admin-undo-applied', onUndoApplied);
+    }, [eventSlug, fetchAttendance, fetchRounds]);
+
+    useEffect(() => {
         fetchRounds();
     }, [fetchRounds]);
 
@@ -211,12 +243,17 @@ function AttendanceContent() {
         const rowKey = `${row.entity_type}-${row.entity_id}`;
         const originalPresent = Boolean(rowPresenceMap[rowKey]);
         setPresenceDraft((prev) => {
+            const previousSnapshot = { ...prev };
             const next = { ...prev };
             if (originalPresent) {
                 delete next[rowKey];
             } else {
                 next[rowKey] = true;
             }
+            pushLocalUndo({
+                label: 'Undo QR attendance draft edit',
+                undoFn: () => setPresenceDraft(previousSnapshot),
+            });
             return next;
         });
 
@@ -455,15 +492,20 @@ function AttendanceContent() {
         const nextValue = checked === true;
         const originalValue = Boolean(rowPresenceMap[key]);
         setPresenceDraft((prev) => {
+            const previousSnapshot = { ...prev };
             const next = { ...prev };
             if (nextValue === originalValue) {
                 delete next[key];
             } else {
                 next[key] = nextValue;
             }
+            pushLocalUndo({
+                label: 'Undo attendance draft edit',
+                undoFn: () => setPresenceDraft(previousSnapshot),
+            });
             return next;
         });
-    }, [isSelectedRoundEditable, rowPresenceMap]);
+    }, [isSelectedRoundEditable, pushLocalUndo, rowPresenceMap]);
 
     const areAllPageRowsChecked = pagedRows.length > 0 && pagedRows.every((row) => getPresentValue(row));
     const hasSomePageRowsChecked = pagedRows.some((row) => getPresentValue(row));
@@ -472,6 +514,7 @@ function AttendanceContent() {
         if (!isSelectedRoundEditable) return;
         const nextValue = checked === true;
         setPresenceDraft((prev) => {
+            const previousSnapshot = { ...prev };
             const next = { ...prev };
             pagedRows.forEach((row) => {
                 const key = `${row.entity_type}-${row.entity_id}`;
@@ -482,9 +525,13 @@ function AttendanceContent() {
                     next[key] = nextValue;
                 }
             });
+            pushLocalUndo({
+                label: 'Undo bulk attendance draft edit',
+                undoFn: () => setPresenceDraft(previousSnapshot),
+            });
             return next;
         });
-    }, [isSelectedRoundEditable, pagedRows, rowPresenceMap]);
+    }, [isSelectedRoundEditable, pagedRows, pushLocalUndo, rowPresenceMap]);
 
     const dirtyCount = Object.keys(presenceDraft).length;
 
@@ -529,6 +576,15 @@ function AttendanceContent() {
         setSavingChanges(true);
         try {
             const dirtyRows = rows.filter((row) => Object.prototype.hasOwnProperty.call(presenceDraft, `${row.entity_type}-${row.entity_id}`));
+            const restoreEntries = dirtyRows.map((row) => {
+                const key = `${row.entity_type}-${row.entity_id}`;
+                return {
+                    key,
+                    entity_type: row.entity_type,
+                    entity_id: Number(row.entity_id),
+                    is_present: Boolean(rowPresenceMap[key]),
+                };
+            });
             const results = await Promise.allSettled(
                 dirtyRows.map((row) => {
                     const key = `${row.entity_type}-${row.entity_id}`;
@@ -544,6 +600,23 @@ function AttendanceContent() {
             const failed = results.filter((result) => result.status === 'rejected').length;
             const success = results.length - failed;
             if (success > 0) {
+                const restoredForSucceeded = restoreEntries
+                    .filter((_, index) => results[index]?.status === 'fulfilled')
+                    .map((entry) => ({
+                        entity_type: entry.entity_type,
+                        entity_id: entry.entity_id,
+                        is_present: entry.is_present,
+                    }));
+                if (restoredForSucceeded.length > 0) {
+                    pushSavedUndo({
+                        label: 'Undo attendance save',
+                        command: {
+                            type: 'attendance_restore',
+                            round_id: Number(attendanceRoundId),
+                            entries: restoredForSucceeded,
+                        },
+                    });
+                }
                 toast.success(`Updated attendance for ${success} entr${success === 1 ? 'y' : 'ies'}`);
             }
             if (failed > 0) {
@@ -555,7 +628,7 @@ function AttendanceContent() {
         } finally {
             setSavingChanges(false);
         }
-    }, [attendanceRoundId, dirtyCount, eventSlug, fetchAttendance, getAuthHeader, isSelectedRoundEditable, presenceDraft, rows]);
+    }, [attendanceRoundId, dirtyCount, eventSlug, fetchAttendance, getAuthHeader, isSelectedRoundEditable, presenceDraft, pushSavedUndo, rowPresenceMap, rows]);
 
     useEffect(() => {
         if (isScanning && !isSelectedRoundEditable) {

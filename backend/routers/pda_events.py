@@ -29,6 +29,8 @@ from models import (
     PdaEventAttendance,
     PdaEventScore,
     PdaEventRoundSubmission,
+    PdaEventRoundPanel,
+    PdaEventRoundPanelAssignment,
 )
 from schemas import (
     PdaManagedAchievement,
@@ -963,6 +965,30 @@ def my_round_status(
         .order_by(PdaEventRound.round_no.asc())
         .all()
     )
+    assignment_rows = (
+        db.query(PdaEventRoundPanelAssignment)
+        .filter(
+            PdaEventRoundPanelAssignment.event_id == event.id,
+            PdaEventRoundPanelAssignment.entity_type == entity_type,
+            PdaEventRoundPanelAssignment.user_id == entity_user_id,
+            PdaEventRoundPanelAssignment.team_id == entity_team_id,
+        )
+        .all()
+    )
+    assignment_panel_id_by_round = {
+        int(row.round_id): int(row.panel_id)
+        for row in assignment_rows
+        if row.round_id is not None and row.panel_id is not None
+    }
+    panel_ids = sorted(set(assignment_panel_id_by_round.values()))
+    panel_map = (
+        {
+            int(row.id): row
+            for row in db.query(PdaEventRoundPanel).filter(PdaEventRoundPanel.id.in_(panel_ids)).all()
+        }
+        if panel_ids
+        else {}
+    )
     statuses = []
     for round_row in rounds:
         score_row = db.query(PdaEventScore).filter(
@@ -983,6 +1009,16 @@ def my_round_status(
         else:
             status_label = "Active"
             is_present = bool(score_row.is_present) if score_row else None
+        panel_row = panel_map.get(assignment_panel_id_by_round.get(int(round_row.id)))
+        panel_no = None
+        panel_name = None
+        panel_link = None
+        panel_time = None
+        if panel_row:
+            panel_no = int(panel_row.panel_no) if panel_row.panel_no is not None else None
+            panel_name = str(panel_row.name or "").strip() or None
+            panel_link = str(panel_row.panel_link or "").strip() or None
+            panel_time = panel_row.panel_time.isoformat() if panel_row.panel_time else None
         statuses.append(
             {
                 "round_no": f"PF{int(round_row.round_no):02d}",
@@ -990,6 +1026,10 @@ def my_round_status(
                 "round_state": state_value,
                 "status": status_label,
                 "is_present": is_present,
+                "panel_no": panel_no,
+                "panel_name": panel_name,
+                "panel_link": panel_link,
+                "panel_time": panel_time,
             }
         )
     return statuses

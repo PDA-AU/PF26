@@ -58,6 +58,13 @@ ALLOWED_TAGS = {
     "cumulative_score",
     "attendance_count",
     "rounds_participated",
+    "panel_no",
+    "panel_name",
+    "panel_link",
+    "panel_time",
+    "panel_instructions",
+    "round_name",
+    "round_no",
 }
 
 

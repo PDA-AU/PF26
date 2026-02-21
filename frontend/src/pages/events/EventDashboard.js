@@ -78,12 +78,45 @@ const attendanceMeta = (isPresent) => {
             badgeClassName: 'bg-[#fef2f2] text-red-700'
         };
     }
-    return {
-        label: 'Attendance Pending',
-        icon: <Clock3 className="h-5 w-5 text-slate-500" />,
-        badgeClassName: 'bg-[#f8fafc] text-slate-600'
-    };
+    return null;
 };
+
+const normalizeText = (value) => String(value || '').trim().toLowerCase();
+
+const titleCaseStatus = (value) => {
+    const normalized = normalizeText(value);
+    if (!normalized) return '';
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+};
+
+const getRoundStatusLabel = (round, effectiveStatus) => {
+    const roundState = normalizeText(round?.round_state);
+    const roundStatus = normalizeText(round?.status);
+    const fallbackCompletedStatus = normalizeText(effectiveStatus) === 'eliminated' ? 'Eliminated' : 'Active';
+
+    if (roundState === 'draft') return null;
+    if (roundState === 'published') return 'Pending';
+    if (roundState === 'active') return 'In Progress';
+    if (roundState === 'completed' || roundState === 'reveal') {
+        if (roundStatus === 'active' || roundStatus === 'eliminated') {
+            return titleCaseStatus(roundStatus);
+        }
+        return fallbackCompletedStatus;
+    }
+    if (roundStatus === 'active' || roundStatus === 'eliminated' || roundStatus === 'pending') {
+        return titleCaseStatus(roundStatus);
+    }
+    return null;
+};
+
+const parseRoundNoValue = (value) => {
+    const parsed = Number.parseInt(String(value || '').replace(/\D/g, ''), 10);
+    return Number.isFinite(parsed) ? parsed : null;
+};
+
+const normalizeSubmissionType = (value) => (
+    String(value || '').trim().toLowerCase() === 'link' ? 'link' : 'file'
+);
 
 const formatEventDate = (value) => {
     if (!value) return '';
@@ -104,6 +137,19 @@ const getEventDateLabel = (startDate, endDate) => {
     if (start) return `Starts: ${start}`;
     if (end) return `Ends: ${end}`;
     return 'Date: TBA';
+};
+
+const formatDateTimeValue = (value) => {
+    if (!value) return '';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return String(value);
+    return parsed.toLocaleString(undefined, {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
 };
 
 export default function EventDashboard() {
@@ -201,6 +247,36 @@ export default function EventDashboard() {
         if (!isRegistered) return 'Not Registered';
         return eventProfile?.status || 'Active';
     }, [eventProfile?.status, isRegistered]);
+    const canViewRoundSubmission = isLoggedIn && isRegistered;
+    const canEditRoundSubmission = canViewRoundSubmission && (!isTeamEvent || isLeader);
+    const participantRoundStatuses = useMemo(() => {
+        if (!Array.isArray(roundStatuses) || roundStatuses.length === 0) return [];
+        return roundStatuses
+            .map((round) => {
+                const displayStatus = getRoundStatusLabel(round, effectiveStatus);
+                if (!displayStatus) return null;
+                return {
+                    ...round,
+                    displayStatus,
+                };
+            })
+            .filter(Boolean);
+    }, [effectiveStatus, roundStatuses]);
+    const participantRoundLookup = useMemo(() => {
+        const byNo = new Map();
+        const byName = new Map();
+        (publishedRounds || []).forEach((round) => {
+            const roundNo = parseRoundNoValue(round?.round_no);
+            if (roundNo !== null && !byNo.has(roundNo)) {
+                byNo.set(roundNo, round);
+            }
+            const nameKey = normalizeText(round?.name);
+            if (nameKey && !byName.has(nameKey)) {
+                byName.set(nameKey, round);
+            }
+        });
+        return { byNo, byName };
+    }, [publishedRounds]);
 
     const eventDateLabel = useMemo(
         () => getEventDateLabel(eventInfo?.start_date, eventInfo?.end_date),
@@ -536,8 +612,9 @@ export default function EventDashboard() {
     };
 
     const loadRoundSubmission = useCallback(async (round) => {
-        if (!round?.id || !shouldFetchParticipantData || !isRegistered || !round?.requires_submission) {
+        if (!round?.id || !round?.requires_submission || !canViewRoundSubmission) {
             setRoundSubmission(null);
+            setLoadingSubmission(false);
             return;
         }
         setLoadingSubmission(true);
@@ -548,7 +625,7 @@ export default function EventDashboard() {
             );
             const data = response.data || null;
             setRoundSubmission(data);
-            setSubmissionType(String(data?.submission_type || 'file').toLowerCase() === 'link' ? 'link' : 'file');
+            setSubmissionType(normalizeSubmissionType(data?.submission_type));
             setSubmissionLink(data?.link_url || '');
             setSubmissionNotes(data?.notes || '');
             setSubmissionFile(null);
@@ -558,7 +635,7 @@ export default function EventDashboard() {
         } finally {
             setLoadingSubmission(false);
         }
-    }, [eventSlug, getAuthHeader, getErrorMessage, isRegistered, shouldFetchParticipantData]);
+    }, [canViewRoundSubmission, eventSlug, getAuthHeader, getErrorMessage]);
 
     useEffect(() => {
         if (!selectedRound) {
@@ -574,17 +651,26 @@ export default function EventDashboard() {
 
     const submitRoundWork = async () => {
         if (!selectedRound?.id || !selectedRound?.requires_submission) return;
-        if (!shouldFetchParticipantData || !isRegistered) {
-            toast.error('Open your participant dashboard to submit work');
+        if (!canViewRoundSubmission) {
+            toast.error('Login and register for this event to submit work');
+            return;
+        }
+        if (!canEditRoundSubmission) {
+            toast.error('Only team leader can submit for this round');
+            return;
+        }
+        if (!roundSubmission?.is_editable) {
+            toast.error(roundSubmission?.lock_reason || 'Submission is currently locked');
             return;
         }
         setSubmittingRoundWork(true);
         try {
+            const normalizedSubmissionType = normalizeSubmissionType(submissionType);
             let payload = {
-                submission_type: submissionType,
+                submission_type: normalizedSubmissionType,
                 notes: String(submissionNotes || '').trim() || null,
             };
-            if (submissionType === 'file') {
+            if (normalizedSubmissionType === 'file') {
                 if (!submissionFile) {
                     toast.error('Choose a file to upload');
                     setSubmittingRoundWork(false);
@@ -1091,10 +1177,22 @@ export default function EventDashboard() {
                                     <div className="lg:col-span-2">
                                         <div className="rounded-md border-4 border-black bg-white p-5 shadow-[8px_8px_0px_0px_#000000]">
                                             <h3 className="font-heading text-2xl font-black uppercase tracking-tight">Round Status</h3>
-                                            {roundStatuses.length > 0 ? (
+                                            {participantRoundStatuses.length > 0 ? (
                                                 <div className="mt-4 space-y-3">
-                                                    {roundStatuses.map((round) => {
+                                                    {participantRoundStatuses.map((round) => {
                                                         const attendance = attendanceMeta(round.is_present);
+                                                        const panelNoRaw = Number.parseInt(String(round.panel_no ?? ''), 10);
+                                                        const panelNo = Number.isFinite(panelNoRaw) ? panelNoRaw : null;
+                                                        const panelName = String(round.panel_name || '').trim();
+                                                        const panelLink = String(round.panel_link || '').trim();
+                                                        const panelTimeLabel = formatDateTimeValue(round.panel_time);
+                                                        const roundNoKey = parseRoundNoValue(round.round_no);
+                                                        const roundNameKey = normalizeText(round.round_name);
+                                                        const linkedRound = (
+                                                            (roundNoKey !== null ? participantRoundLookup.byNo.get(roundNoKey) : null)
+                                                            || participantRoundLookup.byName.get(roundNameKey)
+                                                            || null
+                                                        );
                                                         return (
                                                             <div key={`${round.round_no}-${round.round_name}`} className="flex flex-wrap items-center justify-between gap-3 rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
                                                                 <div className="flex items-center gap-3">
@@ -1104,17 +1202,56 @@ export default function EventDashboard() {
                                                                     <div>
                                                                         <p className="font-heading text-lg font-black uppercase tracking-tight">{round.round_name}</p>
                                                                         <p className="text-xs font-medium uppercase tracking-[0.1em] text-slate-600">{round.round_no}</p>
+                                                                        {panelNo !== null ? (
+                                                                            <p className="mt-1 text-xs font-semibold uppercase tracking-[0.08em] text-slate-700">
+                                                                                Panel No: {panelNo}
+                                                                            </p>
+                                                                        ) : null}
+                                                                        {panelName ? (
+                                                                            <p className="mt-1 text-xs font-semibold uppercase tracking-[0.08em] text-slate-700">
+                                                                                Panel Name: {panelName}
+                                                                            </p>
+                                                                        ) : null}
+                                                                        {panelTimeLabel ? (
+                                                                            <p className="mt-1 text-xs font-semibold uppercase tracking-[0.08em] text-slate-700">
+                                                                                Panel Time: {panelTimeLabel}
+                                                                            </p>
+                                                                        ) : null}
+                                                                        {panelLink ? (
+                                                                            <a
+                                                                                href={panelLink}
+                                                                                target="_blank"
+                                                                                rel="noreferrer"
+                                                                                className="mt-1 inline-flex items-center gap-1 text-xs font-bold text-blue-700 underline"
+                                                                            >
+                                                                                <ExternalLink className="h-3.5 w-3.5" />
+                                                                                Panel Link
+                                                                            </a>
+                                                                        ) : null}
                                                                     </div>
                                                                 </div>
                                                                 <div className="flex flex-wrap items-center justify-end gap-2">
                                                                     <div className="flex items-center gap-2 rounded-md border-2 border-black bg-white px-3 py-2 shadow-neo">
-                                                                        {statusIcon(round.status)}
-                                                                        <span className="text-xs font-bold uppercase tracking-[0.12em] text-black">{round.status}</span>
+                                                                        {statusIcon(round.displayStatus)}
+                                                                        <span className="text-xs font-bold uppercase tracking-[0.12em] text-black">{round.displayStatus}</span>
                                                                     </div>
-                                                                    <div className={`flex items-center gap-2 rounded-md border-2 border-black px-3 py-2 shadow-neo ${attendance.badgeClassName}`}>
-                                                                        {attendance.icon}
-                                                                        <span className="text-xs font-bold uppercase tracking-[0.12em]">{attendance.label}</span>
-                                                                    </div>
+                                                                    {attendance ? (
+                                                                        <div className={`flex items-center gap-2 rounded-md border-2 border-black px-3 py-2 shadow-neo ${attendance.badgeClassName}`}>
+                                                                            {attendance.icon}
+                                                                            <span className="text-xs font-bold uppercase tracking-[0.12em]">{attendance.label}</span>
+                                                                        </div>
+                                                                    ) : null}
+                                                                    {linkedRound ? (
+                                                                        <Button
+                                                                            type="button"
+                                                                            variant="outline"
+                                                                            className="border-2 border-black bg-[#FDE047] text-black shadow-neo"
+                                                                            onClick={() => setSelectedRound(linkedRound)}
+                                                                            data-testid={`event-dashboard-round-action-${round.round_no}`}
+                                                                        >
+                                                                            {linkedRound?.requires_submission ? 'Submit Work' : 'View Round'}
+                                                                        </Button>
+                                                                    ) : null}
                                                                 </div>
                                                             </div>
                                                         );
@@ -1561,9 +1698,17 @@ export default function EventDashboard() {
                                                     Mode: {selectedRound?.submission_mode || 'file_or_link'}
                                                     {selectedRound?.submission_deadline ? ` | Deadline: ${new Date(selectedRound.submission_deadline).toLocaleString()}` : ''}
                                                 </p>
-                                                {!shouldFetchParticipantData || !isRegistered ? (
+                                                {!isLoggedIn ? (
                                                     <p className="mt-3 text-sm font-medium text-slate-700">
-                                                        Open your participant dashboard and register for this event to submit work.
+                                                        Login to submit work for this round.
+                                                    </p>
+                                                ) : !isRegistered ? (
+                                                    <p className="mt-3 text-sm font-medium text-slate-700">
+                                                        Register for this event to submit work.
+                                                    </p>
+                                                ) : !canEditRoundSubmission ? (
+                                                    <p className="mt-3 text-sm font-medium text-slate-700">
+                                                        Only team leaders can submit work for this round.
                                                     </p>
                                                 ) : loadingSubmission ? (
                                                     <p className="mt-3 text-sm font-medium text-slate-700">Loading submission...</p>
@@ -1596,7 +1741,11 @@ export default function EventDashboard() {
                                                         ) : null}
                                                         <div>
                                                             <Label className="text-xs font-bold uppercase tracking-[0.1em]">Submission Type</Label>
-                                                            <Select value={submissionType} onValueChange={setSubmissionType} disabled={!roundSubmission?.is_editable || submittingRoundWork}>
+                                                            <Select
+                                                                value={normalizeSubmissionType(submissionType)}
+                                                                onValueChange={(value) => setSubmissionType(normalizeSubmissionType(value))}
+                                                                disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork}
+                                                            >
                                                                 <SelectTrigger className="neo-input mt-2"><SelectValue /></SelectTrigger>
                                                                 <SelectContent>
                                                                     <SelectItem value="file">File Upload</SelectItem>
@@ -1604,14 +1753,14 @@ export default function EventDashboard() {
                                                                 </SelectContent>
                                                             </Select>
                                                         </div>
-                                                        {submissionType === 'file' ? (
+                                                        {normalizeSubmissionType(submissionType) === 'file' ? (
                                                             <div>
                                                                 <Label className="text-xs font-bold uppercase tracking-[0.1em]">File</Label>
                                                                 <Input
                                                                     type="file"
                                                                     accept=".pdf,.ppt,.pptx,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/webp,application/zip"
                                                                     className="neo-input mt-2"
-                                                                    disabled={!roundSubmission?.is_editable || submittingRoundWork}
+                                                                    disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork}
                                                                     onChange={(e) => setSubmissionFile((e.target.files || [])[0] || null)}
                                                                 />
                                                             </div>
@@ -1623,7 +1772,7 @@ export default function EventDashboard() {
                                                                     onChange={(e) => setSubmissionLink(e.target.value)}
                                                                     placeholder="https://..."
                                                                     className="neo-input mt-2"
-                                                                    disabled={!roundSubmission?.is_editable || submittingRoundWork}
+                                                                    disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork}
                                                                 />
                                                             </div>
                                                         )}
@@ -1633,12 +1782,12 @@ export default function EventDashboard() {
                                                                 value={submissionNotes}
                                                                 onChange={(e) => setSubmissionNotes(e.target.value)}
                                                                 className="neo-input mt-2"
-                                                                disabled={!roundSubmission?.is_editable || submittingRoundWork}
+                                                                disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork}
                                                             />
                                                         </div>
                                                         <Button
                                                             className="w-full border-2 border-black bg-[#8B5CF6] text-white shadow-neo"
-                                                            disabled={!roundSubmission?.is_editable || submittingRoundWork}
+                                                            disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork}
                                                             onClick={submitRoundWork}
                                                         >
                                                             <Upload className="mr-2 h-4 w-4" />

@@ -74,9 +74,13 @@ const TAG_GROUPS = [
 
 function EventAdminEmailContent() {
     const { getAuthHeader } = useAuth();
-    const { eventInfo, eventSlug } = useEventAdminShell();
+    const {
+        eventInfo,
+        eventSlug,
+        pushLocalUndo,
+        warnNonUndoable,
+    } = useEventAdminShell();
     const isTeamMode = eventInfo?.participant_mode === 'team';
-    const displayTeamMode = isTeamMode && mode !== 'unregistered';
 
     const [registeredRows, setRegisteredRows] = useState([]);
     const [unregisteredRows, setUnregisteredRows] = useState([]);
@@ -100,6 +104,7 @@ function EventAdminEmailContent() {
     const [sending, setSending] = useState(false);
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [lastSendInfo, setLastSendInfo] = useState(null);
+    const displayTeamMode = isTeamMode && mode !== 'unregistered';
 
     const getErrorMessage = (error, fallback) => (
         error?.response?.data?.detail || error?.response?.data?.message || fallback
@@ -229,6 +234,15 @@ function EventAdminEmailContent() {
     const selectedCount = useMemo(() => (
         Object.keys(selectedMap).filter((id) => selectedMap[id]).length
     ), [selectedMap]);
+    const setFiltersWithUndo = useCallback((updater, label) => {
+        const previous = { ...filters };
+        const next = typeof updater === 'function' ? updater(previous) : updater;
+        setFilters(next);
+        pushLocalUndo({
+            label: label || 'Undo email filter change',
+            undoFn: () => setFilters(previous),
+        });
+    }, [filters, pushLocalUndo]);
 
     const toggleSelect = (id) => {
         setSelectedMap((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -365,13 +379,22 @@ function EventAdminEmailContent() {
                         <Input
                             placeholder={`Search ${displayTeamMode ? 'team' : 'participant'}...`}
                             value={filters.search}
-                            onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
+                            onChange={(e) => setFiltersWithUndo(
+                                (prev) => ({ ...prev, search: e.target.value }),
+                                'Undo email search change'
+                            )}
                             className="neo-input pl-10"
                         />
                     </div>
 
                     {!displayTeamMode ? (
-                        <Select value={filters.department || 'all'} onValueChange={(value) => setFilters((prev) => ({ ...prev, department: value === 'all' ? '' : value }))}>
+                        <Select
+                            value={filters.department || 'all'}
+                            onValueChange={(value) => setFiltersWithUndo(
+                                (prev) => ({ ...prev, department: value === 'all' ? '' : value }),
+                                'Undo email department filter'
+                            )}
+                        >
                             <SelectTrigger className="neo-input"><SelectValue placeholder="Department" /></SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="all">All Departments</SelectItem>
@@ -383,7 +406,13 @@ function EventAdminEmailContent() {
                     ) : null}
 
                     {!displayTeamMode ? (
-                        <Select value={filters.gender || 'all'} onValueChange={(value) => setFilters((prev) => ({ ...prev, gender: value === 'all' ? '' : value }))}>
+                        <Select
+                            value={filters.gender || 'all'}
+                            onValueChange={(value) => setFiltersWithUndo(
+                                (prev) => ({ ...prev, gender: value === 'all' ? '' : value }),
+                                'Undo email gender filter'
+                            )}
+                        >
                             <SelectTrigger className="neo-input"><SelectValue placeholder="Gender" /></SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="all">All Genders</SelectItem>
@@ -395,7 +424,13 @@ function EventAdminEmailContent() {
                     ) : null}
 
                     {!displayTeamMode ? (
-                        <Select value={filters.batch || 'all'} onValueChange={(value) => setFilters((prev) => ({ ...prev, batch: value === 'all' ? '' : value }))}>
+                        <Select
+                            value={filters.batch || 'all'}
+                            onValueChange={(value) => setFiltersWithUndo(
+                                (prev) => ({ ...prev, batch: value === 'all' ? '' : value }),
+                                'Undo email batch filter'
+                            )}
+                        >
                             <SelectTrigger className="neo-input"><SelectValue placeholder="Batch" /></SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="all">All Batches</SelectItem>
@@ -407,7 +442,13 @@ function EventAdminEmailContent() {
                     ) : null}
 
                     {mode !== 'unregistered' ? (
-                        <Select value={filters.status || 'all'} onValueChange={(value) => setFilters((prev) => ({ ...prev, status: value === 'all' ? '' : value }))}>
+                        <Select
+                            value={filters.status || 'all'}
+                            onValueChange={(value) => setFiltersWithUndo(
+                                (prev) => ({ ...prev, status: value === 'all' ? '' : value }),
+                                'Undo email status filter'
+                            )}
+                        >
                             <SelectTrigger className="neo-input"><SelectValue placeholder="Status" /></SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="all">All Statuses</SelectItem>
@@ -424,7 +465,17 @@ function EventAdminEmailContent() {
                 <div className="grid gap-3 md:grid-cols-4">
                     <div className="space-y-2">
                         <Label>Recipient Mode</Label>
-                        <Select value={mode} onValueChange={setMode}>
+                        <Select
+                            value={mode}
+                            onValueChange={(value) => {
+                                const previous = mode;
+                                setMode(value);
+                                pushLocalUndo({
+                                    label: 'Undo email recipient mode change',
+                                    undoFn: () => setMode(previous),
+                                });
+                            }}
+                        >
                             <SelectTrigger className="neo-input"><SelectValue placeholder="Select mode" /></SelectTrigger>
                             <SelectContent>
                                 {MODE_OPTIONS.map((opt) => (
@@ -436,13 +487,37 @@ function EventAdminEmailContent() {
                     {mode === 'top_k' ? (
                         <div className="space-y-2">
                             <Label>Top K</Label>
-                            <Input value={topK} onChange={(e) => setTopK(e.target.value)} className="neo-input" type="number" min="1" />
+                            <Input
+                                value={topK}
+                                onChange={(e) => {
+                                    const previous = topK;
+                                    const next = e.target.value;
+                                    setTopK(next);
+                                    pushLocalUndo({
+                                        label: 'Undo top-k change',
+                                        undoFn: () => setTopK(previous),
+                                    });
+                                }}
+                                className="neo-input"
+                                type="number"
+                                min="1"
+                            />
                         </div>
                     ) : null}
                     <div className="space-y-2">
                         <Label>Sort</Label>
                         <div className="flex gap-2">
-                            <Select value={sortBy} onValueChange={setSortBy}>
+                            <Select
+                                value={sortBy}
+                                onValueChange={(value) => {
+                                    const previous = sortBy;
+                                    setSortBy(value);
+                                    pushLocalUndo({
+                                        label: 'Undo email sort field change',
+                                        undoFn: () => setSortBy(previous),
+                                    });
+                                }}
+                            >
                                 <SelectTrigger className="neo-input"><SelectValue placeholder="Sort by" /></SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="name">Name</SelectItem>
@@ -451,7 +526,17 @@ function EventAdminEmailContent() {
                                     {!displayTeamMode ? <SelectItem value="batch">Batch</SelectItem> : null}
                                 </SelectContent>
                             </Select>
-                            <Select value={sortDir} onValueChange={setSortDir}>
+                            <Select
+                                value={sortDir}
+                                onValueChange={(value) => {
+                                    const previous = sortDir;
+                                    setSortDir(value);
+                                    pushLocalUndo({
+                                        label: 'Undo email sort direction change',
+                                        undoFn: () => setSortDir(previous),
+                                    });
+                                }}
+                            >
                                 <SelectTrigger className="neo-input"><SelectValue placeholder="Direction" /></SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="asc">Ascending</SelectItem>
@@ -536,13 +621,34 @@ function EventAdminEmailContent() {
                 <h2 className="font-heading font-bold text-2xl">Email Content</h2>
                 <div className="space-y-2">
                     <Label>Subject</Label>
-                    <Input value={subject} onChange={(e) => setSubject(e.target.value)} className="neo-input" placeholder="Subject line" />
+                    <Input
+                        value={subject}
+                        onChange={(e) => {
+                            const previous = subject;
+                            const next = e.target.value;
+                            setSubject(next);
+                            pushLocalUndo({
+                                label: 'Undo email subject edit',
+                                undoFn: () => setSubject(previous),
+                            });
+                        }}
+                        className="neo-input"
+                        placeholder="Subject line"
+                    />
                 </div>
                 <div className="space-y-2">
                     <Label>HTML Body</Label>
                     <Textarea
                         value={htmlBody}
-                        onChange={(e) => setHtmlBody(e.target.value)}
+                        onChange={(e) => {
+                            const previous = htmlBody;
+                            const next = e.target.value;
+                            setHtmlBody(next);
+                            pushLocalUndo({
+                                label: 'Undo email body edit',
+                                undoFn: () => setHtmlBody(previous),
+                            });
+                        }}
                         className="neo-input min-h-[220px]"
                         placeholder="<p>Hello <name>, ...</p>"
                     />
@@ -599,7 +705,11 @@ function EventAdminEmailContent() {
                                 className="flex-1 bg-primary text-white border-2 border-black"
                                 onClick={async () => {
                                     setConfirmOpen(false);
-                                    await handleSend();
+                                    warnNonUndoable({
+                                        title: 'Send Email Is Not Undoable',
+                                        message: 'Sending bulk email cannot be undone from header Undo. Continue?',
+                                        proceed: handleSend,
+                                    });
                                 }}
                             >
                                 Confirm

@@ -1,10 +1,12 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import axios from 'axios';
 import { toast } from 'sonner';
 import {
     Sparkles,
     LogOut,
+    Undo2,
+    AlertTriangle,
     LayoutDashboard,
     Camera,
     Calendar,
@@ -17,6 +19,9 @@ import {
 
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { clearUndoEntry, getUndoEntry, setUndoEntry, subscribeUndoEntry } from './undo/eventAdminUndoStore';
+import { executeUndoCommand } from './undo/undoExecutors';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const EventAdminContext = createContext(null);
@@ -34,10 +39,19 @@ export default function EventAdminShell({
     children,
 }) {
     const { eventSlug } = useParams();
+    const location = useLocation();
     const navigate = useNavigate();
     const { user, logout, getAuthHeader, canAccessEvent } = useAuth();
     const [eventInfo, setEventInfo] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [undoEntry, setUndoEntryState] = useState(() => getUndoEntry(eventSlug));
+    const [undoLoading, setUndoLoading] = useState(false);
+    const [undoConfirmOpen, setUndoConfirmOpen] = useState(false);
+    const [nonUndoableOpen, setNonUndoableOpen] = useState(false);
+    const [nonUndoableTitle, setNonUndoableTitle] = useState('Action Not Undoable');
+    const [nonUndoableMessage, setNonUndoableMessage] = useState('This action cannot be undone from header Undo.');
+    const nonUndoableProceedRef = useRef(null);
+    const previousPathRef = useRef(location.pathname);
 
     const isSuperAdmin = Boolean(user?.is_superadmin);
 
@@ -72,6 +86,19 @@ export default function EventAdminShell({
         };
     }, [eventSlug, getAuthHeader]);
 
+    useEffect(() => {
+        const unsubscribe = subscribeUndoEntry(eventSlug, setUndoEntryState);
+        return unsubscribe;
+    }, [eventSlug]);
+
+    useEffect(() => {
+        const prevPath = previousPathRef.current;
+        if (prevPath !== location.pathname) {
+            clearUndoEntry(eventSlug);
+        }
+        previousPathRef.current = location.pathname;
+    }, [eventSlug, location.pathname, undoEntry]);
+
     const participantTabLabel = useMemo(() => {
         if (eventInfo?.participant_mode === 'team') return 'Teams';
         return 'Participants';
@@ -89,6 +116,93 @@ export default function EventAdminShell({
     ];
 
     const navActiveTab = activeTab === 'scoring' ? 'rounds' : activeTab;
+    const canUndo = Boolean(undoEntry);
+
+    const pushLocalUndo = useCallback(({ label, routeKey, undoFn }) => {
+        if (!eventSlug || typeof undoFn !== 'function') return;
+        setUndoEntry(eventSlug, {
+            source: 'local',
+            label: String(label || 'Undo'),
+            routeKey: String(routeKey || location.pathname),
+            undoFn,
+            createdAt: Date.now(),
+        });
+    }, [eventSlug, location.pathname]);
+
+    const pushSavedUndo = useCallback(({ label, command }) => {
+        if (!eventSlug || !command || typeof command !== 'object') return;
+        setUndoEntry(eventSlug, {
+            source: 'saved',
+            label: String(label || 'Undo'),
+            command,
+            routeKey: String(location.pathname),
+            createdAt: Date.now(),
+        });
+    }, [eventSlug, location.pathname]);
+
+    const clearUndo = useCallback(() => {
+        clearUndoEntry(eventSlug);
+    }, [eventSlug]);
+
+    const executeSavedUndo = useCallback(async () => {
+        const latestEntry = getUndoEntry(eventSlug);
+        if (!latestEntry || latestEntry.source !== 'saved' || !latestEntry.command) {
+            setUndoConfirmOpen(false);
+            return;
+        }
+        setUndoLoading(true);
+        try {
+            await executeUndoCommand({
+                eventSlug,
+                command: latestEntry.command,
+                getAuthHeader,
+            });
+            clearUndoEntry(eventSlug);
+            setUndoConfirmOpen(false);
+            toast.success('Undo applied');
+            if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('event-admin-undo-applied', {
+                    detail: {
+                        eventSlug,
+                        source: 'saved',
+                        type: String(latestEntry.command?.type || ''),
+                    },
+                }));
+            }
+        } catch (error) {
+            toast.error(error?.response?.data?.detail || error?.response?.data?.message || error?.message || 'Undo failed');
+        } finally {
+            setUndoLoading(false);
+        }
+    }, [eventSlug, getAuthHeader]);
+
+    const executeUndo = useCallback(async () => {
+        const latestEntry = getUndoEntry(eventSlug);
+        if (!latestEntry) return;
+        if (latestEntry.source === 'saved') {
+            setUndoConfirmOpen(true);
+            return;
+        }
+        if (latestEntry.source === 'local' && typeof latestEntry.undoFn === 'function') {
+            setUndoLoading(true);
+            try {
+                await Promise.resolve(latestEntry.undoFn());
+                clearUndoEntry(eventSlug);
+                toast.success('Undo applied');
+            } catch (error) {
+                toast.error(error?.message || 'Undo failed');
+            } finally {
+                setUndoLoading(false);
+            }
+        }
+    }, [eventSlug]);
+
+    const warnNonUndoable = useCallback(({ title, message, proceed }) => {
+        nonUndoableProceedRef.current = typeof proceed === 'function' ? proceed : null;
+        setNonUndoableTitle(String(title || 'Action Not Undoable'));
+        setNonUndoableMessage(String(message || 'This action cannot be undone from header Undo.'));
+        setNonUndoableOpen(true);
+    }, []);
 
     if (loading) {
         return (
@@ -118,7 +232,21 @@ export default function EventAdminShell({
     }
 
     return (
-        <EventAdminContext.Provider value={{ eventInfo, eventSlug, refreshEventInfo }}>
+        <EventAdminContext.Provider
+            value={{
+                eventInfo,
+                eventSlug,
+                refreshEventInfo,
+                pushLocalUndo,
+                pushSavedUndo,
+                canUndo,
+                undoLabel: undoEntry?.label || '',
+                undoSourceType: undoEntry?.source || null,
+                executeUndo,
+                clearUndo,
+                warnNonUndoable,
+            }}
+        >
             <div className="min-h-screen bg-muted">
             <header className="bg-primary text-white border-b-4 border-black sticky top-0 z-50">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -137,6 +265,17 @@ export default function EventAdminShell({
                         </div>
                         <div className="flex items-center gap-4">
                             <span className="hidden md:block font-medium text-sm lg:text-base">{user?.name}</span>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                disabled={!canUndo || undoLoading}
+                                onClick={executeUndo}
+                                className="bg-white text-black border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all disabled:opacity-60"
+                                title={undoEntry?.label || 'Undo'}
+                            >
+                                <Undo2 className="w-4 h-4 mr-2" />
+                                <span className="hidden sm:inline">{undoLoading ? 'Undoing...' : 'Undo'}</span>
+                            </Button>
                             <Button
                                 variant="outline"
                                 onClick={() => {
@@ -178,6 +317,79 @@ export default function EventAdminShell({
                     {children}
                 </main>
             </div>
+            <Dialog open={undoConfirmOpen} onOpenChange={setUndoConfirmOpen}>
+                <DialogContent className="border-4 border-black bg-white max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading text-xl font-black">Confirm Undo</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <p className="text-sm text-slate-700">
+                            Undo last saved action{undoEntry?.label ? `: ${undoEntry.label}` : ''}?
+                        </p>
+                        <div className="flex justify-end gap-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="border-2 border-black shadow-neo"
+                                onClick={() => setUndoConfirmOpen(false)}
+                                disabled={undoLoading}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                type="button"
+                                className="border-2 border-black bg-[#FDE047] text-black shadow-neo"
+                                onClick={executeSavedUndo}
+                                disabled={undoLoading}
+                            >
+                                {undoLoading ? 'Undoing...' : 'Confirm'}
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+            <Dialog open={nonUndoableOpen} onOpenChange={setNonUndoableOpen}>
+                <DialogContent className="border-4 border-black bg-white max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading text-xl font-black flex items-center gap-2">
+                            <AlertTriangle className="w-5 h-5 text-orange-500" /> {nonUndoableTitle}
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <p className="text-sm text-slate-700">{nonUndoableMessage}</p>
+                        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
+                            This action cannot be undone from header Undo.
+                        </p>
+                        <div className="flex justify-end gap-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="border-2 border-black shadow-neo"
+                                onClick={() => {
+                                    nonUndoableProceedRef.current = null;
+                                    setNonUndoableOpen(false);
+                                }}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                type="button"
+                                className="border-2 border-black bg-[#FDE047] text-black shadow-neo"
+                                onClick={() => {
+                                    const proceed = nonUndoableProceedRef.current;
+                                    nonUndoableProceedRef.current = null;
+                                    setNonUndoableOpen(false);
+                                    if (typeof proceed === 'function') {
+                                        proceed();
+                                    }
+                                }}
+                            >
+                                Continue
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
         </EventAdminContext.Provider>
     );
 }

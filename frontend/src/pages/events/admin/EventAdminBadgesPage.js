@@ -15,7 +15,12 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 function BadgesContent() {
     const { getAuthHeader } = useAuth();
-    const { eventInfo, eventSlug } = useEventAdminShell();
+    const {
+        eventInfo,
+        eventSlug,
+        pushLocalUndo,
+        warnNonUndoable,
+    } = useEventAdminShell();
     const [badges, setBadges] = useState([]);
     const [entities, setEntities] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -73,8 +78,7 @@ function BadgesContent() {
         return entities.filter((item) => (isTeamMode ? item.entity_type === 'team' : item.entity_type === 'user'));
     }, [entities, isTeamMode]);
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
+    const createBadge = async () => {
         if (!form.entity_id) {
             toast.error(`Select a ${isTeamMode ? 'team' : 'participant'} to assign badge`);
             return;
@@ -103,6 +107,19 @@ function BadgesContent() {
         }
     };
 
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        if (!form.entity_id) {
+            toast.error(`Select a ${isTeamMode ? 'team' : 'participant'} to assign badge`);
+            return;
+        }
+        warnNonUndoable({
+            title: 'Badge Creation Is Not Undoable',
+            message: 'Creating a badge cannot be undone from header Undo. Continue?',
+            proceed: createBadge,
+        });
+    };
+
     return (
         <>
             <div className="neo-card mb-6">
@@ -115,11 +132,33 @@ function BadgesContent() {
                 <form className="grid gap-3 md:grid-cols-3" onSubmit={handleSubmit}>
                     <div className="md:col-span-2">
                         <Label>Title</Label>
-                        <Input value={form.title} onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))} required />
+                        <Input
+                            value={form.title}
+                            onChange={(e) => {
+                                const previous = { ...form };
+                                const nextValue = e.target.value;
+                                setForm((prev) => ({ ...prev, title: nextValue }));
+                                pushLocalUndo({
+                                    label: 'Undo badge title edit',
+                                    undoFn: () => setForm(previous),
+                                });
+                            }}
+                            required
+                        />
                     </div>
                     <div>
                         <Label>Place</Label>
-                        <Select value={form.place} onValueChange={(value) => setForm((prev) => ({ ...prev, place: value }))}>
+                        <Select
+                            value={form.place}
+                            onValueChange={(value) => {
+                                const previous = { ...form };
+                                setForm((prev) => ({ ...prev, place: value }));
+                                pushLocalUndo({
+                                    label: 'Undo badge place change',
+                                    undoFn: () => setForm(previous),
+                                });
+                            }}
+                        >
                             <SelectTrigger><SelectValue /></SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="Winner">Winner</SelectItem>
@@ -130,11 +169,33 @@ function BadgesContent() {
                     </div>
                     <div>
                         <Label>Score</Label>
-                        <Input type="number" value={form.score} onChange={(e) => setForm((prev) => ({ ...prev, score: e.target.value }))} />
+                        <Input
+                            type="number"
+                            value={form.score}
+                            onChange={(e) => {
+                                const previous = { ...form };
+                                const nextValue = e.target.value;
+                                setForm((prev) => ({ ...prev, score: nextValue }));
+                                pushLocalUndo({
+                                    label: 'Undo badge score edit',
+                                    undoFn: () => setForm(previous),
+                                });
+                            }}
+                        />
                     </div>
                     <div className="md:col-span-2">
                         <Label>{isTeamMode ? 'Team' : 'Participant'}</Label>
-                        <Select value={form.entity_id || 'none'} onValueChange={(value) => setForm((prev) => ({ ...prev, entity_id: value === 'none' ? '' : value }))}>
+                        <Select
+                            value={form.entity_id || 'none'}
+                            onValueChange={(value) => {
+                                const previous = { ...form };
+                                setForm((prev) => ({ ...prev, entity_id: value === 'none' ? '' : value }));
+                                pushLocalUndo({
+                                    label: 'Undo badge entity selection',
+                                    undoFn: () => setForm(previous),
+                                });
+                            }}
+                        >
                             <SelectTrigger><SelectValue placeholder={`Select ${isTeamMode ? 'team' : 'participant'}`} /></SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="none">Select {isTeamMode ? 'team' : 'participant'}</SelectItem>
@@ -148,7 +209,18 @@ function BadgesContent() {
                     </div>
                     <div className="md:col-span-3">
                         <Label>Image URL</Label>
-                        <Input value={form.image_url} onChange={(e) => setForm((prev) => ({ ...prev, image_url: e.target.value }))} />
+                        <Input
+                            value={form.image_url}
+                            onChange={(e) => {
+                                const previous = { ...form };
+                                const nextValue = e.target.value;
+                                setForm((prev) => ({ ...prev, image_url: nextValue }));
+                                pushLocalUndo({
+                                    label: 'Undo badge image URL edit',
+                                    undoFn: () => setForm(previous),
+                                });
+                            }}
+                        />
                     </div>
                     <div className="md:col-span-3 flex justify-end">
                         <Button type="submit" className="bg-[#11131a] text-white hover:bg-[#1f2330] border-2 border-black">Add Badge</Button>

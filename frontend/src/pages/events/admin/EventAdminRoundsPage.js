@@ -44,11 +44,40 @@ const isPublishedState = (state) => normalizeState(state) === 'published';
 const isActiveState = (state) => normalizeState(state) === 'active';
 const isCompletedState = (state) => normalizeState(state) === 'completed';
 const isRevealState = (state) => normalizeState(state) === 'reveal';
+const IST_OFFSET_MINUTES = 5.5 * 60;
+
+const padTwoDigits = (value) => String(value).padStart(2, '0');
+
+const splitIsoToIstDateTime = (isoValue) => {
+    if (!isoValue) return { date: '', time: '' };
+    const parsed = new Date(isoValue);
+    if (Number.isNaN(parsed.getTime())) return { date: '', time: '' };
+    const istDate = new Date(parsed.getTime() + (IST_OFFSET_MINUTES * 60 * 1000));
+    return {
+        date: `${istDate.getUTCFullYear()}-${padTwoDigits(istDate.getUTCMonth() + 1)}-${padTwoDigits(istDate.getUTCDate())}`,
+        time: `${padTwoDigits(istDate.getUTCHours())}:${padTwoDigits(istDate.getUTCMinutes())}`,
+    };
+};
+
+const combineIstDateTimeToIso = (dateValue, timeValue) => {
+    if (!dateValue || !timeValue) return null;
+    const [year, month, day] = String(dateValue || '').split('-').map((part) => Number.parseInt(part, 10));
+    const [hour, minute] = String(timeValue || '').split(':').map((part) => Number.parseInt(part, 10));
+    const hasInvalidPart = [year, month, day, hour, minute].some((part) => Number.isNaN(part));
+    if (hasInvalidPart) return null;
+    const utcMillis = Date.UTC(year, month - 1, day, hour, minute) - (IST_OFFSET_MINUTES * 60 * 1000);
+    return new Date(utcMillis).toISOString();
+};
 
 function RoundsContent() {
     const navigate = useNavigate();
     const { getAuthHeader } = useAuth();
-    const { eventSlug } = useEventAdminShell();
+    const {
+        eventSlug,
+        pushLocalUndo,
+        pushSavedUndo,
+        warnNonUndoable,
+    } = useEventAdminShell();
 
     const [rounds, setRounds] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -65,7 +94,8 @@ function RoundsContent() {
     const [mode, setMode] = useState('Offline');
     const [requiresSubmission, setRequiresSubmission] = useState(false);
     const [submissionMode, setSubmissionMode] = useState('file_or_link');
-    const [submissionDeadline, setSubmissionDeadline] = useState('');
+    const [submissionDeadlineDate, setSubmissionDeadlineDate] = useState('');
+    const [submissionDeadlineTime, setSubmissionDeadlineTime] = useState('');
     const [allowedMimeTypes, setAllowedMimeTypes] = useState('application/pdf, application/vnd.ms-powerpoint, application/vnd.openxmlformats-officedocument.presentationml.presentation, image/png, image/jpeg, image/webp, application/zip');
     const [maxFileSizeMb, setMaxFileSizeMb] = useState('25');
     const [criteria, setCriteria] = useState([createCriterion('Score', 100)]);
@@ -94,6 +124,14 @@ function RoundsContent() {
         setRoundPoster(String(nextPosterUrl || ''));
     }, [clearRoundPosterPreview]);
 
+    const registerRoundFormUndo = useCallback((label, undoFn) => {
+        if (typeof undoFn !== 'function') return;
+        pushLocalUndo({
+            label,
+            undoFn,
+        });
+    }, [pushLocalUndo]);
+
     const fetchRounds = useCallback(async () => {
         setLoading(true);
         try {
@@ -112,6 +150,15 @@ function RoundsContent() {
     useEffect(() => {
         fetchRounds();
     }, [fetchRounds]);
+
+    useEffect(() => {
+        const onUndoApplied = (event) => {
+            if (event?.detail?.eventSlug !== eventSlug) return;
+            fetchRounds();
+        };
+        window.addEventListener('event-admin-undo-applied', onUndoApplied);
+        return () => window.removeEventListener('event-admin-undo-applied', onUndoApplied);
+    }, [eventSlug, fetchRounds]);
 
     const fetchRoundStats = useCallback(async (roundId) => {
         setRoundStats((prev) => ({
@@ -153,7 +200,8 @@ function RoundsContent() {
         setMode('Offline');
         setRequiresSubmission(false);
         setSubmissionMode('file_or_link');
-        setSubmissionDeadline('');
+        setSubmissionDeadlineDate('');
+        setSubmissionDeadlineTime('');
         setAllowedMimeTypes('application/pdf, application/vnd.ms-powerpoint, application/vnd.openxmlformats-officedocument.presentationml.presentation, image/png, image/jpeg, image/webp, application/zip');
         setMaxFileSizeMb('25');
         setCriteria([createCriterion('Score', 100)]);
@@ -183,6 +231,21 @@ function RoundsContent() {
             .split(',')
             .map((item) => String(item || '').trim().toLowerCase())
             .filter(Boolean);
+        const hasSubmissionDeadlineDate = Boolean(String(submissionDeadlineDate || '').trim());
+        const hasSubmissionDeadlineTime = Boolean(String(submissionDeadlineTime || '').trim());
+        if (hasSubmissionDeadlineDate !== hasSubmissionDeadlineTime) {
+            toast.error('Select both submission deadline date and time (IST)');
+            setSavingRound(false);
+            return;
+        }
+        const submissionDeadlineIso = (hasSubmissionDeadlineDate && hasSubmissionDeadlineTime)
+            ? combineIstDateTimeToIso(submissionDeadlineDate, submissionDeadlineTime)
+            : null;
+        if ((hasSubmissionDeadlineDate && hasSubmissionDeadlineTime) && !submissionDeadlineIso) {
+            toast.error('Invalid submission deadline (IST)');
+            setSavingRound(false);
+            return;
+        }
 
         try {
             let uploadedPosterUrl = String(roundPoster || '').trim();
@@ -214,19 +277,57 @@ function RoundsContent() {
                 evaluation_criteria: cleanedCriteria.length > 0 ? cleanedCriteria : [{ name: 'Score', max_marks: 100 }],
                 requires_submission: Boolean(requiresSubmission),
                 submission_mode: submissionMode || 'file_or_link',
-                submission_deadline: submissionDeadline ? new Date(submissionDeadline).toISOString() : null,
+                submission_deadline: requiresSubmission ? submissionDeadlineIso : null,
                 allowed_mime_types: parsedMimeTypes.length ? parsedMimeTypes : ['application/pdf', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'image/png', 'image/jpeg', 'image/webp', 'application/zip'],
                 max_file_size_mb: Math.max(1, parseInt(maxFileSizeMb, 10) || 25),
             };
             if (editingRound) {
+                const restorePayload = {
+                    round_no: Number(editingRound.round_no),
+                    name: editingRound.name || '',
+                    description: editingRound.description || '',
+                    round_poster: editingRound.round_poster || null,
+                    external_url: editingRound.external_url || null,
+                    external_url_name: editingRound.external_url_name || 'Explore Round',
+                    date: editingRound.date || null,
+                    mode: editingRound.mode || 'Offline',
+                    evaluation_criteria: Array.isArray(editingRound.evaluation_criteria) && editingRound.evaluation_criteria.length
+                        ? editingRound.evaluation_criteria
+                        : [{ name: 'Score', max_marks: 100 }],
+                    requires_submission: Boolean(editingRound.requires_submission),
+                    submission_mode: String(editingRound.submission_mode || 'file_or_link'),
+                    submission_deadline: editingRound.submission_deadline || null,
+                    allowed_mime_types: Array.isArray(editingRound.allowed_mime_types) && editingRound.allowed_mime_types.length
+                        ? editingRound.allowed_mime_types
+                        : ['application/pdf', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'image/png', 'image/jpeg', 'image/webp', 'application/zip'],
+                    max_file_size_mb: Number(editingRound.max_file_size_mb || 25),
+                };
                 await axios.put(`${API}/pda-admin/events/${eventSlug}/rounds/${editingRound.id}`, payload, {
                     headers: getAuthHeader(),
                 });
+                pushSavedUndo({
+                    label: `Undo round ${editingRound.round_no} update`,
+                    command: {
+                        type: 'round_patch_restore',
+                        round_id: Number(editingRound.id),
+                        payload: restorePayload,
+                    },
+                });
                 toast.success('Round updated');
             } else {
-                await axios.post(`${API}/pda-admin/events/${eventSlug}/rounds`, payload, {
+                const response = await axios.post(`${API}/pda-admin/events/${eventSlug}/rounds`, payload, {
                     headers: getAuthHeader(),
                 });
+                const createdRoundId = Number(response?.data?.id);
+                if (Number.isFinite(createdRoundId)) {
+                    pushSavedUndo({
+                        label: `Undo round ${payload.round_no} create`,
+                        command: {
+                            type: 'round_delete_created',
+                            round_id: createdRoundId,
+                        },
+                    });
+                }
                 toast.success('Round created');
             }
             setDialogOpen(false);
@@ -250,11 +351,9 @@ function RoundsContent() {
         setMode(round.mode || 'Offline');
         setRequiresSubmission(Boolean(round.requires_submission));
         setSubmissionMode(String(round.submission_mode || 'file_or_link'));
-        setSubmissionDeadline(
-            round.submission_deadline
-                ? new Date(round.submission_deadline).toISOString().slice(0, 16)
-                : ''
-        );
+        const deadlineInIst = splitIsoToIstDateTime(round.submission_deadline);
+        setSubmissionDeadlineDate(deadlineInIst.date);
+        setSubmissionDeadlineTime(deadlineInIst.time);
         setAllowedMimeTypes(
             Array.isArray(round.allowed_mime_types) && round.allowed_mime_types.length
                 ? round.allowed_mime_types.join(', ')
@@ -292,10 +391,21 @@ function RoundsContent() {
     };
 
     const handleStateChange = async (roundId, newState) => {
+        const currentRound = rounds.find((item) => Number(item.id) === Number(roundId));
         try {
             await axios.put(`${API}/pda-admin/events/${eventSlug}/rounds/${roundId}`, {
                 state: newState,
             }, { headers: getAuthHeader() });
+            if (currentRound?.state) {
+                pushSavedUndo({
+                    label: `Undo round ${currentRound.round_no} state change`,
+                    command: {
+                        type: 'round_state_restore',
+                        round_id: Number(roundId),
+                        state: currentRound.state,
+                    },
+                });
+            }
             toast.success(`State changed to ${newState}`);
             fetchRounds();
         } catch (error) {
@@ -310,6 +420,14 @@ function RoundsContent() {
             await axios.put(`${API}/pda-admin/events/${eventSlug}/rounds/${revealRound.id}`, {
                 state: 'Reveal',
             }, { headers: getAuthHeader() });
+            pushSavedUndo({
+                label: `Undo round ${revealRound.round_no} reveal`,
+                command: {
+                    type: 'round_state_restore',
+                    round_id: Number(revealRound.id),
+                    state: revealRound.state || 'Completed',
+                },
+            });
             toast.success(`Round ${revealRound.round_no} revealed`);
             setRevealRound(null);
             fetchRounds();
@@ -337,6 +455,7 @@ function RoundsContent() {
         const current = sortedRounds;
         const fromIndex = current.findIndex((round) => round.id === roundId);
         if (fromIndex < 0) return;
+        const movedRound = current[fromIndex];
         const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1;
         if (toIndex < 0 || toIndex >= current.length) return;
         const targetRound = current[toIndex];
@@ -346,6 +465,16 @@ function RoundsContent() {
             await axios.put(`${API}/pda-admin/events/${eventSlug}/rounds/${roundId}`, {
                 round_no: Number(targetRound.round_no),
             }, { headers: getAuthHeader() });
+            pushSavedUndo({
+                label: `Undo round ${movedRound?.round_no || ''} reorder`.trim(),
+                command: {
+                    type: 'round_patch_restore',
+                    round_id: Number(roundId),
+                    payload: {
+                        round_no: Number(movedRound?.round_no || 0),
+                    },
+                },
+            });
             toast.success('Round order updated');
             fetchRounds();
         } catch (error) {
@@ -383,11 +512,30 @@ function RoundsContent() {
                             </div>
                             <div>
                                 <Label className="font-bold">Name *</Label>
-                                <Input value={name} onChange={(e) => setName(e.target.value)} required className="neo-input" />
+                                <Input
+                                    value={name}
+                                    onChange={(e) => {
+                                        const previous = name;
+                                        const next = e.target.value;
+                                        setName(next);
+                                        registerRoundFormUndo('Undo round name edit', () => setName(previous));
+                                    }}
+                                    required
+                                    className="neo-input"
+                                />
                             </div>
                             <div>
                                 <Label className="font-bold">Description</Label>
-                                <Textarea value={description} onChange={(e) => setDescription(e.target.value)} className="neo-input" />
+                                <Textarea
+                                    value={description}
+                                    onChange={(e) => {
+                                        const previous = description;
+                                        const next = e.target.value;
+                                        setDescription(next);
+                                        registerRoundFormUndo('Undo round description edit', () => setDescription(previous));
+                                    }}
+                                    className="neo-input"
+                                />
                             </div>
                             <div>
                                 <Label className="font-bold">Round Poster</Label>
@@ -439,20 +587,57 @@ function RoundsContent() {
                             </div>
                             <div>
                                 <Label className="font-bold">External URL</Label>
-                                <Input value={externalUrl} onChange={(e) => setExternalUrl(e.target.value)} placeholder="https://..." className="neo-input" />
+                                <Input
+                                    value={externalUrl}
+                                    onChange={(e) => {
+                                        const previous = externalUrl;
+                                        const next = e.target.value;
+                                        setExternalUrl(next);
+                                        registerRoundFormUndo('Undo external URL edit', () => setExternalUrl(previous));
+                                    }}
+                                    placeholder="https://..."
+                                    className="neo-input"
+                                />
                             </div>
                             <div>
                                 <Label className="font-bold">External URL Name</Label>
-                                <Input value={externalUrlName} onChange={(e) => setExternalUrlName(e.target.value)} placeholder="Explore Round" className="neo-input" />
+                                <Input
+                                    value={externalUrlName}
+                                    onChange={(e) => {
+                                        const previous = externalUrlName;
+                                        const next = e.target.value;
+                                        setExternalUrlName(next);
+                                        registerRoundFormUndo('Undo external URL label edit', () => setExternalUrlName(previous));
+                                    }}
+                                    placeholder="Explore Round"
+                                    className="neo-input"
+                                />
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <Label className="font-bold">Date</Label>
-                                    <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="neo-input" />
+                                    <Input
+                                        type="date"
+                                        value={date}
+                                        onChange={(e) => {
+                                            const previous = date;
+                                            const next = e.target.value;
+                                            setDate(next);
+                                            registerRoundFormUndo('Undo round date edit', () => setDate(previous));
+                                        }}
+                                        className="neo-input"
+                                    />
                                 </div>
                                 <div>
                                     <Label className="font-bold">Mode</Label>
-                                    <Select value={mode} onValueChange={setMode}>
+                                    <Select
+                                        value={mode}
+                                        onValueChange={(value) => {
+                                            const previous = mode;
+                                            setMode(value);
+                                            registerRoundFormUndo('Undo round mode change', () => setMode(previous));
+                                        }}
+                                    >
                                         <SelectTrigger className="neo-input"><SelectValue /></SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="Online">Online</SelectItem>
@@ -468,14 +653,26 @@ function RoundsContent() {
                                     <input
                                         type="checkbox"
                                         checked={requiresSubmission}
-                                        onChange={(e) => setRequiresSubmission(e.target.checked)}
+                                        onChange={(e) => {
+                                            const previous = requiresSubmission;
+                                            const next = e.target.checked;
+                                            setRequiresSubmission(next);
+                                            registerRoundFormUndo('Undo submission requirement change', () => setRequiresSubmission(previous));
+                                        }}
                                     />
                                 </div>
                                 {requiresSubmission ? (
                                     <>
                                         <div>
                                             <Label className="font-bold">Submission Mode</Label>
-                                            <Select value={submissionMode} onValueChange={setSubmissionMode}>
+                                            <Select
+                                                value={submissionMode}
+                                                onValueChange={(value) => {
+                                                    const previous = submissionMode;
+                                                    setSubmissionMode(value);
+                                                    registerRoundFormUndo('Undo submission mode change', () => setSubmissionMode(previous));
+                                                }}
+                                            >
                                                 <SelectTrigger className="neo-input"><SelectValue /></SelectTrigger>
                                                 <SelectContent>
                                                     <SelectItem value="file_or_link">File or Link</SelectItem>
@@ -484,30 +681,59 @@ function RoundsContent() {
                                         </div>
                                         <div className="grid grid-cols-2 gap-4">
                                             <div>
-                                                <Label className="font-bold">Submission Deadline</Label>
+                                                <Label className="font-bold">Submission Deadline Date (IST)</Label>
                                                 <Input
-                                                    type="datetime-local"
-                                                    value={submissionDeadline}
-                                                    onChange={(e) => setSubmissionDeadline(e.target.value)}
+                                                    type="date"
+                                                    value={submissionDeadlineDate}
+                                                    onChange={(e) => {
+                                                        const previous = submissionDeadlineDate;
+                                                        const next = e.target.value;
+                                                        setSubmissionDeadlineDate(next);
+                                                        registerRoundFormUndo('Undo submission deadline date edit', () => setSubmissionDeadlineDate(previous));
+                                                    }}
                                                     className="neo-input"
                                                 />
                                             </div>
                                             <div>
-                                                <Label className="font-bold">Max File Size (MB)</Label>
+                                                <Label className="font-bold">Submission Deadline Time (IST)</Label>
                                                 <Input
-                                                    type="number"
-                                                    min="1"
-                                                    value={maxFileSizeMb}
-                                                    onChange={(e) => setMaxFileSizeMb(e.target.value)}
+                                                    type="time"
+                                                    value={submissionDeadlineTime}
+                                                    onChange={(e) => {
+                                                        const previous = submissionDeadlineTime;
+                                                        const next = e.target.value;
+                                                        setSubmissionDeadlineTime(next);
+                                                        registerRoundFormUndo('Undo submission deadline time edit', () => setSubmissionDeadlineTime(previous));
+                                                    }}
                                                     className="neo-input"
                                                 />
                                             </div>
                                         </div>
                                         <div>
+                                            <Label className="font-bold">Max File Size (MB)</Label>
+                                            <Input
+                                                type="number"
+                                                min="1"
+                                                value={maxFileSizeMb}
+                                                onChange={(e) => {
+                                                    const previous = maxFileSizeMb;
+                                                    const next = e.target.value;
+                                                    setMaxFileSizeMb(next);
+                                                    registerRoundFormUndo('Undo max file size edit', () => setMaxFileSizeMb(previous));
+                                                }}
+                                                className="neo-input"
+                                            />
+                                        </div>
+                                        <div>
                                             <Label className="font-bold">Allowed MIME Types (comma separated)</Label>
                                             <Textarea
                                                 value={allowedMimeTypes}
-                                                onChange={(e) => setAllowedMimeTypes(e.target.value)}
+                                                onChange={(e) => {
+                                                    const previous = allowedMimeTypes;
+                                                    const next = e.target.value;
+                                                    setAllowedMimeTypes(next);
+                                                    registerRoundFormUndo('Undo MIME types edit', () => setAllowedMimeTypes(previous));
+                                                }}
                                                 className="neo-input"
                                             />
                                         </div>
@@ -517,7 +743,16 @@ function RoundsContent() {
                             <div className="space-y-3">
                                 <div className="flex items-center justify-between">
                                     <Label className="font-bold">Evaluation Criteria</Label>
-                                    <Button type="button" variant="outline" className="border-2 border-black" onClick={() => setCriteria((prev) => [...prev, createCriterion('', 0)])}>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="border-2 border-black"
+                                        onClick={() => {
+                                            const previous = criteria;
+                                            setCriteria((prev) => [...prev, createCriterion('', 0)]);
+                                            registerRoundFormUndo('Undo add criterion', () => setCriteria(previous));
+                                        }}
+                                    >
                                         <Plus className="w-4 h-4 mr-2" /> Add
                                     </Button>
                                 </div>
@@ -526,14 +761,24 @@ function RoundsContent() {
                                         <div key={criterion.id} className="grid grid-cols-[1fr_120px_auto] gap-2 items-center">
                                             <Input
                                                 value={criterion.name}
-                                                onChange={(e) => setCriteria((prev) => prev.map((item) => item.id === criterion.id ? { ...item, name: e.target.value } : item))}
+                                                onChange={(e) => {
+                                                    const previous = criteria;
+                                                    const next = e.target.value;
+                                                    setCriteria((prev) => prev.map((item) => item.id === criterion.id ? { ...item, name: next } : item));
+                                                    registerRoundFormUndo('Undo criterion name edit', () => setCriteria(previous));
+                                                }}
                                                 placeholder="Criteria name"
                                                 className="neo-input"
                                             />
                                             <Input
                                                 type="number"
                                                 value={criterion.max_marks}
-                                                onChange={(e) => setCriteria((prev) => prev.map((item) => item.id === criterion.id ? { ...item, max_marks: e.target.value } : item))}
+                                                onChange={(e) => {
+                                                    const previous = criteria;
+                                                    const next = e.target.value;
+                                                    setCriteria((prev) => prev.map((item) => item.id === criterion.id ? { ...item, max_marks: next } : item));
+                                                    registerRoundFormUndo('Undo criterion max marks edit', () => setCriteria(previous));
+                                                }}
                                                 placeholder="Max marks"
                                                 className="neo-input"
                                             />
@@ -541,7 +786,11 @@ function RoundsContent() {
                                                 type="button"
                                                 variant="outline"
                                                 className="border-2 border-black"
-                                                onClick={() => setCriteria((prev) => (prev.length > 1 ? prev.filter((item) => item.id !== criterion.id) : prev))}
+                                                onClick={() => {
+                                                    const previous = criteria;
+                                                    setCriteria((prev) => (prev.length > 1 ? prev.filter((item) => item.id !== criterion.id) : prev));
+                                                    registerRoundFormUndo('Undo criterion remove', () => setCriteria(previous));
+                                                }}
                                                 disabled={criteria.length === 1}
                                             >
                                                 <X className="w-4 h-4" />
@@ -622,7 +871,16 @@ function RoundsContent() {
                                             <Edit2 className="w-4 h-4" />
                                         </Button>
                                         {isDraftState(round.state) ? (
-                                            <Button size="sm" variant="outline" onClick={() => handleDelete(round.id)} className="border-2 border-black text-red-500">
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={() => warnNonUndoable({
+                                                    title: 'Delete Round Is Not Undoable',
+                                                    message: `Deleting Round ${round.round_no} cannot be undone from header Undo. Continue?`,
+                                                    proceed: () => handleDelete(round.id),
+                                                })}
+                                                className="border-2 border-black text-red-500"
+                                            >
                                                 <Trash2 className="w-4 h-4" />
                                             </Button>
                                         ) : null}

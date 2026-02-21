@@ -24,7 +24,12 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 function DashboardContent() {
     const { getAuthHeader } = useAuth();
-    const { eventInfo, eventSlug, refreshEventInfo } = useEventAdminShell();
+    const {
+        eventInfo,
+        eventSlug,
+        refreshEventInfo,
+        pushSavedUndo,
+    } = useEventAdminShell();
     const [stats, setStats] = useState(null);
     const [topMales, setTopMales] = useState([]);
     const [topFemales, setTopFemales] = useState([]);
@@ -78,6 +83,16 @@ function DashboardContent() {
             setTopFemales([]);
         }
     }, [eventInfo?.participant_mode, fetchTopByGender]);
+
+    useEffect(() => {
+        const onUndoApplied = (event) => {
+            if (event?.detail?.eventSlug !== eventSlug) return;
+            refreshEventInfo();
+            fetchDashboardStats();
+        };
+        window.addEventListener('event-admin-undo-applied', onUndoApplied);
+        return () => window.removeEventListener('event-admin-undo-applied', onUndoApplied);
+    }, [eventSlug, fetchDashboardStats, refreshEventInfo]);
 
     const handleExport = async (type, format) => {
         const endpoint = type === 'participants'
@@ -159,11 +174,19 @@ function DashboardContent() {
     const toggleEventRegistration = async () => {
         setActionLoading(true);
         try {
+            const previousRegistrationOpen = Boolean(isRegistrationOpen);
             const nextRegistrationOpen = !isRegistrationOpen;
             await axios.put(`${API}/pda-admin/events/${eventSlug}/registration`, {
                 registration_open: nextRegistrationOpen,
             }, { headers: getAuthHeader() });
             await Promise.all([refreshEventInfo(), fetchDashboardStats()]);
+            pushSavedUndo({
+                label: 'Undo registration toggle',
+                command: {
+                    type: 'event_flags_restore',
+                    registration_open: previousRegistrationOpen,
+                },
+            });
             toast.success(`Registration ${nextRegistrationOpen ? 'opened' : 'closed'}`);
         } catch (error) {
             toast.error(getErrorMessage(error, 'Failed to update registration state'));
@@ -175,11 +198,19 @@ function DashboardContent() {
     const toggleEventVisibility = async () => {
         setActionLoading(true);
         try {
+            const previousVisible = Boolean(isVisible);
             const nextVisible = !isVisible;
             await axios.put(`${API}/pda-admin/events/${eventSlug}/visibility`, {
                 is_visible: nextVisible,
             }, { headers: getAuthHeader() });
             await Promise.all([refreshEventInfo(), fetchDashboardStats()]);
+            pushSavedUndo({
+                label: 'Undo visibility toggle',
+                command: {
+                    type: 'event_flags_restore',
+                    is_visible: previousVisible,
+                },
+            });
             toast.success(`Event ${nextVisible ? 'is now visible' : 'is now hidden'} on public pages`);
         } catch (error) {
             toast.error(getErrorMessage(error, 'Failed to update event visibility'));

@@ -1373,6 +1373,150 @@ def ensure_pda_event_round_submission_tables(engine):
         )
 
 
+def ensure_pda_event_panel_tables(engine):
+    with engine.begin() as conn:
+        if _table_exists(conn, "pda_event_rounds"):
+            conn.execute(text("ALTER TABLE pda_event_rounds ADD COLUMN IF NOT EXISTS panel_mode_enabled BOOLEAN NOT NULL DEFAULT FALSE"))
+            conn.execute(
+                text(
+                    "ALTER TABLE pda_event_rounds "
+                    "ADD COLUMN IF NOT EXISTS panel_team_distribution_mode VARCHAR(32) NOT NULL DEFAULT 'team_count'"
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    UPDATE pda_event_rounds
+                    SET panel_team_distribution_mode = 'team_count'
+                    WHERE panel_team_distribution_mode IS NULL
+                       OR btrim(panel_team_distribution_mode) = ''
+                       OR lower(panel_team_distribution_mode) NOT IN ('team_count', 'member_count_weighted')
+                    """
+                )
+            )
+
+        has_event_tables = _table_exists(conn, "pda_events") and _table_exists(conn, "pda_event_rounds")
+        has_users = _table_exists(conn, "users")
+        has_teams = _table_exists(conn, "pda_event_teams")
+        if not has_event_tables:
+            return
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS pda_event_round_panels (
+                    id SERIAL PRIMARY KEY,
+                    event_id INTEGER NOT NULL REFERENCES pda_events(id) ON DELETE CASCADE,
+                    round_id INTEGER NOT NULL REFERENCES pda_event_rounds(id) ON DELETE CASCADE,
+                    panel_no INTEGER NOT NULL,
+                    name VARCHAR(255),
+                    panel_link VARCHAR(800),
+                    panel_time TIMESTAMPTZ,
+                    instructions TEXT,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_pda_event_round_panel_round_no "
+                "ON pda_event_round_panels(round_id, panel_no)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_pda_round_panels_event_round "
+                "ON pda_event_round_panels(event_id, round_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_pda_round_panels_round_no "
+                "ON pda_event_round_panels(round_id, panel_no)"
+            )
+        )
+
+        if has_users:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS pda_event_round_panel_members (
+                        id SERIAL PRIMARY KEY,
+                        event_id INTEGER NOT NULL REFERENCES pda_events(id) ON DELETE CASCADE,
+                        round_id INTEGER NOT NULL REFERENCES pda_event_rounds(id) ON DELETE CASCADE,
+                        panel_id INTEGER NOT NULL REFERENCES pda_event_round_panels(id) ON DELETE CASCADE,
+                        admin_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        created_at TIMESTAMPTZ DEFAULT now()
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_pda_event_round_panel_member "
+                    "ON pda_event_round_panel_members(round_id, panel_id, admin_user_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_pda_round_panel_members_round_panel "
+                    "ON pda_event_round_panel_members(round_id, panel_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_pda_round_panel_members_round_admin "
+                    "ON pda_event_round_panel_members(round_id, admin_user_id)"
+                )
+            )
+
+        if has_users and has_teams:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS pda_event_round_panel_assignments (
+                        id SERIAL PRIMARY KEY,
+                        event_id INTEGER NOT NULL REFERENCES pda_events(id) ON DELETE CASCADE,
+                        round_id INTEGER NOT NULL REFERENCES pda_event_rounds(id) ON DELETE CASCADE,
+                        panel_id INTEGER NOT NULL REFERENCES pda_event_round_panels(id) ON DELETE CASCADE,
+                        entity_type VARCHAR(10) NOT NULL,
+                        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                        team_id INTEGER REFERENCES pda_event_teams(id) ON DELETE CASCADE,
+                        assigned_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                        created_at TIMESTAMPTZ DEFAULT now(),
+                        updated_at TIMESTAMPTZ
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_pda_event_round_panel_assignment_entity "
+                    "ON pda_event_round_panel_assignments(round_id, entity_type, user_id, team_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_pda_round_panel_assign_round_panel "
+                    "ON pda_event_round_panel_assignments(round_id, panel_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_pda_round_panel_assign_round_entity_user "
+                    "ON pda_event_round_panel_assignments(round_id, entity_type, user_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_pda_round_panel_assign_round_entity_team "
+                    "ON pda_event_round_panel_assignments(round_id, entity_type, team_id)"
+                )
+            )
+
+
 def ensure_community_event_tables(engine):
     with engine.begin() as conn:
         conn.execute(

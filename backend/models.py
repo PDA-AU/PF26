@@ -357,7 +357,59 @@ class PdaEventRound(Base):
     submission_deadline = Column(DateTime(timezone=True), nullable=True)
     allowed_mime_types = Column(JSON, nullable=True)
     max_file_size_mb = Column(Integer, nullable=False, default=25)
+    panel_mode_enabled = Column(Boolean, nullable=False, default=False)
+    panel_team_distribution_mode = Column(String(32), nullable=False, default="team_count")
     is_frozen = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PdaEventRoundPanel(Base):
+    __tablename__ = "pda_event_round_panels"
+    __table_args__ = (
+        UniqueConstraint("round_id", "panel_no", name="uq_pda_event_round_panel_round_no"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("pda_events.id"), nullable=False, index=True)
+    round_id = Column(Integer, ForeignKey("pda_event_rounds.id"), nullable=False, index=True)
+    panel_no = Column(Integer, nullable=False)
+    name = Column(String(255), nullable=True)
+    panel_link = Column(String(800), nullable=True)
+    panel_time = Column(DateTime(timezone=True), nullable=True)
+    instructions = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PdaEventRoundPanelMember(Base):
+    __tablename__ = "pda_event_round_panel_members"
+    __table_args__ = (
+        UniqueConstraint("round_id", "panel_id", "admin_user_id", name="uq_pda_event_round_panel_member"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("pda_events.id"), nullable=False, index=True)
+    round_id = Column(Integer, ForeignKey("pda_event_rounds.id"), nullable=False, index=True)
+    panel_id = Column(Integer, ForeignKey("pda_event_round_panels.id"), nullable=False, index=True)
+    admin_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PdaEventRoundPanelAssignment(Base):
+    __tablename__ = "pda_event_round_panel_assignments"
+    __table_args__ = (
+        UniqueConstraint("round_id", "entity_type", "user_id", "team_id", name="uq_pda_event_round_panel_assignment_entity"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("pda_events.id"), nullable=False, index=True)
+    round_id = Column(Integer, ForeignKey("pda_event_rounds.id"), nullable=False, index=True)
+    panel_id = Column(Integer, ForeignKey("pda_event_round_panels.id"), nullable=False, index=True)
+    entity_type = Column(SQLEnum(PdaEventEntityType), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    team_id = Column(Integer, ForeignKey("pda_event_teams.id"), nullable=True, index=True)
+    assigned_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

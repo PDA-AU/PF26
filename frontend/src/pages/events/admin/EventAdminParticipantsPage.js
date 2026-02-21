@@ -43,7 +43,13 @@ const STATUSES = ['Active', 'Eliminated'];
 
 function ParticipantsContent() {
     const { getAuthHeader } = useAuth();
-    const { eventInfo, eventSlug } = useEventAdminShell();
+    const {
+        eventInfo,
+        eventSlug,
+        pushLocalUndo,
+        pushSavedUndo,
+        warnNonUndoable,
+    } = useEventAdminShell();
 
     const [rows, setRows] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -113,6 +119,15 @@ function ParticipantsContent() {
     }, [fetchRows]);
 
     useEffect(() => {
+        const onUndoApplied = (event) => {
+            if (event?.detail?.eventSlug !== eventSlug) return;
+            fetchRows();
+        };
+        window.addEventListener('event-admin-undo-applied', onUndoApplied);
+        return () => window.removeEventListener('event-admin-undo-applied', onUndoApplied);
+    }, [eventSlug, fetchRows]);
+
+    useEffect(() => {
         setCurrentPage(1);
     }, [filters.batch, filters.department, filters.gender, filters.search, filters.status]);
 
@@ -157,6 +172,7 @@ function ParticipantsContent() {
     };
 
     const clearFilters = () => {
+        const previous = { ...filters };
         setFilters({
             department: '',
             gender: '',
@@ -164,15 +180,34 @@ function ParticipantsContent() {
             status: '',
             search: '',
         });
+        pushLocalUndo({
+            label: 'Undo clear participant filters',
+            undoFn: () => setFilters(previous),
+        });
     };
 
-    const handleStatusChange = async (entityId, nextStatus) => {
+    const handleStatusChange = async (entityId, nextStatus, currentStatus) => {
         try {
             await axios.put(
                 `${API}/pda-admin/events/${eventSlug}/participants/${entityId}/status?status=${encodeURIComponent(nextStatus)}`,
                 {},
                 { headers: getAuthHeader() }
             );
+            if (currentStatus && currentStatus !== nextStatus) {
+                pushSavedUndo({
+                    label: 'Undo participant status change',
+                    command: {
+                        type: 'participant_status_bulk_restore',
+                        updates: [
+                            {
+                                entity_type: 'user',
+                                entity_id: Number(entityId),
+                                status: currentStatus,
+                            },
+                        ],
+                    },
+                });
+            }
             toast.success('Status updated');
             fetchRows();
         } catch (error) {
@@ -304,13 +339,32 @@ function ParticipantsContent() {
                         <Input
                             placeholder="Search by name, code, email..."
                             value={filters.search}
-                            onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
+                            onChange={(e) => {
+                                const previous = { ...filters };
+                                const nextSearch = e.target.value;
+                                setFilters((prev) => ({ ...prev, search: nextSearch }));
+                                pushLocalUndo({
+                                    label: 'Undo participant search change',
+                                    undoFn: () => setFilters(previous),
+                                });
+                            }}
                             className="neo-input pl-10"
                         />
                     </div>
 
                     {!isTeamMode ? (
-                        <Select value={filters.department || 'all'} onValueChange={(value) => setFilters((prev) => ({ ...prev, department: value === 'all' ? '' : value }))}>
+                        <Select
+                            value={filters.department || 'all'}
+                            onValueChange={(value) => {
+                                const previous = { ...filters };
+                                const nextValue = value === 'all' ? '' : value;
+                                setFilters((prev) => ({ ...prev, department: nextValue }));
+                                pushLocalUndo({
+                                    label: 'Undo department filter change',
+                                    undoFn: () => setFilters(previous),
+                                });
+                            }}
+                        >
                             <SelectTrigger className="neo-input">
                                 <SelectValue placeholder="Department" />
                             </SelectTrigger>
@@ -324,7 +378,18 @@ function ParticipantsContent() {
                     ) : null}
 
                     {!isTeamMode ? (
-                        <Select value={filters.gender || 'all'} onValueChange={(value) => setFilters((prev) => ({ ...prev, gender: value === 'all' ? '' : value }))}>
+                        <Select
+                            value={filters.gender || 'all'}
+                            onValueChange={(value) => {
+                                const previous = { ...filters };
+                                const nextValue = value === 'all' ? '' : value;
+                                setFilters((prev) => ({ ...prev, gender: nextValue }));
+                                pushLocalUndo({
+                                    label: 'Undo gender filter change',
+                                    undoFn: () => setFilters(previous),
+                                });
+                            }}
+                        >
                             <SelectTrigger className="neo-input">
                                 <SelectValue placeholder="Gender" />
                             </SelectTrigger>
@@ -338,7 +403,18 @@ function ParticipantsContent() {
                     ) : null}
 
                     {!isTeamMode ? (
-                        <Select value={filters.batch || 'all'} onValueChange={(value) => setFilters((prev) => ({ ...prev, batch: value === 'all' ? '' : value }))}>
+                        <Select
+                            value={filters.batch || 'all'}
+                            onValueChange={(value) => {
+                                const previous = { ...filters };
+                                const nextValue = value === 'all' ? '' : value;
+                                setFilters((prev) => ({ ...prev, batch: nextValue }));
+                                pushLocalUndo({
+                                    label: 'Undo batch filter change',
+                                    undoFn: () => setFilters(previous),
+                                });
+                            }}
+                        >
                             <SelectTrigger className="neo-input">
                                 <SelectValue placeholder="Batch" />
                             </SelectTrigger>
@@ -351,7 +427,18 @@ function ParticipantsContent() {
                         </Select>
                     ) : null}
 
-                    <Select value={filters.status || 'all'} onValueChange={(value) => setFilters((prev) => ({ ...prev, status: value === 'all' ? '' : value }))}>
+                    <Select
+                        value={filters.status || 'all'}
+                        onValueChange={(value) => {
+                            const previous = { ...filters };
+                            const nextValue = value === 'all' ? '' : value;
+                            setFilters((prev) => ({ ...prev, status: nextValue }));
+                            pushLocalUndo({
+                                label: 'Undo status filter change',
+                                undoFn: () => setFilters(previous),
+                            });
+                        }}
+                    >
                         <SelectTrigger className="neo-input">
                             <SelectValue placeholder="Status" />
                         </SelectTrigger>
@@ -499,7 +586,7 @@ function ParticipantsContent() {
                                 className={`flex-1 ${pendingStatus === 'Eliminated' ? 'bg-red-500' : 'bg-green-500'} text-white border-2 border-black`}
                                 onClick={() => {
                                     if (statusTarget && pendingStatus) {
-                                        handleStatusChange(statusTarget.entity_id, pendingStatus);
+                                        handleStatusChange(statusTarget.entity_id, pendingStatus, statusTarget.status);
                                     }
                                     setStatusDialogOpen(false);
                                 }}
@@ -539,9 +626,15 @@ function ParticipantsContent() {
                                 disabled={!teamDeleteTarget || deletingTeam}
                                 onClick={async () => {
                                     if (!teamDeleteTarget) return;
-                                    await handleTeamDelete(teamDeleteTarget.entity_id);
-                                    setTeamDeleteDialogOpen(false);
-                                    setTeamDeleteTarget(null);
+                                    warnNonUndoable({
+                                        title: 'Team Delete Is Not Undoable',
+                                        message: `Deleting ${teamDeleteTarget.name || 'this team'} cannot be undone from header Undo. Continue?`,
+                                        proceed: async () => {
+                                            await handleTeamDelete(teamDeleteTarget.entity_id);
+                                            setTeamDeleteDialogOpen(false);
+                                            setTeamDeleteTarget(null);
+                                        },
+                                    });
                                 }}
                             >
                                 {deletingTeam ? 'Deleting...' : 'Delete Team'}
@@ -593,10 +686,16 @@ function ParticipantsContent() {
                                 disabled={!participantDeleteTarget || deletingParticipant || participantDeleteConfirmText.trim() !== 'DELETE'}
                                 onClick={async () => {
                                     if (!participantDeleteTarget) return;
-                                    await handleParticipantDelete(participantDeleteTarget.entity_id);
-                                    setParticipantDeleteDialogOpen(false);
-                                    setParticipantDeleteTarget(null);
-                                    setParticipantDeleteConfirmText('');
+                                    warnNonUndoable({
+                                        title: 'Participant Delete Is Not Undoable',
+                                        message: `Deleting ${participantDeleteTarget.name || 'this participant'} cannot be undone from header Undo. Continue?`,
+                                        proceed: async () => {
+                                            await handleParticipantDelete(participantDeleteTarget.entity_id);
+                                            setParticipantDeleteDialogOpen(false);
+                                            setParticipantDeleteTarget(null);
+                                            setParticipantDeleteConfirmText('');
+                                        },
+                                    });
                                 }}
                             >
                                 {deletingParticipant ? 'Deleting...' : 'Delete Participant'}

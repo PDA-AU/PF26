@@ -14,7 +14,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 function LogsContent() {
     const { getAuthHeader } = useAuth();
-    const { eventSlug } = useEventAdminShell();
+    const { eventSlug, pushLocalUndo } = useEventAdminShell();
     const [rows, setRows] = useState([]);
     const [loading, setLoading] = useState(true);
     const [logLimit, setLogLimit] = useState('50');
@@ -62,11 +62,34 @@ function LogsContent() {
                 <div className="flex flex-wrap items-end gap-3">
                     <div>
                         <Label>Action</Label>
-                        <Input value={filters.action} onChange={(e) => setFilters((prev) => ({ ...prev, action: e.target.value }))} placeholder="Filter action" />
+                        <Input
+                            value={filters.action}
+                            onChange={(e) => {
+                                const previous = { ...filters };
+                                const nextValue = e.target.value;
+                                setFilters((prev) => ({ ...prev, action: nextValue }));
+                                pushLocalUndo({
+                                    label: 'Undo logs action filter',
+                                    undoFn: () => setFilters(previous),
+                                });
+                            }}
+                            placeholder="Filter action"
+                        />
                     </div>
                     <div>
                         <Label>Method</Label>
-                        <Select value={filters.method || 'any'} onValueChange={(value) => setFilters((prev) => ({ ...prev, method: value === 'any' ? '' : value }))}>
+                        <Select
+                            value={filters.method || 'any'}
+                            onValueChange={(value) => {
+                                const previous = { ...filters };
+                                const nextValue = value === 'any' ? '' : value;
+                                setFilters((prev) => ({ ...prev, method: nextValue }));
+                                pushLocalUndo({
+                                    label: 'Undo logs method filter',
+                                    undoFn: () => setFilters(previous),
+                                });
+                            }}
+                        >
                             <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="any">Any</SelectItem>
@@ -79,11 +102,33 @@ function LogsContent() {
                     </div>
                     <div className="min-w-[220px]">
                         <Label>Path Contains</Label>
-                        <Input value={filters.path_contains} onChange={(e) => setFilters((prev) => ({ ...prev, path_contains: e.target.value }))} placeholder="/rounds/" />
+                        <Input
+                            value={filters.path_contains}
+                            onChange={(e) => {
+                                const previous = { ...filters };
+                                const nextValue = e.target.value;
+                                setFilters((prev) => ({ ...prev, path_contains: nextValue }));
+                                pushLocalUndo({
+                                    label: 'Undo logs path filter',
+                                    undoFn: () => setFilters(previous),
+                                });
+                            }}
+                            placeholder="/rounds/"
+                        />
                     </div>
                     <div>
                         <Label>Limit</Label>
-                        <Select value={logLimit} onValueChange={(value) => setLogLimit(value)}>
+                        <Select
+                            value={logLimit}
+                            onValueChange={(value) => {
+                                const previous = logLimit;
+                                setLogLimit(value);
+                                pushLocalUndo({
+                                    label: 'Undo logs limit change',
+                                    undoFn: () => setLogLimit(previous),
+                                });
+                            }}
+                        >
                             <SelectTrigger className="w-[110px]"><SelectValue /></SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="25">25</SelectItem>
@@ -98,8 +143,17 @@ function LogsContent() {
                         variant="outline"
                         className="border-black/20"
                         onClick={() => {
+                            const previousFilters = { ...filters };
+                            const previousOffset = logOffset;
                             setFilters({ action: '', method: '', path_contains: '' });
                             setLogOffset(0);
+                            pushLocalUndo({
+                                label: 'Undo logs filter reset',
+                                undoFn: () => {
+                                    setFilters(previousFilters);
+                                    setLogOffset(previousOffset);
+                                },
+                            });
                         }}
                     >
                         Reset
