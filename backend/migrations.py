@@ -1385,6 +1385,12 @@ def ensure_pda_event_panel_tables(engine):
             )
             conn.execute(
                 text(
+                    "ALTER TABLE pda_event_rounds "
+                    "ADD COLUMN IF NOT EXISTS panel_structure_locked BOOLEAN NOT NULL DEFAULT FALSE"
+                )
+            )
+            conn.execute(
+                text(
                     """
                     UPDATE pda_event_rounds
                     SET panel_team_distribution_mode = 'team_count'

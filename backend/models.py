@@ -359,6 +359,7 @@ class PdaEventRound(Base):
     max_file_size_mb = Column(Integer, nullable=False, default=25)
     panel_mode_enabled = Column(Boolean, nullable=False, default=False)
     panel_team_distribution_mode = Column(String(32), nullable=False, default="team_count")
+    panel_structure_locked = Column(Boolean, nullable=False, default=False)
     is_frozen = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

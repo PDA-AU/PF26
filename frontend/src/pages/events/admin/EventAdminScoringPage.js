@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import {
     Save,
     Lock,
+    LockOpen,
     ArrowLeft,
     Search,
     AlertTriangle,
@@ -249,6 +250,7 @@ function ScoringContent() {
     const [panelConfig, setPanelConfig] = useState({
         panel_mode_enabled: false,
         panel_team_distribution_mode: 'team_count',
+        panel_structure_locked: false,
         current_admin_is_superadmin: false,
         my_panel_ids: [],
         available_admins: [],
@@ -262,7 +264,7 @@ function ScoringContent() {
     const [panelAssignmentSaving, setPanelAssignmentSaving] = useState(false);
     const [panelAssignmentOriginal, setPanelAssignmentOriginal] = useState({});
     const [panelAssignmentDraft, setPanelAssignmentDraft] = useState({});
-    const [panelCountDraft, setPanelCountDraft] = useState('2');
+    const [panelCountDraft, setPanelCountDraft] = useState('1');
     const [panelAutoAssignOnlyUnassigned, setPanelAutoAssignOnlyUnassigned] = useState(false);
     const [panelEmailSubject, setPanelEmailSubject] = useState('');
     const [panelEmailHtml, setPanelEmailHtml] = useState('');
@@ -306,6 +308,7 @@ function ScoringContent() {
         const safeConfig = {
             panel_mode_enabled: safe.panel_mode_enabled === true || roundData?.panel_mode_enabled === true,
             panel_team_distribution_mode: safe.panel_team_distribution_mode || roundData?.panel_team_distribution_mode || 'team_count',
+            panel_structure_locked: safe.panel_structure_locked === true || roundData?.panel_structure_locked === true,
             current_admin_is_superadmin: safe.current_admin_is_superadmin === true,
             my_panel_ids: safeMyPanelIds,
             available_admins: Array.isArray(safe.available_admins) ? safe.available_admins : [],
@@ -330,6 +333,7 @@ function ScoringContent() {
                 ? panel.members.map((member) => Number(member.admin_user_id)).filter(Number.isFinite)
                 : [],
         })));
+        setPanelCountDraft(String(Math.max(1, safePanels.length || 1)));
         setPanelFilter((prev) => {
             const hasMyPanels = !safeConfig.current_admin_is_superadmin && safeMyPanelIds.length > 0;
             const validPanelIds = new Set(safePanels.map((panel) => Number(panel.id)));
@@ -390,23 +394,27 @@ function ScoringContent() {
                     setPanelConfig({
                         panel_mode_enabled: currentRound?.panel_mode_enabled === true,
                         panel_team_distribution_mode: currentRound?.panel_team_distribution_mode || 'team_count',
+                        panel_structure_locked: currentRound?.panel_structure_locked === true,
                         current_admin_is_superadmin: false,
                         my_panel_ids: [],
                         available_admins: [],
                         panels: [],
                     });
                     setPanelDrafts([]);
+                    setPanelCountDraft('1');
                 }
             } else {
                 setPanelConfig({
                     panel_mode_enabled: false,
                     panel_team_distribution_mode: 'team_count',
+                    panel_structure_locked: false,
                     current_admin_is_superadmin: false,
                     my_panel_ids: [],
                     available_admins: [],
                     panels: [],
                 });
                 setPanelDrafts([]);
+                setPanelCountDraft('1');
             }
         } catch (error) {
             toast.error(getErrorMessage(error, 'Failed to load scoring data'));
@@ -415,12 +423,14 @@ function ScoringContent() {
             setPanelConfig({
                 panel_mode_enabled: false,
                 panel_team_distribution_mode: 'team_count',
+                panel_structure_locked: false,
                 current_admin_is_superadmin: false,
                 my_panel_ids: [],
                 available_admins: [],
                 panels: [],
             });
             setPanelDrafts([]);
+            setPanelCountDraft('1');
             setPanelAssignmentOriginal({});
             setPanelAssignmentDraft({});
             setScoreDraftOriginalByEntity({});
@@ -448,6 +458,7 @@ function ScoringContent() {
     const isSubmissionRound = Boolean(round?.requires_submission);
     const panelModeEnabled = Boolean(panelConfig.panel_mode_enabled || round?.panel_mode_enabled);
     const panelDistributionMode = panelConfig.panel_team_distribution_mode || round?.panel_team_distribution_mode || 'team_count';
+    const isPanelStructureLocked = Boolean(panelConfig.panel_structure_locked || round?.panel_structure_locked);
     const isTeamMode = entityMode === 'team';
     const panelRows = useMemo(() => (Array.isArray(panelConfig.panels) ? panelConfig.panels : []), [panelConfig.panels]);
     const panelById = useMemo(
@@ -800,6 +811,32 @@ function ScoringContent() {
             await fetchRoundData();
         } catch (error) {
             toast.error(getErrorMessage(error, 'Failed to update team distribution mode'));
+        } finally {
+            setPanelModeSaving(false);
+        }
+    };
+
+    const updateRoundPanelStructureLock = async (locked) => {
+        const previousValue = Boolean(isPanelStructureLocked);
+        setPanelModeSaving(true);
+        try {
+            await axios.put(`${API}/pda-admin/events/${eventSlug}/rounds/${roundId}`, {
+                panel_structure_locked: Boolean(locked),
+            }, { headers: getAuthHeader() });
+            pushSavedUndo({
+                label: 'Undo panel lock change',
+                command: {
+                    type: 'round_patch_restore',
+                    round_id: Number(roundId),
+                    payload: {
+                        panel_structure_locked: previousValue,
+                    },
+                },
+            });
+            toast.success(`Panels ${locked ? 'locked' : 'unlocked'}`);
+            await fetchRoundData();
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to update panel lock'));
         } finally {
             setPanelModeSaving(false);
         }
@@ -1470,7 +1507,7 @@ function ScoringContent() {
                                         <Lock className="w-4 h-4 mr-2" /> Freeze
                                     </Button>
                                 </DialogTrigger>
-                                <DialogContent className="border-4 border-black">
+                                <DialogContent className="border-4 border-black w-[calc(100vw-2rem)] sm:w-full max-h-[85vh] overflow-y-auto">
                                     <DialogHeader>
                                         <DialogTitle className="font-heading font-bold text-xl flex items-center gap-2">
                                             <AlertTriangle className="w-6 h-6 text-orange-500" /> Freeze Round
@@ -1513,7 +1550,7 @@ function ScoringContent() {
                     }
                 }}
             >
-                <DialogContent className="border-4 border-black max-w-3xl">
+                <DialogContent className="border-4 border-black max-w-3xl w-[calc(100vw-2rem)] sm:w-full max-h-[85vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle className="font-heading font-bold text-xl">Edit Evaluation Criteria</DialogTitle>
                     </DialogHeader>
@@ -1523,7 +1560,7 @@ function ScoringContent() {
                         </p>
                         <div className="space-y-2">
                             {criteriaDraft.map((criterion) => (
-                                <div key={criterion.id} className="grid grid-cols-[1fr_130px_auto] gap-2 items-end">
+                                <div key={criterion.id} className="grid grid-cols-1 sm:grid-cols-[1fr_130px_auto] gap-2 items-end">
                                     <div className="space-y-1">
                                         <Label className="text-xs uppercase tracking-wide text-gray-500">Criterion</Label>
                                         <Input
@@ -1618,7 +1655,7 @@ function ScoringContent() {
                     }
                 }}
             >
-                <DialogContent className="border-4 border-black max-w-4xl">
+                <DialogContent className="border-4 border-black max-w-4xl w-[calc(100vw-2rem)] sm:w-full max-h-[85vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle className="font-heading font-bold text-xl">Import Preview</DialogTitle>
                     </DialogHeader>
@@ -1728,7 +1765,7 @@ function ScoringContent() {
                     }
                 }}
             >
-                <DialogContent className="border-4 border-black max-w-md">
+                <DialogContent className="border-4 border-black max-w-md w-[calc(100vw-2rem)] sm:w-full max-h-[85vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle className="font-heading font-bold text-xl flex items-center gap-2">
                             <AlertTriangle className="w-5 h-5 text-orange-500" /> Unsaved Changes
@@ -1830,14 +1867,14 @@ function ScoringContent() {
                                     onChange={(e) => setPanelCountDraft(e.target.value)}
                                     className="neo-input w-[110px]"
                                     placeholder="Panels"
-                                    disabled={panelSaving || round?.is_frozen}
+                                    disabled={panelSaving || panelModeSaving || round?.is_frozen || isPanelStructureLocked}
                                 />
                                 <Button
                                     type="button"
                                     onClick={generatePanelDraftsFromCount}
                                     variant="outline"
                                     className="border-2 border-black"
-                                    disabled={panelSaving || round?.is_frozen}
+                                    disabled={panelSaving || panelModeSaving || round?.is_frozen || isPanelStructureLocked}
                                 >
                                     Generate Panels
                                 </Button>
@@ -1846,9 +1883,22 @@ function ScoringContent() {
                                     onClick={addPanelDraft}
                                     variant="outline"
                                     className="border-2 border-black"
-                                    disabled={panelSaving || round?.is_frozen}
+                                    disabled={panelSaving || panelModeSaving || round?.is_frozen || isPanelStructureLocked}
                                 >
                                     <Plus className="w-4 h-4 mr-2" /> Add Panel
+                                </Button>
+                                <Button
+                                    type="button"
+                                    onClick={() => runWithUnsavedGuard(
+                                        () => { updateRoundPanelStructureLock(!isPanelStructureLocked); },
+                                        'Changing panel lock will refresh round data. Continue without saving pending changes?'
+                                    )}
+                                    variant="outline"
+                                    className="border-2 border-black bg-white"
+                                    disabled={panelModeSaving || round?.is_frozen}
+                                >
+                                    {isPanelStructureLocked ? <LockOpen className="w-4 h-4 mr-2" /> : <Lock className="w-4 h-4 mr-2" />}
+                                    {isPanelStructureLocked ? 'Unlock Panels' : 'Lock Panels'}
                                 </Button>
                                 
                                 <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
@@ -1890,10 +1940,10 @@ function ScoringContent() {
                                                     type="number"
                                                     min={1}
                                                     value={panel.panel_no}
-                                                    onChange={(e) => updatePanelDraftField(panel._draftId, 'panel_no', e.target.value)}
-                                                    className="neo-input"
+                                                    readOnly
+                                                    className="neo-input bg-slate-100"
                                                     placeholder="No"
-                                                    disabled={panelSaving || round?.is_frozen}
+                                                    disabled
                                                 />
                                                 <Input
                                                     value={panel.panel_name}
@@ -1928,7 +1978,7 @@ function ScoringContent() {
                                                     variant="outline"
                                                     className="border-2 border-black"
                                                     onClick={() => removePanelDraft(panel._draftId)}
-                                                    disabled={panelSaving || round?.is_frozen}
+                                                    disabled={panelSaving || round?.is_frozen || isPanelStructureLocked}
                                                 >
                                                     <X className="w-4 h-4" />
                                                 </Button>
@@ -2085,7 +2135,7 @@ function ScoringContent() {
                     <h3 className="font-heading font-bold text-xl">No Entries Match Current Filters</h3>
                 </div>
             ) : (
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto pb-1">
                     <table className="neo-table">
                         <thead>
                             <tr>
@@ -2096,10 +2146,10 @@ function ScoringContent() {
                                 {isSubmissionRound ? <th>Submission</th> : null}
                                 <th>Present</th>
                                 {criteria.map((criterion, index) => (
-                                    <th key={`${criterion.name}-${index}`}>{criterion.name} (/{criterion.max_marks})</th>
+                                    <th key={`${criterion.name}-${index}`} className="min-w-[140px] whitespace-nowrap">{criterion.name} (/{criterion.max_marks})</th>
                                 ))}
                                 <th>Total</th>
-                                <th>Round Score</th>
+                                <th className="min-w-[140px] whitespace-nowrap">Round Score</th>
                                 {round?.is_frozen ? <th>Round Rank</th> : null}
                             </tr>
                         </thead>
@@ -2180,22 +2230,24 @@ function ScoringContent() {
                                             />
                                         </td>
                                         {criteria.map((criterion, index) => (
-                                            <td key={`${criterion.name}-${index}`}>
+                                            <td key={`${criterion.name}-${index}`} className="min-w-[140px]">
                                                 <Input
                                                     type="number"
                                                     value={row.criteria_scores?.[criterion.name] ?? ''}
                                                     onChange={(e) => handleScoreChange(row._entityType, row._entityId, criterion.name, e.target.value)}
                                                     onBlur={() => handleScoreBlur(row._entityType, row._entityId, criterion.name)}
                                                     disabled={!row.is_present || !rowEditable}
-                                                    className="neo-input w-20"
+                                                    className="neo-input h-10 w-full min-w-[110px]"
                                                     min={0}
                                                     max={criterion.max_marks}
                                                 />
                                             </td>
                                         ))}
                                         <td className="font-bold">{totalScore}</td>
-                                        <td>
-                                            <span className="bg-primary text-white px-2 py-1 border-2 border-black font-bold">{normalized}</span>
+                                        <td className="min-w-[140px]">
+                                            <span className="inline-flex h-10 w-full min-w-[110px] items-center justify-center bg-primary text-white px-2 py-1 border-2 border-black font-bold">
+                                                {normalized}
+                                            </span>
                                         </td>
                                         {round?.is_frozen ? <td className="font-bold">{roundRank}</td> : null}
                                     </tr>

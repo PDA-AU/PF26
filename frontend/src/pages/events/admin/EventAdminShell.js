@@ -318,7 +318,7 @@ export default function EventAdminShell({
                 </main>
             </div>
             <Dialog open={undoConfirmOpen} onOpenChange={setUndoConfirmOpen}>
-                <DialogContent className="border-4 border-black bg-white max-w-md">
+                <DialogContent className="border-4 border-black bg-white max-w-md w-[calc(100vw-2rem)] sm:w-full max-h-[85vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle className="font-heading text-xl font-black">Confirm Undo</DialogTitle>
                     </DialogHeader>
@@ -349,7 +349,7 @@ export default function EventAdminShell({
                 </DialogContent>
             </Dialog>
             <Dialog open={nonUndoableOpen} onOpenChange={setNonUndoableOpen}>
-                <DialogContent className="border-4 border-black bg-white max-w-md">
+                <DialogContent className="border-4 border-black bg-white max-w-md w-[calc(100vw-2rem)] sm:w-full max-h-[85vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle className="font-heading text-xl font-black flex items-center gap-2">
                             <AlertTriangle className="w-5 h-5 text-orange-500" /> {nonUndoableTitle}

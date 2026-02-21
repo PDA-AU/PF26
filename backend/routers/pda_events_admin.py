@@ -1928,6 +1928,7 @@ def create_round(
             if hasattr(payload.panel_team_distribution_mode, "value")
             else payload.panel_team_distribution_mode
         ),
+        panel_structure_locked=bool(payload.panel_structure_locked),
     )
     db.add(round_row)
     _sync_event_round_count(db, event.id)
@@ -2159,17 +2160,14 @@ def _event_admin_options(db: Session, event: PdaEvent) -> List[PdaRoundPanelAdmi
     )
     options: List[PdaRoundPanelAdminOption] = []
     for admin_row, user in joined:
+        user_regno = str(user.regno or "").strip()
+        if user_regno == "0000000000":
+            continue
         policy = admin_row.policy if isinstance(admin_row.policy, dict) else {}
-        events = policy.get("events") if isinstance(policy.get("events"), dict) else {}
-        is_superadmin = bool(policy.get("superAdmin"))
-        if is_superadmin:
-            continue
-        if not bool(events.get(event.slug)):
-            continue
         options.append(
             PdaRoundPanelAdminOption(
                 admin_user_id=int(user.id),
-                regno=str(user.regno or ""),
+                regno=user_regno,
                 name=str(user.name or user.regno or f"User {user.id}"),
                 email=str(user.email or "").strip() or None,
             )
@@ -2209,14 +2207,14 @@ def _build_round_panel_list_response(
     )
     member_map: Dict[int, List[PdaRoundPanelMemberResponse]] = {}
     for member_row, user, admin_row in members:
-        policy = admin_row.policy if admin_row and isinstance(admin_row.policy, dict) else {}
-        if bool(policy.get("superAdmin")):
+        user_regno = str(user.regno or "").strip()
+        if user_regno == "0000000000":
             continue
         panel_id = int(member_row.panel_id)
         member_map.setdefault(panel_id, []).append(
             PdaRoundPanelMemberResponse(
                 admin_user_id=int(user.id),
-                regno=str(user.regno or ""),
+                regno=user_regno,
                 name=str(user.name or user.regno or f"User {user.id}"),
                 email=str(user.email or "").strip() or None,
             )
@@ -2271,6 +2269,7 @@ def _build_round_panel_list_response(
     return PdaRoundPanelListResponse(
         panel_mode_enabled=bool(round_row.panel_mode_enabled),
         panel_team_distribution_mode=_normalize_panel_distribution_mode(round_row.panel_team_distribution_mode),
+        panel_structure_locked=bool(round_row.panel_structure_locked),
         current_admin_is_superadmin=is_superadmin,
         my_panel_ids=sorted(my_panel_ids),
         available_admins=_event_admin_options(db, event),
@@ -2354,6 +2353,7 @@ def update_round_panels(
     panel_nos = [int(item.panel_no) for item in panel_defs]
     if len(panel_nos) != len(set(panel_nos)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="panel_no must be unique")
+    panel_structure_locked = bool(round_row.panel_structure_locked)
 
     existing_panels = (
         db.query(PdaEventRoundPanel)
@@ -2364,10 +2364,10 @@ def update_round_panels(
         .all()
     )
     existing_by_id = {int(panel.id): panel for panel in existing_panels}
+    existing_panel_ids = set(existing_by_id.keys())
+    seen_existing_panel_ids: Set[int] = set()
     kept_existing_panel_ids: Set[int] = set()
     panel_member_targets: Dict[int, Set[int]] = {}
-    desired_panel_no_by_id: Dict[int, int] = {}
-    touched_existing_panel_ids: List[int] = []
     pending_new_panels: List[Dict[str, object]] = []
     target_admin_ids: Set[int] = set()
 
@@ -2387,18 +2387,24 @@ def update_round_panels(
         target_admin_ids.update(member_admin_user_ids)
 
         if panel_def.id is not None:
-            panel_row = existing_by_id.get(int(panel_def.id))
+            panel_id = int(panel_def.id)
+            if panel_id in seen_existing_panel_ids:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Duplicate panel id in payload: {panel_id}")
+            seen_existing_panel_ids.add(panel_id)
+            panel_row = existing_by_id.get(panel_id)
             if not panel_row:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Panel {panel_def.id} not found")
+            if target_panel_no != int(panel_row.panel_no):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="panel_no cannot be changed")
             panel_row.name = panel_name
             panel_row.panel_link = panel_link
             panel_row.panel_time = panel_time
             panel_row.instructions = instructions
             kept_existing_panel_ids.add(int(panel_row.id))
             panel_member_targets[int(panel_row.id)] = member_admin_user_ids
-            desired_panel_no_by_id[int(panel_row.id)] = target_panel_no
-            touched_existing_panel_ids.append(int(panel_row.id))
             continue
+        if panel_structure_locked:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Panel structure is locked; cannot add new panels")
 
         pending_new_panels.append(
             {
@@ -2410,6 +2416,14 @@ def update_round_panels(
                 "member_admin_user_ids": member_admin_user_ids,
             }
         )
+
+    if panel_structure_locked:
+        missing_panel_ids = sorted(existing_panel_ids - seen_existing_panel_ids)
+        if missing_panel_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Panel structure is locked; missing panel ids in payload: {missing_panel_ids}",
+            )
 
     allowed_admin_ids = {
         int(option.admin_user_id)
@@ -2423,6 +2437,8 @@ def update_round_panels(
         )
 
     removable_panel_ids = [panel_id for panel_id in existing_by_id.keys() if panel_id not in kept_existing_panel_ids]
+    if panel_structure_locked and removable_panel_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Panel structure is locked; cannot delete panels")
     if removable_panel_ids:
         db.query(PdaEventRoundPanelAssignment).filter(
             PdaEventRoundPanelAssignment.event_id == event.id,
@@ -2439,21 +2455,6 @@ def update_round_panels(
             PdaEventRoundPanel.round_id == round_row.id,
             PdaEventRoundPanel.id.in_(removable_panel_ids),
         ).delete(synchronize_session=False)
-
-    # Avoid transient unique conflicts for (round_id, panel_no) during re-order/swap updates.
-    # Example: panel 1->2 and panel 2->1 would collide without two-phase renumbering.
-    for idx, panel_id in enumerate(sorted(set(touched_existing_panel_ids))):
-        panel_row = existing_by_id.get(panel_id)
-        if panel_row is None:
-            continue
-        panel_row.panel_no = -1000000 - idx
-    if touched_existing_panel_ids:
-        db.flush()
-        for panel_id in sorted(set(touched_existing_panel_ids)):
-            panel_row = existing_by_id.get(panel_id)
-            if panel_row is None:
-                continue
-            panel_row.panel_no = int(desired_panel_no_by_id.get(panel_id, panel_row.panel_no))
 
     for pending in pending_new_panels:
         panel_row = PdaEventRoundPanel(

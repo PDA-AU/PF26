@@ -1484,6 +1484,7 @@ class PdaManagedRoundCreate(BaseModel):
     max_file_size_mb: int = Field(default=25, ge=1, le=500)
     panel_mode_enabled: bool = False
     panel_team_distribution_mode: PdaManagedPanelTeamDistributionModeEnum = PdaManagedPanelTeamDistributionModeEnum.TEAM_COUNT
+    panel_structure_locked: bool = False
 
     @model_validator(mode="before")
     @classmethod
@@ -1527,6 +1528,7 @@ class PdaManagedRoundUpdate(BaseModel):
     max_file_size_mb: Optional[int] = Field(default=None, ge=1, le=500)
     panel_mode_enabled: Optional[bool] = None
     panel_team_distribution_mode: Optional[PdaManagedPanelTeamDistributionModeEnum] = None
+    panel_structure_locked: Optional[bool] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -1570,6 +1572,7 @@ class PdaManagedRoundResponse(BaseModel):
     max_file_size_mb: int = 25
     panel_mode_enabled: bool = False
     panel_team_distribution_mode: PdaManagedPanelTeamDistributionModeEnum = PdaManagedPanelTeamDistributionModeEnum.TEAM_COUNT
+    panel_structure_locked: bool = False
     is_frozen: bool
     created_at: datetime
 
@@ -1768,6 +1771,7 @@ class PdaRoundPanelResponse(BaseModel):
 class PdaRoundPanelListResponse(BaseModel):
     panel_mode_enabled: bool = False
     panel_team_distribution_mode: PdaManagedPanelTeamDistributionModeEnum = PdaManagedPanelTeamDistributionModeEnum.TEAM_COUNT
+    panel_structure_locked: bool = False
     current_admin_is_superadmin: bool = False
     my_panel_ids: List[int] = Field(default_factory=list)
     available_admins: List[PdaRoundPanelAdminOption] = Field(default_factory=list)
