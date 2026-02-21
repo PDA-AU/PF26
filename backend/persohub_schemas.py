@@ -502,6 +502,7 @@ class PersohubCommunityCard(BaseModel):
 class PersohubPublicClubCommunityInfo(BaseModel):
     clubId: str
     clubName: str
+    clubUrl: Optional[str] = None
     clubTagline: Optional[str] = None
     clubImage: Optional[str] = None
     clubDescription: Optional[str] = None
