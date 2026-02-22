@@ -204,6 +204,7 @@ export default function EventDashboard() {
     const [roundSubmission, setRoundSubmission] = useState(null);
     const [loadingSubmission, setLoadingSubmission] = useState(false);
     const [submittingRoundWork, setSubmittingRoundWork] = useState(false);
+    const [submissionUploadProgress, setSubmissionUploadProgress] = useState(null);
     const [submissionType, setSubmissionType] = useState('file');
     const [submissionLink, setSubmissionLink] = useState('');
     const [submissionNotes, setSubmissionNotes] = useState('');
@@ -629,6 +630,7 @@ export default function EventDashboard() {
             setSubmissionLink(data?.link_url || '');
             setSubmissionNotes(data?.notes || '');
             setSubmissionFile(null);
+            setSubmissionUploadProgress(null);
         } catch (error) {
             setRoundSubmission(null);
             toast.error(getErrorMessage(error, 'Failed to load round submission'));
@@ -664,6 +666,7 @@ export default function EventDashboard() {
             return;
         }
         setSubmittingRoundWork(true);
+        setSubmissionUploadProgress(null);
         try {
             const normalizedSubmissionType = normalizeSubmissionType(submissionType);
             let payload = {
@@ -686,9 +689,19 @@ export default function EventDashboard() {
                     { headers: getAuthHeader() }
                 );
                 const { upload_url, public_url, content_type } = presignRes.data || {};
+                setSubmissionUploadProgress(0);
                 await axios.put(upload_url, submissionFile, {
                     headers: { 'Content-Type': content_type || submissionFile.type },
+                    onUploadProgress: (progressEvent) => {
+                        const totalBytes = Number(progressEvent?.total || 0);
+                        const loadedBytes = Number(progressEvent?.loaded || 0);
+                        if (totalBytes > 0) {
+                            const percent = Math.min(100, Math.max(0, Math.round((loadedBytes / totalBytes) * 100)));
+                            setSubmissionUploadProgress(percent);
+                        }
+                    },
                 });
+                setSubmissionUploadProgress(100);
                 payload = {
                     ...payload,
                     submission_type: 'file',
@@ -722,6 +735,7 @@ export default function EventDashboard() {
             toast.error(getErrorMessage(error, 'Failed to submit round work'));
         } finally {
             setSubmittingRoundWork(false);
+            setSubmissionUploadProgress(null);
         }
     };
 
@@ -1785,6 +1799,20 @@ export default function EventDashboard() {
                                                                 disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork}
                                                             />
                                                         </div>
+                                                        {submittingRoundWork && normalizeSubmissionType(submissionType) === 'file' && submissionUploadProgress !== null ? (
+                                                            <div className="space-y-1">
+                                                                <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
+                                                                    <span>Uploading file...</span>
+                                                                    <span>{submissionUploadProgress}%</span>
+                                                                </div>
+                                                                <div className="h-2 w-full overflow-hidden rounded border border-black bg-white">
+                                                                    <div
+                                                                        className="h-full bg-[#8B5CF6] transition-all duration-200"
+                                                                        style={{ width: `${submissionUploadProgress}%` }}
+                                                                    />
+                                                                </div>
+                                                            </div>
+                                                        ) : null}
                                                         <Button
                                                             className="w-full border-2 border-black bg-[#8B5CF6] text-white shadow-neo"
                                                             disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork}
