@@ -175,7 +175,8 @@ class PdaUserRegister(BaseModel):
     dob: date
     gender: Optional[GenderEnum] = None
     phno: Optional[str] = None
-    dept: Optional[DepartmentEnum] = None
+    dept: Optional[str] = None
+    college: Optional[str] = "MIT"
     password: str = Field(..., min_length=6)
     image_url: Optional[str] = None
     preferred_team: Optional[str] = None
@@ -203,6 +204,12 @@ class PdaUserRegister(BaseModel):
             return None
         value = str(v).strip()
         return value or None
+
+    @field_validator("college", mode="before")
+    @classmethod
+    def normalize_college(cls, v):
+        value = str(v or "").strip()
+        return value or "MIT"
 
 
 class PdaRecruitmentApplyRequest(BaseModel):
@@ -269,7 +276,8 @@ class PdaUserUpdate(BaseModel):
     dob: Optional[date] = None
     gender: Optional[GenderEnum] = None
     phno: Optional[str] = None
-    dept: Optional[DepartmentEnum] = None
+    dept: Optional[str] = None
+    college: Optional[str] = None
     image_url: Optional[str] = None
     instagram_url: Optional[str] = None
     linkedin_url: Optional[str] = None
@@ -292,6 +300,14 @@ class PdaUserUpdate(BaseModel):
         value = str(v).strip()
         return value or None
 
+    @field_validator("college", mode="before")
+    @classmethod
+    def normalize_optional_college(cls, v):
+        if v is None:
+            return None
+        value = str(v or "").strip()
+        return value or "MIT"
+
 
 class PdaForgotPasswordRequest(BaseModel):
     email: Optional[EmailStr] = None
@@ -308,7 +324,8 @@ class PdaUserResponse(BaseModel):
     dob: Optional[date] = None
     gender: Optional[GenderEnum] = None
     phno: Optional[str] = None
-    dept: Optional[DepartmentEnum] = None
+    dept: Optional[str] = None
+    college: str = "MIT"
     image_url: Optional[str] = None
     is_member: bool
     is_applied: bool = False
@@ -1044,7 +1061,8 @@ class PdaTeamCreate(BaseModel):
     regno: Optional[str] = None
     name: Optional[str] = None
     profile_name: Optional[str] = None
-    dept: Optional[DepartmentEnum] = None
+    dept: Optional[str] = None
+    college: Optional[str] = "MIT"
     email: Optional[str] = None
     dob: Optional[date] = None
     gender: Optional[GenderEnum] = None
@@ -1065,12 +1083,19 @@ class PdaTeamCreate(BaseModel):
         value = str(v).strip()
         return value or None
 
+    @field_validator("college", mode="before")
+    @classmethod
+    def normalize_team_college(cls, v):
+        value = str(v or "").strip()
+        return value or "MIT"
+
 
 class PdaTeamUpdate(BaseModel):
     user_id: Optional[int] = None
     regno: Optional[str] = None
     name: Optional[str] = None
-    dept: Optional[DepartmentEnum] = None
+    dept: Optional[str] = None
+    college: Optional[str] = None
     email: Optional[str] = None
     phno: Optional[str] = None
     dob: Optional[date] = None
@@ -1089,6 +1114,14 @@ class PdaTeamUpdate(BaseModel):
         value = str(v).strip()
         return value or None
 
+    @field_validator("college", mode="before")
+    @classmethod
+    def normalize_optional_team_college(cls, v):
+        if v is None:
+            return None
+        value = str(v or "").strip()
+        return value or "MIT"
+
 
 class PdaTeamResponse(BaseModel):
     id: int
@@ -1097,6 +1130,7 @@ class PdaTeamResponse(BaseModel):
     profile_name: Optional[str] = None
     regno: Optional[str] = None
     dept: Optional[str] = None
+    college: Optional[str] = None
     email: Optional[str] = None
     phno: Optional[str] = None
     dob: Optional[date] = None
@@ -1120,6 +1154,7 @@ class PdaAdminUserResponse(BaseModel):
     profile_name: Optional[str] = None
     regno: str
     dept: Optional[str] = None
+    college: Optional[str] = None
     email: str
     phno: Optional[str] = None
     dob: Optional[date] = None
@@ -1149,7 +1184,8 @@ class PdaAdminUserUpdate(BaseModel):
     profile_name: Optional[str] = None
     email: Optional[str] = None
     phno: Optional[str] = None
-    dept: Optional[DepartmentEnum] = None
+    dept: Optional[str] = None
+    college: Optional[str] = None
     dob: Optional[date] = None
     gender: Optional[GenderEnum] = None
     is_member: Optional[bool] = None
@@ -1168,6 +1204,14 @@ class PdaAdminUserUpdate(BaseModel):
             return None
         value = str(v).strip()
         return value or None
+
+    @field_validator("college", mode="before")
+    @classmethod
+    def normalize_optional_admin_college(cls, v):
+        if v is None:
+            return None
+        value = str(v or "").strip()
+        return value or "MIT"
 
 
 class PdaGalleryCreate(BaseModel):
@@ -1244,6 +1288,11 @@ class PdaManagedRoundModeEnum(str, Enum):
 class PdaManagedEventStatusEnum(str, Enum):
     OPEN = "open"
     CLOSED = "closed"
+
+
+class PdaManagedEventOpenForEnum(str, Enum):
+    MIT = "MIT"
+    ALL = "ALL"
 
 
 class PdaManagedEntityTypeEnum(str, Enum):
@@ -1338,6 +1387,7 @@ class PdaManagedEventCreate(BaseModel):
     team_min_size: Optional[int] = Field(None, ge=1, le=100)
     team_max_size: Optional[int] = Field(None, ge=1, le=100)
     club_id: int = Field(1, ge=1)
+    open_for: PdaManagedEventOpenForEnum = PdaManagedEventOpenForEnum.MIT
 
     @field_validator("whatsapp_url", mode="before")
     @classmethod
@@ -1363,6 +1413,7 @@ class PdaManagedEventUpdate(BaseModel):
     team_max_size: Optional[int] = Field(None, ge=1, le=100)
     is_visible: Optional[bool] = None
     status: Optional[PdaManagedEventStatusEnum] = None
+    open_for: Optional[PdaManagedEventOpenForEnum] = None
 
     @field_validator("whatsapp_url", mode="before")
     @classmethod
@@ -1404,6 +1455,7 @@ class PdaManagedEventResponse(BaseModel):
     team_max_size: Optional[int] = None
     is_visible: bool = True
     registration_open: bool = True
+    open_for: PdaManagedEventOpenForEnum = PdaManagedEventOpenForEnum.MIT
     status: PdaManagedEventStatusEnum
     created_at: datetime
 

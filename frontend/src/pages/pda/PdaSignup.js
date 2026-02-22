@@ -22,10 +22,15 @@ const DEPARTMENTS = [
     { value: "Rubber and Plastics Technology", label: "Rubber & Plastics" },
     { value: "Information Technology", label: "Information Technology" }
 ];
+const DEPARTMENT_OTHER = 'OTHER';
 
 const GENDERS = [
     { value: 'Male', label: 'Male' },
     { value: 'Female', label: 'Female' }
+];
+const COLLEGES = [
+    { value: 'MIT', label: 'MIT' },
+    { value: 'OTHER', label: 'Other' }
 ];
 
 const SHOWCASE_IMAGE = 'https://images.unsplash.com/photo-1569173675610-42c361a86e37?q=80&w=2067&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D';
@@ -36,6 +41,7 @@ const selectContentClass = 'border-2 border-black bg-white shadow-[4px_4px_0px_0
 export default function PdaSignup() {
     const navigate = useNavigate();
     const { register } = useAuth();
+    const maxDobDate = new Date().toISOString().slice(0, 10);
     const [formData, setFormData] = useState({
         name: '',
         profile_name: '',
@@ -44,7 +50,10 @@ export default function PdaSignup() {
         dob: '',
         gender: '',
         phno: '',
-        dept: '',
+        deptChoice: '',
+        deptOther: '',
+        collegeChoice: 'MIT',
+        collegeOther: '',
         password: '',
         confirmPassword: ''
     });
@@ -70,7 +79,19 @@ export default function PdaSignup() {
     const handleSubmit = async (e) => {
         e.preventDefault();
         const missingRequiredField = Object.entries(formData).some(([key, value]) => {
-            if (key === 'dob' || key === 'gender' || key === 'dept') {
+            if (key === 'collegeOther') {
+                return formData.collegeChoice === 'OTHER' && !String(value).trim();
+            }
+            if (key === 'deptOther') {
+                return formData.deptChoice === DEPARTMENT_OTHER && !String(value).trim();
+            }
+            if (key === 'dob' || key === 'gender') {
+                return !value;
+            }
+            if (key === 'deptChoice') {
+                return !value;
+            }
+            if (key === 'collegeChoice') {
                 return !value;
             }
             return !String(value).trim();
@@ -88,6 +109,20 @@ export default function PdaSignup() {
             toast.error('Profile name must be 3-40 chars: lowercase letters, numbers, underscore');
             return;
         }
+        const departmentValue = formData.deptChoice === DEPARTMENT_OTHER
+            ? formData.deptOther.trim()
+            : formData.deptChoice;
+        if (!departmentValue) {
+            toast.error('Please enter your department');
+            return;
+        }
+        const collegeValue = formData.collegeChoice === 'OTHER'
+            ? formData.collegeOther.trim()
+            : 'MIT';
+        if (!collegeValue) {
+            toast.error('Please enter your college name');
+            return;
+        }
         setLoading(true);
         try {
             const result = await register({
@@ -98,7 +133,8 @@ export default function PdaSignup() {
                 dob: formData.dob,
                 gender: formData.gender,
                 phno: formData.phno.trim(),
-                dept: formData.dept,
+                dept: departmentValue,
+                college: collegeValue,
                 password: formData.password
             });
             if (result?.status === 'verification_required') {
@@ -202,9 +238,10 @@ export default function PdaSignup() {
                                     type="date"
                                     value={formData.dob}
                                     onChange={handleChange}
+                                    max={maxDobDate}
                                     required
                                     data-testid="pda-signup-dob-input"
-                                    className={inputClass}
+                                    className={`${inputClass} [color-scheme:light]`}
                                 />
                             </div>
                             <div>
@@ -236,7 +273,7 @@ export default function PdaSignup() {
                             </div>
                             <div>
                                 <Label htmlFor="dept" className="text-xs font-bold uppercase tracking-[0.12em]">Department *</Label>
-                                <Select value={formData.dept} onValueChange={(value) => setFormData((prev) => ({ ...prev, dept: value }))}>
+                                <Select value={formData.deptChoice} onValueChange={(value) => setFormData((prev) => ({ ...prev, deptChoice: value, deptOther: value === DEPARTMENT_OTHER ? prev.deptOther : '' }))}>
                                     <SelectTrigger id="dept" data-testid="pda-signup-dept-select" className={selectTriggerClass}>
                                         <SelectValue placeholder="Select department" />
                                     </SelectTrigger>
@@ -246,9 +283,54 @@ export default function PdaSignup() {
                                                 {dept.label}
                                             </SelectItem>
                                         ))}
+                                        <SelectItem value={DEPARTMENT_OTHER}>Other</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>
+                            {formData.deptChoice === DEPARTMENT_OTHER ? (
+                                <div>
+                                    <Label htmlFor="deptOther" className="text-xs font-bold uppercase tracking-[0.12em]">Department Name *</Label>
+                                    <Input
+                                        id="deptOther"
+                                        name="deptOther"
+                                        value={formData.deptOther}
+                                        onChange={handleChange}
+                                        required
+                                        className={inputClass}
+                                    />
+                                </div>
+                            ) : null}
+                            <div>
+                                <Label htmlFor="college-choice" className="text-xs font-bold uppercase tracking-[0.12em]">College *</Label>
+                                <Select
+                                    value={formData.collegeChoice}
+                                    onValueChange={(value) => setFormData((prev) => ({ ...prev, collegeChoice: value, collegeOther: value === 'OTHER' ? prev.collegeOther : '' }))}
+                                >
+                                    <SelectTrigger id="college-choice" className={selectTriggerClass}>
+                                        <SelectValue placeholder="Select college" />
+                                    </SelectTrigger>
+                                    <SelectContent className={selectContentClass}>
+                                        {COLLEGES.map((college) => (
+                                            <SelectItem key={college.value} value={college.value}>
+                                                {college.label}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            {formData.collegeChoice === 'OTHER' ? (
+                                <div>
+                                    <Label htmlFor="collegeOther" className="text-xs font-bold uppercase tracking-[0.12em]">College Name *</Label>
+                                    <Input
+                                        id="collegeOther"
+                                        name="collegeOther"
+                                        value={formData.collegeOther}
+                                        onChange={handleChange}
+                                        required
+                                        className={inputClass}
+                                    />
+                                </div>
+                            ) : null}
                             <div className="relative">
                                 <Label htmlFor="password" className="text-xs font-bold uppercase tracking-[0.12em]">Password *</Label>
                                 <Input

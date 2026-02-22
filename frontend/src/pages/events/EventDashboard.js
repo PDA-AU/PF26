@@ -46,10 +46,15 @@ const DEPARTMENTS = [
     { value: 'Rubber and Plastics Technology', label: 'Rubber & Plastics' },
     { value: 'Information Technology', label: 'Information Technology' }
 ];
+const DEPARTMENT_OTHER = 'OTHER';
 
 const GENDERS = [
     { value: 'Male', label: 'Male' },
     { value: 'Female', label: 'Female' }
+];
+const COLLEGES = [
+    { value: 'MIT', label: 'MIT' },
+    { value: 'OTHER', label: 'Other' }
 ];
 
 const authInputClass = 'h-11 border-2 border-black bg-white text-sm shadow-neo focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2';
@@ -200,10 +205,14 @@ export default function EventDashboard() {
         dob: '',
         gender: '',
         phno: '',
-        dept: '',
+        deptChoice: '',
+        deptOther: '',
+        collegeChoice: 'MIT',
+        collegeOther: '',
         password: '',
         confirmPassword: ''
     });
+    const [registrationCtaModalOpen, setRegistrationCtaModalOpen] = useState(false);
 
     const [teamName, setTeamName] = useState('');
     const [teamCode, setTeamCode] = useState('');
@@ -230,6 +239,7 @@ export default function EventDashboard() {
     const [isRoundDescriptionExpanded, setIsRoundDescriptionExpanded] = useState(false);
 
     const [copiedReferral, setCopiedReferral] = useState(false);
+    const maxDobDate = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
     const isLoggedIn = Boolean(user);
     const routeFamily = useMemo(
@@ -496,7 +506,19 @@ export default function EventDashboard() {
     const handleSignupSubmit = async (e) => {
         e.preventDefault();
         const missingRequiredField = Object.entries(signupForm).some(([key, value]) => {
-            if (key === 'dob' || key === 'gender' || key === 'dept') {
+            if (key === 'collegeOther') {
+                return signupForm.collegeChoice === 'OTHER' && !String(value).trim();
+            }
+            if (key === 'deptOther') {
+                return signupForm.deptChoice === DEPARTMENT_OTHER && !String(value).trim();
+            }
+            if (key === 'dob' || key === 'gender') {
+                return !value;
+            }
+            if (key === 'deptChoice') {
+                return !value;
+            }
+            if (key === 'collegeChoice') {
                 return !value;
             }
             return !String(value).trim();
@@ -514,6 +536,20 @@ export default function EventDashboard() {
             toast.error('Profile name must be 3-40 chars: lowercase letters, numbers, underscore');
             return;
         }
+        const departmentValue = signupForm.deptChoice === DEPARTMENT_OTHER
+            ? signupForm.deptOther.trim()
+            : signupForm.deptChoice;
+        if (!departmentValue) {
+            toast.error('Please enter your department');
+            return;
+        }
+        const collegeValue = signupForm.collegeChoice === 'OTHER'
+            ? signupForm.collegeOther.trim()
+            : 'MIT';
+        if (!collegeValue) {
+            toast.error('Please enter your college name');
+            return;
+        }
         setSignupLoading(true);
         try {
             const result = await register({
@@ -524,7 +560,8 @@ export default function EventDashboard() {
                 dob: signupForm.dob,
                 gender: signupForm.gender,
                 phno: signupForm.phno.trim(),
-                dept: signupForm.dept,
+                dept: departmentValue,
+                college: collegeValue,
                 password: signupForm.password
             });
             if (result?.status === 'verification_required') {
@@ -550,6 +587,9 @@ export default function EventDashboard() {
             await axios.post(`${API}/pda/events/${eventSlug}/register`, {}, { headers: getAuthHeader() });
             toast.success('Registered successfully');
             closeRegistrationDialog(true);
+            if (whatsappUrl) {
+                setRegistrationCtaModalOpen(true);
+            }
             await fetchData();
         } catch (error) {
             toast.error(error?.response?.data?.detail || 'Registration failed');
@@ -566,6 +606,9 @@ export default function EventDashboard() {
             await axios.post(`${API}/pda/events/${eventSlug}/teams/create`, { team_name: teamName }, { headers: getAuthHeader() });
             toast.success('Team created');
             closeRegistrationDialog(true);
+            if (whatsappUrl) {
+                setRegistrationCtaModalOpen(true);
+            }
             await fetchData();
         } catch (error) {
             toast.error(error?.response?.data?.detail || 'Failed to create team');
@@ -582,6 +625,9 @@ export default function EventDashboard() {
             await axios.post(`${API}/pda/events/${eventSlug}/teams/join`, { team_code: teamCode }, { headers: getAuthHeader() });
             toast.success('Joined team');
             closeRegistrationDialog(true);
+            if (whatsappUrl) {
+                setRegistrationCtaModalOpen(true);
+            }
             await fetchData();
         } catch (error) {
             toast.error(error?.response?.data?.detail || 'Failed to join team');
@@ -1406,10 +1452,10 @@ export default function EventDashboard() {
                                         PDA Login
                                     </DialogTitle>
                                 </DialogHeader>
-                                <p className="mt-2 text-sm font-medium text-slate-700">Use your register number and password to continue.</p>
+                                <p className="mt-2 text-sm font-medium text-slate-700">Use your register number or profile name and password to continue.</p>
                                 <form onSubmit={handleLoginSubmit} className="mt-6 space-y-4">
                                     <div className="space-y-2">
-                                        <Label htmlFor="auth-regno" className="text-xs font-bold uppercase tracking-[0.12em]">Register Number</Label>
+                                        <Label htmlFor="auth-regno" className="text-xs font-bold uppercase tracking-[0.12em]">Register Number or Profile Name</Label>
                                         <Input
                                             id="auth-regno"
                                             name="regno"
@@ -1439,6 +1485,14 @@ export default function EventDashboard() {
                                             >
                                                 {showAuthPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                                             </button>
+                                        </div>
+                                        <div className="text-right">
+                                            <Link
+                                                to="/forgot-password"
+                                                className="text-xs font-bold uppercase tracking-[0.1em] text-[#8B5CF6] transition-[color] duration-150 hover:text-black"
+                                            >
+                                                Forgot Password?
+                                            </Link>
                                         </div>
                                     </div>
                                     <div className="flex justify-end gap-2">
@@ -1525,8 +1579,9 @@ export default function EventDashboard() {
                                             type="date"
                                             value={signupForm.dob}
                                             onChange={(e) => setSignupForm((prev) => ({ ...prev, dob: e.target.value }))}
+                                            max={maxDobDate}
                                             required
-                                            className={authInputClass}
+                                            className={`${authInputClass} [color-scheme:light]`}
                                         />
                                     </div>
                                     <div>
@@ -1555,7 +1610,7 @@ export default function EventDashboard() {
                                     </div>
                                     <div>
                                         <Label htmlFor="auth-dept" className="text-xs font-bold uppercase tracking-[0.12em]">Department *</Label>
-                                        <Select value={signupForm.dept} onValueChange={(value) => setSignupForm((prev) => ({ ...prev, dept: value }))}>
+                                        <Select value={signupForm.deptChoice} onValueChange={(value) => setSignupForm((prev) => ({ ...prev, deptChoice: value, deptOther: value === DEPARTMENT_OTHER ? prev.deptOther : '' }))}>
                                             <SelectTrigger id="auth-dept" className={authSelectTriggerClass}>
                                                 <SelectValue placeholder="Select department" />
                                             </SelectTrigger>
@@ -1563,9 +1618,52 @@ export default function EventDashboard() {
                                                 {DEPARTMENTS.map((dept) => (
                                                     <SelectItem key={dept.value} value={dept.value}>{dept.label}</SelectItem>
                                                 ))}
+                                                <SelectItem value={DEPARTMENT_OTHER}>Other</SelectItem>
                                             </SelectContent>
                                         </Select>
                                     </div>
+                                    {signupForm.deptChoice === DEPARTMENT_OTHER ? (
+                                        <div>
+                                            <Label htmlFor="auth-dept-other" className="text-xs font-bold uppercase tracking-[0.12em]">Department Name *</Label>
+                                            <Input
+                                                id="auth-dept-other"
+                                                name="deptOther"
+                                                value={signupForm.deptOther}
+                                                onChange={(e) => setSignupForm((prev) => ({ ...prev, deptOther: e.target.value }))}
+                                                required
+                                                className={authInputClass}
+                                            />
+                                        </div>
+                                    ) : null}
+                                    <div>
+                                        <Label htmlFor="auth-college-choice" className="text-xs font-bold uppercase tracking-[0.12em]">College *</Label>
+                                        <Select
+                                            value={signupForm.collegeChoice}
+                                            onValueChange={(value) => setSignupForm((prev) => ({ ...prev, collegeChoice: value, collegeOther: value === 'OTHER' ? prev.collegeOther : '' }))}
+                                        >
+                                            <SelectTrigger id="auth-college-choice" className={authSelectTriggerClass}>
+                                                <SelectValue placeholder="Select college" />
+                                            </SelectTrigger>
+                                            <SelectContent className={authSelectContentClass}>
+                                                {COLLEGES.map((college) => (
+                                                    <SelectItem key={college.value} value={college.value}>{college.label}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    {signupForm.collegeChoice === 'OTHER' ? (
+                                        <div>
+                                            <Label htmlFor="auth-college-other" className="text-xs font-bold uppercase tracking-[0.12em]">College Name *</Label>
+                                            <Input
+                                                id="auth-college-other"
+                                                name="collegeOther"
+                                                value={signupForm.collegeOther}
+                                                onChange={(e) => setSignupForm((prev) => ({ ...prev, collegeOther: e.target.value }))}
+                                                required
+                                                className={authInputClass}
+                                            />
+                                        </div>
+                                    ) : null}
                                     <div>
                                         <Label htmlFor="auth-password-signup" className="text-xs font-bold uppercase tracking-[0.12em]">Password *</Label>
                                         <div className="relative">
@@ -2010,6 +2108,39 @@ export default function EventDashboard() {
                                 onClick={() => setSubmissionSuccessDialogOpen(false)}
                             >
                                 OK
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={registrationCtaModalOpen} onOpenChange={setRegistrationCtaModalOpen}>
+                <DialogContent className="max-w-md border-4 border-black bg-white">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading text-xl font-black uppercase tracking-tight">
+                            Registration Confirmed
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <p className="text-sm font-medium text-slate-700">
+                            You are registered. Join the external channel for updates.
+                        </p>
+                        {whatsappUrl ? (
+                            <a href={whatsappUrl} target="_blank" rel="noreferrer">
+                                <Button type="button" className="w-full border-2 border-black bg-[#16A34A] text-white shadow-neo hover:bg-[#15803D]">
+                                    <ExternalLink className="mr-2 h-4 w-4" />
+                                    {externalUrlLabel}
+                                </Button>
+                            </a>
+                        ) : null}
+                        <div className="flex justify-end">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="border-2 border-black shadow-neo"
+                                onClick={() => setRegistrationCtaModalOpen(false)}
+                            >
+                                Close
                             </Button>
                         </div>
                     </div>

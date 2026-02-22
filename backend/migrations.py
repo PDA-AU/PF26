@@ -64,6 +64,7 @@ def ensure_pda_users_table(engine):
                     gender VARCHAR(10),
                     phno VARCHAR(20),
                     dept VARCHAR(150),
+                    college VARCHAR(255) NOT NULL DEFAULT 'MIT',
                     instagram_url VARCHAR(500),
                     linkedin_url VARCHAR(500),
                     github_url VARCHAR(500),
@@ -105,27 +106,6 @@ def normalize_pda_profile_enum_values(engine):
                 SET gender = NULL
                 WHERE gender IS NOT NULL
                   AND gender NOT IN ('Male', 'Female')
-                """
-            )
-        )
-        conn.execute(
-            text(
-                """
-                UPDATE users
-                SET dept = NULL
-                WHERE dept IS NOT NULL
-                  AND dept NOT IN (
-                    'Artificial Intelligence and Data Science',
-                    'Aerospace Engineering',
-                    'Automobile Engineering',
-                    'Computer Technology',
-                    'Electronics and Communication Engineering',
-                    'Electronics and Instrumentation Engineering',
-                    'Production Technology',
-                    'Robotics and Automation',
-                    'Rubber and Plastics Technology',
-                    'Information Technology'
-                  )
                 """
             )
         )
@@ -179,6 +159,25 @@ def ensure_pda_user_social_columns(engine):
             conn.execute(text("ALTER TABLE users ADD COLUMN linkedin_url VARCHAR(500)"))
         if not _column_exists(conn, "users", "github_url"):
             conn.execute(text("ALTER TABLE users ADD COLUMN github_url VARCHAR(500)"))
+
+
+def ensure_pda_users_college_column(engine):
+    with engine.begin() as conn:
+        if not _table_exists(conn, "users"):
+            return
+        if not _column_exists(conn, "users", "college"):
+            conn.execute(text("ALTER TABLE users ADD COLUMN college VARCHAR(255) NOT NULL DEFAULT 'MIT'"))
+        conn.execute(
+            text(
+                """
+                UPDATE users
+                SET college = 'MIT'
+                WHERE college IS NULL OR btrim(college) = ''
+                """
+            )
+        )
+        conn.execute(text("ALTER TABLE users ALTER COLUMN college SET DEFAULT 'MIT'"))
+        conn.execute(text("ALTER TABLE users ALTER COLUMN college SET NOT NULL"))
 
 
 def ensure_pda_recruitment_tables(engine):
@@ -962,6 +961,7 @@ def ensure_pda_event_tables(engine):
                     team_min_size INTEGER,
                     team_max_size INTEGER,
                     is_visible BOOLEAN NOT NULL DEFAULT TRUE,
+                    open_for VARCHAR(8) NOT NULL DEFAULT 'MIT',
                     status VARCHAR(20) NOT NULL DEFAULT 'closed',
                     created_at TIMESTAMPTZ DEFAULT now(),
                     updated_at TIMESTAMPTZ
@@ -987,6 +987,18 @@ def ensure_pda_event_tables(engine):
         )
         conn.execute(text("ALTER TABLE pda_events ADD COLUMN IF NOT EXISTS is_visible BOOLEAN NOT NULL DEFAULT TRUE"))
         conn.execute(text("ALTER TABLE pda_events ADD COLUMN IF NOT EXISTS registration_open BOOLEAN NOT NULL DEFAULT TRUE"))
+        conn.execute(text("ALTER TABLE pda_events ADD COLUMN IF NOT EXISTS open_for VARCHAR(8) NOT NULL DEFAULT 'MIT'"))
+        conn.execute(
+            text(
+                """
+                UPDATE pda_events
+                SET open_for = CASE
+                    WHEN upper(btrim(COALESCE(open_for, ''))) = 'ALL' THEN 'ALL'
+                    ELSE 'MIT'
+                END
+                """
+            )
+        )
         conn.execute(text("ALTER TABLE pda_events ALTER COLUMN poster_url TYPE TEXT"))
         if _table_exists(conn, "pda_event_rounds"):
             conn.execute(text("ALTER TABLE pda_event_rounds ADD COLUMN IF NOT EXISTS round_poster TEXT"))
@@ -1288,6 +1300,24 @@ def ensure_pda_event_registration_open_column(engine):
     with engine.begin() as conn:
         if _table_exists(conn, "pda_events"):
             conn.execute(text("ALTER TABLE pda_events ADD COLUMN IF NOT EXISTS registration_open BOOLEAN NOT NULL DEFAULT TRUE"))
+
+
+def ensure_pda_events_open_for_column(engine):
+    with engine.begin() as conn:
+        if not _table_exists(conn, "pda_events"):
+            return
+        conn.execute(text("ALTER TABLE pda_events ADD COLUMN IF NOT EXISTS open_for VARCHAR(8) NOT NULL DEFAULT 'MIT'"))
+        conn.execute(
+            text(
+                """
+                UPDATE pda_events
+                SET open_for = CASE
+                    WHEN upper(btrim(COALESCE(open_for, ''))) = 'ALL' THEN 'ALL'
+                    ELSE 'MIT'
+                END
+                """
+            )
+        )
 
 
 def ensure_pda_event_round_submission_tables(engine):
@@ -1961,6 +1991,74 @@ def backfill_pda_event_round_count_once(engine):
                     """
                 )
             )
+
+        conn.execute(
+            text(
+                """
+                INSERT INTO system_config (key, value)
+                VALUES (:key, 'done')
+                ON CONFLICT (key) DO UPDATE SET value = 'done'
+                """
+            ),
+            {"key": marker_key},
+        )
+
+
+def resolve_user_identifier_collisions_once(engine):
+    marker_key = "migration_resolve_user_identifier_collisions_v1"
+    with engine.begin() as conn:
+        if not _table_exists(conn, "users") or not _column_exists(conn, "users", "profile_name"):
+            return
+        if not _table_exists(conn, "system_config"):
+            return
+
+        marker_exists = bool(
+            conn.execute(
+                text("SELECT 1 FROM system_config WHERE key = :key"),
+                {"key": marker_key},
+            ).fetchone()
+        )
+        if marker_exists:
+            return
+
+        regno_rows = conn.execute(
+            text("SELECT lower(btrim(regno)) AS normalized_regno FROM users WHERE regno IS NOT NULL")
+        ).fetchall()
+        normalized_regnos = {str(row[0] or "").strip() for row in regno_rows if str(row[0] or "").strip()}
+        if normalized_regnos:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT id, name, regno, profile_name
+                    FROM users
+                    WHERE profile_name IS NOT NULL
+                      AND btrim(profile_name) <> ''
+                    ORDER BY id ASC
+                    """
+                )
+            ).mappings().all()
+            for row in rows:
+                profile_norm = str(row.get("profile_name") or "").strip().lower()
+                if profile_norm not in normalized_regnos:
+                    continue
+                base = _normalize_profile_seed(str(row.get("name") or row.get("profile_name") or row.get("regno") or "user"))
+                candidate = f"{base}_{secrets.randbelow(100000):05d}"[:40]
+                while True:
+                    profile_exists = conn.execute(
+                        text("SELECT 1 FROM users WHERE profile_name = :profile_name"),
+                        {"profile_name": candidate},
+                    ).fetchone()
+                    regno_exists = conn.execute(
+                        text("SELECT 1 FROM users WHERE lower(btrim(regno)) = :regno"),
+                        {"regno": candidate.lower()},
+                    ).fetchone()
+                    if not profile_exists and not regno_exists:
+                        break
+                    candidate = f"{base}_{secrets.randbelow(100000):05d}"[:40]
+                conn.execute(
+                    text("UPDATE users SET profile_name = :profile_name WHERE id = :id"),
+                    {"profile_name": candidate, "id": int(row["id"])},
+                )
 
         conn.execute(
             text(

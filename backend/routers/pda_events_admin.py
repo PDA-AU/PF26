@@ -389,6 +389,11 @@ def _to_event_status(value) -> PdaEventStatus:
     return PdaEventStatus[value.name] if hasattr(value, "name") else PdaEventStatus(value)
 
 
+def _to_event_open_for(value) -> str:
+    raw = str(value.value if hasattr(value, "value") else value or "").strip().upper()
+    return "ALL" if raw == "ALL" else "MIT"
+
+
 def _to_round_state(value) -> PdaEventRoundState:
     return PdaEventRoundState[value.name] if hasattr(value, "name") else PdaEventRoundState(value)
 
@@ -885,6 +890,7 @@ def create_managed_event(
         team_max_size=payload.team_max_size,
         is_visible=True,
         registration_open=True,
+        open_for=_to_event_open_for(payload.open_for),
         status=PdaEventStatus.CLOSED,
     )
     db.add(new_event)
@@ -970,6 +976,8 @@ def update_managed_event(
         updates["status"] = _to_event_status(payload.status)
     if "external_url_name" in updates:
         updates["external_url_name"] = str(updates.get("external_url_name") or "").strip() or "Join whatsapp channel"
+    if "open_for" in updates:
+        updates["open_for"] = _to_event_open_for(payload.open_for)
 
     for field, value in updates.items():
         setattr(event, field, value)
@@ -4239,10 +4247,14 @@ def event_leaderboard(
             )
         )
         active_rank = 0
+        prev_score = None
         for row in rows:
             if str(row.get("status") or "").lower() == "active":
-                active_rank += 1
+                score = float(row.get("cumulative_score") or 0.0)
+                if prev_score is None or score != prev_score:
+                    active_rank += 1
                 row["rank"] = active_rank
+                prev_score = score
             else:
                 row["rank"] = None
     else:
@@ -4331,10 +4343,14 @@ def event_leaderboard(
             )
         )
         active_rank = 0
+        prev_score = None
         for row in rows:
             if _status_is_active(row.get("status")):
-                active_rank += 1
+                score = float(row.get("cumulative_score") or 0.0)
+                if prev_score is None or score != prev_score:
+                    active_rank += 1
                 row["rank"] = active_rank
+                prev_score = score
             else:
                 row["rank"] = None
 

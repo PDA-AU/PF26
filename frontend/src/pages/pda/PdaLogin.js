@@ -128,16 +128,16 @@ export default function PdaLogin() {
                         <h2 className="mt-2 font-heading text-4xl font-black uppercase tracking-tight">
                             Welcome Back
                         </h2>
-                        <p className="mt-2 text-sm font-medium text-slate-700">Use your register number and password to continue.</p>
+                        <p className="mt-2 text-sm font-medium text-slate-700">Use your register number or profile name and password to continue.</p>
 
                         <form onSubmit={handleSubmit} className="mt-8 space-y-5">
                             <div className="space-y-2">
-                                <Label htmlFor="regno" className="text-xs font-bold uppercase tracking-[0.12em]">Register Number</Label>
+                                <Label htmlFor="regno" className="text-xs font-bold uppercase tracking-[0.12em]">Register Number or Profile Name</Label>
                                 <Input
                                     id="regno"
                                     name="regno"
                                     type="text"
-                                    placeholder="eg: 921323104001"
+                                    placeholder="eg: 921323104001 or john_doe"
                                     value={formData.regno}
                                     onChange={handleChange}
                                     required

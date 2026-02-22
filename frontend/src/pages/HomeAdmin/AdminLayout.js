@@ -130,13 +130,13 @@ export default function AdminLayout({ title, subtitle, children, allowEventAdmin
                         <form onSubmit={handleLoginSubmit} className="space-y-6">
                             <div className="space-y-2">
                                 <Label htmlFor="register_number" className="font-bold">
-                                    Register Number
+                                    Register Number or Profile Name
                                 </Label>
                                 <Input
                                     id="register_number"
                                     name="register_number"
                                     type="text"
-                                    placeholder="Enter your register number"
+                                    placeholder="Enter register number or profile name"
                                     value={loginForm.register_number}
                                     onChange={handleLoginChange}
                                     required

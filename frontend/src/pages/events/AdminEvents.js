@@ -37,6 +37,7 @@ const initialForm = {
     format: 'Offline',
     template_option: 'attendance_scoring',
     participant_mode: 'individual',
+    open_for: 'MIT',
     round_mode: 'single',
     round_count: 1,
     team_min_size: '',
@@ -80,6 +81,7 @@ const toEventForm = (eventRow = {}) => ({
     format: eventRow.format || 'Offline',
     template_option: eventRow.template_option || 'attendance_scoring',
     participant_mode: eventRow.participant_mode || 'individual',
+    open_for: eventRow.open_for || 'MIT',
     round_mode: eventRow.round_mode || 'single',
     round_count: Number(eventRow.round_count || 1),
     team_min_size: eventRow.team_min_size ?? '',
@@ -106,6 +108,7 @@ const buildEventPayload = (formState, posterUrl) => ({
     format: formState.format,
     template_option: formState.template_option,
     participant_mode: formState.participant_mode,
+    open_for: formState.open_for || 'MIT',
     round_mode: formState.round_mode,
     round_count: Number(formState.round_count || 1),
     team_min_size: formState.participant_mode === 'team' ? Number(formState.team_min_size || 1) : null,
@@ -268,6 +271,16 @@ function EventFormFields({
                     <SelectContent>
                         <SelectItem value="individual">Individual</SelectItem>
                         <SelectItem value="team">Team</SelectItem>
+                    </SelectContent>
+                </Select>
+            </div>
+            <div>
+                <Label>Open For</Label>
+                <Select value={form.open_for || 'MIT'} onValueChange={(value) => setForm((prev) => ({ ...prev, open_for: value }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="MIT">MIT</SelectItem>
+                        <SelectItem value="ALL">All</SelectItem>
                     </SelectContent>
                 </Select>
             </div>
@@ -579,6 +592,7 @@ export default function AdminEvents() {
                                         <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.event_type}</span>
                                         <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.format}</span>
                                         <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.participant_mode}</span>
+                                        <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.open_for || 'MIT'}</span>
                                         <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.template_option}</span>
                                     </div>
                                     <div className="mt-4 flex flex-wrap gap-2">

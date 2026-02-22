@@ -242,6 +242,24 @@ def _ensure_registration_open_for_registration_actions(event: PdaEvent) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Registration is closed")
 
 
+def _is_event_open_for_all(event: PdaEvent) -> bool:
+    return str(getattr(event, "open_for", "MIT") or "MIT").strip().upper() == "ALL"
+
+
+def _is_mit_user(user: PdaUser) -> bool:
+    return str(getattr(user, "college", "") or "").strip().lower() == "mit"
+
+
+def _ensure_user_eligible_for_event(event: PdaEvent, user: PdaUser) -> None:
+    if _is_event_open_for_all(event):
+        return
+    if not _is_mit_user(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This event is open only for MIT users",
+        )
+
+
 def _send_registration_email(user: PdaUser, event: PdaEvent, details: str) -> None:
     if not user.email:
         return
@@ -613,6 +631,7 @@ def register_individual_event(
     event = _get_event_or_404(db, slug)
     _ensure_event_visible_for_public_access(event)
     _ensure_registration_open_for_registration_actions(event)
+    _ensure_user_eligible_for_event(event, user)
     if event.participant_mode != PdaEventParticipantMode.INDIVIDUAL:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Use team registration for this event")
 
@@ -657,6 +676,7 @@ def create_team(
     event = _get_event_or_404(db, slug)
     _ensure_event_visible_for_public_access(event)
     _ensure_registration_open_for_registration_actions(event)
+    _ensure_user_eligible_for_event(event, user)
     if event.participant_mode != PdaEventParticipantMode.TEAM:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This event is not a team event")
 
@@ -704,6 +724,7 @@ def join_team(
     event = _get_event_or_404(db, slug)
     _ensure_event_visible_for_public_access(event)
     _ensure_registration_open_for_registration_actions(event)
+    _ensure_user_eligible_for_event(event, user)
     if event.participant_mode != PdaEventParticipantMode.TEAM:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This event is not a team event")
 
@@ -784,6 +805,7 @@ def invite_to_team(
     target = db.query(PdaUser).filter(PdaUser.regno == payload.regno.strip()).first()
     if not target:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    _ensure_user_eligible_for_event(event, target)
     if _get_user_team_for_event(db, event.id, target.id):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already in a team")
     if event.team_max_size:

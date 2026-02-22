@@ -18,6 +18,7 @@ from migrations import (
     normalize_pda_profile_enum_values,
     ensure_pda_users_profile_name_column,
     ensure_pda_user_social_columns,
+    ensure_pda_users_college_column,
     ensure_pda_recruitment_tables,
     ensure_system_config_recruit_url_column,
     migrate_legacy_recruitment_json_once,
@@ -38,10 +39,12 @@ from migrations import (
     ensure_default_superadmin,
     ensure_pda_event_tables,
     ensure_pda_event_registration_open_column,
+    ensure_pda_events_open_for_column,
     ensure_pda_event_round_submission_tables,
     ensure_pda_event_panel_tables,
     ensure_community_event_tables,
     backfill_pda_event_round_count_once,
+    resolve_user_identifier_collisions_once,
     remove_legacy_persofest_once,
     clear_legacy_poster_urls_once,
     ensure_persohub_tables,
@@ -135,6 +138,7 @@ async def startup_event():
     normalize_pda_profile_enum_values(engine)
     ensure_pda_users_profile_name_column(engine)
     ensure_pda_user_social_columns(engine)
+    ensure_pda_users_college_column(engine)
     ensure_pda_team_columns(engine)
     ensure_pda_items_columns(engine)
     ensure_pda_items_no_hero_caption(engine)
@@ -145,6 +149,7 @@ async def startup_event():
     ensure_email_auth_columns(engine)
     ensure_pda_event_tables(engine)
     ensure_pda_event_registration_open_column(engine)
+    ensure_pda_events_open_for_column(engine)
     ensure_pda_event_round_submission_tables(engine)
     ensure_pda_event_panel_tables(engine)
     ensure_community_event_tables(engine)
@@ -155,6 +160,7 @@ async def startup_event():
 
     Base.metadata.create_all(bind=engine)
     ensure_pda_event_panel_tables(engine)
+    resolve_user_identifier_collisions_once(engine)
 
     migrate_legacy_recruitment_json_once(engine)
     remove_legacy_persofest_once(engine)

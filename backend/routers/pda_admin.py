@@ -1,6 +1,7 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, UploadFile, File, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, UploadFile, File, Request, Query
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func
 from typing import Dict, List, Optional, Tuple
 import os
 import io
@@ -59,6 +60,7 @@ from utils import (
 from auth import get_password_hash
 from recruitment_state import get_recruitment_state, get_recruitment_state_map
 from persohub_service import is_profile_name_valid, generate_unique_profile_name
+from identifier_rules import ensure_no_identifier_collision
 
 try:
     import pypdfium2 as pdfium
@@ -69,6 +71,13 @@ router = APIRouter()
 
 PDF_PREVIEW_MAX_PAGES = 20
 PDF_PREVIEW_RENDER_SCALE = 1.5
+DEFAULT_COLLEGE = "MIT"
+ADMIN_LIST_MAX_PAGE_SIZE = 100
+
+
+def _normalize_college(value: Optional[str]) -> str:
+    normalized = str(value or "").strip()
+    return normalized or DEFAULT_COLLEGE
 
 
 def _render_pdf_preview_images(pdf_bytes: bytes, max_pages: int) -> List[bytes]:
@@ -126,6 +135,7 @@ def _build_team_response(member: PdaTeam, user: Optional[PdaUser], resume_url: O
         profile_name=user.profile_name if user else None,
         regno=user.regno if user else None,
         dept=user.dept if user else None,
+        college=_normalize_college(user.college) if user else None,
         email=user.email if user else None,
         phno=user.phno if user else None,
         dob=user.dob if user else None,
@@ -153,6 +163,7 @@ def _build_admin_user_response(
         profile_name=user.profile_name,
         regno=user.regno,
         dept=user.dept,
+        college=_normalize_college(user.college),
         email=user.email,
         phno=user.phno,
         dob=user.dob,
@@ -187,6 +198,7 @@ def _build_email_context_for_user(
         "regno": user.regno,
         "email": user.email,
         "dept": user.dept,
+        "college": _normalize_college(user.college),
         "gender": user.gender,
         "phno": user.phno,
         "dob": user.dob,
@@ -471,15 +483,31 @@ def delete_pda_event(
 
 @router.get("/pda-admin/team", response_model=List[PdaTeamResponse])
 def list_team_members(
+    college_scope: str = "all",
+    page: Optional[int] = Query(default=None, ge=1),
+    page_size: Optional[int] = Query(default=None, ge=1),
     admin: PdaUser = Depends(require_pda_home_admin),
     db: Session = Depends(get_db)
 ):
-    rows = (
+    scope = str(college_scope or "all").strip().lower()
+    if scope not in {"all", "mit"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="college_scope must be all or mit")
+    if page_size is not None and page_size > ADMIN_LIST_MAX_PAGE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"page_size must be <= {ADMIN_LIST_MAX_PAGE_SIZE}",
+        )
+    query = (
         db.query(PdaTeam, PdaUser)
         .join(PdaUser, PdaTeam.user_id == PdaUser.id, isouter=True)
-        .order_by(PdaTeam.team.asc().nullslast(), PdaTeam.designation.asc().nullslast(), PdaUser.name.asc().nullslast())
-        .all()
     )
+    if scope == "mit":
+        query = query.filter(func.lower(func.trim(func.coalesce(PdaUser.college, ""))) == "mit")
+    query = query.order_by(PdaTeam.team.asc().nullslast(), PdaTeam.designation.asc().nullslast(), PdaUser.name.asc().nullslast())
+    if page_size is not None:
+        current_page = page or 1
+        query = query.offset((current_page - 1) * page_size).limit(page_size)
+    rows = query.all()
     users = [u for _, u in rows if u and u.id is not None]
     resume_map = get_recruitment_state_map(db, users) if users else {}
     return [
@@ -494,14 +522,21 @@ def list_team_members(
 
 @router.get("/pda-admin/users", response_model=List[PdaAdminUserResponse])
 def list_pda_users(
+    page: Optional[int] = Query(default=None, ge=1),
+    page_size: Optional[int] = Query(default=None, ge=1),
     admin: PdaUser = Depends(require_pda_home_admin),
     db: Session = Depends(get_db),
 ):
-    users = (
-        db.query(PdaUser)
-        .order_by(PdaUser.name.asc().nullslast(), PdaUser.regno.asc())
-        .all()
-    )
+    if page_size is not None and page_size > ADMIN_LIST_MAX_PAGE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"page_size must be <= {ADMIN_LIST_MAX_PAGE_SIZE}",
+        )
+    users_query = db.query(PdaUser).order_by(PdaUser.name.asc().nullslast(), PdaUser.regno.asc())
+    if page_size is not None:
+        current_page = page or 1
+        users_query = users_query.offset((current_page - 1) * page_size).limit(page_size)
+    users = users_query.all()
     user_ids = [user.id for user in users]
     team_rows = (
         db.query(PdaTeam)
@@ -645,6 +680,7 @@ def update_pda_user_admin(
 
     incoming_profile_name = updates.get("profile_name")
     if incoming_profile_name:
+        ensure_no_identifier_collision(db, regno=user.regno, profile_name=incoming_profile_name)
         existing_profile_user = db.query(PdaUser).filter(
             PdaUser.profile_name == incoming_profile_name,
             PdaUser.id != user_id
@@ -652,7 +688,10 @@ def update_pda_user_admin(
         if existing_profile_user:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Profile name already in use")
 
-    for field in ("name", "profile_name", "email", "phno", "dept", "dob", "gender", "is_member", "instagram_url", "linkedin_url", "github_url"):
+    if "college" in updates:
+        updates["college"] = _normalize_college(updates.get("college"))
+
+    for field in ("name", "profile_name", "email", "phno", "dept", "college", "dob", "gender", "is_member", "instagram_url", "linkedin_url", "github_url"):
         if field in updates:
             setattr(user, field, updates[field])
     if "photo_url" in updates:
@@ -720,6 +759,8 @@ def create_team_member(
     desired_profile_name = str(payload.get("profile_name") or "").strip().lower() or None
     if desired_profile_name and not is_profile_name_valid(desired_profile_name):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid profile name format")
+    incoming_regno = str(payload.get("regno") or "").strip() or None
+    ensure_no_identifier_collision(db, regno=incoming_regno, profile_name=desired_profile_name)
     password_value = str(payload.get("password") or "").strip()
     user = None
     if payload.get("user_id"):
@@ -728,6 +769,8 @@ def create_team_member(
             for field in ("name", "email", "phno", "dept", "instagram_url", "linkedin_url", "github_url"):
                 if payload.get(field):
                     setattr(user, field, payload[field])
+            if "college" in payload:
+                user.college = _normalize_college(payload.get("college"))
             if payload.get("dob"):
                 user.dob = payload["dob"]
             if payload.get("gender"):
@@ -764,6 +807,7 @@ def create_team_member(
                 gender=payload.get("gender"),
                 phno=payload.get("phno"),
                 dept=payload.get("dept"),
+                college=_normalize_college(payload.get("college")),
                 instagram_url=payload.get("instagram_url"),
                 linkedin_url=payload.get("linkedin_url"),
                 github_url=payload.get("github_url"),
@@ -777,6 +821,8 @@ def create_team_member(
             for field in ("name", "email", "phno", "dept", "instagram_url", "linkedin_url", "github_url"):
                 if payload.get(field):
                     setattr(user, field, payload[field])
+            if "college" in payload:
+                user.college = _normalize_college(payload.get("college"))
             if payload.get("dob"):
                 user.dob = payload["dob"]
             if payload.get("gender"):
@@ -847,6 +893,8 @@ def update_team_member(
         for field in ("name", "email", "phno", "dept", "dob", "instagram_url", "linkedin_url", "github_url"):
             if field in updates and updates[field] is not None:
                 setattr(user, field, updates[field])
+        if "college" in updates:
+            user.college = _normalize_college(updates.get("college"))
         if "photo_url" in updates and updates.get("photo_url"):
             if user.image_url != updates["photo_url"]:
                 user.image_url = updates["photo_url"]
@@ -1000,15 +1048,20 @@ def delete_pda_user(
 @router.get("/pda-admin/team/export")
 def export_team_members(
     format: str = "csv",
+    college_scope: str = "all",
     admin: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db)
 ):
-    rows = (
+    scope = str(college_scope or "all").strip().lower()
+    if scope not in {"all", "mit"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="college_scope must be all or mit")
+    query = (
         db.query(PdaTeam, PdaUser)
         .join(PdaUser, PdaTeam.user_id == PdaUser.id, isouter=True)
-        .order_by(PdaTeam.team.asc().nullslast(), PdaTeam.designation.asc().nullslast(), PdaUser.name.asc().nullslast())
-        .all()
     )
+    if scope == "mit":
+        query = query.filter(func.lower(func.trim(func.coalesce(PdaUser.college, ""))) == "mit")
+    rows = query.order_by(PdaTeam.team.asc().nullslast(), PdaTeam.designation.asc().nullslast(), PdaUser.name.asc().nullslast()).all()
     if format == "xlsx":
         wb = Workbook()
         ws = wb.active

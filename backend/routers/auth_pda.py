@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from time_utils import ensure_timezone, now_tz
 from email_tokens import generate_token, hash_token, RESET_TOKEN_TTL_SECONDS
 from datetime import timedelta
@@ -10,7 +11,6 @@ import io
 from database import get_db
 from models import PdaUser, PdaTeam, PdaAdmin, SystemConfig
 from schemas import (
-    DepartmentEnum,
     GenderEnum,
     PdaUserRegister,
     PdaRecruitmentApplyRequest,
@@ -40,12 +40,18 @@ from persohub_service import (
     is_profile_name_valid,
 )
 from recruitment_state import create_recruitment_application, get_recruitment_state, update_recruitment_resume
+from identifier_rules import ensure_no_identifier_collision
 import os
 
 router = APIRouter()
 DEFAULT_PDA_RECRUIT_URL = "https://chat.whatsapp.com/ErThvhBS77kGJEApiABP2z"
 ALLOWED_PDA_GENDERS = {choice.value for choice in GenderEnum}
-ALLOWED_PDA_DEPARTMENTS = {choice.value for choice in DepartmentEnum}
+DEFAULT_COLLEGE = "MIT"
+
+
+def _normalize_college(value: Optional[str]) -> str:
+    normalized = str(value or "").strip()
+    return normalized or DEFAULT_COLLEGE
 
 
 def _normalize_optional_choice(value: Optional[str], allowed_values: set[str]) -> Optional[str]:
@@ -83,7 +89,8 @@ def _build_pda_user_response(db: Session, user: PdaUser) -> PdaUserResponse:
         dob=user.dob,
         gender=_normalize_optional_choice(user.gender, ALLOWED_PDA_GENDERS),
         phno=user.phno,
-        dept=_normalize_optional_choice(user.dept, ALLOWED_PDA_DEPARTMENTS),
+        dept=str(user.dept or "").strip() or None,
+        college=_normalize_college(user.college),
         image_url=user.image_url,
         is_member=user.is_member,
         is_applied=bool(recruit["is_applied"]),
@@ -122,6 +129,7 @@ def pda_register(user_data: PdaUserRegister, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists")
 
     desired_profile_name = str(user_data.profile_name or "").strip().lower() or None
+    ensure_no_identifier_collision(db, regno=user_data.regno, profile_name=desired_profile_name)
     if desired_profile_name:
         if not is_profile_name_valid(desired_profile_name):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid profile name format")
@@ -144,7 +152,8 @@ def pda_register(user_data: PdaUserRegister, db: Session = Depends(get_db)):
         dob=user_data.dob,
         gender=user_data.gender.value if user_data.gender else None,
         phno=user_data.phno,
-        dept=user_data.dept.value if user_data.dept else None,
+        dept=str(user_data.dept or "").strip() or None,
+        college=_normalize_college(user_data.college),
         image_url=user_data.image_url,
         json_content={},
         is_member=False
@@ -229,7 +238,16 @@ def update_pda_recruitment_resume(
 
 @router.post("/auth/login", response_model=PdaTokenResponse)
 def pda_login(login_data: PdaUserLogin, db: Session = Depends(get_db)):
-    user = db.query(PdaUser).filter(PdaUser.regno == login_data.regno).first()
+    identifier = str(login_data.regno or "").strip()
+    user = db.query(PdaUser).filter(PdaUser.regno == identifier).first()
+    if not user:
+        normalized_identifier = identifier.lower()
+        user = (
+            db.query(PdaUser)
+            .filter(PdaUser.profile_name.isnot(None))
+            .filter(func.lower(PdaUser.profile_name) == normalized_identifier)
+            .first()
+        )
     if not user or not verify_password(login_data.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     if os.environ.get("EMAIL_VERIFY_REQUIRED", "false").lower() == "true" and not user.email_verified:
@@ -284,6 +302,7 @@ def update_pda_me(
     if update_data.profile_name is not None:
         if not is_profile_name_valid(update_data.profile_name):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid profile name format")
+        ensure_no_identifier_collision(db, regno=user.regno, profile_name=update_data.profile_name)
         existing = db.query(PdaUser).filter(
             PdaUser.profile_name == update_data.profile_name,
             PdaUser.id != user.id
@@ -312,7 +331,9 @@ def update_pda_me(
     if update_data.phno is not None:
         user.phno = update_data.phno
     if update_data.dept is not None:
-        user.dept = update_data.dept.value
+        user.dept = str(update_data.dept or "").strip() or None
+    if "college" in update_data.model_fields_set:
+        user.college = _normalize_college(update_data.college)
     if update_data.image_url is not None:
         user.image_url = update_data.image_url
     if "instagram_url" in update_data.model_fields_set:

@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import AdminLayout from '@/pages/HomeAdmin/AdminLayout';
 import pdaLogo from '@/assets/pda-logo.png';
@@ -12,7 +13,8 @@ import { API, uploadTeamImage } from '@/pages/HomeAdmin/adminApi';
 import { compressImageToWebp } from '@/utils/imageCompression';
 import { toast } from 'sonner';
 
-const PAGE_SIZE = 12;
+const PAGE_SIZE_OPTIONS = [10, 50, 100];
+const MAX_PAGE_SIZE = 100;
 
 const TEAMS = [
     'Executive',
@@ -42,6 +44,10 @@ const DEPARTMENTS = [
 const GENDERS = [
     { value: 'Male', label: 'Male' },
     { value: 'Female', label: 'Female' }
+];
+const COLLEGE_SCOPE_OPTIONS = [
+    { value: 'mit', label: 'MIT Only' },
+    { value: 'all', label: 'All Users' }
 ];
 const DEPARTMENT_ENUM_KEY_TO_VALUE = {
     AI_DS: 'Artificial Intelligence and Data Science',
@@ -99,15 +105,18 @@ const normalizeDepartmentValue = (value) => {
 export default function UsersAdmin() {
     const { isSuperAdmin, canAccessHome, getAuthHeader } = useAuth();
     const [usersRows, setUsersRows] = useState([]);
+    const [collegeScope, setCollegeScope] = useState('mit');
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [memberFilter, setMemberFilter] = useState('All');
     const [appliedFilter, setAppliedFilter] = useState('All');
     const [verifiedFilter, setVerifiedFilter] = useState('All');
+    const [collegeFilter, setCollegeFilter] = useState('MIT');
     const [sortBy, setSortBy] = useState('name');
     const [sortDir, setSortDir] = useState('asc');
     const [batchFilter, setBatchFilter] = useState('All');
     const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(10);
     const [selectedMember, setSelectedMember] = useState(null);
     const [editForm, setEditForm] = useState({
         name: '',
@@ -115,6 +124,7 @@ export default function UsersAdmin() {
         email: '',
         phno: '',
         dept: '',
+        college: 'MIT',
         gender: '',
         is_member: false,
         team: '',
@@ -158,22 +168,27 @@ export default function UsersAdmin() {
     }, [canAccessHome, fetchData]);
 
     const filtered = useMemo(() => {
-        const filteredRows = usersRows.filter((member) => {
+        const scopedRows = usersRows.filter((member) => (
+            collegeScope === 'all' ? true : String(member?.college || '').trim().toLowerCase() === 'mit'
+        ));
+        const filteredRows = scopedRows.filter((member) => {
             const memberMatch = memberFilter === 'All' || (memberFilter === 'Members' ? member.is_member : !member.is_member);
             const appliedMatch = appliedFilter === 'All' || (appliedFilter === 'Applied' ? member.is_applied : !member.is_applied);
             const verifiedMatch = verifiedFilter === 'All' || (verifiedFilter === 'Verified' ? member.email_verified : !member.email_verified);
-            return memberMatch && appliedMatch && verifiedMatch;
+            const isMit = String(member?.college || '').trim().toLowerCase() === 'mit';
+            const collegeMatch = collegeFilter === 'MIT' ? isMit : !isMit;
+            return memberMatch && appliedMatch && verifiedMatch && collegeMatch;
         });
         if (!search) return filteredRows;
         const s = search.toLowerCase();
         return filteredRows.filter(m =>
-            [m.name, m.profile_name, m.regno, m.preferred_team, m.team, m.email, m.phno, m.dept]
+            [m.name, m.profile_name, m.regno, m.preferred_team, m.team, m.email, m.phno, m.dept, m.college]
                 .filter(Boolean)
                 .join(' ')
                 .toLowerCase()
                 .includes(s)
         );
-    }, [usersRows, search, memberFilter, appliedFilter, verifiedFilter]);
+    }, [usersRows, collegeScope, search, memberFilter, appliedFilter, verifiedFilter, collegeFilter]);
 
     const sorted = useMemo(() => {
         const rows = [...filtered];
@@ -204,10 +219,12 @@ export default function UsersAdmin() {
 
     useEffect(() => {
         setPage(1);
-    }, [search, memberFilter, appliedFilter, verifiedFilter, sortBy, sortDir]);
+    }, [collegeScope, search, memberFilter, appliedFilter, verifiedFilter, collegeFilter, sortBy, sortDir, pageSize]);
 
-    const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
-    const paged = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+    const boundedPageSize = Math.min(pageSize, MAX_PAGE_SIZE);
+    const totalPages = Math.max(1, Math.ceil(sorted.length / boundedPageSize));
+    const currentPage = Math.min(page, totalPages);
+    const paged = sorted.slice((currentPage - 1) * boundedPageSize, currentPage * boundedPageSize);
 
     const openMember = (member) => {
         setSelectedMember(member);
@@ -217,6 +234,7 @@ export default function UsersAdmin() {
             email: member.email || '',
             phno: member.phno || '',
             dept: normalizeDepartmentValue(member.dept),
+            college: member.college || 'MIT',
             gender: normalizeGenderValue(member.gender),
             is_member: Boolean(member.is_member),
             team: member.team || '',
@@ -244,6 +262,7 @@ export default function UsersAdmin() {
                 email: editForm.email || null,
                 phno: editForm.phno || null,
                 dept: editForm.dept || null,
+                college: (editForm.college || 'MIT').trim(),
                 gender: editForm.gender || null,
                 is_member: Boolean(editForm.is_member),
                 team: editForm.team || null,
@@ -338,11 +357,15 @@ export default function UsersAdmin() {
         );
     }
 
-    const statsMembers = usersRows.filter((m) => String(m?.regno || '') !== '0000000000');
+    const statsMembers = usersRows.filter((m) => (
+        String(m?.regno || '') !== '0000000000'
+        && (collegeScope === 'all' ? true : String(m?.college || '').trim().toLowerCase() === 'mit')
+    ));
     const totalUsers = statsMembers.length;
     const totalMembers = statsMembers.filter((m) => Boolean(m.is_member)).length;
     const totalApplied = statsMembers.filter((m) => Boolean(m.is_applied)).length;
     const totalVerified = statsMembers.filter((m) => Boolean(m.email_verified)).length;
+    const totalNonMitian = statsMembers.filter((m) => String(m?.college || '').trim().toLowerCase() !== 'mit').length;
     const totalUnverified = totalUsers - totalVerified;
     const totalNotApplied = totalUsers - totalApplied;
 
@@ -406,10 +429,25 @@ export default function UsersAdmin() {
                         <p className="text-xs uppercase tracking-[0.4em] text-slate-400">Overview</p>
                         <h2 className="text-2xl font-heading font-black">PDA Users Stats</h2>
                     </div>
-                    <div className="text-sm text-slate-600">
+                    <div className="flex flex-col gap-2 sm:items-end">
+                        <div className="flex items-center gap-2">
+                            <Label className="text-xs uppercase tracking-[0.2em] text-slate-400">Scope</Label>
+                            <Select value={collegeScope} onValueChange={setCollegeScope}>
+                                <SelectTrigger className="h-9 w-40">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {COLLEGE_SCOPE_OPTIONS.map((option) => (
+                                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="text-sm text-slate-600">
                         Total users: <span className="font-semibold text-[#11131a]">{totalUsers}</span> · Members:{' '}
                         <span className="font-semibold text-[#11131a]">{totalMembers}</span> · Applied:{' '}
                         <span className="font-semibold text-[#11131a]">{totalApplied}</span>
+                        </div>
                     </div>
                 </div>
 
@@ -436,6 +474,10 @@ export default function UsersAdmin() {
                             <div className="flex items-center justify-between rounded-lg border border-black/10 bg-white px-3 py-2 text-sm">
                                 <span className="font-semibold text-slate-700">Email Unverified</span>
                                 <span className="text-slate-600">{totalUnverified}</span>
+                            </div>
+                            <div className="flex items-center justify-between rounded-lg border border-black/10 bg-white px-3 py-2 text-sm">
+                                <span className="font-semibold text-slate-700">NON MITIAN</span>
+                                <span className="text-slate-600">{totalNonMitian}</span>
                             </div>
                         </div>
                     </div>
@@ -540,8 +582,8 @@ export default function UsersAdmin() {
                     </div>
                 </div>
 
-                <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <div className="mt-6 space-y-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                         <Input
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
@@ -578,6 +620,15 @@ export default function UsersAdmin() {
                                 <SelectItem value="Unverified">Unverified</SelectItem>
                             </SelectContent>
                         </Select>
+                        <Select value={collegeFilter} onValueChange={setCollegeFilter}>
+                            <SelectTrigger className="sm:w-44">
+                                <SelectValue placeholder="College" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="MIT">MIT</SelectItem>
+                                <SelectItem value="NON_MIT">NON MIT</SelectItem>
+                            </SelectContent>
+                        </Select>
                         <Select value={sortBy} onValueChange={setSortBy}>
                             <SelectTrigger className="sm:w-44">
                                 <SelectValue placeholder="Sort by" />
@@ -595,10 +646,41 @@ export default function UsersAdmin() {
                             {sortDir === 'asc' ? 'Asc' : 'Desc'}
                         </Button>
                     </div>
-                    <div className="flex items-center gap-2">
-                        <Button variant="outline" onClick={() => setPage(Math.max(1, page - 1))} disabled={page === 1}>Prev</Button>
-                        <span className="text-sm text-slate-500">Page {page} of {totalPages}</span>
-                        <Button variant="outline" onClick={() => setPage(Math.min(totalPages, page + 1))} disabled={page === totalPages}>Next</Button>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex items-center gap-2">
+                            <Label className="text-xs uppercase tracking-[0.2em] text-slate-400">Rows</Label>
+                            <Select value={String(pageSize)} onValueChange={(value) => setPageSize(Number(value))}>
+                                <SelectTrigger className="h-9 w-20">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {PAGE_SIZE_OPTIONS.map((option) => (
+                                        <SelectItem key={option} value={String(option)}>
+                                            {option}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setPage(Math.max(1, currentPage - 1))}
+                            className="rounded-full border border-[#c99612] bg-[#f6c347] p-2 text-[#11131a] transition hover:bg-[#ffd16b] disabled:cursor-not-allowed disabled:opacity-50"
+                            aria-label="Previous page"
+                            disabled={currentPage === 1}
+                        >
+                            <ChevronLeft className="h-4 w-4" />
+                        </button>
+                        <span className="text-sm text-slate-500">Page {currentPage} of {totalPages}</span>
+                        <button
+                            type="button"
+                            onClick={() => setPage(Math.min(totalPages, currentPage + 1))}
+                            className="rounded-full border border-[#c99612] bg-[#f6c347] p-2 text-[#11131a] transition hover:bg-[#ffd16b] disabled:cursor-not-allowed disabled:opacity-50"
+                            aria-label="Next page"
+                            disabled={currentPage === totalPages}
+                        >
+                            <ChevronRight className="h-4 w-4" />
+                        </button>
                     </div>
                 </div>
 
@@ -662,7 +744,7 @@ export default function UsersAdmin() {
                 setSelectedMember(null);
                 setConfirmOpen(false);
             }}>
-                <DialogContent className="w-[calc(100vw-1rem)] max-w-3xl max-h-[calc(100vh-2rem)] overflow-x-hidden overflow-y-auto bg-white p-4 sm:p-6">
+                <DialogContent className="w-[92vw] max-w-3xl max-h-[90vh] overflow-x-hidden overflow-y-auto bg-white p-4 sm:p-6">
                     <DialogHeader>
                         <DialogTitle className="text-xl font-heading font-black">User Details</DialogTitle>
                     </DialogHeader>
@@ -676,18 +758,19 @@ export default function UsersAdmin() {
                                 />
                             </div>
                             <div className="grid gap-6 md:grid-cols-2">
-                                <div className="space-y-2 text-xs text-slate-500">
+                                <div className="min-w-0 space-y-2 break-words text-xs text-slate-500">
                                     <p><span className="font-semibold text-slate-600">Reg No:</span> {selectedMember.regno || 'N/A'}</p>
                                     <p><span className="font-semibold text-slate-600">Profile Name:</span> @{selectedMember.profile_name || 'n/a'}</p>
                                     <p><span className="font-semibold text-slate-600">Email:</span> {selectedMember.email || 'N/A'}</p>
                                     <p><span className="font-semibold text-slate-600">Phone:</span> {selectedMember.phno || 'N/A'}</p>
                                     <p><span className="font-semibold text-slate-600">Dept:</span> {selectedMember.dept || 'N/A'}</p>
+                                    <p><span className="font-semibold text-slate-600">College:</span> {selectedMember.college || 'MIT'}</p>
                                     <p><span className="font-semibold text-slate-600">Gender:</span> {selectedMember.gender || 'N/A'}</p>
                                     <p><span className="font-semibold text-slate-600">Is Member:</span> {selectedMember.is_member ? 'Yes' : 'No'}</p>
                                     <p><span className="font-semibold text-slate-600">Is Applied:</span> {selectedMember.is_applied ? 'Yes' : 'No'}</p>
                                     <p><span className="font-semibold text-slate-600">Instagram:</span> {selectedMember.instagram_url || 'N/A'}</p>
                                 </div>
-                                <div className="space-y-2 text-xs text-slate-500">
+                                <div className="min-w-0 space-y-2 break-words text-xs text-slate-500">
                                     <p><span className="font-semibold text-slate-600">DOB:</span> {selectedMember.dob || 'N/A'}</p>
                                     <p><span className="font-semibold text-slate-600">Email Verified:</span> {selectedMember.email_verified ? 'Yes' : 'No'}</p>
                                     <p><span className="font-semibold text-slate-600">Preferred Team:</span> {selectedMember.preferred_team || 'N/A'}</p>
@@ -758,6 +841,10 @@ export default function UsersAdmin() {
                                                 ) : null}
                                             </SelectContent>
                                         </Select>
+                                    </div>
+                                    <div>
+                                        <Label>College</Label>
+                                        <Input value={editForm.college} onChange={(e) => setEditForm((prev) => ({ ...prev, college: e.target.value }))} disabled={!isEditing || !isSuperAdmin} />
                                     </div>
                                     <div>
                                         <Label>Gender</Label>

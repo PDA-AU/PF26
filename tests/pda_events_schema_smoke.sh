@@ -68,8 +68,13 @@ CREATE_JSON="$(
 )"
 EVENT_SLUG="$(echo "$CREATE_JSON" | parse_json 'data["slug"]')"
 EVENT_STATUS="$(echo "$CREATE_JSON" | parse_json 'data["status"]')"
+EVENT_OPEN_FOR="$(echo "$CREATE_JSON" | parse_json 'data.get("open_for")')"
 if [[ "$EVENT_STATUS" != "closed" ]]; then
   echo "Expected new event status closed, got $EVENT_STATUS"
+  exit 1
+fi
+if [[ "$EVENT_OPEN_FOR" != "MIT" ]]; then
+  echo "Expected new event open_for MIT, got $EVENT_OPEN_FOR"
   exit 1
 fi
 

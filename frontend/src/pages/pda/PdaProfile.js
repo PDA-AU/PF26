@@ -27,6 +27,11 @@ const DEPARTMENTS = [
     { value: 'Rubber and Plastics Technology', label: 'Rubber & Plastics' },
     { value: 'Information Technology', label: 'Information Technology' }
 ];
+const DEPARTMENT_OTHER = 'OTHER';
+const COLLEGES = [
+    { value: 'MIT', label: 'MIT' },
+    { value: 'OTHER', label: 'Other' }
+];
 
 const GENDERS = [
     { value: 'Male', label: 'Male' },
@@ -219,7 +224,10 @@ export default function PdaProfile() {
         dob: '',
         gender: '',
         phno: '',
-        dept: '',
+        deptChoice: '',
+        deptOther: '',
+        collegeChoice: 'MIT',
+        collegeOther: '',
         instagram_url: '',
         linkedin_url: '',
         github_url: ''
@@ -260,6 +268,10 @@ export default function PdaProfile() {
 
     const resetProfileForm = useCallback(() => {
         if (!user) return;
+        const normalizedDept = normalizeDepartmentValue(user.dept);
+        const isKnownDept = DEPARTMENTS.some((dept) => dept.value === normalizedDept);
+        const normalizedCollege = String(user.college || '').trim() || 'MIT';
+        const isMitCollege = normalizedCollege.toLowerCase() === 'mit';
         setFormData({
             name: user.name || '',
             profile_name: user.profile_name || '',
@@ -267,7 +279,10 @@ export default function PdaProfile() {
             dob: user.dob || '',
             gender: normalizeGenderValue(user.gender),
             phno: user.phno || '',
-            dept: normalizeDepartmentValue(user.dept),
+            deptChoice: isKnownDept ? normalizedDept : (normalizedDept ? DEPARTMENT_OTHER : ''),
+            deptOther: isKnownDept ? '' : normalizedDept,
+            collegeChoice: isMitCollege ? 'MIT' : 'OTHER',
+            collegeOther: isMitCollege ? '' : normalizedCollege,
             instagram_url: user.instagram_url || '',
             linkedin_url: user.linkedin_url || '',
             github_url: user.github_url || ''
@@ -375,7 +390,20 @@ export default function PdaProfile() {
             return;
         }
         const normalizedGender = String(formData.gender || '').trim();
-        const normalizedDept = String(formData.dept || '').trim();
+        const normalizedDept = formData.deptChoice === DEPARTMENT_OTHER
+            ? String(formData.deptOther || '').trim()
+            : String(formData.deptChoice || '').trim();
+        if (formData.deptChoice === DEPARTMENT_OTHER && !normalizedDept) {
+            toast.error('Please enter your department');
+            return;
+        }
+        const normalizedCollege = formData.collegeChoice === 'OTHER'
+            ? String(formData.collegeOther || '').trim()
+            : 'MIT';
+        if (formData.collegeChoice === 'OTHER' && !normalizedCollege) {
+            toast.error('Please enter your college name');
+            return;
+        }
         const instagram_url = String(formData.instagram_url || '').trim();
         const linkedin_url = String(formData.linkedin_url || '').trim();
         const github_url = String(formData.github_url || '').trim();
@@ -387,6 +415,7 @@ export default function PdaProfile() {
                 email: formData.email,
                 dob: formData.dob,
                 phno: formData.phno,
+                college: normalizedCollege,
                 instagram_url: instagram_url || null,
                 linkedin_url: linkedin_url || null,
                 github_url: github_url || null
@@ -595,7 +624,9 @@ export default function PdaProfile() {
 
     if (!user) return null;
     const displayGender = isEditing ? formData.gender : normalizeGenderValue(user.gender);
-    const displayDept = isEditing ? formData.dept : normalizeDepartmentValue(user.dept);
+    const displayDept = isEditing
+        ? (formData.deptChoice === DEPARTMENT_OTHER ? formData.deptOther : formData.deptChoice)
+        : normalizeDepartmentValue(user.dept);
 
     return (
         <div className="min-h-screen bg-[#fffdf5] text-black flex flex-col">
@@ -644,8 +675,8 @@ export default function PdaProfile() {
                                         </div>
                                     )}
                                     <div className="space-y-1">
-                                        <p className="font-heading text-xl font-black uppercase tracking-tight">{user.name || 'PDA Member'}</p>
-                                        <p className="font-mono text-xs font-bold uppercase tracking-[0.12em] text-[#8B5CF6]">@{user.profile_name || 'n/a'}</p>
+                                        <p className="font-heading text-xl font-black tracking-tight">{user.name || 'PDA Member'}</p>
+                                        <p className="font-mono text-xs font-bold tracking-[0.12em] text-[#8B5CF6]">@{user.profile_name || 'n/a'}</p>
                                         <p className="font-mono text-xs font-bold uppercase tracking-[0.12em] text-slate-600">{user.regno}</p>
                                         <p className="text-sm font-medium text-slate-700">{user.email}</p>
                                     </div>
@@ -888,24 +919,86 @@ export default function PdaProfile() {
                             </div>
                             <div>
                                 <Label htmlFor="profile-dept" className="text-xs font-bold uppercase tracking-[0.12em]">Department</Label>
-                                <Select value={displayDept} onValueChange={(value) => setFormData((prev) => ({ ...prev, dept: value }))} disabled={!isEditing}>
+                                <Select
+                                    value={formData.deptChoice || '__none__'}
+                                    onValueChange={(value) => setFormData((prev) => ({
+                                        ...prev,
+                                        deptChoice: value === '__none__' ? '' : value,
+                                        deptOther: value === DEPARTMENT_OTHER ? prev.deptOther : ''
+                                    }))}
+                                    disabled={!isEditing}
+                                >
                                     <SelectTrigger id="profile-dept" data-testid="pda-profile-dept-select" className={`${selectTriggerClass} disabled:bg-[#f3f4f6]`}>
                                         <SelectValue placeholder="Select department">
                                             {displayDept || 'Select department'}
                                         </SelectValue>
                                     </SelectTrigger>
                                     <SelectContent className={selectContentClass}>
+                                        <SelectItem value="__none__">Select department</SelectItem>
                                         {DEPARTMENTS.map((dept) => (
                                             <SelectItem data-testid={`pda-profile-dept-${dept.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`} key={dept.value} value={dept.value}>
                                                 {dept.label}
                                             </SelectItem>
                                         ))}
-                                        {displayDept && !DEPARTMENTS.some((dept) => dept.value === displayDept) ? (
-                                            <SelectItem value={displayDept}>{displayDept}</SelectItem>
-                                        ) : null}
+                                        <SelectItem value={DEPARTMENT_OTHER}>Other</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>
+                            {formData.deptChoice === DEPARTMENT_OTHER ? (
+                                <div>
+                                    <Label htmlFor="profile-dept-other" className="text-xs font-bold uppercase tracking-[0.12em]">Department (Other)</Label>
+                                    <Input
+                                        id="profile-dept-other"
+                                        name="deptOther"
+                                        value={formData.deptOther}
+                                        onChange={handleChange}
+                                        placeholder="Enter your department"
+                                        disabled={!isEditing}
+                                        data-testid="pda-profile-dept-other-input"
+                                        className={`${inputClass} disabled:bg-[#f3f4f6]`}
+                                    />
+                                </div>
+                            ) : null}
+                            <div>
+                                <Label htmlFor="profile-college" className="text-xs font-bold uppercase tracking-[0.12em]">College</Label>
+                                <Select
+                                    value={formData.collegeChoice || 'MIT'}
+                                    onValueChange={(value) => setFormData((prev) => ({
+                                        ...prev,
+                                        collegeChoice: value,
+                                        collegeOther: value === 'OTHER' ? prev.collegeOther : ''
+                                    }))}
+                                    disabled={!isEditing}
+                                >
+                                    <SelectTrigger id="profile-college" data-testid="pda-profile-college-select" className={`${selectTriggerClass} disabled:bg-[#f3f4f6]`}>
+                                        <SelectValue placeholder="Select college">
+                                            {formData.collegeChoice === 'OTHER' ? (formData.collegeOther || 'Other') : 'MIT'}
+                                        </SelectValue>
+                                    </SelectTrigger>
+                                    <SelectContent className={selectContentClass}>
+                                        {COLLEGES.map((college) => (
+                                            <SelectItem key={college.value} value={college.value}>
+                                                {college.label}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            {formData.collegeChoice === 'OTHER' ? (
+                                <div>
+                                    <Label htmlFor="profile-college-other" className="text-xs font-bold uppercase tracking-[0.12em]">College Name</Label>
+                                    <Input
+                                        id="profile-college-other"
+                                        name="collegeOther"
+                                        value={formData.collegeOther}
+                                        onChange={handleChange}
+                                        placeholder="Enter college name"
+                                        disabled={!isEditing}
+                                        data-testid="pda-profile-college-other-input"
+                                        className={`${inputClass} disabled:bg-[#f3f4f6]`}
+                                    />
+                                </div>
+                            ) : null}
                             <div>
                                 <Label htmlFor="profile-member-status" className="text-xs font-bold uppercase tracking-[0.12em]">Membership Status</Label>
                                 <Input id="profile-member-status" value={user.is_member ? 'Member' : (user.is_applied ? 'Applied' : 'Not Applied')} readOnly data-testid="pda-profile-membership-status-input" className={`${inputClass} bg-[#f3f4f6]`} />

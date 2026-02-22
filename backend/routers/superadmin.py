@@ -116,6 +116,7 @@ def _build_admin_response(
         dob=user.dob,
         phno=user.phno,
         dept=user.dept,
+        college=user.college or "MIT",
         image_url=user.image_url,
         is_member=user.is_member,
         is_applied=bool(recruit_state.get("is_applied")),

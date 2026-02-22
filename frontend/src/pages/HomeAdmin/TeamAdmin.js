@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import AdminLayout from '@/pages/HomeAdmin/AdminLayout';
 import pdaLogo from '@/assets/pda-logo.png';
@@ -12,7 +13,8 @@ import { API, uploadTeamImage } from '@/pages/HomeAdmin/adminApi';
 import { compressImageToWebp } from '@/utils/imageCompression';
 import { toast } from 'sonner';
 
-const PAGE_SIZE = 12;
+const PAGE_SIZE_OPTIONS = [10, 50, 100];
+const MAX_PAGE_SIZE = 100;
 
 const TEAMS = [
     'Executive',
@@ -112,10 +114,12 @@ export default function TeamAdmin() {
     const [search, setSearch] = useState('');
     const [teamFilter, setTeamFilter] = useState('All');
     const [designationFilter, setDesignationFilter] = useState('All');
+    const [collegeFilter, setCollegeFilter] = useState('MIT');
     const [sortBy, setSortBy] = useState('name');
     const [sortDir, setSortDir] = useState('asc');
     const [batchFilter, setBatchFilter] = useState('All');
     const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(10);
     const [selectedMember, setSelectedMember] = useState(null);
     const [editForm, setEditForm] = useState({ team: '', designation: '', instagram_url: '', linkedin_url: '', github_url: '' });
     const [photoFile, setPhotoFile] = useState(null);
@@ -131,10 +135,11 @@ export default function TeamAdmin() {
     const [addForm, setAddForm] = useState(emptyAddForm);
     const [addPhotoFile, setAddPhotoFile] = useState(null);
     const [adding, setAdding] = useState(false);
+    const maxDobDate = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
     const fetchData = useCallback(async () => {
         try {
-            const res = await axios.get(`${API}/pda-admin/team`, { headers: getAuthHeader() });
+            const res = await axios.get(`${API}/pda-admin/team?college_scope=mit`, { headers: getAuthHeader() });
             const rows = (res.data || [])
                 .filter((row) => String(row?.regno || '') !== '0000000000')
                 .map((row) => ({
@@ -159,18 +164,20 @@ export default function TeamAdmin() {
         const filteredByTeam = teamMembers.filter((member) => {
             const teamMatch = teamFilter === 'All' || member.team === teamFilter;
             const desigMatch = designationFilter === 'All' || member.designation === designationFilter;
-            return teamMatch && desigMatch;
+            const isMit = String(member?.college || '').trim().toLowerCase() === 'mit';
+            const collegeMatch = collegeFilter === 'MIT' ? isMit : !isMit;
+            return teamMatch && desigMatch && collegeMatch;
         });
         if (!search) return filteredByTeam;
         const s = search.toLowerCase();
         return filteredByTeam.filter(m =>
-            [m.name, m.profile_name, m.regno, m.team, m.designation, m.email, m.phno, m.dept]
+            [m.name, m.profile_name, m.regno, m.team, m.designation, m.email, m.phno, m.dept, m.college]
                 .filter(Boolean)
                 .join(' ')
                 .toLowerCase()
                 .includes(s)
         );
-    }, [teamMembers, search, teamFilter, designationFilter]);
+    }, [teamMembers, search, teamFilter, designationFilter, collegeFilter]);
 
     const sorted = useMemo(() => {
         const rows = [...filtered];
@@ -199,10 +206,12 @@ export default function TeamAdmin() {
 
     useEffect(() => {
         setPage(1);
-    }, [search, teamFilter, designationFilter, sortBy, sortDir]);
+    }, [search, teamFilter, designationFilter, collegeFilter, sortBy, sortDir, pageSize]);
 
-    const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
-    const paged = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+    const boundedPageSize = Math.min(pageSize, MAX_PAGE_SIZE);
+    const totalPages = Math.max(1, Math.ceil(sorted.length / boundedPageSize));
+    const currentPage = Math.min(page, totalPages);
+    const paged = sorted.slice((currentPage - 1) * boundedPageSize, currentPage * boundedPageSize);
 
     const openMember = (member) => {
         setSelectedMember(member);
@@ -372,7 +381,7 @@ export default function TeamAdmin() {
 
     const handleExport = async (format) => {
         try {
-            const response = await axios.get(`${API}/pda-admin/team/export?format=${format}` , {
+            const response = await axios.get(`${API}/pda-admin/team/export?format=${format}&college_scope=mit` , {
                 headers: getAuthHeader(),
                 responseType: 'blob'
             });
@@ -596,8 +605,8 @@ export default function TeamAdmin() {
                     </div>
                 </div>
 
-                <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <div className="mt-6 space-y-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                         <Input
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
@@ -626,6 +635,15 @@ export default function TeamAdmin() {
                                 ))}
                             </SelectContent>
                         </Select>
+                        <Select value={collegeFilter} onValueChange={setCollegeFilter}>
+                            <SelectTrigger className="sm:w-56">
+                                <SelectValue placeholder="Filter by college" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="MIT">MIT</SelectItem>
+                                <SelectItem value="NON_MIT">NON MIT</SelectItem>
+                            </SelectContent>
+                        </Select>
                         <Select value={sortBy} onValueChange={setSortBy}>
                             <SelectTrigger className="sm:w-44">
                                 <SelectValue placeholder="Sort by" />
@@ -641,10 +659,41 @@ export default function TeamAdmin() {
                             {sortDir === 'asc' ? 'Asc' : 'Desc'}
                         </Button>
                     </div>
-                    <div className="flex items-center gap-2">
-                        <Button variant="outline" onClick={() => setPage(Math.max(1, page - 1))} disabled={page === 1}>Prev</Button>
-                        <span className="text-sm text-slate-500">Page {page} of {totalPages}</span>
-                        <Button variant="outline" onClick={() => setPage(Math.min(totalPages, page + 1))} disabled={page === totalPages}>Next</Button>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex items-center gap-2">
+                            <Label className="text-xs uppercase tracking-[0.2em] text-slate-400">Rows</Label>
+                            <Select value={String(pageSize)} onValueChange={(value) => setPageSize(Number(value))}>
+                                <SelectTrigger className="h-9 w-20">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {PAGE_SIZE_OPTIONS.map((option) => (
+                                        <SelectItem key={option} value={String(option)}>
+                                            {option}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setPage(Math.max(1, currentPage - 1))}
+                            className="rounded-full border border-[#c99612] bg-[#f6c347] p-2 text-[#11131a] transition hover:bg-[#ffd16b] disabled:cursor-not-allowed disabled:opacity-50"
+                            aria-label="Previous page"
+                            disabled={currentPage === 1}
+                        >
+                            <ChevronLeft className="h-4 w-4" />
+                        </button>
+                        <span className="text-sm text-slate-500">Page {currentPage} of {totalPages}</span>
+                        <button
+                            type="button"
+                            onClick={() => setPage(Math.min(totalPages, currentPage + 1))}
+                            className="rounded-full border border-[#c99612] bg-[#f6c347] p-2 text-[#11131a] transition hover:bg-[#ffd16b] disabled:cursor-not-allowed disabled:opacity-50"
+                            aria-label="Next page"
+                            disabled={currentPage === totalPages}
+                        >
+                            <ChevronRight className="h-4 w-4" />
+                        </button>
                     </div>
                 </div>
 
@@ -738,7 +787,15 @@ export default function TeamAdmin() {
                         </div>
                         <div>
                             <Label>Date Of Birth *</Label>
-                            <Input name="dob" type="date" value={addForm.dob} onChange={(e) => setAddForm((prev) => ({ ...prev, dob: e.target.value }))} required />
+                            <Input
+                                name="dob"
+                                type="date"
+                                value={addForm.dob}
+                                onChange={(e) => setAddForm((prev) => ({ ...prev, dob: e.target.value }))}
+                                max={maxDobDate}
+                                required
+                                className="[color-scheme:light]"
+                            />
                         </div>
                         <div>
                             <Label>Gender *</Label>
@@ -882,12 +939,13 @@ export default function TeamAdmin() {
                                 />
                             </div>
                             <div className="grid gap-6 md:grid-cols-2">
-                                <div className="space-y-2 text-xs text-slate-500">
+                                <div className="min-w-0 space-y-2 break-words text-xs text-slate-500">
                                     <p><span className="font-semibold text-slate-600">Reg No:</span> {selectedMember.regno || 'N/A'}</p>
                                     <p><span className="font-semibold text-slate-600">Profile Name:</span> @{selectedMember.profile_name || 'n/a'}</p>
                                     <p><span className="font-semibold text-slate-600">Email:</span> {selectedMember.email || 'N/A'}</p>
                                     <p><span className="font-semibold text-slate-600">Phone:</span> {selectedMember.phno || 'N/A'}</p>
                                     <p><span className="font-semibold text-slate-600">Dept:</span> {selectedMember.dept || 'N/A'}</p>
+                                    <p><span className="font-semibold text-slate-600">College:</span> {selectedMember.college || 'MIT'}</p>
                                     <p>
                                         <span className="font-semibold text-slate-600">Resume:</span>{' '}
                                         {selectedMember.resume_url ? (
@@ -903,7 +961,7 @@ export default function TeamAdmin() {
                                     </p>
                                     <p><span className="font-semibold text-slate-600">Instagram:</span> {selectedMember.instagram_url || 'N/A'}</p>
                                 </div>
-                                <div className="space-y-2 text-xs text-slate-500">
+                                <div className="min-w-0 space-y-2 break-words text-xs text-slate-500">
                                     <p><span className="font-semibold text-slate-600">DOB:</span> {selectedMember.dob || 'N/A'}</p>
                                     <p><span className="font-semibold text-slate-600">Team:</span> {selectedMember.team || 'Unassigned'}</p>
                                     <p><span className="font-semibold text-slate-600">Designation:</span> {selectedMember.designation || 'Member'}</p>
