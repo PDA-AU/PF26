@@ -1478,6 +1478,8 @@ class PdaManagedRoundCreate(BaseModel):
             "image/png",
             "image/jpeg",
             "image/webp",
+            "video/mp4",
+            "video/quicktime",
             "application/zip",
         ]
     )

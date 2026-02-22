@@ -198,6 +198,8 @@ def _default_round_allowed_mime_types() -> List[str]:
         "image/png",
         "image/jpeg",
         "image/webp",
+        "video/mp4",
+        "video/quicktime",
         "application/zip",
     ]
 
