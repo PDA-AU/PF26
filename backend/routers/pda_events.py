@@ -420,7 +420,10 @@ def upsert_my_round_submission(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=lock_reason)
 
     data = payload.model_dump()
-    submission_type = str(data.get("submission_type") or "").strip().lower()
+    submission_type_raw = payload.submission_type
+    submission_type = str(
+        submission_type_raw.value if hasattr(submission_type_raw, "value") else submission_type_raw or ""
+    ).strip().lower()
     allowed_mime_types = list(round_row.allowed_mime_types or _default_round_allowed_mime_types())
     max_file_size_mb = int(round_row.max_file_size_mb or 25)
     max_bytes = max_file_size_mb * 1024 * 1024
