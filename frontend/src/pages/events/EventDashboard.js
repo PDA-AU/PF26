@@ -152,6 +152,21 @@ const formatDateTimeValue = (value) => {
     });
 };
 
+const formatDateTimeIst = (value) => {
+    if (!value) return '';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return String(value);
+    return `${parsed.toLocaleString('en-IN', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+        timeZone: 'Asia/Kolkata',
+    })} IST`;
+};
+
 export default function EventDashboard() {
     const { eventSlug, profileName } = useParams();
     const location = useLocation();
@@ -204,11 +219,15 @@ export default function EventDashboard() {
     const [roundSubmission, setRoundSubmission] = useState(null);
     const [loadingSubmission, setLoadingSubmission] = useState(false);
     const [submittingRoundWork, setSubmittingRoundWork] = useState(false);
+    const [removingRoundWork, setRemovingRoundWork] = useState(false);
     const [submissionUploadProgress, setSubmissionUploadProgress] = useState(null);
+    const [submissionSuccessDialogOpen, setSubmissionSuccessDialogOpen] = useState(false);
+    const [submissionSuccessText, setSubmissionSuccessText] = useState('');
     const [submissionType, setSubmissionType] = useState('file');
     const [submissionLink, setSubmissionLink] = useState('');
     const [submissionNotes, setSubmissionNotes] = useState('');
     const [submissionFile, setSubmissionFile] = useState(null);
+    const [isRoundDescriptionExpanded, setIsRoundDescriptionExpanded] = useState(false);
 
     const [copiedReferral, setCopiedReferral] = useState(false);
 
@@ -304,6 +323,15 @@ export default function EventDashboard() {
         () => formatEventDate(selectedRound?.date),
         [selectedRound?.date]
     );
+    const selectedRoundDeadlineLabel = useMemo(
+        () => formatDateTimeIst(selectedRound?.submission_deadline),
+        [selectedRound?.submission_deadline]
+    );
+    const selectedRoundDescription = useMemo(
+        () => String(selectedRound?.description || '').trim(),
+        [selectedRound?.description]
+    );
+    const showRoundDescriptionToggle = selectedRoundDescription.length > 340;
 
     const fetchData = useCallback(async (options = {}) => {
         const authHeaderOverride = options.authHeaderOverride;
@@ -646,8 +674,11 @@ export default function EventDashboard() {
             setSubmissionLink('');
             setSubmissionNotes('');
             setSubmissionType('file');
+            setRemovingRoundWork(false);
+            setIsRoundDescriptionExpanded(false);
             return;
         }
+        setIsRoundDescriptionExpanded(false);
         loadRoundSubmission(selectedRound);
     }, [loadRoundSubmission, selectedRound]);
 
@@ -729,13 +760,58 @@ export default function EventDashboard() {
                 payload,
                 { headers: getAuthHeader() }
             );
-            toast.success('Round submission saved');
-            await loadRoundSubmission(selectedRound);
+            setSubmissionSuccessText(
+                normalizeSubmissionType(submissionType) === 'file'
+                    ? 'File uploaded successfully.'
+                    : 'Submission link saved successfully.'
+            );
+            setSubmissionSuccessDialogOpen(true);
+            setSelectedRound(null);
+            setSubmissionFile(null);
         } catch (error) {
             toast.error(getErrorMessage(error, 'Failed to submit round work'));
         } finally {
             setSubmittingRoundWork(false);
             setSubmissionUploadProgress(null);
+        }
+    };
+
+    const removeRoundSubmission = async () => {
+        if (!selectedRound?.id || !selectedRound?.requires_submission) return;
+        if (!canViewRoundSubmission) {
+            toast.error('Login and register for this event to manage submission');
+            return;
+        }
+        if (!canEditRoundSubmission) {
+            toast.error('Only team leader can submit for this round');
+            return;
+        }
+        if (!roundSubmission?.id) {
+            toast.error('No submission found to remove');
+            return;
+        }
+        if (!roundSubmission?.is_editable) {
+            toast.error(roundSubmission?.lock_reason || 'Submission is currently locked');
+            return;
+        }
+        setRemovingRoundWork(true);
+        try {
+            const response = await axios.delete(
+                `${API}/pda/events/${eventSlug}/rounds/${selectedRound.id}/submission`,
+                { headers: getAuthHeader() }
+            );
+            const data = response.data || null;
+            setRoundSubmission(data);
+            setSubmissionType('file');
+            setSubmissionLink('');
+            setSubmissionNotes('');
+            setSubmissionFile(null);
+            setSubmissionUploadProgress(null);
+            toast.success('Submitted work removed');
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to remove submission'));
+        } finally {
+            setRemovingRoundWork(false);
         }
     };
 
@@ -1207,6 +1283,11 @@ export default function EventDashboard() {
                                                             || participantRoundLookup.byName.get(roundNameKey)
                                                             || null
                                                         );
+                                                        const submissionDeadlineLabel = (
+                                                            linkedRound?.requires_submission
+                                                                ? formatDateTimeIst(linkedRound?.submission_deadline)
+                                                                : ''
+                                                        );
                                                         return (
                                                             <div key={`${round.round_no}-${round.round_name}`} className="flex flex-wrap items-center justify-between gap-3 rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
                                                                 <div className="flex items-center gap-3">
@@ -1242,6 +1323,11 @@ export default function EventDashboard() {
                                                                                 Panel Link
                                                                             </a>
                                                                         ) : null}
+                                                                        {linkedRound?.requires_submission ? (
+                                                                            <p className="mt-1 text-xs font-semibold uppercase tracking-[0.08em] text-slate-700">
+                                                                                Submission Deadline (IST): {submissionDeadlineLabel || 'Not Set'}
+                                                                            </p>
+                                                                        ) : null}
                                                                     </div>
                                                                 </div>
                                                                 <div className="flex flex-wrap items-center justify-end gap-2">
@@ -1263,7 +1349,7 @@ export default function EventDashboard() {
                                                                             onClick={() => setSelectedRound(linkedRound)}
                                                                             data-testid={`event-dashboard-round-action-${round.round_no}`}
                                                                         >
-                                                                            {linkedRound?.requires_submission ? 'Submit Work' : 'View Round'}
+                                                                            {linkedRound?.requires_submission ? 'Submit / Replace Work' : 'View Round'}
                                                                         </Button>
                                                                     ) : null}
                                                                 </div>
@@ -1656,12 +1742,12 @@ export default function EventDashboard() {
                                     {selectedRoundPosterAssets.length ? (
                                         <div className="space-y-3">
                                             <div className="overflow-hidden rounded-md border-2 border-black bg-[#11131a]">
-                                                <div className="aspect-[1/1.4142] w-full">
+                                                <div className="aspect-[1/1.41421356] w-full">
                                                     <PosterCarousel
                                                         assets={selectedRoundPosterAssets}
                                                         title={selectedRound.name || `Round ${selectedRound.round_no}`}
                                                         className="h-full w-full"
-                                                        imageClassName="h-full w-full object-cover"
+                                                        imageClassName="h-full w-full object-contain"
                                                         autoPlay={false}
                                                         showArrows
                                                         showPageMeta
@@ -1692,10 +1778,24 @@ export default function EventDashboard() {
                                             </div>
                                         ) : null}
                                         <div className="rounded-md border-2 border-black bg-white p-4 text-base text-slate-700">
-                                            <ParsedDescription
-                                                description={selectedRound?.description || ''}
-                                                emptyText="No description provided."
-                                            />
+                                            <div className={`relative ${showRoundDescriptionToggle && !isRoundDescriptionExpanded ? 'max-h-44 overflow-hidden' : ''}`}>
+                                                <ParsedDescription
+                                                    description={selectedRound?.description || ''}
+                                                    emptyText="No description provided."
+                                                />
+                                                {showRoundDescriptionToggle && !isRoundDescriptionExpanded ? (
+                                                    <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-white to-transparent" />
+                                                ) : null}
+                                            </div>
+                                            {showRoundDescriptionToggle ? (
+                                                <button
+                                                    type="button"
+                                                    className="mt-3 text-sm font-bold text-blue-700 underline underline-offset-2"
+                                                    onClick={() => setIsRoundDescriptionExpanded((prev) => !prev)}
+                                                >
+                                                    {isRoundDescriptionExpanded ? 'Read less' : 'Read more'}
+                                                </button>
+                                            ) : null}
                                         </div>
                                         {String(selectedRound?.external_url || '').trim() ? (
                                             <a href={String(selectedRound?.external_url || '').trim()} target="_blank" rel="noreferrer">
@@ -1710,7 +1810,7 @@ export default function EventDashboard() {
                                                 <h4 className="font-heading text-base font-black uppercase tracking-tight">Submission</h4>
                                                 <p className="mt-1 text-xs font-medium text-slate-700">
                                                     Mode: {selectedRound?.submission_mode || 'file_or_link'}
-                                                    {selectedRound?.submission_deadline ? ` | Deadline: ${new Date(selectedRound.submission_deadline).toLocaleString()}` : ''}
+                                                    {selectedRoundDeadlineLabel ? ` | Deadline (IST): ${selectedRoundDeadlineLabel}` : ' | Deadline (IST): Not Set'}
                                                 </p>
                                                 {!isLoggedIn ? (
                                                     <p className="mt-3 text-sm font-medium text-slate-700">
@@ -1758,7 +1858,7 @@ export default function EventDashboard() {
                                                             <Select
                                                                 value={normalizeSubmissionType(submissionType)}
                                                                 onValueChange={(value) => setSubmissionType(normalizeSubmissionType(value))}
-                                                                disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork}
+                                                                disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}
                                                             >
                                                                 <SelectTrigger className="neo-input mt-2"><SelectValue /></SelectTrigger>
                                                                 <SelectContent>
@@ -1773,9 +1873,16 @@ export default function EventDashboard() {
                                                                 <Input
                                                                     type="file"
                                                                     accept=".pdf,.ppt,.pptx,.mp4,.mov,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/webp,video/mp4,video/quicktime,application/zip"
+                                                                    multiple={false}
                                                                     className="neo-input mt-2"
-                                                                    disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork}
-                                                                    onChange={(e) => setSubmissionFile((e.target.files || [])[0] || null)}
+                                                                    disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}
+                                                                    onChange={(e) => {
+                                                                        const files = e.target.files || [];
+                                                                        if (files.length > 1) {
+                                                                            toast.error('Please select only one file');
+                                                                        }
+                                                                        setSubmissionFile(files[0] || null);
+                                                                    }}
                                                                 />
                                                             </div>
                                                         ) : (
@@ -1786,7 +1893,7 @@ export default function EventDashboard() {
                                                                     onChange={(e) => setSubmissionLink(e.target.value)}
                                                                     placeholder="https://..."
                                                                     className="neo-input mt-2"
-                                                                    disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork}
+                                                                    disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}
                                                                 />
                                                             </div>
                                                         )}
@@ -1796,7 +1903,7 @@ export default function EventDashboard() {
                                                                 value={submissionNotes}
                                                                 onChange={(e) => setSubmissionNotes(e.target.value)}
                                                                 className="neo-input mt-2"
-                                                                disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork}
+                                                                disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}
                                                             />
                                                         </div>
                                                         {submittingRoundWork && normalizeSubmissionType(submissionType) === 'file' && submissionUploadProgress !== null ? (
@@ -1815,12 +1922,24 @@ export default function EventDashboard() {
                                                         ) : null}
                                                         <Button
                                                             className="w-full border-2 border-black bg-[#8B5CF6] text-white shadow-neo"
-                                                            disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork}
+                                                            disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}
                                                             onClick={submitRoundWork}
                                                         >
                                                             <Upload className="mr-2 h-4 w-4" />
-                                                            {submittingRoundWork ? 'Submitting...' : 'Submit Work'}
+                                                            {submittingRoundWork
+                                                                ? 'Submitting...'
+                                                                : (roundSubmission?.id ? 'Submitted (can be replaced)' : 'Submit Work')}
                                                         </Button>
+                                                        {roundSubmission?.id ? (
+                                                            <Button
+                                                                variant="outline"
+                                                                className="w-full border-2 border-black bg-white text-red-700 shadow-neo"
+                                                                disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}
+                                                                onClick={removeRoundSubmission}
+                                                            >
+                                                                {removingRoundWork ? 'Removing...' : 'Remove Submitted Work'}
+                                                            </Button>
+                                                        ) : null}
                                                     </div>
                                                 )}
                                             </div>
@@ -1858,6 +1977,30 @@ export default function EventDashboard() {
                                 }}
                             >
                                 Close
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={submissionSuccessDialogOpen} onOpenChange={setSubmissionSuccessDialogOpen}>
+                <DialogContent className="max-w-md border-4 border-black bg-white">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading text-xl font-black uppercase tracking-tight">
+                            Submission Confirmed
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <p className="text-sm font-medium text-slate-700">
+                            {submissionSuccessText || 'Submission saved successfully.'}
+                        </p>
+                        <div className="flex justify-end">
+                            <Button
+                                type="button"
+                                className="border-2 border-black bg-[#8B5CF6] text-white shadow-neo"
+                                onClick={() => setSubmissionSuccessDialogOpen(false)}
+                            >
+                                OK
                             </Button>
                         </div>
                     </div>

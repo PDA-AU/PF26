@@ -236,6 +236,7 @@ function ScoringContent() {
     const [search, setSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
     const [presenceFilter, setPresenceFilter] = useState('all');
+    const [submissionFilter, setSubmissionFilter] = useState('all');
     const [sortBy, setSortBy] = useState('register_asc');
     const [currentPage, setCurrentPage] = useState(1);
     const [pageSize, setPageSize] = useState(() => loadPageSize(SCORING_PAGE_SIZE_KEY, 10, SCORING_PAGE_SIZE_OPTIONS));
@@ -527,6 +528,11 @@ function ScoringContent() {
                 if (presenceFilter === 'present' && !row.is_present) return false;
                 if (presenceFilter === 'absent' && row.is_present) return false;
             }
+            if (isSubmissionRound && submissionFilter !== 'all') {
+                const hasSubmission = Boolean(row.submission_file_url || row.submission_link_url);
+                if (submissionFilter === 'found' && !hasSubmission) return false;
+                if (submissionFilter === 'missing' && hasSubmission) return false;
+            }
             if (panelModeEnabled) {
                 if (panelFilter === 'my' && !panelConfig.current_admin_is_superadmin) {
                     if (row.panel_id == null || !myPanelIdSet.has(Number(row.panel_id))) return false;
@@ -568,7 +574,7 @@ function ScoringContent() {
                     return regA.localeCompare(regB, undefined, { numeric: true, sensitivity: 'base' });
             }
         });
-    }, [getTotalScore, myPanelIdSet, panelConfig.current_admin_is_superadmin, panelFilter, panelModeEnabled, presenceFilter, roundRankMap, rows, search, sortBy, statusFilter]);
+    }, [getTotalScore, isSubmissionRound, myPanelIdSet, panelConfig.current_admin_is_superadmin, panelFilter, panelModeEnabled, presenceFilter, roundRankMap, rows, search, sortBy, statusFilter, submissionFilter]);
 
     const totalRows = displayedRows.length;
     const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
@@ -581,7 +587,13 @@ function ScoringContent() {
 
     useEffect(() => {
         setCurrentPage(1);
-    }, [search, statusFilter, presenceFilter, panelFilter, sortBy, pageSize]);
+    }, [search, statusFilter, presenceFilter, submissionFilter, panelFilter, sortBy, pageSize]);
+
+    useEffect(() => {
+        if (!isSubmissionRound && submissionFilter !== 'all') {
+            setSubmissionFilter('all');
+        }
+    }, [isSubmissionRound, submissionFilter]);
 
     useEffect(() => {
         if (currentPage > totalPages) {
@@ -2160,7 +2172,7 @@ function ScoringContent() {
                         />
                     </div>
                 </div>
-                <div className={`grid gap-3 ${panelModeEnabled ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
+                <div className={`grid gap-3 ${panelModeEnabled ? 'sm:grid-cols-5' : 'sm:grid-cols-4'}`}>
                     <Select value={statusFilter} onValueChange={setStatusFilter}>
                         <SelectTrigger className="neo-input"><SelectValue placeholder="Filter by status" /></SelectTrigger>
                         <SelectContent>
@@ -2189,6 +2201,16 @@ function ScoringContent() {
                             {round?.is_frozen ? <SelectItem value="rank_asc">Rank (Top-Down)</SelectItem> : null}
                         </SelectContent>
                     </Select>
+                    {isSubmissionRound ? (
+                        <Select value={submissionFilter} onValueChange={setSubmissionFilter}>
+                            <SelectTrigger className="neo-input"><SelectValue placeholder="Filter submissions" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All Submissions</SelectItem>
+                                <SelectItem value="found">Submission Found</SelectItem>
+                                <SelectItem value="missing">Submission Missing</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    ) : null}
                     {panelModeEnabled ? (
                         <Select value={panelFilter} onValueChange={setPanelFilter}>
                             <SelectTrigger className="neo-input"><SelectValue placeholder="Filter by panel" /></SelectTrigger>

@@ -510,6 +510,40 @@ def upsert_my_round_submission(
     return _submission_payload(round_row, entity_type, entity_user_id, entity_team_id, submission)
 
 
+@router.delete("/pda/events/{slug}/rounds/{round_id}/submission", response_model=PdaRoundSubmissionResponse)
+def delete_my_round_submission(
+    slug: str,
+    round_id: int,
+    user: PdaUser = Depends(require_pda_user),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    _ensure_event_visible_for_public_access(event)
+    round_row = db.query(PdaEventRound).filter(PdaEventRound.id == round_id, PdaEventRound.event_id == event.id).first()
+    if not round_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
+    if not bool(round_row.requires_submission):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Round does not require submission")
+
+    _, entity_type, entity_user_id, entity_team_id, _, _ = _resolve_submission_entity(db, event, user, enforce_team_leader=True)
+    submission = db.query(PdaEventRoundSubmission).filter(
+        PdaEventRoundSubmission.event_id == event.id,
+        PdaEventRoundSubmission.round_id == round_row.id,
+        PdaEventRoundSubmission.entity_type == entity_type,
+        PdaEventRoundSubmission.user_id == entity_user_id,
+        PdaEventRoundSubmission.team_id == entity_team_id,
+    ).first()
+
+    lock_reason = _round_submission_lock_reason(round_row, submission)
+    if lock_reason:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=lock_reason)
+
+    if submission:
+        db.delete(submission)
+        db.commit()
+    return _submission_payload(round_row, entity_type, entity_user_id, entity_team_id, None)
+
+
 @router.get("/pda/events/{slug}/dashboard", response_model=PdaManagedEventDashboard)
 def get_event_dashboard(
     slug: str,
