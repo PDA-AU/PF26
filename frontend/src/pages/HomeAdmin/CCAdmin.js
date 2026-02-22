@@ -168,7 +168,7 @@ export default function CCAdmin() {
         if (eventOptionsLoading) return;
         setEventOptionsLoading(true);
         try {
-            const response = await ccAdminApi.listCommunityEventOptions(headers, { page: 1, page_size: 200 });
+            const response = await ccAdminApi.listPersohubEventOptions(headers, { page: 1, page_size: 200 });
             setEventOptions(response?.data || []);
         } catch (error) {
             toast.error(parseApiError(error, 'Failed to load event options'));
@@ -180,7 +180,7 @@ export default function CCAdmin() {
     const loadEventsPage = useCallback(async () => {
         setEventsLoading(true);
         try {
-            const response = await ccAdminApi.listCommunityEventOptions(headers, {
+            const response = await ccAdminApi.listPersohubEventOptions(headers, {
                 page: eventsPage,
                 page_size: EVENTS_PAGE_SIZE,
                 q: eventsQueryDebounced || undefined,
@@ -414,7 +414,7 @@ export default function CCAdmin() {
             const payload = {
                 sympo_id: draftValue === 'none' ? null : Number(draftValue),
             };
-            const response = await ccAdminApi.assignCommunityEventSympo(eventRow.id, payload, headers);
+            const response = await ccAdminApi.assignPersohubEventSympo(eventRow.id, payload, headers);
             toast.success(response?.data?.message || 'Event mapping updated');
             await refreshData();
         } catch (error) {

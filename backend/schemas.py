@@ -580,6 +580,18 @@ class AdminLogResponse(BaseModel):
         from_attributes = True
 
 
+class SuperadminMigrationStatusResponse(BaseModel):
+    status_key: str
+    recorded: bool
+    ok: Optional[bool] = None
+    old_remaining: Optional[int] = None
+    new_missing: Optional[int] = None
+    legacy_sympo: Optional[bool] = None
+    updated_at: Optional[datetime] = None
+    logged_once: bool
+    raw_value: Optional[str] = None
+
+
 class PdaEventLogResponse(BaseModel):
     id: int
     event_id: Optional[int] = None
@@ -902,7 +914,7 @@ class CcAdminUserOption(BaseModel):
     name: str
 
 
-class CcCommunityEventOption(BaseModel):
+class CcPersohubEventOption(BaseModel):
     id: int
     slug: str
     event_code: str
@@ -913,13 +925,13 @@ class CcCommunityEventOption(BaseModel):
     sympo_name: Optional[str] = None
 
 
-class CcCommunityEventSympoAssignRequest(BaseModel):
+class CcPersohubEventSympoAssignRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     sympo_id: Optional[int] = Field(default=None, ge=1)
 
 
-class CcCommunityEventSympoAssignResponse(BaseModel):
+class CcPersohubEventSympoAssignResponse(BaseModel):
     event_id: int
     sympo_id: Optional[int] = None
     sympo_name: Optional[str] = None
@@ -1965,6 +1977,308 @@ class EventBulkEmailRequest(BaseModel):
     batch: Optional[str] = None
     status: Optional[str] = None
     search: Optional[str] = None
+
+
+# Persohub event parity schemas: mirror PDA managed behavior with Persohub event identity.
+class PersohubManagedEventTypeEnum(str, Enum):
+    TECHNICAL = "Technical"
+    FUNTECHINICAL = "FunTechinical"
+    HACKATHON = "Hackathon"
+    SIGNATURE = "Signature"
+    NONTECHINICAL = "NonTechinical"
+    SESSION = "Session"
+    WORKSHOP = "Workshop"
+    EVENT = "Event"
+
+
+PersohubManagedEventFormatEnum = PdaManagedEventFormatEnum
+PersohubManagedEventTemplateEnum = PdaManagedEventTemplateEnum
+PersohubManagedParticipantModeEnum = PdaManagedParticipantModeEnum
+PersohubManagedRoundModeEnum = PdaManagedRoundModeEnum
+PersohubManagedEventStatusEnum = PdaManagedEventStatusEnum
+PersohubManagedEventOpenForEnum = PdaManagedEventOpenForEnum
+PersohubManagedEntityTypeEnum = PdaManagedEntityTypeEnum
+PersohubManagedRoundStateEnum = PdaManagedRoundStateEnum
+PersohubManagedRoundSubmissionModeEnum = PdaManagedRoundSubmissionModeEnum
+PersohubManagedRoundSubmissionTypeEnum = PdaManagedRoundSubmissionTypeEnum
+PersohubManagedBadgePlaceEnum = PdaManagedBadgePlaceEnum
+PersohubManagedPanelTeamDistributionModeEnum = PdaManagedPanelTeamDistributionModeEnum
+
+
+class PersohubManagedEventCreate(BaseModel):
+    title: str = Field(..., min_length=2)
+    description: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    poster_url: Optional[str] = None
+    whatsapp_url: Optional[str] = None
+    external_url_name: Optional[str] = "Join whatsapp channel"
+    event_type: PersohubManagedEventTypeEnum
+    format: PersohubManagedEventFormatEnum
+    template_option: PersohubManagedEventTemplateEnum
+    participant_mode: PersohubManagedParticipantModeEnum
+    round_mode: PersohubManagedRoundModeEnum
+    round_count: int = Field(1, ge=1, le=20)
+    team_min_size: Optional[int] = Field(None, ge=1, le=100)
+    team_max_size: Optional[int] = Field(None, ge=1, le=100)
+    # Keep optional compatibility fields; backend resolves target community from auth.
+    club_id: Optional[int] = Field(default=None, ge=1)
+    community_id: Optional[int] = Field(default=None, ge=1)
+    open_for: PersohubManagedEventOpenForEnum = PersohubManagedEventOpenForEnum.MIT
+
+    @field_validator("whatsapp_url", mode="before")
+    @classmethod
+    def validate_whatsapp_url(cls, value):
+        return _normalize_optional_http_url(value, "whatsapp_url")
+
+
+class PersohubManagedEventUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    poster_url: Optional[str] = None
+    whatsapp_url: Optional[str] = None
+    external_url_name: Optional[str] = None
+    event_type: Optional[PersohubManagedEventTypeEnum] = None
+    format: Optional[PersohubManagedEventFormatEnum] = None
+    template_option: Optional[PersohubManagedEventTemplateEnum] = None
+    participant_mode: Optional[PersohubManagedParticipantModeEnum] = None
+    round_mode: Optional[PersohubManagedRoundModeEnum] = None
+    round_count: Optional[int] = Field(None, ge=1, le=20)
+    team_min_size: Optional[int] = Field(None, ge=1, le=100)
+    team_max_size: Optional[int] = Field(None, ge=1, le=100)
+    is_visible: Optional[bool] = None
+    status: Optional[PersohubManagedEventStatusEnum] = None
+    open_for: Optional[PersohubManagedEventOpenForEnum] = None
+
+    @field_validator("whatsapp_url", mode="before")
+    @classmethod
+    def validate_whatsapp_url(cls, value):
+        return _normalize_optional_http_url(value, "whatsapp_url")
+
+
+class PersohubManagedEventStatusUpdate(PdaManagedEventStatusUpdate):
+    pass
+
+
+class PersohubManagedEventVisibilityUpdate(PdaManagedEventVisibilityUpdate):
+    pass
+
+
+class PersohubManagedEventRegistrationUpdate(PdaManagedEventRegistrationUpdate):
+    pass
+
+
+class PersohubManagedEventResponse(BaseModel):
+    id: int
+    slug: str
+    event_code: str
+    community_id: int
+    title: str
+    description: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    poster_url: Optional[str] = None
+    whatsapp_url: Optional[str] = None
+    external_url_name: Optional[str] = "Join whatsapp channel"
+    event_type: PersohubManagedEventTypeEnum
+    format: PersohubManagedEventFormatEnum
+    template_option: PersohubManagedEventTemplateEnum
+    participant_mode: PersohubManagedParticipantModeEnum
+    round_mode: PersohubManagedRoundModeEnum
+    round_count: int
+    team_min_size: Optional[int] = None
+    team_max_size: Optional[int] = None
+    is_visible: bool = True
+    registration_open: bool = True
+    open_for: PersohubManagedEventOpenForEnum = PersohubManagedEventOpenForEnum.MIT
+    status: PersohubManagedEventStatusEnum
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PersohubManagedEventDashboard(BaseModel):
+    event: PersohubManagedEventResponse
+    is_registered: bool = False
+    entity_type: Optional[PersohubManagedEntityTypeEnum] = None
+    entity_id: Optional[int] = None
+    team_code: Optional[str] = None
+    team_name: Optional[str] = None
+    team_members: List[Dict[str, Any]] = Field(default_factory=list)
+    rounds_count: int = 0
+    badges_count: int = 0
+
+
+class PersohubEventPublicRoundResponse(PdaEventPublicRoundResponse):
+    pass
+
+
+class PersohubManagedTeamCreate(PdaManagedTeamCreate):
+    pass
+
+
+class PersohubManagedTeamJoin(PdaManagedTeamJoin):
+    pass
+
+
+class PersohubManagedTeamInvite(PdaManagedTeamInvite):
+    pass
+
+
+class PersohubManagedTeamMemberResponse(PdaManagedTeamMemberResponse):
+    pass
+
+
+class PersohubManagedTeamResponse(PdaManagedTeamResponse):
+    pass
+
+
+class PersohubManagedRoundCriteria(PdaManagedRoundCriteria):
+    pass
+
+
+class PersohubManagedRoundCreate(PdaManagedRoundCreate):
+    pass
+
+
+class PersohubManagedRoundUpdate(PdaManagedRoundUpdate):
+    pass
+
+
+class PersohubManagedRoundResponse(PdaManagedRoundResponse):
+    pass
+
+
+class PersohubRoundSubmissionPresignRequest(PdaRoundSubmissionPresignRequest):
+    pass
+
+
+class PersohubRoundSubmissionUpsertRequest(PdaRoundSubmissionUpsertRequest):
+    pass
+
+
+class PersohubRoundSubmissionAdminUpdate(PdaRoundSubmissionAdminUpdate):
+    pass
+
+
+class PersohubRoundSubmissionResponse(PdaRoundSubmissionResponse):
+    pass
+
+
+class PersohubRoundSubmissionAdminListItem(PdaRoundSubmissionAdminListItem):
+    pass
+
+
+class PersohubManagedAttendanceMarkRequest(PdaManagedAttendanceMarkRequest):
+    pass
+
+
+class PersohubManagedAttendanceScanRequest(PdaManagedAttendanceScanRequest):
+    pass
+
+
+class PersohubManagedAttendanceResponse(PdaManagedAttendanceResponse):
+    pass
+
+
+class PersohubManagedRegistrationStatusBulkUpdate(PdaManagedRegistrationStatusBulkUpdate):
+    pass
+
+
+class PersohubManagedRegistrationStatusBulkRequest(PdaManagedRegistrationStatusBulkRequest):
+    pass
+
+
+class PersohubManagedRegistrationStatusBulkResponse(PdaManagedRegistrationStatusBulkResponse):
+    pass
+
+
+class PersohubManagedScoreEntry(PdaManagedScoreEntry):
+    pass
+
+
+class PersohubRoundPanelAdminOption(PdaRoundPanelAdminOption):
+    pass
+
+
+class PersohubRoundPanelMemberResponse(PdaRoundPanelMemberResponse):
+    pass
+
+
+class PersohubRoundPanelDefinition(PdaRoundPanelDefinition):
+    pass
+
+
+class PersohubRoundPanelResponse(PdaRoundPanelResponse):
+    pass
+
+
+class PersohubRoundPanelListResponse(PdaRoundPanelListResponse):
+    pass
+
+
+class PersohubRoundPanelsUpdateRequest(PdaRoundPanelsUpdateRequest):
+    pass
+
+
+class PersohubRoundPanelsAutoAssignRequest(PdaRoundPanelsAutoAssignRequest):
+    pass
+
+
+class PersohubRoundPanelAssignmentItem(PdaRoundPanelAssignmentItem):
+    pass
+
+
+class PersohubRoundPanelAssignmentsUpdateRequest(PdaRoundPanelAssignmentsUpdateRequest):
+    pass
+
+
+class PersohubRoundPanelEmailRequest(PdaRoundPanelEmailRequest):
+    pass
+
+
+class PersohubManagedScoreResponse(PdaManagedScoreResponse):
+    pass
+
+
+class PersohubManagedParticipantListItem(PdaManagedParticipantListItem):
+    pass
+
+
+class PersohubManagedBadgeCreate(PdaManagedBadgeCreate):
+    pass
+
+
+class PersohubManagedBadgeResponse(PdaManagedBadgeResponse):
+    pass
+
+
+class PersohubManagedMyEvent(BaseModel):
+    event: PersohubManagedEventResponse
+    entity_type: Optional[PersohubManagedEntityTypeEnum] = None
+    entity_id: Optional[int] = None
+    is_registered: bool = False
+    attendance_count: int = 0
+    cumulative_score: float = 0
+
+
+class PersohubManagedAchievement(PdaManagedAchievement):
+    pass
+
+
+class PersohubManagedCertificateResponse(PdaManagedCertificateResponse):
+    pass
+
+
+class PersohubManagedQrResponse(PdaManagedQrResponse):
+    pass
+
+
+class PersohubEventLogResponse(PdaEventLogResponse):
+    pass
 
 
 # Update forward reference

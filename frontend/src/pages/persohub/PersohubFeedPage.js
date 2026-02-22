@@ -4,7 +4,6 @@ import { Menu, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useAuth } from '@/context/AuthContext';
-import PdaFooter from '@/components/layout/PdaFooter';
 import PdaHeader from '@/components/layout/PdaHeader';
 import { compressImageToWebp } from '@/utils/imageCompression';
 import { copyTextToClipboard } from '@/utils/clipboard';
@@ -57,10 +56,12 @@ export default function PersohubFeedPage() {
     const [editSubmitting, setEditSubmitting] = useState(false);
     const [pendingLikeSlugs, setPendingLikeSlugs] = useState(() => new Set());
     const pendingLikeSlugsRef = useRef(new Set());
+    const feedLoadingMoreRef = useRef(false);
     const [deleteTargetPost, setDeleteTargetPost] = useState(null);
     const [deleteSubmitting, setDeleteSubmitting] = useState(false);
 
     const [activeHashtag, setActiveHashtag] = useState('');
+    const feedSentinelRef = useRef(null);
 
     const isUserLoggedIn = Boolean(user);
     const loadInitial = useCallback(async () => {
@@ -186,8 +187,9 @@ export default function PersohubFeedPage() {
         await loadInitial();
     };
 
-    const handleLoadMoreFeed = async () => {
-        if (!feedHasMore || feedLoadingMore || !feedCursor) return;
+    const handleLoadMoreFeed = useCallback(async () => {
+        if (!feedHasMore || !feedCursor || feedLoadingMoreRef.current) return;
+        feedLoadingMoreRef.current = true;
         setFeedLoadingMore(true);
         try {
             const response = await persohubApi.fetchFeed(25, feedCursor);
@@ -205,9 +207,32 @@ export default function PersohubFeedPage() {
         } catch (error) {
             toast.error(persohubApi.parseApiError(error, 'Failed to load more posts'));
         } finally {
+            feedLoadingMoreRef.current = false;
             setFeedLoadingMore(false);
         }
-    };
+    }, [feedCursor, feedHasMore]);
+
+    useEffect(() => {
+        if (loading || activeHashtag || !feedHasMore || !feedCursor || feedLoadingMore) return;
+        const sentinel = feedSentinelRef.current;
+        if (!sentinel) return;
+
+        const observer = new IntersectionObserver(
+            (entries) => {
+                const first = entries[0];
+                if (!first?.isIntersecting) return;
+                handleLoadMoreFeed();
+            },
+            {
+                root: null,
+                threshold: 0,
+                rootMargin: '600px 0px 600px 0px',
+            },
+        );
+
+        observer.observe(sentinel);
+        return () => observer.disconnect();
+    }, [activeHashtag, feedCursor, feedHasMore, feedLoadingMore, handleLoadMoreFeed, loading]);
 
     const handleShare = (post) => setSharePost(post);
 
@@ -405,7 +430,7 @@ export default function PersohubFeedPage() {
     };
 
     return (
-        <div className="persohub-page">
+        <div className="persohub-page ph-feed-page">
             <PdaHeader />
             <div className="ph-layer ph-shell">
                 <div className="ph-grid ph-grid-sections">
@@ -427,7 +452,7 @@ export default function PersohubFeedPage() {
                         <p className="ph-sub">Discover. Discuss. Build your public voice.</p>
                     </header>
 
-                    <section className="ph-search-wrap ph-section ph-span-all">
+                    <section className="ph-search-wrap ph-span-all">
                         <input
                             type="text"
                             className="ph-search"
@@ -440,7 +465,7 @@ export default function PersohubFeedPage() {
                     </section>
 
                     {communityAuthExpanded ? (
-                        <section className="ph-section ph-span-all ph-mobile-auth-panel" data-testid="ph-mobile-auth-panel">
+                        <section className="ph-span-all ph-mobile-auth-panel" data-testid="ph-mobile-auth-panel">
                             {communityAccount ? (
                                 <div className="ph-mobile-auth-panel-inner">
                                     <p style={{ marginTop: 0, marginBottom: '0.45rem' }}>
@@ -455,13 +480,13 @@ export default function PersohubFeedPage() {
                     ) : null}
 
                     {activeHashtag ? (
-                        <div className="ph-section ph-span-all ph-hashtag-row">
+                        <div className="ph-span-all ph-hashtag-row">
                             <span style={{ fontWeight: 800 }}>Showing posts for #{activeHashtag}</span>
                             <button type="button" className="ph-btn" onClick={clearHashtagFilter}>Clear</button>
                         </div>
                     ) : null}
 
-                    <aside className="ph-col ph-col-left ph-section">
+                    <aside className="ph-col ph-col-left">
                         <CommunityListPanel
                             communities={communities}
                             onToggleFollow={handleToggleFollow}
@@ -469,7 +494,7 @@ export default function PersohubFeedPage() {
                         />
                     </aside>
 
-                    <main className="ph-col ph-col-main ph-section">
+                    <main className="ph-col ph-col-main">
                         {loading ? (
                             <EmptyState title="Loading feed" subtitle="Fetching community posts..." />
                         ) : null}
@@ -496,22 +521,14 @@ export default function PersohubFeedPage() {
                                         onEdit={handleEditPost}
                                     />
                                 ))}
-                                {!activeHashtag && feedHasMore ? (
-                                    <button
-                                        type="button"
-                                        className="ph-btn"
-                                        onClick={handleLoadMoreFeed}
-                                        disabled={feedLoadingMore}
-                                        style={{ alignSelf: 'center' }}
-                                    >
-                                        {feedLoadingMore ? 'Loading...' : 'Load more posts'}
-                                    </button>
-                                ) : null}
+                                {!activeHashtag && feedHasMore ? <div ref={feedSentinelRef} className="ph-feed-sentinel" aria-hidden="true" /> : null}
+                                {!activeHashtag && feedLoadingMore ? <p className="ph-feed-status">Loading more posts...</p> : null}
+                                {!activeHashtag && !feedHasMore ? <p className="ph-feed-status">You are all caught up.</p> : null}
                             </div>
                         ) : null}
                     </main>
 
-                    <aside className="ph-col ph-col-right ph-section">
+                    <aside className="ph-col ph-col-right">
                         <div className="ph-card ph-side-card" style={{ marginBottom: '0.8rem' }} data-testid="ph-community-auth-panel">
                             <h3 style={{ marginTop: 0, marginBottom: '0.45rem' }}>Community Auth</h3>
                             {communityAccount ? (
@@ -646,7 +663,6 @@ export default function PersohubFeedPage() {
                 onCancel={() => setDeleteTargetPost(null)}
                 pending={deleteSubmitting}
             />
-            <PdaFooter />
         </div>
     );
 }

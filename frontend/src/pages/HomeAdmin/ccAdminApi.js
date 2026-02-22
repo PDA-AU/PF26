@@ -14,13 +14,13 @@ export const ccAdminApi = {
         axios.post(`${API}/pda-admin/cc/communities/${communityId}/reset-password`, payload, { headers }),
     deleteCommunity: (communityId, headers) => axios.delete(`${API}/pda-admin/cc/communities/${communityId}`, { headers }),
 
-    listSympos: (headers) => axios.get(`${API}/pda-admin/cc/sympos`, { headers }),
-    createSympo: (payload, headers) => axios.post(`${API}/pda-admin/cc/sympos`, payload, { headers }),
-    updateSympo: (sympoId, payload, headers) => axios.put(`${API}/pda-admin/cc/sympos/${sympoId}`, payload, { headers }),
-    deleteSympo: (sympoId, headers) => axios.delete(`${API}/pda-admin/cc/sympos/${sympoId}`, { headers }),
+    listSympos: (headers) => axios.get(`${API}/pda-admin/cc/persohub-sympos`, { headers }),
+    createSympo: (payload, headers) => axios.post(`${API}/pda-admin/cc/persohub-sympos`, payload, { headers }),
+    updateSympo: (sympoId, payload, headers) => axios.put(`${API}/pda-admin/cc/persohub-sympos/${sympoId}`, payload, { headers }),
+    deleteSympo: (sympoId, headers) => axios.delete(`${API}/pda-admin/cc/persohub-sympos/${sympoId}`, { headers }),
 
-    listCommunityEventOptions: (headers, params = {}) => axios.get(`${API}/pda-admin/cc/options/community-events`, { headers, params }),
-    assignCommunityEventSympo: (eventId, payload, headers) => axios.put(`${API}/pda-admin/cc/community-events/${eventId}/sympo`, payload, { headers }),
+    listPersohubEventOptions: (headers, params = {}) => axios.get(`${API}/pda-admin/cc/options/persohub-events`, { headers, params }),
+    assignPersohubEventSympo: (eventId, payload, headers) => axios.put(`${API}/pda-admin/cc/persohub-events/${eventId}/sympo`, payload, { headers }),
     listAdminUserOptions: (headers) => axios.get(`${API}/pda-admin/cc/options/admin-users`, { headers }),
 
     presignLogoUpload: (file, headers) => axios.post(`${API}/pda-admin/cc/logos/presign`, {

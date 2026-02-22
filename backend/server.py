@@ -42,7 +42,13 @@ from migrations import (
     ensure_pda_events_open_for_column,
     ensure_pda_event_round_submission_tables,
     ensure_pda_event_panel_tables,
-    ensure_community_event_tables,
+    rename_community_event_namespace_to_persohub,
+    ensure_persohub_event_tables,
+    ensure_persohub_events_parity_flag,
+    ensure_persohub_event_open_columns,
+    ensure_persohub_event_round_submission_tables,
+    ensure_persohub_event_panel_tables,
+    drop_legacy_persohub_sympo_table,
     backfill_pda_event_round_count_once,
     resolve_user_identifier_collisions_once,
     remove_legacy_persofest_once,
@@ -59,6 +65,8 @@ from routers import (
     persohub_community_admin,
     persohub_admin_profile,
     persohub_admin_events,
+    persohub_events_admin,
+    persohub_events,
 )
 
 ROOT_DIR = Path(__file__).parent
@@ -131,6 +139,12 @@ async def admin_audit_middleware(request, call_next):
 
 @app.on_event("startup")
 async def startup_event():
+    # Rename legacy community event namespace before ORM table creation.
+    rename_community_event_namespace_to_persohub(engine)
+
+    # Create ORM-managed schema, then run compatibility migrations.
+    Base.metadata.create_all(bind=engine)
+
     # Migrations / schema adjustments
     ensure_pda_users_table(engine)
     ensure_pda_users_dob_column(engine)
@@ -152,14 +166,16 @@ async def startup_event():
     ensure_pda_events_open_for_column(engine)
     ensure_pda_event_round_submission_tables(engine)
     ensure_pda_event_panel_tables(engine)
-    ensure_community_event_tables(engine)
+    ensure_persohub_event_tables(engine)
+    ensure_persohub_event_open_columns(engine)
+    ensure_persohub_event_round_submission_tables(engine)
+    ensure_persohub_event_panel_tables(engine)
+    ensure_persohub_events_parity_flag(engine)
+    drop_legacy_persohub_sympo_table(engine)
     backfill_pda_event_round_count_once(engine)
     ensure_persohub_tables(engine)
     ensure_pda_recruitment_tables(engine)
     ensure_system_config_recruit_url_column(engine)
-
-    Base.metadata.create_all(bind=engine)
-    ensure_pda_event_panel_tables(engine)
     resolve_user_identifier_collisions_once(engine)
 
     migrate_legacy_recruitment_json_once(engine)
@@ -208,3 +224,5 @@ app.include_router(persohub_community_auth.router, prefix="/api")
 app.include_router(persohub_community_admin.router, prefix="/api")
 app.include_router(persohub_admin_profile.router, prefix="/api")
 app.include_router(persohub_admin_events.router, prefix="/api")
+app.include_router(persohub_events_admin.router, prefix="/api")
+app.include_router(persohub_events.router, prefix="/api")

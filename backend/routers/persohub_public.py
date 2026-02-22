@@ -6,9 +6,9 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models import (
-    CommunityEvent,
-    CommunitySympo,
-    CommunitySympoEvent,
+    PersohubEvent,
+    PersohubSympo,
+    PersohubSympoEvent,
     PdaEventBadge,
     PdaTeam,
     PdaUser,
@@ -126,8 +126,8 @@ def get_chakravyuha_public_content(
     db: Session = Depends(get_db),
 ):
     sympo = (
-        db.query(CommunitySympo)
-        .filter(func.lower(CommunitySympo.name) == "chakravyuha-26")
+        db.query(PersohubSympo)
+        .filter(func.lower(PersohubSympo.name) == "chakravyuha-26")
         .first()
     )
     if not sympo:
@@ -135,7 +135,7 @@ def get_chakravyuha_public_content(
     return _normalize_chakravyuha_content(sympo.content)
 
 
-def _serialize_chakravyuha_event(event: CommunityEvent, community: PersohubCommunity) -> Dict[str, Any]:
+def _serialize_chakravyuha_event(event: PersohubEvent, community: PersohubCommunity) -> Dict[str, Any]:
     return {
         "id": event.id,
         "slug": event.slug,
@@ -172,19 +172,19 @@ def get_chakravyuha_public_events(
     db: Session = Depends(get_db),
 ):
     sympo = (
-        db.query(CommunitySympo)
-        .filter(func.lower(CommunitySympo.name) == "chakravyuha-26")
+        db.query(PersohubSympo)
+        .filter(func.lower(PersohubSympo.name) == "chakravyuha-26")
         .first()
     )
     if not sympo:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chakravyuha content not found")
 
     rows = (
-        db.query(CommunityEvent, PersohubCommunity)
-        .join(CommunitySympoEvent, CommunitySympoEvent.event_id == CommunityEvent.id)
-        .join(PersohubCommunity, PersohubCommunity.id == CommunityEvent.community_id)
-        .filter(CommunitySympoEvent.sympo_id == sympo.id)
-        .order_by(CommunityEvent.start_date.asc().nullslast(), CommunityEvent.id.asc())
+        db.query(PersohubEvent, PersohubCommunity)
+        .join(PersohubSympoEvent, PersohubSympoEvent.event_id == PersohubEvent.id)
+        .join(PersohubCommunity, PersohubCommunity.id == PersohubEvent.community_id)
+        .filter(PersohubSympoEvent.sympo_id == sympo.id)
+        .order_by(PersohubEvent.start_date.asc().nullslast(), PersohubEvent.id.asc())
         .all()
     )
     return [_serialize_chakravyuha_event(event, community) for event, community in rows]

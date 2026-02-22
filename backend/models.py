@@ -255,6 +255,20 @@ class PdaEventBadgePlace(enum.Enum):
     SPECIAL_MENTION = "SpecialMention"
 
 
+# Persohub event namespace intentionally reuses PDA enum/value semantics.
+PersohubEventType = PdaEventType
+PersohubEventFormat = PdaEventFormat
+PersohubEventTemplate = PdaEventTemplate
+PersohubEventParticipantMode = PdaEventParticipantMode
+PersohubEventRoundMode = PdaEventRoundMode
+PersohubEventStatus = PdaEventStatus
+PersohubEventRegistrationStatus = PdaEventRegistrationStatus
+PersohubEventEntityType = PdaEventEntityType
+PersohubEventRoundState = PdaEventRoundState
+PersohubEventInviteStatus = PdaEventInviteStatus
+PersohubEventBadgePlace = PdaEventBadgePlace
+
+
 class PdaEvent(Base):
     __tablename__ = "pda_events"
 
@@ -532,8 +546,8 @@ class PdaEventInvite(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
-class CommunityEvent(Base):
-    __tablename__ = "community_events"
+class PersohubEvent(Base):
+    __tablename__ = "persohub_events"
 
     id = Column(Integer, primary_key=True, index=True)
     slug = Column(String(120), unique=True, nullable=False, index=True)
@@ -556,25 +570,17 @@ class CommunityEvent(Base):
     team_min_size = Column(Integer, nullable=True)
     team_max_size = Column(Integer, nullable=True)
     is_visible = Column(Boolean, nullable=False, default=True)
+    registration_open = Column(Boolean, nullable=False, default=True)
+    open_for = Column(String(8), nullable=False, default="MIT", server_default="MIT")
     status = Column(SQLEnum(PdaEventStatus), nullable=False, default=PdaEventStatus.CLOSED)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
-class CommunitySympoLegacy(Base):
-    __tablename__ = "community_sympo"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(255), nullable=False)
-    organising_club_id = Column(Integer, ForeignKey("persohub_clubs.id"), nullable=False, index=True)
-    event_id = Column(Integer, ForeignKey("community_events.id"), nullable=False, index=True)
-    content = Column(JSON, nullable=True)
-
-
-class CommunitySympo(Base):
-    __tablename__ = "community_sympos"
+class PersohubSympo(Base):
+    __tablename__ = "persohub_sympos"
     __table_args__ = (
-        UniqueConstraint("organising_club_id", "name", name="uq_community_sympos_club_name"),
+        UniqueConstraint("organising_club_id", "name", name="uq_persohub_sympos_club_name"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -585,30 +591,30 @@ class CommunitySympo(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
-class CommunitySympoEvent(Base):
-    __tablename__ = "community_sympo_events"
+class PersohubSympoEvent(Base):
+    __tablename__ = "persohub_sympo_events"
     __table_args__ = (
-        UniqueConstraint("sympo_id", "event_id", name="uq_community_sympo_events_pair"),
-        UniqueConstraint("event_id", name="uq_community_sympo_events_event"),
+        UniqueConstraint("sympo_id", "event_id", name="uq_persohub_sympo_events_pair"),
+        UniqueConstraint("event_id", name="uq_persohub_sympo_events_event"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    sympo_id = Column(Integer, ForeignKey("community_sympos.id"), nullable=False, index=True)
-    event_id = Column(Integer, ForeignKey("community_events.id"), nullable=False, index=True)
+    sympo_id = Column(Integer, ForeignKey("persohub_sympos.id"), nullable=False, index=True)
+    event_id = Column(Integer, ForeignKey("persohub_events.id"), nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
-class CommunityEventRegistration(Base):
-    __tablename__ = "community_event_registrations"
+class PersohubEventRegistration(Base):
+    __tablename__ = "persohub_event_registrations"
     __table_args__ = (
-        UniqueConstraint("event_id", "user_id", name="uq_community_event_registration_event_user"),
-        UniqueConstraint("event_id", "team_id", name="uq_community_event_registration_event_team"),
+        UniqueConstraint("event_id", "user_id", name="uq_persohub_event_registration_event_user"),
+        UniqueConstraint("event_id", "team_id", name="uq_persohub_event_registration_event_team"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    event_id = Column(Integer, ForeignKey("community_events.id"), nullable=False, index=True)
+    event_id = Column(Integer, ForeignKey("persohub_events.id"), nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
-    team_id = Column(Integer, ForeignKey("community_event_teams.id"), nullable=True, index=True)
+    team_id = Column(Integer, ForeignKey("persohub_event_teams.id"), nullable=True, index=True)
     entity_type = Column(SQLEnum(PdaEventEntityType), nullable=False)
     status = Column(SQLEnum(PdaEventRegistrationStatus), nullable=False, default=PdaEventRegistrationStatus.ACTIVE)
     referral_code = Column(String(16), nullable=True)
@@ -617,14 +623,14 @@ class CommunityEventRegistration(Base):
     registered_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
-class CommunityEventTeam(Base):
-    __tablename__ = "community_event_teams"
+class PersohubEventTeam(Base):
+    __tablename__ = "persohub_event_teams"
     __table_args__ = (
-        UniqueConstraint("event_id", "team_code", name="uq_community_event_team_event_code"),
+        UniqueConstraint("event_id", "team_code", name="uq_persohub_event_team_event_code"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    event_id = Column(Integer, ForeignKey("community_events.id"), nullable=False, index=True)
+    event_id = Column(Integer, ForeignKey("persohub_events.id"), nullable=False, index=True)
     team_code = Column(String(5), nullable=False)
     team_name = Column(String(255), nullable=False)
     team_lead_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
@@ -632,28 +638,28 @@ class CommunityEventTeam(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
-class CommunityEventTeamMember(Base):
-    __tablename__ = "community_event_team_members"
+class PersohubEventTeamMember(Base):
+    __tablename__ = "persohub_event_team_members"
     __table_args__ = (
-        UniqueConstraint("team_id", "user_id", name="uq_community_event_team_member_team_user"),
+        UniqueConstraint("team_id", "user_id", name="uq_persohub_event_team_member_team_user"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    team_id = Column(Integer, ForeignKey("community_event_teams.id"), nullable=False, index=True)
+    team_id = Column(Integer, ForeignKey("persohub_event_teams.id"), nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     role = Column(String(20), nullable=False, default="member")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
-class CommunityEventRound(Base):
-    __tablename__ = "community_event_rounds"
+class PersohubEventRound(Base):
+    __tablename__ = "persohub_event_rounds"
     __table_args__ = (
-        UniqueConstraint("event_id", "round_no", name="uq_community_event_round_event_round_no"),
+        UniqueConstraint("event_id", "round_no", name="uq_persohub_event_round_event_round_no"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    event_id = Column(Integer, ForeignKey("community_events.id"), nullable=False, index=True)
+    event_id = Column(Integer, ForeignKey("persohub_events.id"), nullable=False, index=True)
     round_no = Column(Integer, nullable=False)
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
@@ -667,13 +673,71 @@ class CommunityEventRound(Base):
     evaluation_criteria = Column(JSON, nullable=True)
     elimination_type = Column(String(20), nullable=True)
     elimination_value = Column(Float, nullable=True)
+    requires_submission = Column(Boolean, nullable=False, default=False)
+    submission_mode = Column(String(32), nullable=False, default="file_or_link")
+    submission_deadline = Column(DateTime(timezone=True), nullable=True)
+    allowed_mime_types = Column(JSON, nullable=True)
+    max_file_size_mb = Column(Integer, nullable=False, default=25)
+    panel_mode_enabled = Column(Boolean, nullable=False, default=False)
+    panel_team_distribution_mode = Column(String(32), nullable=False, default="team_count")
+    panel_structure_locked = Column(Boolean, nullable=False, default=False)
     is_frozen = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
-class CommunityEventAttendance(Base):
-    __tablename__ = "community_event_attendance"
+class PersohubEventRoundPanel(Base):
+    __tablename__ = "persohub_event_round_panels"
+    __table_args__ = (
+        UniqueConstraint("round_id", "panel_no", name="uq_persohub_event_round_panel_round_no"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("persohub_events.id"), nullable=False, index=True)
+    round_id = Column(Integer, ForeignKey("persohub_event_rounds.id"), nullable=False, index=True)
+    panel_no = Column(Integer, nullable=False)
+    name = Column(String(255), nullable=True)
+    panel_link = Column(String(800), nullable=True)
+    panel_time = Column(DateTime(timezone=True), nullable=True)
+    instructions = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PersohubEventRoundPanelMember(Base):
+    __tablename__ = "persohub_event_round_panel_members"
+    __table_args__ = (
+        UniqueConstraint("round_id", "panel_id", "admin_user_id", name="uq_persohub_event_round_panel_member"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("persohub_events.id"), nullable=False, index=True)
+    round_id = Column(Integer, ForeignKey("persohub_event_rounds.id"), nullable=False, index=True)
+    panel_id = Column(Integer, ForeignKey("persohub_event_round_panels.id"), nullable=False, index=True)
+    admin_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PersohubEventRoundPanelAssignment(Base):
+    __tablename__ = "persohub_event_round_panel_assignments"
+    __table_args__ = (
+        UniqueConstraint("round_id", "entity_type", "user_id", "team_id", name="uq_persohub_event_round_panel_assignment_entity"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("persohub_events.id"), nullable=False, index=True)
+    round_id = Column(Integer, ForeignKey("persohub_event_rounds.id"), nullable=False, index=True)
+    panel_id = Column(Integer, ForeignKey("persohub_event_round_panels.id"), nullable=False, index=True)
+    entity_type = Column(SQLEnum(PdaEventEntityType), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    team_id = Column(Integer, ForeignKey("persohub_event_teams.id"), nullable=True, index=True)
+    assigned_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PersohubEventRoundSubmission(Base):
+    __tablename__ = "persohub_event_round_submissions"
     __table_args__ = (
         UniqueConstraint(
             "event_id",
@@ -681,23 +745,56 @@ class CommunityEventAttendance(Base):
             "entity_type",
             "user_id",
             "team_id",
-            name="uq_community_event_attendance_entity",
+            name="uq_persohub_event_round_submission_entity",
         ),
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    event_id = Column(Integer, ForeignKey("community_events.id"), nullable=False, index=True)
-    round_id = Column(Integer, ForeignKey("community_event_rounds.id"), nullable=True, index=True)
+    event_id = Column(Integer, ForeignKey("persohub_events.id"), nullable=False, index=True)
+    round_id = Column(Integer, ForeignKey("persohub_event_rounds.id"), nullable=False, index=True)
     entity_type = Column(SQLEnum(PdaEventEntityType), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
-    team_id = Column(Integer, ForeignKey("community_event_teams.id"), nullable=True, index=True)
+    team_id = Column(Integer, ForeignKey("persohub_event_teams.id"), nullable=True, index=True)
+    submission_type = Column(String(16), nullable=False)
+    file_url = Column(String(800), nullable=True)
+    file_name = Column(String(255), nullable=True)
+    file_size_bytes = Column(BigInteger, nullable=True)
+    mime_type = Column(String(255), nullable=True)
+    link_url = Column(String(800), nullable=True)
+    notes = Column(Text, nullable=True)
+    version = Column(Integer, nullable=False, default=1)
+    is_locked = Column(Boolean, nullable=False, default=False)
+    submitted_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    updated_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+
+class PersohubEventAttendance(Base):
+    __tablename__ = "persohub_event_attendance"
+    __table_args__ = (
+        UniqueConstraint(
+            "event_id",
+            "round_id",
+            "entity_type",
+            "user_id",
+            "team_id",
+            name="uq_persohub_event_attendance_entity",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("persohub_events.id"), nullable=False, index=True)
+    round_id = Column(Integer, ForeignKey("persohub_event_rounds.id"), nullable=True, index=True)
+    entity_type = Column(SQLEnum(PdaEventEntityType), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    team_id = Column(Integer, ForeignKey("persohub_event_teams.id"), nullable=True, index=True)
     is_present = Column(Boolean, nullable=False, default=False)
     marked_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     marked_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
-class CommunityEventScore(Base):
-    __tablename__ = "community_event_scores"
+class PersohubEventScore(Base):
+    __tablename__ = "persohub_event_scores"
     __table_args__ = (
         UniqueConstraint(
             "event_id",
@@ -705,16 +802,16 @@ class CommunityEventScore(Base):
             "entity_type",
             "user_id",
             "team_id",
-            name="uq_community_event_score_entity",
+            name="uq_persohub_event_score_entity",
         ),
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    event_id = Column(Integer, ForeignKey("community_events.id"), nullable=False, index=True)
-    round_id = Column(Integer, ForeignKey("community_event_rounds.id"), nullable=False, index=True)
+    event_id = Column(Integer, ForeignKey("persohub_events.id"), nullable=False, index=True)
+    round_id = Column(Integer, ForeignKey("persohub_event_rounds.id"), nullable=False, index=True)
     entity_type = Column(SQLEnum(PdaEventEntityType), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
-    team_id = Column(Integer, ForeignKey("community_event_teams.id"), nullable=True, index=True)
+    team_id = Column(Integer, ForeignKey("persohub_event_teams.id"), nullable=True, index=True)
     criteria_scores = Column(JSON, nullable=True)
     total_score = Column(Float, nullable=False, default=0)
     normalized_score = Column(Float, nullable=False, default=0)
@@ -723,30 +820,30 @@ class CommunityEventScore(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
-class CommunityEventBadge(Base):
-    __tablename__ = "community_event_badges"
+class PersohubEventBadge(Base):
+    __tablename__ = "persohub_event_badges"
 
     id = Column(Integer, primary_key=True, index=True)
-    event_id = Column(Integer, ForeignKey("community_events.id"), nullable=False, index=True)
+    event_id = Column(Integer, ForeignKey("persohub_events.id"), nullable=False, index=True)
     title = Column(String(255), nullable=False)
     image_url = Column(String(500), nullable=True)
     place = Column(SQLEnum(PdaEventBadgePlace), nullable=False)
     score = Column(Float, nullable=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
-    team_id = Column(Integer, ForeignKey("community_event_teams.id"), nullable=True, index=True)
+    team_id = Column(Integer, ForeignKey("persohub_event_teams.id"), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
-class CommunityEventInvite(Base):
-    __tablename__ = "community_event_invites"
+class PersohubEventInvite(Base):
+    __tablename__ = "persohub_event_invites"
     __table_args__ = (
-        UniqueConstraint("event_id", "team_id", "invited_user_id", name="uq_community_event_invite_unique"),
+        UniqueConstraint("event_id", "team_id", "invited_user_id", name="uq_persohub_event_invite_unique"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    event_id = Column(Integer, ForeignKey("community_events.id"), nullable=False, index=True)
-    team_id = Column(Integer, ForeignKey("community_event_teams.id"), nullable=False, index=True)
+    event_id = Column(Integer, ForeignKey("persohub_events.id"), nullable=False, index=True)
+    team_id = Column(Integer, ForeignKey("persohub_event_teams.id"), nullable=False, index=True)
     invited_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     invited_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     status = Column(SQLEnum(PdaEventInviteStatus), nullable=False, default=PdaEventInviteStatus.PENDING)
@@ -754,11 +851,11 @@ class CommunityEventInvite(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
-class CommunityEventLog(Base):
-    __tablename__ = "community_event_logs"
+class PersohubEventLog(Base):
+    __tablename__ = "persohub_event_logs"
 
     id = Column(Integer, primary_key=True, index=True)
-    event_id = Column(Integer, ForeignKey("community_events.id"), nullable=True, index=True)
+    event_id = Column(Integer, ForeignKey("persohub_events.id"), nullable=True, index=True)
     event_slug = Column(String(120), nullable=False, index=True)
     admin_id = Column(Integer, nullable=True, index=True)
     admin_register_number = Column(String(20), nullable=False)

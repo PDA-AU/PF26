@@ -41,6 +41,16 @@ import ChakravyuhaTmpEditorPage from "@/pages/persohub/tmp/ChakravyuhaTmpEditorP
 import PersohubAdminEntryPage from "@/pages/persohub/admin/PersohubAdminEntryPage";
 import PersohubAdminProfilePage from "@/pages/persohub/admin/PersohubAdminProfilePage";
 import PersohubAdminEventsPage from "@/pages/persohub/admin/PersohubAdminEventsPage";
+import PersohubEventDashboard from "@/pages/persohub/events/PersohubEventDashboard";
+import PersohubEventAdminDashboardPage from "@/pages/persohub/events/admin/EventAdminDashboardPage";
+import PersohubEventAdminAttendancePage from "@/pages/persohub/events/admin/EventAdminAttendancePage";
+import PersohubEventAdminRoundsPage from "@/pages/persohub/events/admin/EventAdminRoundsPage";
+import PersohubEventAdminScoringPage from "@/pages/persohub/events/admin/EventAdminScoringPage";
+import PersohubEventAdminParticipantsPage from "@/pages/persohub/events/admin/EventAdminParticipantsPage";
+import PersohubEventAdminLeaderboardPage from "@/pages/persohub/events/admin/EventAdminLeaderboardPage";
+import PersohubEventAdminLogsPage from "@/pages/persohub/events/admin/EventAdminLogsPage";
+import PersohubEventAdminBadgesPage from "@/pages/persohub/events/admin/EventAdminBadgesPage";
+import PersohubEventAdminEmailPage from "@/pages/persohub/events/admin/EventAdminEmailPage";
 
 // Protected Route Components
 const ProtectedPdaRoute = ({ children, requirePf = false, requireHome = false, requireSuperAdmin = false, requireEvents = false }) => {
@@ -87,6 +97,12 @@ const EventAdminBaseRedirectLegacy = () => {
     const { eventSlug } = useParams();
     if (!eventSlug) return <Navigate to="/admin/events" replace />;
     return <Navigate to={`/admin/events/${eventSlug}/dashboard`} replace />;
+};
+
+const PersohubEventAdminBaseRedirect = () => {
+    const { eventSlug } = useParams();
+    if (!eventSlug) return <Navigate to="/persohub/admin/persohub-events" replace />;
+    return <Navigate to={`/persohub/admin/persohub-events/${eventSlug}/dashboard`} replace />;
 };
 
 function AppRoutes() {
@@ -192,7 +208,19 @@ function AppRoutes() {
             } />
             <Route path="/persohub/admin" element={<PersohubAdminEntryPage />} />
             <Route path="/persohub/admin/profile" element={<PersohubAdminProfilePage />} />
-            <Route path="/persohub/admin/events" element={<PersohubAdminEventsPage />} />
+            <Route path="/persohub/admin/persohub-events" element={<PersohubAdminEventsPage />} />
+            <Route path="/persohub/admin/persohub-events/:eventSlug" element={<PersohubEventAdminBaseRedirect />} />
+            <Route path="/persohub/admin/persohub-events/:eventSlug/dashboard" element={<PersohubEventAdminDashboardPage />} />
+            <Route path="/persohub/admin/persohub-events/:eventSlug/attendance" element={<PersohubEventAdminAttendancePage />} />
+            <Route path="/persohub/admin/persohub-events/:eventSlug/rounds" element={<PersohubEventAdminRoundsPage />} />
+            <Route path="/persohub/admin/persohub-events/:eventSlug/rounds/:roundId/scoring" element={<PersohubEventAdminScoringPage />} />
+            <Route path="/persohub/admin/persohub-events/:eventSlug/participants" element={<PersohubEventAdminParticipantsPage />} />
+            <Route path="/persohub/admin/persohub-events/:eventSlug/leaderboard" element={<PersohubEventAdminLeaderboardPage />} />
+            <Route path="/persohub/admin/persohub-events/:eventSlug/email" element={<PersohubEventAdminEmailPage />} />
+            <Route path="/persohub/admin/persohub-events/:eventSlug/badges" element={<PersohubEventAdminBadgesPage />} />
+            <Route path="/persohub/admin/persohub-events/:eventSlug/logs" element={<PersohubEventAdminLogsPage />} />
+            <Route path="/persohub/events/:eventSlug" element={<PersohubEventDashboard />} />
+            <Route path="/persohub/events/:eventSlug/:profileName" element={<PersohubEventDashboard />} />
             <Route path="/persohub/:profileName" element={<PersohubProfilePage />} />
 
             {/* Catch all */}

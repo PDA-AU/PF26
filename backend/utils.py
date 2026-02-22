@@ -5,7 +5,7 @@ from typing import Optional, List, Dict
 from urllib.parse import unquote, urlparse
 from fastapi import HTTPException, status, UploadFile
 from sqlalchemy.orm import Session
-from models import AdminLog, PdaEventLog, PdaUser
+from models import AdminLog, PdaEventLog, PersohubEventLog, PdaUser
 import boto3
 from botocore.config import Config
 
@@ -57,6 +57,32 @@ def log_pda_event_action(
 ):
     db.add(
         PdaEventLog(
+            event_id=event_id,
+            event_slug=event_slug,
+            admin_id=admin.id if admin else None,
+            admin_register_number=admin.regno if admin else "",
+            admin_name=admin.name if admin else "",
+            action=action,
+            method=method,
+            path=path,
+            meta=meta,
+        )
+    )
+    db.commit()
+
+
+def log_persohub_event_action(
+    db: Session,
+    event_slug: str,
+    admin: PdaUser,
+    action: str,
+    event_id: Optional[int] = None,
+    method: Optional[str] = None,
+    path: Optional[str] = None,
+    meta: Optional[dict] = None,
+):
+    db.add(
+        PersohubEventLog(
             event_id=event_id,
             event_slug=event_slug,
             admin_id=admin.id if admin else None,

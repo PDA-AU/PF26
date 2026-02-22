@@ -144,7 +144,7 @@ export default function PersohubAdminLayout({ children, title = 'Persohub Admin'
 
     const navItems = [
         { id: 'profile', label: 'Profile', path: '/persohub/admin/profile' },
-        { id: 'events', label: 'Events', path: '/persohub/admin/events' },
+        { id: 'events', label: 'Events', path: '/persohub/admin/persohub-events' },
     ];
 
     const navClass = (path) => (

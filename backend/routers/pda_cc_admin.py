@@ -8,10 +8,9 @@ from sqlalchemy.orm import Session
 from auth import get_password_hash
 from database import get_db
 from models import (
-    CommunityEvent,
-    CommunitySympo,
-    CommunitySympoEvent,
-    CommunitySympoLegacy,
+    PersohubEvent,
+    PersohubSympo,
+    PersohubSympoEvent,
     PdaUser,
     PersohubClub,
     PersohubCommunity,
@@ -23,9 +22,9 @@ from schemas import (
     CcClubResponse,
     CcClubUpdateRequest,
     CcCommunityCreateRequest,
-    CcCommunityEventOption,
-    CcCommunityEventSympoAssignRequest,
-    CcCommunityEventSympoAssignResponse,
+    CcPersohubEventOption,
+    CcPersohubEventSympoAssignRequest,
+    CcPersohubEventSympoAssignResponse,
     CcCommunityResetPasswordRequest,
     CcCommunityResponse,
     CcCommunityUpdateRequest,
@@ -87,12 +86,12 @@ def _build_community_response(
     )
 
 
-def _build_sympo_response(db: Session, sympo: CommunitySympo, club_name: Optional[str]) -> CcSympoResponse:
+def _build_sympo_response(db: Session, sympo: PersohubSympo, club_name: Optional[str]) -> CcSympoResponse:
     linked_events = (
-        db.query(CommunitySympoEvent, CommunityEvent)
-        .join(CommunityEvent, CommunityEvent.id == CommunitySympoEvent.event_id)
-        .filter(CommunitySympoEvent.sympo_id == sympo.id)
-        .order_by(CommunityEvent.title.asc(), CommunityEvent.id.asc())
+        db.query(PersohubSympoEvent, PersohubEvent)
+        .join(PersohubEvent, PersohubEvent.id == PersohubSympoEvent.event_id)
+        .filter(PersohubSympoEvent.sympo_id == sympo.id)
+        .order_by(PersohubEvent.title.asc(), PersohubEvent.id.asc())
         .all()
     )
     return CcSympoResponse(
@@ -127,8 +126,8 @@ def _assert_admin_user_exists(db: Session, user_id: int) -> PdaUser:
 def _validate_event_ids(db: Session, event_ids: List[int]) -> None:
     existing = {
         row[0]
-        for row in db.query(CommunityEvent.id)
-        .filter(CommunityEvent.id.in_(event_ids))
+        for row in db.query(PersohubEvent.id)
+        .filter(PersohubEvent.id.in_(event_ids))
         .all()
     }
     missing = [event_id for event_id in event_ids if event_id not in existing]
@@ -147,9 +146,9 @@ def _check_event_conflicts(
 ) -> None:
     if not event_ids:
         return
-    query = db.query(CommunitySympoEvent).filter(CommunitySympoEvent.event_id.in_(event_ids))
+    query = db.query(PersohubSympoEvent).filter(PersohubSympoEvent.event_id.in_(event_ids))
     if exclude_sympo_id is not None:
-        query = query.filter(CommunitySympoEvent.sympo_id != exclude_sympo_id)
+        query = query.filter(PersohubSympoEvent.sympo_id != exclude_sympo_id)
     rows = query.all()
     if not rows:
         return
@@ -271,20 +270,17 @@ def delete_cc_club(
             db.query(PersohubPost).filter(PersohubPost.community_id.in_(community_ids)).count()
         )
         deleted_counts["linked_events"] = int(
-            db.query(CommunityEvent).filter(CommunityEvent.community_id.in_(community_ids)).count()
+            db.query(PersohubEvent).filter(PersohubEvent.community_id.in_(community_ids)).count()
         )
 
-    deleted_counts["legacy_sympo_rows"] = int(
-        db.query(CommunitySympoLegacy).filter(CommunitySympoLegacy.organising_club_id == club_id).count()
-    )
+    deleted_counts["legacy_sympo_rows"] = 0
     deleted_counts["normalized_sympos"] = int(
-        db.query(CommunitySympo).filter(CommunitySympo.organising_club_id == club_id).count()
+        db.query(PersohubSympo).filter(PersohubSympo.organising_club_id == club_id).count()
     )
 
     if community_ids:
         db.query(PersohubCommunity).filter(PersohubCommunity.id.in_(community_ids)).delete(synchronize_session=False)
 
-    db.query(CommunitySympoLegacy).filter(CommunitySympoLegacy.organising_club_id == club_id).delete(synchronize_session=False)
     db.delete(club)
     db.commit()
 
@@ -439,7 +435,7 @@ def delete_cc_community(
     deleted_counts = {
         "community_id": community.id,
         "linked_posts": int(db.query(PersohubPost).filter(PersohubPost.community_id == community.id).count()),
-        "linked_events": int(db.query(CommunityEvent).filter(CommunityEvent.community_id == community.id).count()),
+        "linked_events": int(db.query(PersohubEvent).filter(PersohubEvent.community_id == community.id).count()),
     }
 
     db.delete(community)
@@ -460,15 +456,15 @@ def delete_cc_community(
     )
 
 
-@router.get("/pda-admin/cc/sympos", response_model=List[CcSympoResponse])
+@router.get("/pda-admin/cc/persohub-sympos", response_model=List[CcSympoResponse])
 def list_cc_sympos(
     _: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db),
 ):
     rows = (
-        db.query(CommunitySympo, PersohubClub)
-        .join(PersohubClub, PersohubClub.id == CommunitySympo.organising_club_id)
-        .order_by(CommunitySympo.name.asc(), CommunitySympo.id.asc())
+        db.query(PersohubSympo, PersohubClub)
+        .join(PersohubClub, PersohubClub.id == PersohubSympo.organising_club_id)
+        .order_by(PersohubSympo.name.asc(), PersohubSympo.id.asc())
         .all()
     )
     if not rows:
@@ -476,10 +472,10 @@ def list_cc_sympos(
 
     sympo_ids = [sympo.id for sympo, _club in rows]
     linked_rows = (
-        db.query(CommunitySympoEvent.sympo_id, CommunityEvent.id, CommunityEvent.title)
-        .join(CommunityEvent, CommunityEvent.id == CommunitySympoEvent.event_id)
-        .filter(CommunitySympoEvent.sympo_id.in_(sympo_ids))
-        .order_by(CommunitySympoEvent.sympo_id.asc(), CommunityEvent.title.asc(), CommunityEvent.id.asc())
+        db.query(PersohubSympoEvent.sympo_id, PersohubEvent.id, PersohubEvent.title)
+        .join(PersohubEvent, PersohubEvent.id == PersohubSympoEvent.event_id)
+        .filter(PersohubSympoEvent.sympo_id.in_(sympo_ids))
+        .order_by(PersohubSympoEvent.sympo_id.asc(), PersohubEvent.title.asc(), PersohubEvent.id.asc())
         .all()
     )
 
@@ -505,7 +501,7 @@ def list_cc_sympos(
     ]
 
 
-@router.post("/pda-admin/cc/sympos", response_model=CcSympoResponse)
+@router.post("/pda-admin/cc/persohub-sympos", response_model=CcSympoResponse)
 def create_cc_sympo(
     payload: CcSympoCreateRequest,
     admin: PdaUser = Depends(require_superadmin),
@@ -516,7 +512,7 @@ def create_cc_sympo(
     _validate_event_ids(db, payload.event_ids)
     _check_event_conflicts(db, payload.event_ids)
 
-    sympo = CommunitySympo(
+    sympo = PersohubSympo(
         name=payload.name,
         organising_club_id=payload.organising_club_id,
         content=payload.content,
@@ -525,7 +521,7 @@ def create_cc_sympo(
     db.flush()
 
     for event_id in payload.event_ids:
-        db.add(CommunitySympoEvent(sympo_id=sympo.id, event_id=event_id))
+        db.add(PersohubSympoEvent(sympo_id=sympo.id, event_id=event_id))
 
     try:
         db.commit()
@@ -545,7 +541,7 @@ def create_cc_sympo(
     return _build_sympo_response(db, sympo, club.name)
 
 
-@router.put("/pda-admin/cc/sympos/{sympo_id}", response_model=CcSympoResponse)
+@router.put("/pda-admin/cc/persohub-sympos/{sympo_id}", response_model=CcSympoResponse)
 def update_cc_sympo(
     sympo_id: int,
     payload: CcSympoUpdateRequest,
@@ -553,7 +549,7 @@ def update_cc_sympo(
     db: Session = Depends(get_db),
     request: Request = None,
 ):
-    sympo = db.query(CommunitySympo).filter(CommunitySympo.id == sympo_id).first()
+    sympo = db.query(PersohubSympo).filter(PersohubSympo.id == sympo_id).first()
     if not sympo:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sympo not found")
 
@@ -570,9 +566,9 @@ def update_cc_sympo(
             setattr(sympo, key, updates[key])
 
     if "event_ids" in updates:
-        db.query(CommunitySympoEvent).filter(CommunitySympoEvent.sympo_id == sympo_id).delete(synchronize_session=False)
+        db.query(PersohubSympoEvent).filter(PersohubSympoEvent.sympo_id == sympo_id).delete(synchronize_session=False)
         for event_id in updates["event_ids"]:
-            db.add(CommunitySympoEvent(sympo_id=sympo_id, event_id=event_id))
+            db.add(PersohubSympoEvent(sympo_id=sympo_id, event_id=event_id))
 
     try:
         db.commit()
@@ -593,18 +589,18 @@ def update_cc_sympo(
     return _build_sympo_response(db, sympo, club.name)
 
 
-@router.delete("/pda-admin/cc/sympos/{sympo_id}", response_model=CcDeleteSummaryResponse)
+@router.delete("/pda-admin/cc/persohub-sympos/{sympo_id}", response_model=CcDeleteSummaryResponse)
 def delete_cc_sympo(
     sympo_id: int,
     admin: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db),
     request: Request = None,
 ):
-    sympo = db.query(CommunitySympo).filter(CommunitySympo.id == sympo_id).first()
+    sympo = db.query(PersohubSympo).filter(PersohubSympo.id == sympo_id).first()
     if not sympo:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sympo not found")
 
-    link_count = int(db.query(CommunitySympoEvent).filter(CommunitySympoEvent.sympo_id == sympo_id).count())
+    link_count = int(db.query(PersohubSympoEvent).filter(PersohubSympoEvent.sympo_id == sympo_id).count())
     db.delete(sympo)
     db.commit()
 
@@ -623,8 +619,8 @@ def delete_cc_sympo(
     )
 
 
-@router.get("/pda-admin/cc/options/community-events", response_model=List[CcCommunityEventOption])
-def list_cc_community_event_options(
+@router.get("/pda-admin/cc/options/persohub-events", response_model=List[CcPersohubEventOption])
+def list_cc_persohub_event_options(
     response: Response,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
@@ -633,25 +629,25 @@ def list_cc_community_event_options(
     db: Session = Depends(get_db),
 ):
     query = (
-        db.query(CommunityEvent, PersohubCommunity, CommunitySympoEvent, CommunitySympo)
-        .join(PersohubCommunity, PersohubCommunity.id == CommunityEvent.community_id)
-        .outerjoin(CommunitySympoEvent, CommunitySympoEvent.event_id == CommunityEvent.id)
-        .outerjoin(CommunitySympo, CommunitySympo.id == CommunitySympoEvent.sympo_id)
+        db.query(PersohubEvent, PersohubCommunity, PersohubSympoEvent, PersohubSympo)
+        .join(PersohubCommunity, PersohubCommunity.id == PersohubEvent.community_id)
+        .outerjoin(PersohubSympoEvent, PersohubSympoEvent.event_id == PersohubEvent.id)
+        .outerjoin(PersohubSympo, PersohubSympo.id == PersohubSympoEvent.sympo_id)
     )
     if q and q.strip():
         keyword = f"%{q.strip()}%"
         query = query.filter(
             or_(
-                CommunityEvent.title.ilike(keyword),
-                CommunityEvent.slug.ilike(keyword),
-                CommunityEvent.event_code.ilike(keyword),
+                PersohubEvent.title.ilike(keyword),
+                PersohubEvent.slug.ilike(keyword),
+                PersohubEvent.event_code.ilike(keyword),
                 PersohubCommunity.name.ilike(keyword),
             )
         )
 
     total_count = int(query.count())
     rows = (
-        query.order_by(CommunityEvent.title.asc(), CommunityEvent.id.asc())
+        query.order_by(PersohubEvent.title.asc(), PersohubEvent.id.asc())
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
@@ -662,7 +658,7 @@ def list_cc_community_event_options(
     response.headers["X-Page-Size"] = str(page_size)
 
     return [
-        CcCommunityEventOption(
+        CcPersohubEventOption(
             id=event.id,
             slug=event.slug,
             event_code=event.event_code,
@@ -676,29 +672,29 @@ def list_cc_community_event_options(
     ]
 
 
-@router.put("/pda-admin/cc/community-events/{event_id}/sympo", response_model=CcCommunityEventSympoAssignResponse)
+@router.put("/pda-admin/cc/persohub-events/{event_id}/sympo", response_model=CcPersohubEventSympoAssignResponse)
 def assign_cc_event_sympo(
     event_id: int,
-    payload: CcCommunityEventSympoAssignRequest,
+    payload: CcPersohubEventSympoAssignRequest,
     admin: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db),
     request: Request = None,
 ):
-    event = db.query(CommunityEvent).filter(CommunityEvent.id == event_id).first()
+    event = db.query(PersohubEvent).filter(PersohubEvent.id == event_id).first()
     if not event:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Community event not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Persohub event not found")
 
-    existing = db.query(CommunitySympoEvent).filter(CommunitySympoEvent.event_id == event_id).first()
+    existing = db.query(PersohubSympoEvent).filter(PersohubSympoEvent.event_id == event_id).first()
     previous_sympo_id = existing.sympo_id if existing else None
 
     next_sympo = None
     if payload.sympo_id is not None:
-        next_sympo = db.query(CommunitySympo).filter(CommunitySympo.id == payload.sympo_id).first()
+        next_sympo = db.query(PersohubSympo).filter(PersohubSympo.id == payload.sympo_id).first()
         if not next_sympo:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sympo not found")
 
     if existing and next_sympo and existing.sympo_id == next_sympo.id:
-        return CcCommunityEventSympoAssignResponse(
+        return CcPersohubEventSympoAssignResponse(
             event_id=event_id,
             sympo_id=next_sympo.id,
             sympo_name=next_sympo.name,
@@ -710,7 +706,7 @@ def assign_cc_event_sympo(
         db.flush()
 
     if next_sympo:
-        db.add(CommunitySympoEvent(sympo_id=next_sympo.id, event_id=event_id))
+        db.add(PersohubSympoEvent(sympo_id=next_sympo.id, event_id=event_id))
 
     db.commit()
     log_admin_action(
@@ -725,7 +721,7 @@ def assign_cc_event_sympo(
             "next_sympo_id": (next_sympo.id if next_sympo else None),
         },
     )
-    return CcCommunityEventSympoAssignResponse(
+    return CcPersohubEventSympoAssignResponse(
         event_id=event_id,
         sympo_id=(next_sympo.id if next_sympo else None),
         sympo_name=(next_sympo.name if next_sympo else None),

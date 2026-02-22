@@ -7,19 +7,18 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models import (
-    CommunityEvent,
-    CommunityEventAttendance,
-    CommunityEventBadge,
-    CommunityEventInvite,
-    CommunityEventLog,
-    CommunityEventRegistration,
-    CommunityEventRound,
-    CommunityEventScore,
-    CommunityEventTeam,
-    CommunityEventTeamMember,
-    CommunitySympo,
-    CommunitySympoLegacy,
-    CommunitySympoEvent,
+    PersohubEvent,
+    PersohubEventAttendance,
+    PersohubEventBadge,
+    PersohubEventInvite,
+    PersohubEventLog,
+    PersohubEventRegistration,
+    PersohubEventRound,
+    PersohubEventScore,
+    PersohubEventTeam,
+    PersohubEventTeamMember,
+    PersohubSympo,
+    PersohubSympoEvent,
     PdaEventFormat,
     PdaEventParticipantMode,
     PdaEventRoundMode,
@@ -56,14 +55,14 @@ def _next_slug(db: Session, title: str) -> str:
     base = _slugify(title)
     slug = base
     counter = 2
-    while db.query(CommunityEvent).filter(CommunityEvent.slug == slug).first():
+    while db.query(PersohubEvent).filter(PersohubEvent.slug == slug).first():
         slug = f"{base}-{counter}"
         counter += 1
     return slug
 
 
 def _next_event_code(db: Session) -> str:
-    latest = db.query(CommunityEvent).order_by(CommunityEvent.id.desc()).first()
+    latest = db.query(PersohubEvent).order_by(PersohubEvent.id.desc()).first()
     next_id = (latest.id + 1) if latest else 1
     return f"CEV{next_id:03d}"
 
@@ -138,7 +137,7 @@ def _enum_value(value) -> str:
     return str(value)
 
 
-def _serialize_event(event: CommunityEvent, sympo: Optional[CommunitySympo] = None) -> PersohubAdminEventResponse:
+def _serialize_event(event: PersohubEvent, sympo: Optional[PersohubSympo] = None) -> PersohubAdminEventResponse:
     return PersohubAdminEventResponse(
         id=event.id,
         slug=event.slug,
@@ -169,12 +168,12 @@ def _serialize_event(event: CommunityEvent, sympo: Optional[CommunitySympo] = No
     )
 
 
-def _get_event_or_404(db: Session, slug: str, root_community_id: int) -> CommunityEvent:
+def _get_event_or_404(db: Session, slug: str, root_community_id: int) -> PersohubEvent:
     event = (
-        db.query(CommunityEvent)
+        db.query(PersohubEvent)
         .filter(
-            CommunityEvent.slug == slug,
-            CommunityEvent.community_id == root_community_id,
+            PersohubEvent.slug == slug,
+            PersohubEvent.community_id == root_community_id,
         )
         .first()
     )
@@ -190,20 +189,20 @@ def _admin_identity(db: Session, community: PersohubCommunity) -> tuple[Optional
     return admin.id, str(admin.regno or ""), str(admin.name or community.name)
 
 
-def _log_community_event_action(
+def _log_persohub_event_action(
     db: Session,
     community: PersohubCommunity,
     action: str,
     method: str,
     path: str,
-    event: Optional[CommunityEvent] = None,
+    event: Optional[PersohubEvent] = None,
     event_slug: Optional[str] = None,
     meta: Optional[dict] = None,
 ) -> None:
     admin_id, admin_regno, admin_name = _admin_identity(db, community)
     resolved_slug = str(event_slug or (event.slug if event else "") or "")
     db.add(
-        CommunityEventLog(
+        PersohubEventLog(
             event_id=(event.id if event else None),
             event_slug=resolved_slug,
             admin_id=admin_id,
@@ -217,7 +216,7 @@ def _log_community_event_action(
     )
 
 
-@router.get("/persohub/admin/events", response_model=List[PersohubAdminEventResponse])
+@router.get("/persohub/admin/persohub-events", response_model=List[PersohubAdminEventResponse])
 def list_admin_events(
     response: Response,
     page: int = Query(1, ge=1),
@@ -238,23 +237,23 @@ def list_admin_events(
         response.headers["X-Page-Size"] = str(page_size)
         return []
     query = (
-        db.query(CommunityEvent, CommunitySympo)
-        .outerjoin(CommunitySympoEvent, CommunitySympoEvent.event_id == CommunityEvent.id)
-        .outerjoin(CommunitySympo, CommunitySympo.id == CommunitySympoEvent.sympo_id)
-        .filter(CommunityEvent.community_id == root_community.id)
+        db.query(PersohubEvent, PersohubSympo)
+        .outerjoin(PersohubSympoEvent, PersohubSympoEvent.event_id == PersohubEvent.id)
+        .outerjoin(PersohubSympo, PersohubSympo.id == PersohubSympoEvent.sympo_id)
+        .filter(PersohubEvent.community_id == root_community.id)
     )
     if q and q.strip():
         keyword = f"%{q.strip()}%"
         query = query.filter(
             or_(
-                CommunityEvent.title.ilike(keyword),
-                CommunityEvent.slug.ilike(keyword),
-                CommunityEvent.event_code.ilike(keyword),
+                PersohubEvent.title.ilike(keyword),
+                PersohubEvent.slug.ilike(keyword),
+                PersohubEvent.event_code.ilike(keyword),
             )
         )
     total_count = int(query.count())
     rows = (
-        query.order_by(CommunityEvent.created_at.desc(), CommunityEvent.id.desc())
+        query.order_by(PersohubEvent.created_at.desc(), PersohubEvent.id.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
@@ -265,15 +264,15 @@ def list_admin_events(
     return [_serialize_event(event, sympo) for event, sympo in rows]
 
 
-@router.get("/persohub/admin/sympo-options", response_model=List[PersohubAdminSympoOption])
+@router.get("/persohub/admin/persohub-sympo-options", response_model=List[PersohubAdminSympoOption])
 def list_admin_sympo_options(
     _: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
     rows = (
-        db.query(CommunitySympo, PersohubClub)
-        .join(PersohubClub, PersohubClub.id == CommunitySympo.organising_club_id)
-        .order_by(CommunitySympo.name.asc(), CommunitySympo.id.asc())
+        db.query(PersohubSympo, PersohubClub)
+        .join(PersohubClub, PersohubClub.id == PersohubSympo.organising_club_id)
+        .order_by(PersohubSympo.name.asc(), PersohubSympo.id.asc())
         .all()
     )
     return [
@@ -287,7 +286,7 @@ def list_admin_sympo_options(
     ]
 
 
-@router.post("/persohub/admin/events", response_model=PersohubAdminEventResponse)
+@router.post("/persohub/admin/persohub-events", response_model=PersohubAdminEventResponse)
 def create_admin_event(
     payload: PersohubAdminEventCreateRequest,
     request: Request,
@@ -314,7 +313,7 @@ def create_admin_event(
         team_min_size = None
         team_max_size = None
 
-    event = CommunityEvent(
+    event = PersohubEvent(
         slug=_next_slug(db, payload.title),
         event_code=_next_event_code(db),
         community_id=root_community.id,
@@ -342,7 +341,7 @@ def create_admin_event(
 
     for round_no in range(1, round_count + 1):
         db.add(
-            CommunityEventRound(
+            PersohubEventRound(
                 event_id=event.id,
                 round_no=round_no,
                 name=f"Round {round_no}",
@@ -352,10 +351,10 @@ def create_admin_event(
             )
         )
 
-    _log_community_event_action(
+    _log_persohub_event_action(
         db,
         community,
-        action="create_community_managed_event",
+        action="create_persohub_managed_event",
         method=request.method,
         path=request.url.path,
         event=event,
@@ -367,7 +366,7 @@ def create_admin_event(
     return _serialize_event(event)
 
 
-@router.put("/persohub/admin/events/{slug}", response_model=PersohubAdminEventResponse)
+@router.put("/persohub/admin/persohub-events/{slug}", response_model=PersohubAdminEventResponse)
 def update_admin_event(
     slug: str,
     payload: PersohubAdminEventUpdateRequest,
@@ -421,10 +420,10 @@ def update_admin_event(
     for field, value in updates.items():
         setattr(event, field, value)
 
-    _log_community_event_action(
+    _log_persohub_event_action(
         db,
         community,
-        action="update_community_managed_event",
+        action="update_persohub_managed_event",
         method=request.method,
         path=request.url.path,
         event=event,
@@ -436,7 +435,7 @@ def update_admin_event(
     return _serialize_event(event)
 
 
-@router.put("/persohub/admin/events/{slug}/sympo", response_model=PersohubAdminEventSympoAssignResponse)
+@router.put("/persohub/admin/persohub-events/{slug}/sympo", response_model=PersohubAdminEventSympoAssignResponse)
 def assign_admin_event_sympo(
     slug: str,
     payload: PersohubAdminEventSympoAssignRequest,
@@ -453,12 +452,12 @@ def assign_admin_event_sympo(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Root community not found")
 
     event = _get_event_or_404(db, slug, root_community.id)
-    existing = db.query(CommunitySympoEvent).filter(CommunitySympoEvent.event_id == event.id).first()
+    existing = db.query(PersohubSympoEvent).filter(PersohubSympoEvent.event_id == event.id).first()
     previous_sympo_id = existing.sympo_id if existing else None
 
     next_sympo = None
     if payload.sympo_id is not None:
-        next_sympo = db.query(CommunitySympo).filter(CommunitySympo.id == payload.sympo_id).first()
+        next_sympo = db.query(PersohubSympo).filter(PersohubSympo.id == payload.sympo_id).first()
         if not next_sympo:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sympo not found")
 
@@ -474,12 +473,12 @@ def assign_admin_event_sympo(
         db.delete(existing)
         db.flush()
     if next_sympo:
-        db.add(CommunitySympoEvent(sympo_id=next_sympo.id, event_id=event.id))
+        db.add(PersohubSympoEvent(sympo_id=next_sympo.id, event_id=event.id))
 
-    _log_community_event_action(
+    _log_persohub_event_action(
         db,
         community,
-        action="assign_community_event_sympo",
+        action="assign_persohub_event_sympo",
         method=request.method,
         path=request.url.path,
         event=event,
@@ -499,7 +498,7 @@ def assign_admin_event_sympo(
     )
 
 
-@router.delete("/persohub/admin/events/{slug}")
+@router.delete("/persohub/admin/persohub-events/{slug}")
 def delete_admin_event(
     slug: str,
     request: Request,
@@ -520,47 +519,46 @@ def delete_admin_event(
 
     team_ids = [
         int(row[0])
-        for row in db.query(CommunityEventTeam.id).filter(CommunityEventTeam.event_id == event_id).all()
+        for row in db.query(PersohubEventTeam.id).filter(PersohubEventTeam.event_id == event_id).all()
     ]
     round_ids = [
         int(row[0])
-        for row in db.query(CommunityEventRound.id).filter(CommunityEventRound.event_id == event_id).all()
+        for row in db.query(PersohubEventRound.id).filter(PersohubEventRound.event_id == event_id).all()
     ]
 
     if team_ids:
-        db.query(CommunityEventInvite).filter(CommunityEventInvite.team_id.in_(team_ids)).delete(synchronize_session=False)
-        db.query(CommunityEventBadge).filter(CommunityEventBadge.team_id.in_(team_ids)).delete(synchronize_session=False)
-        db.query(CommunityEventScore).filter(CommunityEventScore.team_id.in_(team_ids)).delete(synchronize_session=False)
-        db.query(CommunityEventAttendance).filter(CommunityEventAttendance.team_id.in_(team_ids)).delete(synchronize_session=False)
-        db.query(CommunityEventRegistration).filter(CommunityEventRegistration.team_id.in_(team_ids)).delete(synchronize_session=False)
-        db.query(CommunityEventTeamMember).filter(CommunityEventTeamMember.team_id.in_(team_ids)).delete(synchronize_session=False)
+        db.query(PersohubEventInvite).filter(PersohubEventInvite.team_id.in_(team_ids)).delete(synchronize_session=False)
+        db.query(PersohubEventBadge).filter(PersohubEventBadge.team_id.in_(team_ids)).delete(synchronize_session=False)
+        db.query(PersohubEventScore).filter(PersohubEventScore.team_id.in_(team_ids)).delete(synchronize_session=False)
+        db.query(PersohubEventAttendance).filter(PersohubEventAttendance.team_id.in_(team_ids)).delete(synchronize_session=False)
+        db.query(PersohubEventRegistration).filter(PersohubEventRegistration.team_id.in_(team_ids)).delete(synchronize_session=False)
+        db.query(PersohubEventTeamMember).filter(PersohubEventTeamMember.team_id.in_(team_ids)).delete(synchronize_session=False)
 
     if round_ids:
-        db.query(CommunityEventScore).filter(CommunityEventScore.round_id.in_(round_ids)).delete(synchronize_session=False)
-        db.query(CommunityEventAttendance).filter(CommunityEventAttendance.round_id.in_(round_ids)).delete(synchronize_session=False)
+        db.query(PersohubEventScore).filter(PersohubEventScore.round_id.in_(round_ids)).delete(synchronize_session=False)
+        db.query(PersohubEventAttendance).filter(PersohubEventAttendance.round_id.in_(round_ids)).delete(synchronize_session=False)
 
-    db.query(CommunityEventInvite).filter(CommunityEventInvite.event_id == event_id).delete(synchronize_session=False)
-    db.query(CommunityEventBadge).filter(CommunityEventBadge.event_id == event_id).delete(synchronize_session=False)
-    db.query(CommunityEventScore).filter(CommunityEventScore.event_id == event_id).delete(synchronize_session=False)
-    db.query(CommunityEventAttendance).filter(CommunityEventAttendance.event_id == event_id).delete(synchronize_session=False)
-    db.query(CommunityEventRegistration).filter(CommunityEventRegistration.event_id == event_id).delete(synchronize_session=False)
-    db.query(CommunityEventTeamMember).filter(
-        CommunityEventTeamMember.team_id.in_(
-            db.query(CommunityEventTeam.id).filter(CommunityEventTeam.event_id == event_id)
+    db.query(PersohubEventInvite).filter(PersohubEventInvite.event_id == event_id).delete(synchronize_session=False)
+    db.query(PersohubEventBadge).filter(PersohubEventBadge.event_id == event_id).delete(synchronize_session=False)
+    db.query(PersohubEventScore).filter(PersohubEventScore.event_id == event_id).delete(synchronize_session=False)
+    db.query(PersohubEventAttendance).filter(PersohubEventAttendance.event_id == event_id).delete(synchronize_session=False)
+    db.query(PersohubEventRegistration).filter(PersohubEventRegistration.event_id == event_id).delete(synchronize_session=False)
+    db.query(PersohubEventTeamMember).filter(
+        PersohubEventTeamMember.team_id.in_(
+            db.query(PersohubEventTeam.id).filter(PersohubEventTeam.event_id == event_id)
         )
     ).delete(synchronize_session=False)
-    db.query(CommunityEventTeam).filter(CommunityEventTeam.event_id == event_id).delete(synchronize_session=False)
-    db.query(CommunityEventRound).filter(CommunityEventRound.event_id == event_id).delete(synchronize_session=False)
-    db.query(CommunitySympoLegacy).filter(CommunitySympoLegacy.event_id == event_id).delete(synchronize_session=False)
-    db.query(CommunitySympoEvent).filter(CommunitySympoEvent.event_id == event_id).delete(synchronize_session=False)
-    db.query(CommunityEventLog).filter(
-        (CommunityEventLog.event_id == event_id) | (CommunityEventLog.event_slug == event_slug)
+    db.query(PersohubEventTeam).filter(PersohubEventTeam.event_id == event_id).delete(synchronize_session=False)
+    db.query(PersohubEventRound).filter(PersohubEventRound.event_id == event_id).delete(synchronize_session=False)
+    db.query(PersohubSympoEvent).filter(PersohubSympoEvent.event_id == event_id).delete(synchronize_session=False)
+    db.query(PersohubEventLog).filter(
+        (PersohubEventLog.event_id == event_id) | (PersohubEventLog.event_slug == event_slug)
     ).delete(synchronize_session=False)
 
-    _log_community_event_action(
+    _log_persohub_event_action(
         db,
         community,
-        action="delete_community_managed_event",
+        action="delete_persohub_managed_event",
         method=request.method,
         path=request.url.path,
         event=None,

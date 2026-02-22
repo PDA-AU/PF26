@@ -72,9 +72,9 @@ export const persohubAdminApi = {
         });
     },
 
-    async listAdminEvents(params = {}) {
+    async listPersohubEvents(params = {}) {
         return withCommunityAuthRetry(async () => {
-            const response = await axios.get(`${API}/persohub/admin/events`, {
+            const response = await axios.get(`${API}/persohub/admin/persohub-events`, {
                 params,
                 headers: { ...getCommunityAuthHeader() },
             });
@@ -87,45 +87,61 @@ export const persohubAdminApi = {
         });
     },
 
-    async listAdminSympoOptions() {
+    async isPersohubEventsParityEnabled() {
         return withCommunityAuthRetry(async () => {
-            const response = await axios.get(`${API}/persohub/admin/sympo-options`, {
+            try {
+                const response = await axios.get(`${API}/persohub/admin/persohub-events/parity-enabled`, {
+                    headers: { ...getCommunityAuthHeader() },
+                });
+                return Boolean(response.data?.enabled);
+            } catch (error) {
+                if (error?.response?.status === 404) {
+                    return false;
+                }
+                throw error;
+            }
+        });
+    },
+
+    async listPersohubSympoOptions() {
+        return withCommunityAuthRetry(async () => {
+            const response = await axios.get(`${API}/persohub/admin/persohub-sympo-options`, {
                 headers: { ...getCommunityAuthHeader() },
             });
             return response.data || [];
         });
     },
 
-    async createAdminEvent(payload) {
+    async createPersohubEvent(payload) {
         return withCommunityAuthRetry(async () => {
-            const response = await axios.post(`${API}/persohub/admin/events`, payload, {
+            const response = await axios.post(`${API}/persohub/admin/persohub-events`, payload, {
                 headers: { ...getCommunityAuthHeader() },
             });
             return response.data;
         });
     },
 
-    async updateAdminEvent(slug, payload) {
+    async updatePersohubEvent(slug, payload) {
         return withCommunityAuthRetry(async () => {
-            const response = await axios.put(`${API}/persohub/admin/events/${slug}`, payload, {
+            const response = await axios.put(`${API}/persohub/admin/persohub-events/${slug}`, payload, {
                 headers: { ...getCommunityAuthHeader() },
             });
             return response.data;
         });
     },
 
-    async assignAdminEventSympo(slug, payload) {
+    async assignPersohubEventSympo(slug, payload) {
         return withCommunityAuthRetry(async () => {
-            const response = await axios.put(`${API}/persohub/admin/events/${slug}/sympo`, payload, {
+            const response = await axios.put(`${API}/persohub/admin/persohub-events/${slug}/sympo`, payload, {
                 headers: { ...getCommunityAuthHeader() },
             });
             return response.data;
         });
     },
 
-    async deleteAdminEvent(slug) {
+    async deletePersohubEvent(slug) {
         return withCommunityAuthRetry(async () => {
-            const response = await axios.delete(`${API}/persohub/admin/events/${slug}`, {
+            const response = await axios.delete(`${API}/persohub/admin/persohub-events/${slug}`, {
                 headers: { ...getCommunityAuthHeader() },
             });
             return response.data;

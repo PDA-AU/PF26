@@ -49,6 +49,52 @@ def _column_exists(conn, table_name: str, column_name: str) -> bool:
     return bool(result)
 
 
+def _index_exists(conn, index_name: str) -> bool:
+    result = conn.execute(
+        text(
+            """
+            SELECT 1
+            FROM pg_indexes
+            WHERE schemaname = current_schema()
+              AND indexname = :index_name
+            """
+        ),
+        {"index_name": index_name},
+    ).fetchone()
+    return bool(result)
+
+
+def _constraint_exists(conn, table_name: str, constraint_name: str) -> bool:
+    result = conn.execute(
+        text(
+            """
+            SELECT 1
+            FROM information_schema.table_constraints
+            WHERE table_schema = current_schema()
+              AND table_name = :table_name
+              AND constraint_name = :constraint_name
+            """
+        ),
+        {"table_name": table_name, "constraint_name": constraint_name},
+    ).fetchone()
+    return bool(result)
+
+
+def _quote_ident(identifier: str) -> str:
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", identifier):
+        raise ValueError(f"Unsafe SQL identifier: {identifier}")
+    return f'"{identifier}"'
+
+
+def _table_row_count(conn, table_name: str) -> int:
+    return int(
+        conn.execute(
+            text(f"SELECT COUNT(*) FROM {_quote_ident(table_name)}")
+        ).scalar()
+        or 0
+    )
+
+
 def ensure_pda_users_table(engine):
     with engine.begin() as conn:
         conn.execute(
@@ -461,6 +507,8 @@ def ensure_pda_gallery_tag_column(engine):
     with engine.begin() as conn:
         if _table_exists(conn, "pda_gallery") and not _column_exists(conn, "pda_gallery", "tag"):
             conn.execute(text("ALTER TABLE pda_gallery ADD COLUMN tag VARCHAR(120)"))
+        if not _table_exists(conn, "pda_team"):
+            return
         designation_constraint = conn.execute(
             text(
                 """
@@ -1322,6 +1370,9 @@ def ensure_pda_events_open_for_column(engine):
 
 def ensure_pda_event_round_submission_tables(engine):
     with engine.begin() as conn:
+        required_tables = ("pda_events", "pda_event_rounds", "pda_event_teams", "users")
+        if not all(_table_exists(conn, table_name) for table_name in required_tables):
+            return
         if _table_exists(conn, "pda_event_rounds"):
             conn.execute(text("ALTER TABLE pda_event_rounds ADD COLUMN IF NOT EXISTS requires_submission BOOLEAN NOT NULL DEFAULT FALSE"))
             conn.execute(text("ALTER TABLE pda_event_rounds ADD COLUMN IF NOT EXISTS submission_mode VARCHAR(32) NOT NULL DEFAULT 'file_or_link'"))
@@ -1553,12 +1604,268 @@ def ensure_pda_event_panel_tables(engine):
             )
 
 
-def ensure_community_event_tables(engine):
+_PERSOHUB_EVENT_TABLE_RENAMES = [
+    ("community_events", "persohub_events"),
+    ("community_sympo", "persohub_sympo"),
+    ("community_sympos", "persohub_sympos"),
+    ("community_sympo_events", "persohub_sympo_events"),
+    ("community_event_teams", "persohub_event_teams"),
+    ("community_event_rounds", "persohub_event_rounds"),
+    ("community_event_registrations", "persohub_event_registrations"),
+    ("community_event_team_members", "persohub_event_team_members"),
+    ("community_event_attendance", "persohub_event_attendance"),
+    ("community_event_scores", "persohub_event_scores"),
+    ("community_event_badges", "persohub_event_badges"),
+    ("community_event_invites", "persohub_event_invites"),
+    ("community_event_logs", "persohub_event_logs"),
+]
+
+_PERSOHUB_EVENT_INDEX_RENAMES = [
+    ("idx_community_events_community_created", "idx_persohub_events_community_created"),
+    ("idx_community_event_rounds_event_round", "idx_persohub_event_rounds_event_round"),
+    ("idx_community_event_rounds_event_state", "idx_persohub_event_rounds_event_state"),
+    ("idx_community_event_registration_event_status", "idx_persohub_event_registration_event_status"),
+    ("idx_community_event_registration_event_referred_by", "idx_persohub_event_registration_event_referred_by"),
+    ("idx_community_event_team_members_team_user", "idx_persohub_event_team_members_team_user"),
+    ("idx_community_event_attendance_event_round", "idx_persohub_event_attendance_event_round"),
+    ("idx_community_event_scores_event_round", "idx_persohub_event_scores_event_round"),
+    ("idx_community_event_badges_event", "idx_persohub_event_badges_event"),
+    ("idx_community_sympo_organising_club", "idx_persohub_sympo_organising_club"),
+    ("idx_community_sympo_event", "idx_persohub_sympo_event"),
+    ("idx_community_sympos_organising_club", "idx_persohub_sympos_organising_club"),
+    ("idx_community_sympo_events_event", "idx_persohub_sympo_events_event"),
+    ("idx_community_event_logs_event_created", "idx_persohub_event_logs_event_created"),
+    ("idx_community_event_logs_slug_created", "idx_persohub_event_logs_slug_created"),
+    ("idx_community_event_logs_admin_created", "idx_persohub_event_logs_admin_created"),
+    ("uq_community_event_registration_referral_code", "uq_persohub_event_registration_referral_code"),
+]
+
+_PERSOHUB_EVENT_CONSTRAINT_RENAMES = [
+    ("persohub_sympos", "uq_community_sympos_club_name", "uq_persohub_sympos_club_name"),
+    ("persohub_sympo_events", "uq_community_sympo_events_pair", "uq_persohub_sympo_events_pair"),
+    ("persohub_sympo_events", "uq_community_sympo_events_event", "uq_persohub_sympo_events_event"),
+    ("persohub_event_teams", "uq_community_event_team_event_code", "uq_persohub_event_team_event_code"),
+    ("persohub_event_rounds", "uq_community_event_round_event_round_no", "uq_persohub_event_round_event_round_no"),
+    ("persohub_event_registrations", "uq_community_event_registration_event_user", "uq_persohub_event_registration_event_user"),
+    ("persohub_event_registrations", "uq_community_event_registration_event_team", "uq_persohub_event_registration_event_team"),
+    ("persohub_event_team_members", "uq_community_event_team_member_team_user", "uq_persohub_event_team_member_team_user"),
+    ("persohub_event_attendance", "uq_community_event_attendance_entity", "uq_persohub_event_attendance_entity"),
+    ("persohub_event_scores", "uq_community_event_score_entity", "uq_persohub_event_score_entity"),
+    ("persohub_event_invites", "uq_community_event_invite_unique", "uq_persohub_event_invite_unique"),
+]
+
+PERSOHUB_EVENT_NAMESPACE_STATUS_KEY = "migration_persohub_event_namespace_status_v1"
+
+
+def _update_persohub_event_namespace_status_marker(conn) -> None:
+    if not _table_exists(conn, "system_config"):
+        return
+
+    required_new_tables = [
+        new_table
+        for _old_table, new_table in _PERSOHUB_EVENT_TABLE_RENAMES
+        if new_table != "persohub_sympo"
+    ]
+    old_remaining = sum(1 for old, _ in _PERSOHUB_EVENT_TABLE_RENAMES if _table_exists(conn, old))
+    new_missing = sum(1 for table_name in required_new_tables if not _table_exists(conn, table_name))
+    legacy_sympo_present = _table_exists(conn, "persohub_sympo")
+    payload = {
+        "ok": (old_remaining == 0 and new_missing == 0 and not legacy_sympo_present),
+        "old_remaining": old_remaining,
+        "new_missing": new_missing,
+        "legacy_sympo": legacy_sympo_present,
+    }
+    conn.execute(
+        text(
+            """
+            INSERT INTO system_config (key, value, updated_at)
+            VALUES (:key, :value, now())
+            ON CONFLICT (key)
+            DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+            """
+        ),
+        {
+            "key": PERSOHUB_EVENT_NAMESPACE_STATUS_KEY,
+            "value": json.dumps(payload, separators=(",", ":")),
+        },
+    )
+
+
+def _backfill_legacy_persohub_sympo_rows(conn) -> None:
+    # Backfill legacy persohub_sympo rows into normalized persohub_sympos + persohub_sympo_events.
+    if not _table_exists(conn, "persohub_sympo"):
+        return
+
+    legacy_rows = conn.execute(
+        text(
+            """
+            SELECT id, name, organising_club_id, event_id, content
+            FROM persohub_sympo
+            ORDER BY id ASC
+            """
+        )
+    ).mappings().all()
+    for row in legacy_rows:
+        sympo_name = str(row.get("name") or "").strip()
+        if not sympo_name:
+            continue
+        club_id = row.get("organising_club_id")
+        event_id = row.get("event_id")
+        if not club_id or not event_id:
+            continue
+
+        existing_sympo_id = conn.execute(
+            text(
+                """
+                SELECT id
+                FROM persohub_sympos
+                WHERE organising_club_id = :club_id AND name = :name
+                LIMIT 1
+                """
+            ),
+            {"club_id": club_id, "name": sympo_name},
+        ).scalar()
+
+        content_value = row.get("content")
+        content_json = json.dumps(content_value) if content_value is not None else None
+
+        if existing_sympo_id:
+            sympo_id = int(existing_sympo_id)
+            if content_json is not None:
+                conn.execute(
+                    text(
+                        """
+                        UPDATE persohub_sympos
+                        SET content = COALESCE(content, CAST(:content AS JSONB))
+                        WHERE id = :sympo_id
+                        """
+                    ),
+                    {"sympo_id": sympo_id, "content": content_json},
+                )
+        else:
+            sympo_id = int(
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO persohub_sympos (name, organising_club_id, content)
+                        VALUES (:name, :club_id, CAST(:content AS JSONB))
+                        RETURNING id
+                        """
+                    ),
+                    {"name": sympo_name, "club_id": club_id, "content": content_json},
+                ).scalar()
+            )
+
+        conn.execute(
+            text(
+                """
+                INSERT INTO persohub_sympo_events (sympo_id, event_id)
+                VALUES (:sympo_id, :event_id)
+                ON CONFLICT DO NOTHING
+                """
+            ),
+            {"sympo_id": sympo_id, "event_id": event_id},
+        )
+
+
+def rename_community_event_namespace_to_persohub(engine):
+    with engine.begin() as conn:
+        collisions = []
+        has_old_data = False
+        has_new_data = False
+        for old_table, new_table in _PERSOHUB_EVENT_TABLE_RENAMES:
+            old_exists = _table_exists(conn, old_table)
+            new_exists = _table_exists(conn, new_table)
+            if not (old_exists and new_exists):
+                continue
+            old_count = _table_row_count(conn, old_table)
+            new_count = _table_row_count(conn, new_table)
+            collisions.append((old_table, new_table, old_count, new_count))
+            if old_count > 0:
+                has_old_data = True
+            if new_count > 0:
+                has_new_data = True
+
+        if collisions:
+            if has_old_data and has_new_data:
+                detail = ", ".join(
+                    f"{old}->{new}(old_rows={old_count},new_rows={new_count})"
+                    for old, new, old_count, new_count in collisions
+                )
+                raise RuntimeError(
+                    "Cannot auto-resolve persohub event namespace collision because old and new tables both contain "
+                    f"data: {detail}. Resolve this manually."
+                )
+            if has_old_data:
+                tables_to_drop = [new for _old, new in reversed(_PERSOHUB_EVENT_TABLE_RENAMES)]
+            else:
+                tables_to_drop = [old for old, _new in reversed(_PERSOHUB_EVENT_TABLE_RENAMES)]
+            for table_name in tables_to_drop:
+                if _table_exists(conn, table_name):
+                    conn.execute(
+                        text(
+                            f"DROP TABLE {_quote_ident(table_name)} CASCADE"
+                        )
+                    )
+
+        for old_table, new_table in _PERSOHUB_EVENT_TABLE_RENAMES:
+            old_exists = _table_exists(conn, old_table)
+            new_exists = _table_exists(conn, new_table)
+            if old_exists and new_exists:
+                raise RuntimeError(
+                    f"Cannot rename table '{old_table}' to '{new_table}': both tables exist after cleanup. "
+                    "Resolve this collision manually."
+                )
+            if old_exists:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE {_quote_ident(old_table)} "
+                        f"RENAME TO {_quote_ident(new_table)}"
+                    )
+                )
+
+        for old_index, new_index in _PERSOHUB_EVENT_INDEX_RENAMES:
+            old_exists = _index_exists(conn, old_index)
+            new_exists = _index_exists(conn, new_index)
+            if old_exists and new_exists:
+                raise RuntimeError(
+                    f"Cannot rename index '{old_index}' to '{new_index}': both indexes exist. Resolve the collision first."
+                )
+            if old_exists and not new_exists:
+                conn.execute(
+                    text(
+                        f"ALTER INDEX {_quote_ident(old_index)} "
+                        f"RENAME TO {_quote_ident(new_index)}"
+                    )
+                )
+
+        for table_name, old_constraint, new_constraint in _PERSOHUB_EVENT_CONSTRAINT_RENAMES:
+            if not _table_exists(conn, table_name):
+                continue
+            old_exists = _constraint_exists(conn, table_name, old_constraint)
+            new_exists = _constraint_exists(conn, table_name, new_constraint)
+            if old_exists and new_exists:
+                raise RuntimeError(
+                    f"Cannot rename constraint '{old_constraint}' to '{new_constraint}' on table '{table_name}': "
+                    "both constraints exist. Resolve the collision first."
+                )
+            if old_exists and not new_exists:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE {_quote_ident(table_name)} "
+                        f"RENAME CONSTRAINT {_quote_ident(old_constraint)} "
+                        f"TO {_quote_ident(new_constraint)}"
+                    )
+                )
+        _update_persohub_event_namespace_status_marker(conn)
+
+
+def ensure_persohub_event_tables(engine):
     with engine.begin() as conn:
         conn.execute(
             text(
                 """
-                CREATE TABLE IF NOT EXISTS community_events (
+                CREATE TABLE IF NOT EXISTS persohub_events (
                     id SERIAL PRIMARY KEY,
                     slug VARCHAR(120) UNIQUE NOT NULL,
                     event_code VARCHAR(20) UNIQUE NOT NULL,
@@ -1580,6 +1887,8 @@ def ensure_community_event_tables(engine):
                     team_min_size INTEGER,
                     team_max_size INTEGER,
                     is_visible BOOLEAN NOT NULL DEFAULT TRUE,
+                    registration_open BOOLEAN NOT NULL DEFAULT TRUE,
+                    open_for VARCHAR(8) NOT NULL DEFAULT 'MIT',
                     status VARCHAR(20) NOT NULL DEFAULT 'closed',
                     created_at TIMESTAMPTZ DEFAULT now(),
                     updated_at TIMESTAMPTZ
@@ -1587,51 +1896,50 @@ def ensure_community_event_tables(engine):
                 """
             )
         )
-        conn.execute(text("ALTER TABLE community_events ADD COLUMN IF NOT EXISTS start_date DATE"))
-        conn.execute(text("ALTER TABLE community_events ADD COLUMN IF NOT EXISTS end_date DATE"))
-        conn.execute(text("ALTER TABLE community_events ADD COLUMN IF NOT EXISTS event_time TIME"))
-        conn.execute(text("ALTER TABLE community_events ADD COLUMN IF NOT EXISTS whatsapp_url VARCHAR(500)"))
+        conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS start_date DATE"))
+        conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS end_date DATE"))
+        conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS event_time TIME"))
+        conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS whatsapp_url VARCHAR(500)"))
         conn.execute(
             text(
-                "ALTER TABLE community_events "
+                "ALTER TABLE persohub_events "
                 "ADD COLUMN IF NOT EXISTS external_url_name VARCHAR(120) NOT NULL DEFAULT 'Join whatsapp channel'"
             )
         )
         conn.execute(
             text(
-                "UPDATE community_events "
+                "UPDATE persohub_events "
                 "SET external_url_name = 'Join whatsapp channel' "
                 "WHERE external_url_name IS NULL OR btrim(external_url_name) = ''"
             )
         )
-        conn.execute(text("ALTER TABLE community_events ADD COLUMN IF NOT EXISTS is_visible BOOLEAN NOT NULL DEFAULT TRUE"))
-        conn.execute(text("ALTER TABLE community_events ALTER COLUMN poster_url TYPE TEXT"))
+        conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS is_visible BOOLEAN NOT NULL DEFAULT TRUE"))
+        conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS registration_open BOOLEAN NOT NULL DEFAULT TRUE"))
+        conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS open_for VARCHAR(8) NOT NULL DEFAULT 'MIT'"))
+        conn.execute(
+            text(
+                """
+                UPDATE persohub_events
+                SET open_for = CASE
+                    WHEN upper(btrim(COALESCE(open_for, ''))) = 'ALL' THEN 'ALL'
+                    ELSE 'MIT'
+                END
+                """
+            )
+        )
+        conn.execute(text("ALTER TABLE persohub_events ALTER COLUMN poster_url TYPE TEXT"))
 
         conn.execute(
             text(
                 """
-                CREATE TABLE IF NOT EXISTS community_sympo (
-                    id SERIAL PRIMARY KEY,
-                    name VARCHAR(255) NOT NULL,
-                    organising_club_id INTEGER NOT NULL REFERENCES persohub_clubs(id) ON DELETE RESTRICT,
-                    event_id INTEGER NOT NULL REFERENCES community_events(id) ON DELETE CASCADE,
-                    content JSONB
-                )
-                """
-            )
-        )
-        conn.execute(text("ALTER TABLE community_sympo ADD COLUMN IF NOT EXISTS content JSONB"))
-        conn.execute(
-            text(
-                """
-                CREATE TABLE IF NOT EXISTS community_sympos (
+                CREATE TABLE IF NOT EXISTS persohub_sympos (
                     id SERIAL PRIMARY KEY,
                     name VARCHAR(255) NOT NULL,
                     organising_club_id INTEGER NOT NULL REFERENCES persohub_clubs(id) ON DELETE CASCADE,
                     content JSONB,
                     created_at TIMESTAMPTZ DEFAULT now(),
                     updated_at TIMESTAMPTZ,
-                    CONSTRAINT uq_community_sympos_club_name UNIQUE (organising_club_id, name)
+                    CONSTRAINT uq_persohub_sympos_club_name UNIQUE (organising_club_id, name)
                 )
                 """
             )
@@ -1639,13 +1947,13 @@ def ensure_community_event_tables(engine):
         conn.execute(
             text(
                 """
-                CREATE TABLE IF NOT EXISTS community_sympo_events (
+                CREATE TABLE IF NOT EXISTS persohub_sympo_events (
                     id SERIAL PRIMARY KEY,
-                    sympo_id INTEGER NOT NULL REFERENCES community_sympos(id) ON DELETE CASCADE,
-                    event_id INTEGER NOT NULL REFERENCES community_events(id) ON DELETE CASCADE,
+                    sympo_id INTEGER NOT NULL REFERENCES persohub_sympos(id) ON DELETE CASCADE,
+                    event_id INTEGER NOT NULL REFERENCES persohub_events(id) ON DELETE CASCADE,
                     created_at TIMESTAMPTZ DEFAULT now(),
-                    CONSTRAINT uq_community_sympo_events_pair UNIQUE (sympo_id, event_id),
-                    CONSTRAINT uq_community_sympo_events_event UNIQUE (event_id)
+                    CONSTRAINT uq_persohub_sympo_events_pair UNIQUE (sympo_id, event_id),
+                    CONSTRAINT uq_persohub_sympo_events_event UNIQUE (event_id)
                 )
                 """
             )
@@ -1654,15 +1962,15 @@ def ensure_community_event_tables(engine):
         conn.execute(
             text(
                 """
-                CREATE TABLE IF NOT EXISTS community_event_teams (
+                CREATE TABLE IF NOT EXISTS persohub_event_teams (
                     id SERIAL PRIMARY KEY,
-                    event_id INTEGER NOT NULL REFERENCES community_events(id) ON DELETE CASCADE,
+                    event_id INTEGER NOT NULL REFERENCES persohub_events(id) ON DELETE CASCADE,
                     team_code VARCHAR(5) NOT NULL,
                     team_name VARCHAR(255) NOT NULL,
                     team_lead_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
                     created_at TIMESTAMPTZ DEFAULT now(),
                     updated_at TIMESTAMPTZ,
-                    CONSTRAINT uq_community_event_team_event_code UNIQUE (event_id, team_code)
+                    CONSTRAINT uq_persohub_event_team_event_code UNIQUE (event_id, team_code)
                 )
                 """
             )
@@ -1671,9 +1979,9 @@ def ensure_community_event_tables(engine):
         conn.execute(
             text(
                 """
-                CREATE TABLE IF NOT EXISTS community_event_rounds (
+                CREATE TABLE IF NOT EXISTS persohub_event_rounds (
                     id SERIAL PRIMARY KEY,
-                    event_id INTEGER NOT NULL REFERENCES community_events(id) ON DELETE CASCADE,
+                    event_id INTEGER NOT NULL REFERENCES persohub_events(id) ON DELETE CASCADE,
                     round_no INTEGER NOT NULL,
                     name VARCHAR(255) NOT NULL,
                     description TEXT,
@@ -1687,38 +1995,93 @@ def ensure_community_event_tables(engine):
                     evaluation_criteria JSONB,
                     elimination_type VARCHAR(20),
                     elimination_value DOUBLE PRECISION,
+                    requires_submission BOOLEAN NOT NULL DEFAULT FALSE,
+                    submission_mode VARCHAR(32) NOT NULL DEFAULT 'file_or_link',
+                    submission_deadline TIMESTAMPTZ,
+                    allowed_mime_types JSONB,
+                    max_file_size_mb INTEGER NOT NULL DEFAULT 25,
+                    panel_mode_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                    panel_team_distribution_mode VARCHAR(32) NOT NULL DEFAULT 'team_count',
+                    panel_structure_locked BOOLEAN NOT NULL DEFAULT FALSE,
                     is_frozen BOOLEAN NOT NULL DEFAULT FALSE,
                     created_at TIMESTAMPTZ DEFAULT now(),
                     updated_at TIMESTAMPTZ,
-                    CONSTRAINT uq_community_event_round_event_round_no UNIQUE (event_id, round_no)
+                    CONSTRAINT uq_persohub_event_round_event_round_no UNIQUE (event_id, round_no)
                 )
                 """
             )
         )
         conn.execute(
             text(
-                "UPDATE community_event_rounds "
+                "UPDATE persohub_event_rounds "
                 "SET external_url = whatsapp_url "
                 "WHERE external_url IS NULL AND whatsapp_url IS NOT NULL"
             )
         )
+        if _table_exists(conn, "persohub_event_rounds"):
+            conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS requires_submission BOOLEAN NOT NULL DEFAULT FALSE"))
+            conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS submission_mode VARCHAR(32) NOT NULL DEFAULT 'file_or_link'"))
+            conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS submission_deadline TIMESTAMPTZ"))
+            conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS allowed_mime_types JSONB"))
+            conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS max_file_size_mb INTEGER NOT NULL DEFAULT 25"))
+            conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS panel_mode_enabled BOOLEAN NOT NULL DEFAULT FALSE"))
+            conn.execute(
+                text(
+                    "ALTER TABLE persohub_event_rounds "
+                    "ADD COLUMN IF NOT EXISTS panel_team_distribution_mode VARCHAR(32) NOT NULL DEFAULT 'team_count'"
+                )
+            )
+            conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS panel_structure_locked BOOLEAN NOT NULL DEFAULT FALSE"))
+            conn.execute(
+                text(
+                    """
+                    UPDATE persohub_event_rounds
+                    SET allowed_mime_types = CAST(:default_types AS jsonb)
+                    WHERE allowed_mime_types IS NULL
+                    """
+                ),
+                {
+                    "default_types": json.dumps([
+                        "application/pdf",
+                        "application/vnd.ms-powerpoint",
+                        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        "image/png",
+                        "image/jpeg",
+                        "image/webp",
+                        "video/mp4",
+                        "video/quicktime",
+                        "application/zip",
+                    ])
+                },
+            )
+            conn.execute(
+                text(
+                    """
+                    UPDATE persohub_event_rounds
+                    SET panel_team_distribution_mode = 'team_count'
+                    WHERE panel_team_distribution_mode IS NULL
+                       OR btrim(panel_team_distribution_mode) = ''
+                       OR lower(panel_team_distribution_mode) NOT IN ('team_count', 'member_count_weighted')
+                    """
+                )
+            )
 
         conn.execute(
             text(
                 """
-                CREATE TABLE IF NOT EXISTS community_event_registrations (
+                CREATE TABLE IF NOT EXISTS persohub_event_registrations (
                     id SERIAL PRIMARY KEY,
-                    event_id INTEGER NOT NULL REFERENCES community_events(id) ON DELETE CASCADE,
+                    event_id INTEGER NOT NULL REFERENCES persohub_events(id) ON DELETE CASCADE,
                     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-                    team_id INTEGER REFERENCES community_event_teams(id) ON DELETE CASCADE,
+                    team_id INTEGER REFERENCES persohub_event_teams(id) ON DELETE CASCADE,
                     entity_type VARCHAR(10) NOT NULL,
                     status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
                     referral_code VARCHAR(16),
                     referred_by VARCHAR(16),
                     referral_count INTEGER NOT NULL DEFAULT 0,
                     registered_at TIMESTAMPTZ DEFAULT now(),
-                    CONSTRAINT uq_community_event_registration_event_user UNIQUE (event_id, user_id),
-                    CONSTRAINT uq_community_event_registration_event_team UNIQUE (event_id, team_id)
+                    CONSTRAINT uq_persohub_event_registration_event_user UNIQUE (event_id, user_id),
+                    CONSTRAINT uq_persohub_event_registration_event_team UNIQUE (event_id, team_id)
                 )
                 """
             )
@@ -1727,14 +2090,14 @@ def ensure_community_event_tables(engine):
         conn.execute(
             text(
                 """
-                CREATE TABLE IF NOT EXISTS community_event_team_members (
+                CREATE TABLE IF NOT EXISTS persohub_event_team_members (
                     id SERIAL PRIMARY KEY,
-                    team_id INTEGER NOT NULL REFERENCES community_event_teams(id) ON DELETE CASCADE,
+                    team_id INTEGER NOT NULL REFERENCES persohub_event_teams(id) ON DELETE CASCADE,
                     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                     role VARCHAR(20) NOT NULL DEFAULT 'member',
                     created_at TIMESTAMPTZ DEFAULT now(),
                     updated_at TIMESTAMPTZ,
-                    CONSTRAINT uq_community_event_team_member_team_user UNIQUE (team_id, user_id)
+                    CONSTRAINT uq_persohub_event_team_member_team_user UNIQUE (team_id, user_id)
                 )
                 """
             )
@@ -1743,17 +2106,17 @@ def ensure_community_event_tables(engine):
         conn.execute(
             text(
                 """
-                CREATE TABLE IF NOT EXISTS community_event_attendance (
+                CREATE TABLE IF NOT EXISTS persohub_event_attendance (
                     id SERIAL PRIMARY KEY,
-                    event_id INTEGER NOT NULL REFERENCES community_events(id) ON DELETE CASCADE,
-                    round_id INTEGER REFERENCES community_event_rounds(id) ON DELETE CASCADE,
+                    event_id INTEGER NOT NULL REFERENCES persohub_events(id) ON DELETE CASCADE,
+                    round_id INTEGER REFERENCES persohub_event_rounds(id) ON DELETE CASCADE,
                     entity_type VARCHAR(10) NOT NULL,
                     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-                    team_id INTEGER REFERENCES community_event_teams(id) ON DELETE CASCADE,
+                    team_id INTEGER REFERENCES persohub_event_teams(id) ON DELETE CASCADE,
                     is_present BOOLEAN NOT NULL DEFAULT FALSE,
                     marked_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
                     marked_at TIMESTAMPTZ DEFAULT now(),
-                    CONSTRAINT uq_community_event_attendance_entity UNIQUE (event_id, round_id, entity_type, user_id, team_id)
+                    CONSTRAINT uq_persohub_event_attendance_entity UNIQUE (event_id, round_id, entity_type, user_id, team_id)
                 )
                 """
             )
@@ -1762,20 +2125,20 @@ def ensure_community_event_tables(engine):
         conn.execute(
             text(
                 """
-                CREATE TABLE IF NOT EXISTS community_event_scores (
+                CREATE TABLE IF NOT EXISTS persohub_event_scores (
                     id SERIAL PRIMARY KEY,
-                    event_id INTEGER NOT NULL REFERENCES community_events(id) ON DELETE CASCADE,
-                    round_id INTEGER NOT NULL REFERENCES community_event_rounds(id) ON DELETE CASCADE,
+                    event_id INTEGER NOT NULL REFERENCES persohub_events(id) ON DELETE CASCADE,
+                    round_id INTEGER NOT NULL REFERENCES persohub_event_rounds(id) ON DELETE CASCADE,
                     entity_type VARCHAR(10) NOT NULL,
                     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-                    team_id INTEGER REFERENCES community_event_teams(id) ON DELETE CASCADE,
+                    team_id INTEGER REFERENCES persohub_event_teams(id) ON DELETE CASCADE,
                     criteria_scores JSONB,
                     total_score DOUBLE PRECISION NOT NULL DEFAULT 0,
                     normalized_score DOUBLE PRECISION NOT NULL DEFAULT 0,
                     is_present BOOLEAN NOT NULL DEFAULT FALSE,
                     created_at TIMESTAMPTZ DEFAULT now(),
                     updated_at TIMESTAMPTZ,
-                    CONSTRAINT uq_community_event_score_entity UNIQUE (event_id, round_id, entity_type, user_id, team_id)
+                    CONSTRAINT uq_persohub_event_score_entity UNIQUE (event_id, round_id, entity_type, user_id, team_id)
                 )
                 """
             )
@@ -1784,15 +2147,15 @@ def ensure_community_event_tables(engine):
         conn.execute(
             text(
                 """
-                CREATE TABLE IF NOT EXISTS community_event_badges (
+                CREATE TABLE IF NOT EXISTS persohub_event_badges (
                     id SERIAL PRIMARY KEY,
-                    event_id INTEGER NOT NULL REFERENCES community_events(id) ON DELETE CASCADE,
+                    event_id INTEGER NOT NULL REFERENCES persohub_events(id) ON DELETE CASCADE,
                     title VARCHAR(255) NOT NULL,
                     image_url VARCHAR(500),
                     place VARCHAR(30) NOT NULL,
                     score DOUBLE PRECISION,
                     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-                    team_id INTEGER REFERENCES community_event_teams(id) ON DELETE CASCADE,
+                    team_id INTEGER REFERENCES persohub_event_teams(id) ON DELETE CASCADE,
                     created_at TIMESTAMPTZ DEFAULT now(),
                     updated_at TIMESTAMPTZ
                 )
@@ -1803,16 +2166,16 @@ def ensure_community_event_tables(engine):
         conn.execute(
             text(
                 """
-                CREATE TABLE IF NOT EXISTS community_event_invites (
+                CREATE TABLE IF NOT EXISTS persohub_event_invites (
                     id SERIAL PRIMARY KEY,
-                    event_id INTEGER NOT NULL REFERENCES community_events(id) ON DELETE CASCADE,
-                    team_id INTEGER NOT NULL REFERENCES community_event_teams(id) ON DELETE CASCADE,
+                    event_id INTEGER NOT NULL REFERENCES persohub_events(id) ON DELETE CASCADE,
+                    team_id INTEGER NOT NULL REFERENCES persohub_event_teams(id) ON DELETE CASCADE,
                     invited_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                     invited_by_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
                     status VARCHAR(20) NOT NULL DEFAULT 'pending',
                     created_at TIMESTAMPTZ DEFAULT now(),
                     updated_at TIMESTAMPTZ,
-                    CONSTRAINT uq_community_event_invite_unique UNIQUE (event_id, team_id, invited_user_id)
+                    CONSTRAINT uq_persohub_event_invite_unique UNIQUE (event_id, team_id, invited_user_id)
                 )
                 """
             )
@@ -1821,9 +2184,9 @@ def ensure_community_event_tables(engine):
         conn.execute(
             text(
                 """
-                CREATE TABLE IF NOT EXISTS community_event_logs (
+                CREATE TABLE IF NOT EXISTS persohub_event_logs (
                     id SERIAL PRIMARY KEY,
-                    event_id INTEGER REFERENCES community_events(id) ON DELETE SET NULL,
+                    event_id INTEGER REFERENCES persohub_events(id) ON DELETE SET NULL,
                     event_slug VARCHAR(120) NOT NULL,
                     admin_id INTEGER,
                     admin_register_number VARCHAR(20) NOT NULL,
@@ -1838,114 +2201,539 @@ def ensure_community_event_tables(engine):
             )
         )
 
-        if not _column_exists(conn, "community_event_registrations", "status"):
-            conn.execute(text("ALTER TABLE community_event_registrations ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE'"))
-        if not _column_exists(conn, "community_event_registrations", "referral_code"):
-            conn.execute(text("ALTER TABLE community_event_registrations ADD COLUMN referral_code VARCHAR(16)"))
-        if not _column_exists(conn, "community_event_registrations", "referred_by"):
-            conn.execute(text("ALTER TABLE community_event_registrations ADD COLUMN referred_by VARCHAR(16)"))
-        if not _column_exists(conn, "community_event_registrations", "referral_count"):
-            conn.execute(text("ALTER TABLE community_event_registrations ADD COLUMN referral_count INTEGER NOT NULL DEFAULT 0"))
+        if not _column_exists(conn, "persohub_event_registrations", "status"):
+            conn.execute(text("ALTER TABLE persohub_event_registrations ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE'"))
+        if not _column_exists(conn, "persohub_event_registrations", "referral_code"):
+            conn.execute(text("ALTER TABLE persohub_event_registrations ADD COLUMN referral_code VARCHAR(16)"))
+        if not _column_exists(conn, "persohub_event_registrations", "referred_by"):
+            conn.execute(text("ALTER TABLE persohub_event_registrations ADD COLUMN referred_by VARCHAR(16)"))
+        if not _column_exists(conn, "persohub_event_registrations", "referral_count"):
+            conn.execute(text("ALTER TABLE persohub_event_registrations ADD COLUMN referral_count INTEGER NOT NULL DEFAULT 0"))
 
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_events_community_created ON community_events(community_id, created_at DESC)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_rounds_event_round ON community_event_rounds(event_id, round_no ASC)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_rounds_event_state ON community_event_rounds(event_id, state)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_registration_event_status ON community_event_registrations(event_id, status)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_registration_event_referred_by ON community_event_registrations(event_id, referred_by)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_team_members_team_user ON community_event_team_members(team_id, user_id)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_attendance_event_round ON community_event_attendance(event_id, round_id)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_scores_event_round ON community_event_scores(event_id, round_id)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_badges_event ON community_event_badges(event_id)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_sympo_organising_club ON community_sympo(organising_club_id)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_sympo_event ON community_sympo(event_id)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_sympos_organising_club ON community_sympos(organising_club_id)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_sympo_events_event ON community_sympo_events(event_id)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_logs_event_created ON community_event_logs(event_id, created_at DESC)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_logs_slug_created ON community_event_logs(event_slug, created_at DESC)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_community_event_logs_admin_created ON community_event_logs(admin_id, created_at DESC)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_events_community_created ON persohub_events(community_id, created_at DESC)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_event_rounds_event_round ON persohub_event_rounds(event_id, round_no ASC)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_event_rounds_event_state ON persohub_event_rounds(event_id, state)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_event_registration_event_status ON persohub_event_registrations(event_id, status)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_event_registration_event_referred_by ON persohub_event_registrations(event_id, referred_by)"))
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_persohub_event_registration_event_entity_status_user "
+                "ON persohub_event_registrations(event_id, entity_type, status, user_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_persohub_event_registration_event_entity_status_team "
+                "ON persohub_event_registrations(event_id, entity_type, status, team_id)"
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_event_team_members_team_user ON persohub_event_team_members(team_id, user_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_event_attendance_event_round ON persohub_event_attendance(event_id, round_id)"))
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_persohub_event_attendance_event_entity_user_present "
+                "ON persohub_event_attendance(event_id, entity_type, user_id, is_present)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_persohub_event_attendance_event_entity_team_present "
+                "ON persohub_event_attendance(event_id, entity_type, team_id, is_present)"
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_event_scores_event_round ON persohub_event_scores(event_id, round_id)"))
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_persohub_event_scores_event_round_entity_present_score "
+                "ON persohub_event_scores(event_id, round_id, entity_type, is_present, normalized_score)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_persohub_event_scores_event_entity_user_round "
+                "ON persohub_event_scores(event_id, entity_type, user_id, round_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_persohub_event_scores_event_entity_team_round "
+                "ON persohub_event_scores(event_id, entity_type, team_id, round_id)"
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_event_badges_event ON persohub_event_badges(event_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_sympos_organising_club ON persohub_sympos(organising_club_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_sympo_events_event ON persohub_sympo_events(event_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_event_logs_event_created ON persohub_event_logs(event_id, created_at DESC)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_event_logs_slug_created ON persohub_event_logs(event_slug, created_at DESC)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_event_logs_admin_created ON persohub_event_logs(admin_id, created_at DESC)"))
 
         conn.execute(
             text(
                 """
-                CREATE UNIQUE INDEX IF NOT EXISTS uq_community_event_registration_referral_code
-                ON community_event_registrations(event_id, referral_code)
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_persohub_event_registration_referral_code
+                ON persohub_event_registrations(event_id, referral_code)
                 WHERE entity_type = 'USER' AND referral_code IS NOT NULL
                 """
             )
         )
 
-        # Backfill legacy community_sympo rows into normalized community_sympos + community_sympo_events.
-        if _table_exists(conn, "community_sympo"):
-            legacy_rows = conn.execute(
-                text(
-                    """
-                    SELECT id, name, organising_club_id, event_id, content
-                    FROM community_sympo
-                    ORDER BY id ASC
-                    """
-                )
-            ).mappings().all()
-            for row in legacy_rows:
-                sympo_name = str(row.get("name") or "").strip()
-                if not sympo_name:
-                    continue
-                club_id = row.get("organising_club_id")
-                event_id = row.get("event_id")
-                if not club_id or not event_id:
-                    continue
+        _backfill_legacy_persohub_sympo_rows(conn)
+        _update_persohub_event_parity_status_marker(conn)
 
-                existing_sympo_id = conn.execute(
-                    text(
-                        """
-                        SELECT id
-                        FROM community_sympos
-                        WHERE organising_club_id = :club_id AND name = :name
-                        LIMIT 1
-                        """
-                    ),
-                    {"club_id": club_id, "name": sympo_name},
-                ).scalar()
 
-                content_value = row.get("content")
-                content_json = json.dumps(content_value) if content_value is not None else None
+PERSOHUB_EVENT_PARITY_STATUS_KEY = "migration_persohub_events_parity_v1"
+PERSOHUB_EVENTS_PARITY_ENABLED_KEY = "persohub_events_parity_enabled"
+PERSOHUB_EVENTS_PARITY_AUTO_ENABLED_ONCE_KEY = "migration_persohub_events_parity_auto_enabled_once_v1"
 
-                if existing_sympo_id:
-                    sympo_id = int(existing_sympo_id)
-                    if content_json is not None:
-                        conn.execute(
-                            text(
-                                """
-                                UPDATE community_sympos
-                                SET content = COALESCE(content, CAST(:content AS JSONB))
-                                WHERE id = :sympo_id
-                                """
-                            ),
-                            {"sympo_id": sympo_id, "content": content_json},
-                        )
-                else:
-                    sympo_id = int(
-                        conn.execute(
-                            text(
-                                """
-                                INSERT INTO community_sympos (name, organising_club_id, content)
-                                VALUES (:name, :club_id, CAST(:content AS JSONB))
-                                RETURNING id
-                                """
-                            ),
-                            {"name": sympo_name, "club_id": club_id, "content": content_json},
-                        ).scalar()
-                    )
 
+def _update_persohub_event_parity_status_marker(conn) -> None:
+    if not _table_exists(conn, "system_config"):
+        return
+
+    required_tables = [
+        "persohub_events",
+        "persohub_event_rounds",
+        "persohub_event_registrations",
+        "persohub_event_teams",
+        "persohub_event_team_members",
+        "persohub_event_attendance",
+        "persohub_event_scores",
+        "persohub_event_badges",
+        "persohub_event_invites",
+        "persohub_event_logs",
+        "persohub_event_round_submissions",
+        "persohub_event_round_panels",
+        "persohub_event_round_panel_members",
+        "persohub_event_round_panel_assignments",
+    ]
+    missing_tables = [name for name in required_tables if not _table_exists(conn, name)]
+
+    required_event_columns = ["registration_open", "open_for"]
+    required_round_columns = [
+        "requires_submission",
+        "submission_mode",
+        "submission_deadline",
+        "allowed_mime_types",
+        "max_file_size_mb",
+        "panel_mode_enabled",
+        "panel_team_distribution_mode",
+        "panel_structure_locked",
+    ]
+    missing_event_columns = [
+        column_name for column_name in required_event_columns
+        if _table_exists(conn, "persohub_events") and not _column_exists(conn, "persohub_events", column_name)
+    ]
+    missing_round_columns = [
+        column_name for column_name in required_round_columns
+        if _table_exists(conn, "persohub_event_rounds") and not _column_exists(conn, "persohub_event_rounds", column_name)
+    ]
+
+    required_indexes = [
+        "idx_persohub_event_registration_event_entity_status_user",
+        "idx_persohub_event_registration_event_entity_status_team",
+        "idx_persohub_event_scores_event_round_entity_present_score",
+        "idx_persohub_event_scores_event_entity_user_round",
+        "idx_persohub_event_scores_event_entity_team_round",
+        "idx_persohub_event_attendance_event_entity_user_present",
+        "idx_persohub_event_attendance_event_entity_team_present",
+        "uq_persohub_event_round_submission_entity",
+        "uq_persohub_event_round_panel_round_no",
+        "uq_persohub_event_round_panel_member",
+        "uq_persohub_event_round_panel_assignment_entity",
+    ]
+    missing_indexes = [name for name in required_indexes if not _index_exists(conn, name)]
+
+    payload = {
+        "ok": (len(missing_tables) == 0 and len(missing_event_columns) == 0 and len(missing_round_columns) == 0 and len(missing_indexes) == 0),
+        "missing_tables": missing_tables,
+        "missing_event_columns": missing_event_columns,
+        "missing_round_columns": missing_round_columns,
+        "missing_indexes": missing_indexes,
+    }
+    conn.execute(
+        text(
+            """
+            INSERT INTO system_config (key, value, updated_at)
+            VALUES (:key, :value, now())
+            ON CONFLICT (key)
+            DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+            """
+        ),
+        {"key": PERSOHUB_EVENT_PARITY_STATUS_KEY, "value": json.dumps(payload, separators=(",", ":"))},
+    )
+
+
+def ensure_persohub_events_parity_flag(engine):
+    with engine.begin() as conn:
+        if not _table_exists(conn, "system_config"):
+            return
+
+        parity_ok = False
+        status_row = conn.execute(
+            text("SELECT value FROM system_config WHERE key = :key"),
+            {"key": PERSOHUB_EVENT_PARITY_STATUS_KEY},
+        ).fetchone()
+        if status_row and str(status_row[0] or "").strip():
+            try:
+                parsed = json.loads(str(status_row[0]))
+                parity_ok = bool(isinstance(parsed, dict) and parsed.get("ok") is True)
+            except Exception:
+                parity_ok = False
+
+        existing = conn.execute(
+            text("SELECT value FROM system_config WHERE key = :key"),
+            {"key": PERSOHUB_EVENTS_PARITY_ENABLED_KEY},
+        ).fetchone()
+        if not existing:
+            conn.execute(
+                text("INSERT INTO system_config (key, value) VALUES (:key, :value)"),
+                {
+                    "key": PERSOHUB_EVENTS_PARITY_ENABLED_KEY,
+                    "value": "true" if parity_ok else "false",
+                },
+            )
+            if parity_ok:
                 conn.execute(
                     text(
                         """
-                        INSERT INTO community_sympo_events (sympo_id, event_id)
-                        VALUES (:sympo_id, :event_id)
-                        ON CONFLICT DO NOTHING
+                        INSERT INTO system_config (key, value)
+                        VALUES (:key, 'done')
+                        ON CONFLICT (key) DO UPDATE SET value = 'done'
                         """
                     ),
-                    {"sympo_id": sympo_id, "event_id": event_id},
+                    {"key": PERSOHUB_EVENTS_PARITY_AUTO_ENABLED_ONCE_KEY},
                 )
+            return
+
+        marker_row = conn.execute(
+            text("SELECT value FROM system_config WHERE key = :key"),
+            {"key": PERSOHUB_EVENTS_PARITY_AUTO_ENABLED_ONCE_KEY},
+        ).fetchone()
+        auto_enabled_once = bool(marker_row and str(marker_row[0] or "").strip().lower() == "done")
+
+        if parity_ok and not auto_enabled_once:
+            conn.execute(
+                text(
+                    """
+                    UPDATE system_config
+                    SET value = 'true', updated_at = now()
+                    WHERE key = :key
+                    """
+                ),
+                {"key": PERSOHUB_EVENTS_PARITY_ENABLED_KEY},
+            )
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO system_config (key, value, updated_at)
+                    VALUES (:key, 'done', now())
+                    ON CONFLICT (key) DO UPDATE SET value = 'done', updated_at = now()
+                    """
+                ),
+                {"key": PERSOHUB_EVENTS_PARITY_AUTO_ENABLED_ONCE_KEY},
+            )
+
+
+def ensure_persohub_event_open_columns(engine):
+    with engine.begin() as conn:
+        if _table_exists(conn, "persohub_events"):
+            conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS registration_open BOOLEAN NOT NULL DEFAULT TRUE"))
+            conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS open_for VARCHAR(8) NOT NULL DEFAULT 'MIT'"))
+            conn.execute(
+                text(
+                    """
+                    UPDATE persohub_events
+                    SET open_for = CASE
+                        WHEN upper(btrim(COALESCE(open_for, ''))) = 'ALL' THEN 'ALL'
+                        ELSE 'MIT'
+                    END
+                    """
+                )
+            )
+        _update_persohub_event_parity_status_marker(conn)
+
+
+def ensure_persohub_event_round_submission_tables(engine):
+    with engine.begin() as conn:
+        required_tables = ("persohub_events", "persohub_event_rounds", "persohub_event_teams", "users")
+        if not all(_table_exists(conn, table_name) for table_name in required_tables):
+            _update_persohub_event_parity_status_marker(conn)
+            return
+
+        if _table_exists(conn, "persohub_event_rounds"):
+            conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS requires_submission BOOLEAN NOT NULL DEFAULT FALSE"))
+            conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS submission_mode VARCHAR(32) NOT NULL DEFAULT 'file_or_link'"))
+            conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS submission_deadline TIMESTAMPTZ"))
+            conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS allowed_mime_types JSONB"))
+            conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS max_file_size_mb INTEGER NOT NULL DEFAULT 25"))
+            conn.execute(
+                text(
+                    """
+                    UPDATE persohub_event_rounds
+                    SET allowed_mime_types = CAST(:default_types AS jsonb)
+                    WHERE allowed_mime_types IS NULL
+                    """
+                ),
+                {
+                    "default_types": json.dumps([
+                        "application/pdf",
+                        "application/vnd.ms-powerpoint",
+                        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        "image/png",
+                        "image/jpeg",
+                        "image/webp",
+                        "video/mp4",
+                        "video/quicktime",
+                        "application/zip",
+                    ])
+                },
+            )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS persohub_event_round_submissions (
+                    id SERIAL PRIMARY KEY,
+                    event_id INTEGER NOT NULL REFERENCES persohub_events(id) ON DELETE CASCADE,
+                    round_id INTEGER NOT NULL REFERENCES persohub_event_rounds(id) ON DELETE CASCADE,
+                    entity_type VARCHAR(10) NOT NULL,
+                    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                    team_id INTEGER REFERENCES persohub_event_teams(id) ON DELETE CASCADE,
+                    submission_type VARCHAR(16) NOT NULL,
+                    file_url VARCHAR(800),
+                    file_name VARCHAR(255),
+                    file_size_bytes BIGINT,
+                    mime_type VARCHAR(255),
+                    link_url VARCHAR(800),
+                    notes TEXT,
+                    version INTEGER NOT NULL DEFAULT 1,
+                    is_locked BOOLEAN NOT NULL DEFAULT FALSE,
+                    submitted_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ,
+                    updated_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_persohub_event_round_submission_entity
+                ON persohub_event_round_submissions(event_id, round_id, entity_type, user_id, team_id)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_persohub_round_submission_event_round "
+                "ON persohub_event_round_submissions(event_id, round_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_persohub_round_submission_entity_user "
+                "ON persohub_event_round_submissions(event_id, entity_type, user_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_persohub_round_submission_entity_team "
+                "ON persohub_event_round_submissions(event_id, entity_type, team_id)"
+            )
+        )
+        _update_persohub_event_parity_status_marker(conn)
+
+
+def ensure_persohub_event_panel_tables(engine):
+    with engine.begin() as conn:
+        if _table_exists(conn, "persohub_event_rounds"):
+            conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS panel_mode_enabled BOOLEAN NOT NULL DEFAULT FALSE"))
+            conn.execute(
+                text(
+                    "ALTER TABLE persohub_event_rounds "
+                    "ADD COLUMN IF NOT EXISTS panel_team_distribution_mode VARCHAR(32) NOT NULL DEFAULT 'team_count'"
+                )
+            )
+            conn.execute(
+                text(
+                    "ALTER TABLE persohub_event_rounds "
+                    "ADD COLUMN IF NOT EXISTS panel_structure_locked BOOLEAN NOT NULL DEFAULT FALSE"
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    UPDATE persohub_event_rounds
+                    SET panel_team_distribution_mode = 'team_count'
+                    WHERE panel_team_distribution_mode IS NULL
+                       OR btrim(panel_team_distribution_mode) = ''
+                       OR lower(panel_team_distribution_mode) NOT IN ('team_count', 'member_count_weighted')
+                    """
+                )
+            )
+
+        has_event_tables = _table_exists(conn, "persohub_events") and _table_exists(conn, "persohub_event_rounds")
+        has_users = _table_exists(conn, "users")
+        has_teams = _table_exists(conn, "persohub_event_teams")
+        if not has_event_tables:
+            _update_persohub_event_parity_status_marker(conn)
+            return
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS persohub_event_round_panels (
+                    id SERIAL PRIMARY KEY,
+                    event_id INTEGER NOT NULL REFERENCES persohub_events(id) ON DELETE CASCADE,
+                    round_id INTEGER NOT NULL REFERENCES persohub_event_rounds(id) ON DELETE CASCADE,
+                    panel_no INTEGER NOT NULL,
+                    name VARCHAR(255),
+                    panel_link VARCHAR(800),
+                    panel_time TIMESTAMPTZ,
+                    instructions TEXT,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_persohub_event_round_panel_round_no "
+                "ON persohub_event_round_panels(round_id, panel_no)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_persohub_round_panels_event_round "
+                "ON persohub_event_round_panels(event_id, round_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_persohub_round_panels_round_no "
+                "ON persohub_event_round_panels(round_id, panel_no)"
+            )
+        )
+
+        if has_users:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS persohub_event_round_panel_members (
+                        id SERIAL PRIMARY KEY,
+                        event_id INTEGER NOT NULL REFERENCES persohub_events(id) ON DELETE CASCADE,
+                        round_id INTEGER NOT NULL REFERENCES persohub_event_rounds(id) ON DELETE CASCADE,
+                        panel_id INTEGER NOT NULL REFERENCES persohub_event_round_panels(id) ON DELETE CASCADE,
+                        admin_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        created_at TIMESTAMPTZ DEFAULT now()
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_persohub_event_round_panel_member "
+                    "ON persohub_event_round_panel_members(round_id, panel_id, admin_user_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_persohub_round_panel_members_round_panel "
+                    "ON persohub_event_round_panel_members(round_id, panel_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_persohub_round_panel_members_round_admin "
+                    "ON persohub_event_round_panel_members(round_id, admin_user_id)"
+                )
+            )
+
+        if has_users and has_teams:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS persohub_event_round_panel_assignments (
+                        id SERIAL PRIMARY KEY,
+                        event_id INTEGER NOT NULL REFERENCES persohub_events(id) ON DELETE CASCADE,
+                        round_id INTEGER NOT NULL REFERENCES persohub_event_rounds(id) ON DELETE CASCADE,
+                        panel_id INTEGER NOT NULL REFERENCES persohub_event_round_panels(id) ON DELETE CASCADE,
+                        entity_type VARCHAR(10) NOT NULL,
+                        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                        team_id INTEGER REFERENCES persohub_event_teams(id) ON DELETE CASCADE,
+                        assigned_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                        created_at TIMESTAMPTZ DEFAULT now(),
+                        updated_at TIMESTAMPTZ
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_persohub_event_round_panel_assignment_entity "
+                    "ON persohub_event_round_panel_assignments(round_id, entity_type, user_id, team_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_persohub_round_panel_assign_round_panel "
+                    "ON persohub_event_round_panel_assignments(round_id, panel_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_persohub_round_panel_assign_round_entity_user "
+                    "ON persohub_event_round_panel_assignments(round_id, entity_type, user_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_persohub_round_panel_assign_round_entity_team "
+                    "ON persohub_event_round_panel_assignments(round_id, entity_type, team_id)"
+                )
+            )
+        _update_persohub_event_parity_status_marker(conn)
+
+
+def drop_legacy_persohub_sympo_table(engine):
+    with engine.begin() as conn:
+        if not _table_exists(conn, "persohub_sympo"):
+            _update_persohub_event_namespace_status_marker(conn)
+            return
+        if not _table_exists(conn, "persohub_sympos") or not _table_exists(conn, "persohub_sympo_events"):
+            raise RuntimeError(
+                "Cannot drop legacy table 'persohub_sympo' before 'persohub_sympos' and 'persohub_sympo_events' exist."
+            )
+
+        _backfill_legacy_persohub_sympo_rows(conn)
+
+        unmatched_rows = int(
+            conn.execute(
+                text(
+                    """
+                    SELECT COUNT(*)
+                    FROM persohub_sympo legacy
+                    LEFT JOIN persohub_sympos normalized
+                        ON normalized.organising_club_id = legacy.organising_club_id
+                       AND normalized.name = legacy.name
+                    LEFT JOIN persohub_sympo_events mapping
+                        ON mapping.sympo_id = normalized.id
+                       AND mapping.event_id = legacy.event_id
+                    WHERE normalized.id IS NULL OR mapping.id IS NULL
+                    """
+                )
+            ).scalar()
+            or 0
+        )
+        if unmatched_rows > 0:
+            raise RuntimeError(
+                "Cannot drop legacy table 'persohub_sympo': "
+                f"{unmatched_rows} rows could not be verified in normalized tables."
+            )
+
+        conn.execute(text("DROP TABLE persohub_sympo CASCADE"))
+        _update_persohub_event_namespace_status_marker(conn)
 
 
 def backfill_pda_event_round_count_once(engine):

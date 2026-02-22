@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from auth import decode_token, get_current_pda_user
-from models import PdaUser, PdaAdmin, PdaTeam, PersohubCommunity
+from models import PdaUser, PdaAdmin, PdaTeam, PersohubCommunity, PersohubEvent, SystemConfig
 
 
 def _get_team_and_policy(db: Session, user: PdaUser):
@@ -128,6 +128,63 @@ def require_persohub_community(
     if not community:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Community account not found")
     return community
+
+
+def require_persohub_events_parity_enabled(
+    db: Session = Depends(get_db),
+) -> bool:
+    row = db.query(SystemConfig).filter(SystemConfig.key == "persohub_events_parity_enabled").first()
+    enabled = bool(row and str(row.value or "").strip().lower() in {"1", "true", "yes", "on"})
+    if not enabled:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    return True
+
+
+def _require_persohub_admin_user_for_community(db: Session, community: PersohubCommunity) -> PdaUser:
+    if not bool(getattr(community, "is_root", False)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only root community can manage events")
+    admin_id = int(community.admin_id or 0)
+    if admin_id <= 0:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Community admin mapping missing")
+    admin_user = db.query(PdaUser).filter(PdaUser.id == admin_id).first()
+    if not admin_user:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Mapped admin user not found")
+    return admin_user
+
+
+def require_persohub_root_community_admin(
+    community: PersohubCommunity = Depends(require_persohub_community),
+    db: Session = Depends(get_db),
+) -> PdaUser:
+    return _require_persohub_admin_user_for_community(db, community)
+
+
+def require_persohub_event_admin(
+    request: Request,
+    community: PersohubCommunity = Depends(require_persohub_community),
+    db: Session = Depends(get_db),
+) -> PdaUser:
+    admin_user = _require_persohub_admin_user_for_community(db, community)
+    event_slug = request.path_params.get("event_slug") or request.path_params.get("slug")
+    if event_slug:
+        event = db.query(PersohubEvent).filter(PersohubEvent.slug == event_slug).first()
+        if not event or int(event.community_id) != int(community.id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+    return admin_user
+
+
+def get_persohub_admin_context(
+    community: PersohubCommunity = Depends(require_persohub_community),
+    db: Session = Depends(get_db),
+):
+    admin_user = _require_persohub_admin_user_for_community(db, community)
+    return {
+        "community": community,
+        "admin_user": admin_user,
+        "admin_row": {"community_id": community.id},
+        "policy": {"events": {}},
+        "is_superadmin": True,
+    }
 
 
 def get_optional_persohub_community(

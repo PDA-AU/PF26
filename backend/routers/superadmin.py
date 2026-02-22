@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, text
 from typing import Dict, List, Optional
+import json
 from sqlalchemy.engine import make_url
 import os
 import tempfile
@@ -22,6 +23,7 @@ from schemas import (
     AdminLogResponse,
     RecruitmentApprovalItem,
     PdaRecruitmentConfigUpdateRequest,
+    SuperadminMigrationStatusResponse,
 )
 from security import require_superadmin
 from utils import log_admin_action, _upload_bytes_to_s3, S3_CLIENT, S3_BUCKET_NAME
@@ -33,6 +35,10 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 DB_RESTORE_CONFIRM_TEXT = "CONFIRM RESTORE"
 DEFAULT_PDA_RECRUIT_URL = "https://chat.whatsapp.com/ErThvhBS77kGJEApiABP2z"
 RECRUITMENT_NOTIFY_MARKER_KEY = "pda_recruitment_whatsapp_notified_once"
+PERSOHUB_EVENT_NAMESPACE_STATUS_KEY = "migration_persohub_event_namespace_status_v1"
+PERSOHUB_EVENT_NAMESPACE_STATUS_LOG_MARKER_KEY = "migration_persohub_event_namespace_status_log_once_v1"
+PERSOHUB_EVENT_PARITY_STATUS_KEY = "migration_persohub_events_parity_v1"
+PERSOHUB_EVENT_PARITY_STATUS_LOG_MARKER_KEY = "migration_persohub_events_parity_status_log_once_v1"
 
 
 def _get_or_create_recruitment_config(db: Session) -> SystemConfig:
@@ -47,6 +53,57 @@ def _get_or_create_recruitment_config(db: Session) -> SystemConfig:
         db.commit()
         db.refresh(reg_config)
     return reg_config
+
+
+def _table_exists(db: Session, table_name: str) -> bool:
+    row = db.execute(
+        text(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = :table_name
+            )
+            """
+        ),
+        {"table_name": table_name},
+    ).scalar()
+    return bool(row)
+
+
+def _column_exists(db: Session, table_name: str, column_name: str) -> bool:
+    row = db.execute(
+        text(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = :table_name
+                  AND column_name = :column_name
+            )
+            """
+        ),
+        {"table_name": table_name, "column_name": column_name},
+    ).scalar()
+    return bool(row)
+
+
+def _index_exists(db: Session, index_name: str) -> bool:
+    row = db.execute(
+        text(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM pg_indexes
+                WHERE schemaname = 'public'
+                  AND indexname = :index_name
+            )
+            """
+        ),
+        {"index_name": index_name},
+    ).scalar()
+    return bool(row)
 
 def _resolve_pg_binary(kind: str) -> str:
     # Allow explicit override first for production/runtime control.
@@ -553,6 +610,198 @@ def get_recruitment_status(
     marker = db.query(SystemConfig).filter(SystemConfig.key == RECRUITMENT_NOTIFY_MARKER_KEY).first()
     notify_sent_once = bool(marker and str(marker.value or "").strip().lower() == "done")
     return {"recruitment_open": recruitment_open, "recruit_url": recruit_url, "notify_sent_once": notify_sent_once}
+
+
+@router.get(
+    "/pda-admin/superadmin/migration-status/persohub-event-namespace",
+    response_model=SuperadminMigrationStatusResponse,
+)
+def get_persohub_event_namespace_migration_status(
+    superadmin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    status_row = db.query(SystemConfig).filter(SystemConfig.key == PERSOHUB_EVENT_NAMESPACE_STATUS_KEY).first()
+    raw_value = str(status_row.value or "").strip() if status_row else ""
+    parsed_status = {}
+    if raw_value:
+        try:
+            loaded = json.loads(raw_value)
+            if isinstance(loaded, dict):
+                parsed_status = loaded
+        except Exception:
+            parsed_status = {}
+
+    marker = db.query(SystemConfig).filter(SystemConfig.key == PERSOHUB_EVENT_NAMESPACE_STATUS_LOG_MARKER_KEY).first()
+    logged_once = bool(marker and str(marker.value or "").strip().lower() == "done")
+    if not logged_once:
+        if not marker:
+            marker = SystemConfig(key=PERSOHUB_EVENT_NAMESPACE_STATUS_LOG_MARKER_KEY, value="done")
+            db.add(marker)
+        else:
+            marker.value = "done"
+
+        log_admin_action(
+            db,
+            superadmin,
+            "view_persohub_event_namespace_migration_status",
+            request.method if request else None,
+            request.url.path if request else None,
+            {
+                "status_recorded": bool(status_row),
+                "ok": parsed_status.get("ok"),
+            },
+        )
+        logged_once = True
+
+    return SuperadminMigrationStatusResponse(
+        status_key=PERSOHUB_EVENT_NAMESPACE_STATUS_KEY,
+        recorded=bool(status_row),
+        ok=parsed_status.get("ok"),
+        old_remaining=parsed_status.get("old_remaining"),
+        new_missing=parsed_status.get("new_missing"),
+        legacy_sympo=parsed_status.get("legacy_sympo"),
+        updated_at=(status_row.updated_at if status_row else None),
+        logged_once=logged_once,
+        raw_value=(None if parsed_status else (raw_value or None)),
+    )
+
+
+@router.get("/pda-admin/superadmin/migrations/persohub-events-parity-status")
+def get_persohub_events_parity_status(
+    superadmin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    required_tables = [
+        "persohub_events",
+        "persohub_event_rounds",
+        "persohub_event_registrations",
+        "persohub_event_teams",
+        "persohub_event_team_members",
+        "persohub_event_attendance",
+        "persohub_event_scores",
+        "persohub_event_badges",
+        "persohub_event_invites",
+        "persohub_event_logs",
+        "persohub_event_round_submissions",
+        "persohub_event_round_panels",
+        "persohub_event_round_panel_members",
+        "persohub_event_round_panel_assignments",
+    ]
+    required_event_columns = ["registration_open", "open_for"]
+    required_round_columns = [
+        "requires_submission",
+        "submission_mode",
+        "submission_deadline",
+        "allowed_mime_types",
+        "max_file_size_mb",
+        "panel_mode_enabled",
+        "panel_team_distribution_mode",
+        "panel_structure_locked",
+    ]
+    required_indexes = [
+        "idx_persohub_event_registration_event_entity_status_user",
+        "idx_persohub_event_registration_event_entity_status_team",
+        "idx_persohub_event_scores_event_round_entity_present_score",
+        "idx_persohub_event_scores_event_entity_user_round",
+        "idx_persohub_event_scores_event_entity_team_round",
+        "idx_persohub_event_attendance_event_entity_user_present",
+        "idx_persohub_event_attendance_event_entity_team_present",
+        "uq_persohub_event_round_submission_entity",
+        "uq_persohub_event_round_panel_round_no",
+        "uq_persohub_event_round_panel_member",
+        "uq_persohub_event_round_panel_assignment_entity",
+    ]
+
+    table_status = {name: _table_exists(db, name) for name in required_tables}
+    column_status = {
+        "persohub_events": {column_name: _column_exists(db, "persohub_events", column_name) for column_name in required_event_columns},
+        "persohub_event_rounds": {column_name: _column_exists(db, "persohub_event_rounds", column_name) for column_name in required_round_columns},
+    }
+    index_status = {name: _index_exists(db, name) for name in required_indexes}
+
+    missing_tables = sorted([name for name, exists in table_status.items() if not exists])
+    missing_event_columns = sorted([name for name, exists in column_status["persohub_events"].items() if not exists])
+    missing_round_columns = sorted([name for name, exists in column_status["persohub_event_rounds"].items() if not exists])
+    missing_indexes = sorted([name for name, exists in index_status.items() if not exists])
+    parity_ok = not (missing_tables or missing_event_columns or missing_round_columns or missing_indexes)
+
+    status_row = db.query(SystemConfig).filter(SystemConfig.key == PERSOHUB_EVENT_PARITY_STATUS_KEY).first()
+    parsed_status = {}
+    if status_row and str(status_row.value or "").strip():
+        try:
+            loaded = json.loads(str(status_row.value))
+            if isinstance(loaded, dict):
+                parsed_status = loaded
+        except Exception:
+            parsed_status = {}
+
+    marker = db.query(SystemConfig).filter(SystemConfig.key == PERSOHUB_EVENT_PARITY_STATUS_LOG_MARKER_KEY).first()
+    logged_once = bool(marker and str(marker.value or "").strip().lower() == "done")
+    if not logged_once:
+        if not marker:
+            marker = SystemConfig(key=PERSOHUB_EVENT_PARITY_STATUS_LOG_MARKER_KEY, value="done")
+            db.add(marker)
+        else:
+            marker.value = "done"
+        log_admin_action(
+            db,
+            superadmin,
+            "view_persohub_events_parity_status",
+            request.method if request else None,
+            request.url.path if request else None,
+            {
+                "ok": parity_ok,
+                "missing_tables": len(missing_tables),
+                "missing_event_columns": len(missing_event_columns),
+                "missing_round_columns": len(missing_round_columns),
+                "missing_indexes": len(missing_indexes),
+            },
+        )
+        logged_once = True
+
+    return {
+        "status_key": PERSOHUB_EVENT_PARITY_STATUS_KEY,
+        "recorded": bool(status_row),
+        "recorded_ok": parsed_status.get("ok"),
+        "live_ok": parity_ok,
+        "tables": table_status,
+        "columns": column_status,
+        "indexes": index_status,
+        "missing_tables": missing_tables,
+        "missing_event_columns": missing_event_columns,
+        "missing_round_columns": missing_round_columns,
+        "missing_indexes": missing_indexes,
+        "updated_at": (status_row.updated_at if status_row else None),
+        "logged_once": logged_once,
+        "raw_value": (parsed_status or (status_row.value if status_row else None)),
+    }
+
+
+@router.post("/pda-admin/superadmin/migrations/persohub-events-parity-flag")
+def set_persohub_events_parity_flag(
+    enabled: bool = Query(...),
+    superadmin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    row = db.query(SystemConfig).filter(SystemConfig.key == "persohub_events_parity_enabled").first()
+    if not row:
+        row = SystemConfig(key="persohub_events_parity_enabled", value="false")
+        db.add(row)
+    row.value = "true" if bool(enabled) else "false"
+    db.commit()
+    db.refresh(row)
+    log_admin_action(
+        db,
+        superadmin,
+        "set_persohub_events_parity_flag",
+        request.method if request else None,
+        request.url.path if request else None,
+        {"enabled": bool(enabled)},
+    )
+    return {"key": "persohub_events_parity_enabled", "enabled": bool(enabled)}
 
 
 @router.post("/pda-admin/superadmin/recruitment-toggle")

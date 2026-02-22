@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -384,6 +385,7 @@ export default function PersohubAdminEventsPage() {
     const [editPosterAssets, setEditPosterAssets] = useState([]);
     const [uploadingPoster, setUploadingPoster] = useState(false);
     const [uploadingEditPoster, setUploadingEditPoster] = useState(false);
+    const [parityEnabled, setParityEnabled] = useState(false);
     const [form, setForm] = useState(initialForm);
     const [editForm, setEditForm] = useState(initialForm);
     const [expandedDescriptions, setExpandedDescriptions] = useState({});
@@ -402,7 +404,7 @@ export default function PersohubAdminEventsPage() {
         }
         setLoading(true);
         try {
-            const response = await persohubAdminApi.listAdminEvents({
+            const response = await persohubAdminApi.listPersohubEvents({
                 page,
                 page_size: pageSize,
                 q: queryDebounced || undefined,
@@ -429,10 +431,24 @@ export default function PersohubAdminEventsPage() {
             return;
         }
         try {
-            const rows = await persohubAdminApi.listAdminSympoOptions();
+            const rows = await persohubAdminApi.listPersohubSympoOptions();
             setSympoOptions(rows || []);
         } catch (error) {
             toast.error(persohubAdminApi.parseApiError(error, 'Failed to load sympos'));
+        }
+    }, [community]);
+
+    const fetchParityEnabled = useCallback(async () => {
+        if (!community) {
+            setParityEnabled(false);
+            return;
+        }
+        try {
+            const enabled = await persohubAdminApi.isPersohubEventsParityEnabled();
+            setParityEnabled(Boolean(enabled));
+        } catch (error) {
+            setParityEnabled(false);
+            toast.error(persohubAdminApi.parseApiError(error, 'Failed to read parity status'));
         }
     }, [community]);
 
@@ -443,6 +459,10 @@ export default function PersohubAdminEventsPage() {
     useEffect(() => {
         fetchSympoOptions();
     }, [fetchSympoOptions]);
+
+    useEffect(() => {
+        fetchParityEnabled();
+    }, [fetchParityEnabled]);
 
     const validateDateRange = (formState) => {
         if (formState.start_date && formState.end_date && formState.start_date > formState.end_date) {
@@ -470,9 +490,9 @@ export default function PersohubAdminEventsPage() {
                 posterUrl = serializePosterAssets([{ url: currentAsset.url, aspect_ratio: '4:5' }]);
             }
             const payload = buildEventPayload(form, posterUrl);
-            const createdEvent = await persohubAdminApi.createAdminEvent(payload);
+            const createdEvent = await persohubAdminApi.createPersohubEvent(payload);
             if (form.sympo_id && form.sympo_id !== 'none') {
-                await persohubAdminApi.assignAdminEventSympo(createdEvent.slug, { sympo_id: Number(form.sympo_id) });
+                await persohubAdminApi.assignPersohubEventSympo(createdEvent.slug, { sympo_id: Number(form.sympo_id) });
             }
             toast.success('Event created');
             setForm(initialForm);
@@ -524,8 +544,8 @@ export default function PersohubAdminEventsPage() {
                 posterUrl = serializePosterAssets([{ url: currentAsset.url, aspect_ratio: '4:5' }]);
             }
             const payload = buildEventPayload(editForm, posterUrl);
-            await persohubAdminApi.updateAdminEvent(editTarget.slug, payload);
-            await persohubAdminApi.assignAdminEventSympo(editTarget.slug, {
+            await persohubAdminApi.updatePersohubEvent(editTarget.slug, payload);
+            await persohubAdminApi.assignPersohubEventSympo(editTarget.slug, {
                 sympo_id: editForm.sympo_id === 'none' ? null : Number(editForm.sympo_id),
             });
             toast.success('Event updated');
@@ -544,7 +564,7 @@ export default function PersohubAdminEventsPage() {
         if (!canMutate) return;
         const nextStatus = eventRow.status === 'open' ? 'closed' : 'open';
         try {
-            await persohubAdminApi.updateAdminEvent(eventRow.slug, { status: nextStatus });
+            await persohubAdminApi.updatePersohubEvent(eventRow.slug, { status: nextStatus });
             toast.success(`Event ${nextStatus}`);
             fetchEvents();
         } catch (error) {
@@ -570,7 +590,7 @@ export default function PersohubAdminEventsPage() {
         if (!deleteTarget || deleteConfirmText !== 'DELETE' || !canMutate) return;
         setDeleting(true);
         try {
-            await persohubAdminApi.deleteAdminEvent(deleteTarget.slug);
+            await persohubAdminApi.deletePersohubEvent(deleteTarget.slug);
             toast.success('Event deleted');
             setDeleteDialogOpen(false);
             setDeleteTarget(null);
@@ -591,7 +611,7 @@ export default function PersohubAdminEventsPage() {
         setAssigningSympoSlug(eventRow.slug);
         try {
             const payload = { sympo_id: draftValue === 'none' ? null : Number(draftValue) };
-            const response = await persohubAdminApi.assignAdminEventSympo(eventRow.slug, payload);
+            const response = await persohubAdminApi.assignPersohubEventSympo(eventRow.slug, payload);
             toast.success(response?.message || 'Event mapping updated');
             fetchEvents();
         } catch (error) {
@@ -614,6 +634,11 @@ export default function PersohubAdminEventsPage() {
             {!canMutate ? (
                 <section className="rounded-2xl border border-[#c99612]/40 bg-[#fff8df] p-4 text-sm text-[#7a5a00]">
                     Read-only mode: only the root community account for your club can create, edit, close, or delete events.
+                </section>
+            ) : null}
+            {canMutate && !parityEnabled ? (
+                <section className="rounded-2xl border border-black/10 bg-slate-50 p-4 text-sm text-slate-700">
+                    Parity admin screens are currently disabled by feature flag. Core event CRUD is still available here.
                 </section>
             ) : null}
 
@@ -747,6 +772,13 @@ export default function PersohubAdminEventsPage() {
 
                                     {canMutate ? (
                                         <div className="mt-4 flex flex-wrap gap-2">
+                                            {parityEnabled ? (
+                                                <Button asChild className="bg-[#11131a] text-white hover:bg-[#1f2330]">
+                                                    <Link to={`/persohub/admin/persohub-events/${eventRow.slug}/dashboard`}>
+                                                        Manage Event
+                                                    </Link>
+                                                </Button>
+                                            ) : null}
                                             <Button variant="outline" className="border-black/20" onClick={() => openEditDialog(eventRow)}>
                                                 Edit Event
                                             </Button>
