@@ -768,6 +768,7 @@ export default function EventDashboard() {
             setSubmissionSuccessDialogOpen(true);
             setSelectedRound(null);
             setSubmissionFile(null);
+            await fetchData();
         } catch (error) {
             toast.error(getErrorMessage(error, 'Failed to submit round work'));
         } finally {
@@ -807,6 +808,7 @@ export default function EventDashboard() {
             setSubmissionNotes('');
             setSubmissionFile(null);
             setSubmissionUploadProgress(null);
+            await fetchData();
             toast.success('Submitted work removed');
         } catch (error) {
             toast.error(getErrorMessage(error, 'Failed to remove submission'));
