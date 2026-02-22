@@ -1028,6 +1028,23 @@ def my_round_status(
         if panel_ids
         else {}
     )
+    round_ids = [int(round_row.id) for round_row in rounds]
+    submission_rows = (
+        db.query(PdaEventRoundSubmission.round_id)
+        .filter(
+            PdaEventRoundSubmission.event_id == event.id,
+            PdaEventRoundSubmission.entity_type == entity_type,
+            PdaEventRoundSubmission.user_id == entity_user_id,
+            PdaEventRoundSubmission.team_id == entity_team_id,
+            PdaEventRoundSubmission.round_id.in_(round_ids) if round_ids else False,
+        )
+        .all()
+    )
+    submission_round_id_set = {
+        int(row.round_id)
+        for row in submission_rows
+        if row.round_id is not None
+    }
     statuses = []
     for round_row in rounds:
         score_row = db.query(PdaEventScore).filter(
@@ -1069,6 +1086,7 @@ def my_round_status(
                 "panel_name": panel_name,
                 "panel_link": panel_link,
                 "panel_time": panel_time,
+                "has_submission": bool(int(round_row.id) in submission_round_id_set),
             }
         )
     return statuses

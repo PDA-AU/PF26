@@ -1283,6 +1283,7 @@ export default function EventDashboard() {
                                                             || participantRoundLookup.byName.get(roundNameKey)
                                                             || null
                                                         );
+                                                        const hasRoundSubmission = Boolean(round?.has_submission);
                                                         const submissionDeadlineLabel = (
                                                             linkedRound?.requires_submission
                                                                 ? formatDateTimeIst(linkedRound?.submission_deadline)
@@ -1345,11 +1346,17 @@ export default function EventDashboard() {
                                                                         <Button
                                                                             type="button"
                                                                             variant="outline"
-                                                                            className="border-2 border-black bg-[#FDE047] text-black shadow-neo"
+                                                                            className={`border-2 border-black text-black shadow-neo ${
+                                                                                linkedRound?.requires_submission && hasRoundSubmission
+                                                                                    ? 'bg-[#22C55E] hover:bg-[#16A34A]'
+                                                                                    : 'bg-[#FDE047]'
+                                                                            }`}
                                                                             onClick={() => setSelectedRound(linkedRound)}
                                                                             data-testid={`event-dashboard-round-action-${round.round_no}`}
                                                                         >
-                                                                            {linkedRound?.requires_submission ? 'Submit / Replace Work' : 'View Round'}
+                                                                            {linkedRound?.requires_submission
+                                                                                ? (hasRoundSubmission ? 'View Work' : 'Submit Work')
+                                                                                : 'View Round'}
                                                                         </Button>
                                                                     ) : null}
                                                                 </div>
