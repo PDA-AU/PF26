@@ -31,6 +31,17 @@ import EventAdminShell, { useEventAdminShell } from './EventAdminShell';
 import EventRoundStatsCard from './EventRoundStatsCard';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const DEFAULT_ALLOWED_MIME_TYPES = [
+    'application/pdf',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'image/png',
+    'image/jpeg',
+    'image/webp',
+    'video/mp4',
+    'video/quicktime',
+    'application/zip',
+];
 
 const createCriterion = (name = '', maxMarks = 0) => ({
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -96,7 +107,7 @@ function RoundsContent() {
     const [submissionMode, setSubmissionMode] = useState('file_or_link');
     const [submissionDeadlineDate, setSubmissionDeadlineDate] = useState('');
     const [submissionDeadlineTime, setSubmissionDeadlineTime] = useState('');
-    const [allowedMimeTypes, setAllowedMimeTypes] = useState('application/pdf, application/vnd.ms-powerpoint, application/vnd.openxmlformats-officedocument.presentationml.presentation, image/png, image/jpeg, image/webp, application/zip');
+    const [allowedMimeTypes, setAllowedMimeTypes] = useState(DEFAULT_ALLOWED_MIME_TYPES.join(', '));
     const [maxFileSizeMb, setMaxFileSizeMb] = useState('25');
     const [criteria, setCriteria] = useState([createCriterion('Score', 100)]);
     const [roundStats, setRoundStats] = useState({});
@@ -202,7 +213,7 @@ function RoundsContent() {
         setSubmissionMode('file_or_link');
         setSubmissionDeadlineDate('');
         setSubmissionDeadlineTime('');
-        setAllowedMimeTypes('application/pdf, application/vnd.ms-powerpoint, application/vnd.openxmlformats-officedocument.presentationml.presentation, image/png, image/jpeg, image/webp, application/zip');
+        setAllowedMimeTypes(DEFAULT_ALLOWED_MIME_TYPES.join(', '));
         setMaxFileSizeMb('25');
         setCriteria([createCriterion('Score', 100)]);
         setEditingRound(null);
@@ -278,7 +289,7 @@ function RoundsContent() {
                 requires_submission: Boolean(requiresSubmission),
                 submission_mode: submissionMode || 'file_or_link',
                 submission_deadline: requiresSubmission ? submissionDeadlineIso : null,
-                allowed_mime_types: parsedMimeTypes.length ? parsedMimeTypes : ['application/pdf', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'image/png', 'image/jpeg', 'image/webp', 'application/zip'],
+                allowed_mime_types: parsedMimeTypes.length ? parsedMimeTypes : DEFAULT_ALLOWED_MIME_TYPES,
                 max_file_size_mb: Math.max(1, parseInt(maxFileSizeMb, 10) || 25),
             };
             if (editingRound) {
@@ -299,7 +310,7 @@ function RoundsContent() {
                     submission_deadline: editingRound.submission_deadline || null,
                     allowed_mime_types: Array.isArray(editingRound.allowed_mime_types) && editingRound.allowed_mime_types.length
                         ? editingRound.allowed_mime_types
-                        : ['application/pdf', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 'image/png', 'image/jpeg', 'image/webp', 'application/zip'],
+                        : DEFAULT_ALLOWED_MIME_TYPES,
                     max_file_size_mb: Number(editingRound.max_file_size_mb || 25),
                 };
                 await axios.put(`${API}/pda-admin/events/${eventSlug}/rounds/${editingRound.id}`, payload, {
@@ -357,7 +368,7 @@ function RoundsContent() {
         setAllowedMimeTypes(
             Array.isArray(round.allowed_mime_types) && round.allowed_mime_types.length
                 ? round.allowed_mime_types.join(', ')
-                : 'application/pdf, application/vnd.ms-powerpoint, application/vnd.openxmlformats-officedocument.presentationml.presentation, image/png, image/jpeg, image/webp, application/zip'
+                : DEFAULT_ALLOWED_MIME_TYPES.join(', ')
         );
         setMaxFileSizeMb(String(round.max_file_size_mb || 25));
         setCriteria((round.evaluation_criteria && round.evaluation_criteria.length > 0)
@@ -734,6 +745,7 @@ function RoundsContent() {
                                                     setAllowedMimeTypes(next);
                                                     registerRoundFormUndo('Undo MIME types edit', () => setAllowedMimeTypes(previous));
                                                 }}
+                                                placeholder={DEFAULT_ALLOWED_MIME_TYPES.join(', ')}
                                                 className="neo-input"
                                             />
                                         </div>

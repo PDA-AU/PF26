@@ -1515,11 +1515,6 @@ function ScoringContent() {
                                 <span className="text-xs text-slate-500">
                                     {panelModeEnabled ? 'Scoring permissions are panel-aware.' : 'Classic scoring mode'}
                                 </span>
-                                {panelModeEnabled ? (
-                                    <span className="text-xs font-semibold text-blue-700">
-                                        Panel mode uses standard round normalization (raw/max * 100).
-                                    </span>
-                                ) : null}
                             </div>
                         </div>
                     </div>
