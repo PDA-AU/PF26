@@ -247,6 +247,8 @@ function ScoringContent() {
     const [importPreview, setImportPreview] = useState(null);
     const [pendingImportFile, setPendingImportFile] = useState(null);
     const [confirmingImport, setConfirmingImport] = useState(false);
+    const [exportingRound, setExportingRound] = useState(false);
+    const [exportingPanelWise, setExportingPanelWise] = useState(false);
     const [panelConfig, setPanelConfig] = useState({
         panel_mode_enabled: false,
         panel_team_distribution_mode: 'team_count',
@@ -275,6 +277,7 @@ function ScoringContent() {
     const [scoreDirtyByEntity, setScoreDirtyByEntity] = useState({});
     const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false);
     const [unsavedDialogMessage, setUnsavedDialogMessage] = useState('You have unsaved changes. Continue without saving?');
+    const [panelModeDisableConfirmOpen, setPanelModeDisableConfirmOpen] = useState(false);
     const fileInputRef = useRef(null);
     const pendingDiscardActionRef = useRef(null);
 
@@ -542,8 +545,8 @@ function ScoringContent() {
             const regB = String(b._code || '');
             const nameA = String(a._name || '');
             const nameB = String(b._name || '');
-            const scoreA = getTotalScore(a);
-            const scoreB = getTotalScore(b);
+            const scoreA = panelModeEnabled ? Number(a.normalized_score || 0) : getTotalScore(a);
+            const scoreB = panelModeEnabled ? Number(b.normalized_score || 0) : getTotalScore(b);
             const rankA = Number(roundRankMap[a._entityId] || Number.MAX_SAFE_INTEGER);
             const rankB = Number(roundRankMap[b._entityId] || Number.MAX_SAFE_INTEGER);
 
@@ -653,9 +656,8 @@ function ScoringContent() {
     const canEditScoreRow = useCallback((row) => {
         if (!row) return false;
         if (round?.is_frozen) return false;
-        if (panelModeEnabled && row.is_score_editable_by_current_admin === false) return false;
         return true;
-    }, [panelModeEnabled, round?.is_frozen]);
+    }, [round?.is_frozen]);
 
     const markScoreRowDirtyState = useCallback((entityType, entityId, nextRow) => {
         const key = entityKey(entityType, entityId);
@@ -840,6 +842,20 @@ function ScoringContent() {
         } finally {
             setPanelModeSaving(false);
         }
+    };
+
+    const requestPanelModeChange = (enabled) => {
+        if (enabled) {
+            runWithUnsavedGuard(
+                () => { updateRoundPanelMode(true); },
+                'Changing panel mode will refresh round data. Continue without saving pending changes?'
+            );
+            return;
+        }
+        runWithUnsavedGuard(
+            () => { setPanelModeDisableConfirmOpen(true); },
+            'Changing panel mode will refresh round data. Continue without saving pending changes?'
+        );
     };
 
     const addPanelDraft = () => {
@@ -1100,10 +1116,7 @@ function ScoringContent() {
         try {
             const maxByCriteria = Object.fromEntries(criteria.map((criterion) => [criterion.name, Number(criterion.max_marks || 0)]));
             const dirtySet = new Set(Object.keys(scoreDirtyByEntity || {}));
-            const editableRows = panelModeEnabled
-                ? rows.filter((row) => row.is_score_editable_by_current_admin !== false)
-                : rows;
-            const sourceRows = editableRows.filter((row) => dirtySet.has(entityKey(row._entityType, row._entityId)));
+            const sourceRows = rows.filter((row) => dirtySet.has(entityKey(row._entityType, row._entityId)));
             if (!sourceRows.length) {
                 if (!suppressNoChangesToast) {
                     toast.error('No unsaved score changes');
@@ -1284,6 +1297,8 @@ function ScoringContent() {
     };
 
     const exportRoundEvaluation = async () => {
+        if (exportingRound || exportingPanelWise) return;
+        setExportingRound(true);
         try {
             const response = await axios.get(`${API}/pda-admin/events/${eventSlug}/export/round/${roundId}?format=xlsx`, {
                 headers: getAuthHeader(),
@@ -1300,6 +1315,32 @@ function ScoringContent() {
             toast.success('Round evaluation exported');
         } catch (error) {
             toast.error(getErrorMessage(error, 'Failed to export round evaluation'));
+        } finally {
+            setExportingRound(false);
+        }
+    };
+
+    const exportRoundEvaluationPanelWise = async () => {
+        if (exportingRound || exportingPanelWise) return;
+        setExportingPanelWise(true);
+        try {
+            const response = await axios.get(`${API}/pda-admin/events/${eventSlug}/export/round/${roundId}/panel-wise?format=xlsx`, {
+                headers: getAuthHeader(),
+                responseType: 'blob',
+            });
+            const url = window.URL.createObjectURL(new Blob([response.data]));
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `${round?.round_no || 'round'}_evaluation_panel_wise.xlsx`);
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(url);
+            toast.success('Panel-wise evaluation exported');
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to export panel-wise evaluation'));
+        } finally {
+            setExportingPanelWise(false);
         }
     };
 
@@ -1468,15 +1509,17 @@ function ScoringContent() {
                                 <Label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">Enable Panel Mode</Label>
                                 <Switch
                                     checked={panelModeEnabled}
-                                    onCheckedChange={(enabled) => runWithUnsavedGuard(
-                                        () => { updateRoundPanelMode(enabled); },
-                                        'Changing panel mode will refresh round data. Continue without saving pending changes?'
-                                    )}
+                                    onCheckedChange={requestPanelModeChange}
                                     disabled={panelModeSaving || round.is_frozen}
                                 />
                                 <span className="text-xs text-slate-500">
                                     {panelModeEnabled ? 'Scoring permissions are panel-aware.' : 'Classic scoring mode'}
                                 </span>
+                                {panelModeEnabled ? (
+                                    <span className="text-xs font-semibold text-blue-700">
+                                        Panel mode uses standard round normalization (raw/max * 100).
+                                    </span>
+                                ) : null}
                             </div>
                         </div>
                     </div>
@@ -1497,9 +1540,14 @@ function ScoringContent() {
                                 <Save className="w-4 h-4 mr-2" /> {(saving || panelSaving || panelAssignmentSaving) ? 'Saving...' : `Save${totalDirtyCount ? ` (${totalDirtyCount})` : ''}`}
                             </Button>
                             {panelModeEnabled ? (
-                                <Button onClick={exportRoundEvaluation} variant="outline" className="border-2 border-black shadow-neo">
-                                    <Download className="w-4 h-4 mr-2" /> Export Excel
-                                </Button>
+                                <>
+                                    <Button onClick={exportRoundEvaluation} disabled={exportingRound || exportingPanelWise} variant="outline" className="border-2 border-black shadow-neo">
+                                        <Download className="w-4 h-4 mr-2" /> {exportingRound ? 'Exporting...' : 'Export Excel'}
+                                    </Button>
+                                    <Button onClick={exportRoundEvaluationPanelWise} disabled={exportingRound || exportingPanelWise} variant="outline" className="border-2 border-black shadow-neo">
+                                        <Download className="w-4 h-4 mr-2" /> {exportingPanelWise ? 'Exporting...' : 'Export Panel-wise'}
+                                    </Button>
+                                </>
                             ) : null}
                             <Dialog open={freezeDialogOpen} onOpenChange={setFreezeDialogOpen}>
                                 <DialogTrigger asChild>
@@ -1529,9 +1577,14 @@ function ScoringContent() {
                         </div>
                     ) : (
                         <div className="flex flex-wrap gap-2">
-                            <Button onClick={exportRoundEvaluation} variant="outline" className="border-2 border-black shadow-neo">
-                                <Download className="w-4 h-4 mr-2" /> Export Excel
+                            <Button onClick={exportRoundEvaluation} disabled={exportingRound || exportingPanelWise} variant="outline" className="border-2 border-black shadow-neo">
+                                <Download className="w-4 h-4 mr-2" /> {exportingRound ? 'Exporting...' : 'Export Excel'}
                             </Button>
+                            {panelModeEnabled ? (
+                                <Button onClick={exportRoundEvaluationPanelWise} disabled={exportingRound || exportingPanelWise} variant="outline" className="border-2 border-black shadow-neo">
+                                    <Download className="w-4 h-4 mr-2" /> {exportingPanelWise ? 'Exporting...' : 'Export Panel-wise'}
+                                </Button>
+                            ) : null}
                             <Button onClick={unfreezeRound} className="bg-orange-500 text-white border-2 border-black shadow-neo">
                                 <Lock className="w-4 h-4 mr-2" /> Unfreeze
                             </Button>
@@ -1786,6 +1839,43 @@ function ScoringContent() {
                             </Button>
                             <Button type="button" className="flex-1 bg-orange-500 text-white border-2 border-black" onClick={confirmDiscardAndContinue}>
                                 Continue
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={panelModeDisableConfirmOpen} onOpenChange={setPanelModeDisableConfirmOpen}>
+                <DialogContent className="border-4 border-black max-w-md w-[calc(100vw-2rem)] sm:w-full max-h-[85vh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading font-bold text-xl flex items-center gap-2">
+                            <AlertTriangle className="w-5 h-5 text-orange-500" /> Disable Panel Mode
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <p className="text-sm text-slate-700">
+                            Turning off panel mode removes panel-based scoring restrictions for this round. Continue?
+                        </p>
+                        <div className="flex gap-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="flex-1 border-2 border-black"
+                                onClick={() => setPanelModeDisableConfirmOpen(false)}
+                                disabled={panelModeSaving}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                type="button"
+                                className="flex-1 bg-orange-500 text-white border-2 border-black"
+                                onClick={async () => {
+                                    setPanelModeDisableConfirmOpen(false);
+                                    await updateRoundPanelMode(false);
+                                }}
+                                disabled={panelModeSaving}
+                            >
+                                {panelModeSaving ? 'Updating...' : 'Disable'}
                             </Button>
                         </div>
                     </div>
@@ -2157,7 +2247,10 @@ function ScoringContent() {
                             {pagedRows.map((row) => {
                                 const totalScore = getTotalScore(row);
                                 const maxScore = criteria.reduce((sum, criterion) => sum + Number(criterion.max_marks || 0), 0);
-                                const normalized = maxScore > 0 ? (totalScore / maxScore * 100).toFixed(2) : '0.00';
+                                const nonPanelNormalized = maxScore > 0 ? (totalScore / maxScore * 100).toFixed(2) : '0.00';
+                                const roundScore = panelModeEnabled
+                                    ? Number(row.normalized_score || 0).toFixed(2)
+                                    : nonPanelNormalized;
                                 const roundRank = round?.is_frozen ? (roundRankMap[row._entityId] || '—') : null;
                                 const rowEditable = canEditScoreRow(row);
                                 const roundStatus = !row.is_present
@@ -2246,7 +2339,7 @@ function ScoringContent() {
                                         <td className="font-bold">{totalScore}</td>
                                         <td className="min-w-[140px]">
                                             <span className="inline-flex h-10 w-full min-w-[110px] items-center justify-center bg-primary text-white px-2 py-1 border-2 border-black font-bold">
-                                                {normalized}
+                                                {roundScore}
                                             </span>
                                         </td>
                                         {round?.is_frozen ? <td className="font-bold">{roundRank}</td> : null}

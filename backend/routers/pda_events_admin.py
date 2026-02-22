@@ -85,7 +85,7 @@ from schemas import (
 from emailer import send_bulk_email
 from email_bulk import render_email_template, derive_text_from_html, extract_batch
 from security import get_admin_context, require_pda_event_admin, require_superadmin
-from utils import log_admin_action, log_pda_event_action
+from utils import log_admin_action, log_pda_event_action, _upload_bytes_to_s3
 
 router = APIRouter()
 OFFICIAL_LETTERHEAD_LEFT_LOGO_URL = "https://pda-uploads.s3.ap-south-1.amazonaws.com/pda/letterhead/left-logo/mit-logo-20260220125851.png"
@@ -232,31 +232,49 @@ def _round_admin_panel_scope(
 
 
 def _is_entity_editable_by_admin(scope: Dict[str, object], entity_type: str, entity_id: int, panel_id: Optional[int]) -> bool:
-    if not bool(scope.get("panel_mode_enabled")):
-        return True
-    if bool(scope.get("is_superadmin")):
-        return True
-    panel_ids = scope.get("panel_ids") if isinstance(scope.get("panel_ids"), set) else set()
-    if not panel_ids:
-        return False
-    if panel_id is None:
-        return False
-    return int(panel_id) in panel_ids
+    return True
 
 
-def _assert_panel_editable_entity(
-    scope: Dict[str, object],
-    entity_type: str,
-    entity_id: int,
+def _legacy_normalized(total_score: float, max_total: float, is_present: bool) -> float:
+    if not bool(is_present):
+        return 0.0
+    max_total_value = float(max_total or 0.0)
+    if max_total_value <= 0.0:
+        return 0.0
+    normalized = (float(total_score or 0.0) / max_total_value) * 100.0
+    if normalized < 0.0:
+        return 0.0
+    if normalized > 100.0:
+        return 100.0
+    return float(normalized)
+
+
+def _recompute_round_normalized_scores(
+    db: Session,
+    event: PdaEvent,
+    round_row: PdaEventRound,
 ) -> None:
-    if not bool(scope.get("panel_mode_enabled")) or bool(scope.get("is_superadmin")):
+    # SessionLocal uses autoflush=False; flush pending score/attendance/assignment writes
+    # so recompute always reads the latest in-transaction state.
+    db.flush()
+    criteria = _criteria_def(round_row)
+    max_total = float(sum(float(item.get("max_marks", 0) or 0.0) for item in criteria) or 0.0)
+    score_rows = (
+        db.query(PdaEventScore)
+        .filter(
+            PdaEventScore.event_id == event.id,
+            PdaEventScore.round_id == round_row.id,
+        )
+        .all()
+    )
+    if not score_rows:
         return
-    allowed_entities = scope.get("allowed_entities") if isinstance(scope.get("allowed_entities"), set) else set()
-    key = _panel_entity_key(entity_type, entity_id)
-    if key not in allowed_entities:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Scoring access denied for {entity_type} {entity_id} in panel mode",
+
+    for score_row in score_rows:
+        score_row.normalized_score = _legacy_normalized(
+            total_score=float(score_row.total_score or 0.0),
+            max_total=max_total,
+            is_present=bool(score_row.is_present),
         )
 
 
@@ -478,6 +496,142 @@ def _log_event_admin_action(
         path=path,
         meta=meta,
     )
+
+
+def _audit_fragment(value: object, fallback: str = "na") -> str:
+    raw = str(value or "").strip().lower()
+    cleaned = re.sub(r"[^a-z0-9]+", "-", raw).strip("-")
+    return (cleaned[:48] if cleaned else fallback)
+
+
+def _build_round_audit_csv(
+    db: Session,
+    event: PdaEvent,
+    round_row: PdaEventRound,
+    admin: PdaUser,
+    audit_type: str,
+    generated_at: datetime,
+) -> Tuple[List[str], List[List[object]]]:
+    result = round_participants(
+        slug=event.slug,
+        round_id=int(round_row.id),
+        search=None,
+        admin=admin,
+        db=db,
+    )
+    criteria = _criteria_def(round_row)
+    criteria_names = [str(item.get("name") or "").strip() for item in criteria if str(item.get("name") or "").strip()]
+    id_header = "Register Number" if event.participant_mode == PdaEventParticipantMode.INDIVIDUAL else "Team Code"
+    name_header = "Name" if event.participant_mode == PdaEventParticipantMode.INDIVIDUAL else "Team Name"
+    headers = [
+        "audit_type",
+        "event_slug",
+        "event_code",
+        "round_id",
+        "round_no",
+        "round_name",
+        "round_state",
+        "is_frozen",
+        "generated_at_utc",
+        "entity_type",
+        "entity_id",
+        name_header,
+        id_header,
+        "participant_status",
+        "is_present",
+        "total_score",
+        "normalized_score",
+        "panel_no",
+        "panel_name",
+        "submission_type",
+        "submission_locked",
+    ] + criteria_names
+    rows: List[List[object]] = []
+    for row in result:
+        criteria_scores = row.get("criteria_scores") if isinstance(row.get("criteria_scores"), dict) else {}
+        entity_id = row.get("entity_id")
+        if entity_id is None:
+            entity_id = row.get("participant_id")
+        line = [
+            audit_type,
+            event.slug,
+            event.event_code,
+            int(round_row.id),
+            int(round_row.round_no),
+            str(round_row.name or ""),
+            str(round_row.state.value if hasattr(round_row.state, "value") else round_row.state or ""),
+            bool(round_row.is_frozen),
+            generated_at.isoformat(),
+            row.get("entity_type"),
+            entity_id,
+            row.get("name") or row.get("participant_name"),
+            row.get("regno_or_code") or row.get("participant_register_number"),
+            row.get("status") or row.get("participant_status"),
+            bool(row.get("is_present")),
+            float(row.get("total_score") or 0.0),
+            float(row.get("normalized_score") or 0.0),
+            row.get("panel_no"),
+            row.get("panel_name"),
+            row.get("submission_type"),
+            bool(row.get("submission_is_locked")) if row.get("submission_is_locked") is not None else False,
+        ]
+        for criteria_name in criteria_names:
+            raw = criteria_scores.get(criteria_name)
+            if raw is None:
+                line.append(0)
+                continue
+            try:
+                line.append(float(raw))
+            except Exception:
+                line.append(raw)
+        rows.append(line)
+    return headers, rows
+
+
+def _upload_round_audit_snapshot(
+    db: Session,
+    event: PdaEvent,
+    round_row: PdaEventRound,
+    admin: PdaUser,
+    *,
+    audit_type: str,
+    folder: str,
+    extra_meta: Optional[dict] = None,
+) -> dict:
+    generated_at = datetime.now(timezone.utc)
+    base_meta = {
+        "audit_type": audit_type,
+        "audit_folder": folder,
+        "audit_generated_at": generated_at.isoformat(),
+        "audit_csv_uploaded": False,
+        "audit_csv_url": None,
+        "audit_csv_error": None,
+    }
+    if extra_meta:
+        for key, value in extra_meta.items():
+            if key not in base_meta:
+                base_meta[key] = value
+    try:
+        headers, rows = _build_round_audit_csv(db, event, round_row, admin, audit_type, generated_at)
+        content = _export_to_csv(headers, rows)
+        timestamp_text = generated_at.strftime("%Y%m%dT%H%M%SZ")
+        filename = (
+            f"{_audit_fragment(event.event_code, 'evt')}"
+            f"_round-{int(round_row.round_no)}"
+            f"_{_audit_fragment(audit_type, 'audit')}"
+            f"_{timestamp_text}"
+            f"_by-{_audit_fragment(getattr(admin, 'regno', None) or getattr(admin, 'id', None), 'admin')}.csv"
+        )
+        key_prefix = f"pda-events/{event.slug}/audits/{folder}/round-{int(round_row.round_no)}"
+        url = _upload_bytes_to_s3(content, key_prefix, filename, content_type="text/csv")
+        base_meta["audit_csv_uploaded"] = True
+        base_meta["audit_csv_url"] = url
+        base_meta["audit_csv_rows"] = len(rows)
+        base_meta["audit_csv_filename"] = filename
+        base_meta["audit_csv_key_prefix"] = key_prefix
+    except Exception as exc:
+        base_meta["audit_csv_error"] = str(exc)
+    return base_meta
 
 
 def _send_bulk_event_email_background(
@@ -864,6 +1018,7 @@ def delete_managed_event(
     ]
 
     if team_ids:
+        db.query(PdaEventRoundPanelAssignment).filter(PdaEventRoundPanelAssignment.team_id.in_(team_ids)).delete(synchronize_session=False)
         db.query(PdaEventInvite).filter(PdaEventInvite.team_id.in_(team_ids)).delete(synchronize_session=False)
         db.query(PdaEventBadge).filter(PdaEventBadge.team_id.in_(team_ids)).delete(synchronize_session=False)
         db.query(PdaEventScore).filter(PdaEventScore.team_id.in_(team_ids)).delete(synchronize_session=False)
@@ -873,12 +1028,18 @@ def delete_managed_event(
         db.query(PdaEventTeamMember).filter(PdaEventTeamMember.team_id.in_(team_ids)).delete(synchronize_session=False)
 
     if round_ids:
+        db.query(PdaEventRoundPanelAssignment).filter(PdaEventRoundPanelAssignment.round_id.in_(round_ids)).delete(synchronize_session=False)
+        db.query(PdaEventRoundPanelMember).filter(PdaEventRoundPanelMember.round_id.in_(round_ids)).delete(synchronize_session=False)
+        db.query(PdaEventRoundPanel).filter(PdaEventRoundPanel.round_id.in_(round_ids)).delete(synchronize_session=False)
         db.query(PdaEventScore).filter(PdaEventScore.round_id.in_(round_ids)).delete(synchronize_session=False)
         db.query(PdaEventRoundSubmission).filter(PdaEventRoundSubmission.round_id.in_(round_ids)).delete(synchronize_session=False)
         db.query(PdaEventAttendance).filter(PdaEventAttendance.round_id.in_(round_ids)).delete(synchronize_session=False)
 
     db.query(PdaEventInvite).filter(PdaEventInvite.event_id == event_id).delete(synchronize_session=False)
     db.query(PdaEventBadge).filter(PdaEventBadge.event_id == event_id).delete(synchronize_session=False)
+    db.query(PdaEventRoundPanelAssignment).filter(PdaEventRoundPanelAssignment.event_id == event_id).delete(synchronize_session=False)
+    db.query(PdaEventRoundPanelMember).filter(PdaEventRoundPanelMember.event_id == event_id).delete(synchronize_session=False)
+    db.query(PdaEventRoundPanel).filter(PdaEventRoundPanel.event_id == event_id).delete(synchronize_session=False)
     db.query(PdaEventScore).filter(PdaEventScore.event_id == event_id).delete(synchronize_session=False)
     db.query(PdaEventRoundSubmission).filter(PdaEventRoundSubmission.event_id == event_id).delete(synchronize_session=False)
     db.query(PdaEventAttendance).filter(PdaEventAttendance.event_id == event_id).delete(synchronize_session=False)
@@ -1958,6 +2119,7 @@ def update_round(
     round_row = db.query(PdaEventRound).filter(PdaEventRound.id == round_id, PdaEventRound.event_id == event.id).first()
     if not round_row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
+    panel_mode_before = bool(round_row.panel_mode_enabled)
     updates = payload.model_dump(exclude_unset=True)
     if "external_url" not in updates and updates.get("whatsapp_url") is not None:
         updates["external_url"] = updates.get("whatsapp_url")
@@ -2012,6 +2174,13 @@ def update_round(
 
     for field, value in updates.items():
         setattr(round_row, field, value)
+
+    panel_mode_toggled = (
+        "panel_mode_enabled" in updates
+        and bool(round_row.panel_mode_enabled) != panel_mode_before
+    )
+    if panel_mode_toggled:
+        _recompute_round_normalized_scores(db, event, round_row)
 
     should_apply_shortlisting = (
         round_row.is_frozen
@@ -2079,7 +2248,9 @@ def update_round(
                         """
                         SELECT COALESCE(SUM(total_score), 0)
                         FROM pda_event_scores
-                        WHERE event_id = :event_id AND entity_type = 'TEAM' AND team_id = :entity_id
+                        WHERE event_id = :event_id
+                          AND entity_type = 'TEAM'
+                          AND team_id = :entity_id
                         """
                     ),
                     {"event_id": event.id, "entity_id": entity_id},
@@ -2102,6 +2273,21 @@ def update_round(
         round_row.state = PdaEventRoundState.COMPLETED
     db.commit()
     db.refresh(round_row)
+    shortlist_audit_meta = {}
+    if should_apply_shortlisting:
+        shortlist_audit_meta = _upload_round_audit_snapshot(
+            db=db,
+            event=event,
+            round_row=round_row,
+            admin=admin,
+            audit_type="shortlisting_snapshot",
+            folder="shortlisting",
+            extra_meta={
+                "shortlist_elimination_type": str(round_row.elimination_type or ""),
+                "shortlist_elimination_value": float(round_row.elimination_value or 0.0),
+                "shortlist_eliminate_absent": bool(eliminate_absent),
+            },
+        )
     _log_event_admin_action(
         db,
         admin,
@@ -2114,6 +2300,7 @@ def update_round(
             "elimination_type": round_row.elimination_type,
             "elimination_value": round_row.elimination_value,
             "eliminate_absent": eliminate_absent,
+            **shortlist_audit_meta,
         },
     )
     return PdaManagedRoundResponse.model_validate(round_row)
@@ -2498,6 +2685,8 @@ def update_round_panels(
                 )
             )
 
+    if bool(round_row.panel_mode_enabled):
+        _recompute_round_normalized_scores(db, event, round_row)
     db.commit()
     _log_event_admin_action(
         db,
@@ -2703,6 +2892,8 @@ def auto_assign_round_panels(
         )
         created += 1
 
+    if bool(round_row.panel_mode_enabled):
+        _recompute_round_normalized_scores(db, event, round_row)
     db.commit()
     _log_event_admin_action(
         db,
@@ -2809,6 +3000,8 @@ def update_round_panel_assignments(
             )
         )
         created += 1
+    if bool(round_row.panel_mode_enabled):
+        _recompute_round_normalized_scores(db, event, round_row)
     db.commit()
     _log_event_admin_action(
         db,
@@ -3259,7 +3452,9 @@ def save_scores(
     criteria = _criteria_def(round_row)
     criteria_max = {c["name"]: float(c.get("max_marks", 0) or 0) for c in criteria}
     max_total = sum(criteria_max.values()) if criteria_max else 100
-    panel_scope = _round_admin_panel_scope(db, round_row, admin)
+    panel_assignment_map: Dict[Tuple[str, int], PdaEventRoundPanelAssignment] = {}
+    if bool(round_row.panel_mode_enabled):
+        _, panel_assignment_map = _round_panel_maps(db, round_row)
 
     parsed_entries = []
     user_ids: Set[int] = set()
@@ -3269,7 +3464,13 @@ def save_scores(
         entity_type, user_id, team_id = _entity_from_payload(event, payload)
         entity_type_key = "user" if entity_type == PdaEventEntityType.USER else "team"
         entity_id_value = int(user_id) if entity_type == PdaEventEntityType.USER else int(team_id)
-        _assert_panel_editable_entity(panel_scope, entity_type_key, entity_id_value)
+        if bool(round_row.panel_mode_enabled) and bool(entry.is_present):
+            assignment_row = panel_assignment_map.get(_panel_entity_key(entity_type_key, entity_id_value))
+            if assignment_row is None or assignment_row.panel_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Panel assignment required for present scoring in panel mode: {entity_type_key} {entity_id_value}",
+                )
         parsed_entries.append((entry, entity_type, user_id, team_id))
         if entity_type == PdaEventEntityType.USER and user_id is not None:
             user_ids.add(int(user_id))
@@ -3416,6 +3617,7 @@ def save_scores(
                 attendance_user_map[entity_id_value] = attendance_row
             else:
                 attendance_team_map[entity_id_value] = attendance_row
+    _recompute_round_normalized_scores(db, event, round_row)
     db.commit()
     _log_event_admin_action(
         db,
@@ -3463,7 +3665,9 @@ def import_scores(
         missing = ", ".join(missing_criteria_headers)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Missing criteria columns: {missing}")
     max_total = sum(criteria_max.values()) if criteria_max else 100
-    panel_scope = _round_admin_panel_scope(db, round_row, admin)
+    panel_assignment_map: Dict[Tuple[str, int], PdaEventRoundPanelAssignment] = {}
+    if bool(round_row.panel_mode_enabled):
+        _, panel_assignment_map = _round_panel_maps(db, round_row)
 
     entities = _round_scoring_entities(db, event, round_row)
     entity_by_identifier = {}
@@ -3542,19 +3746,6 @@ def import_scores(
         team_id = int(entity["entity_id"]) if entity_type == PdaEventEntityType.TEAM else None
         entity_type_key = "user" if entity_type == PdaEventEntityType.USER else "team"
         entity_id_value = int(user_id) if entity_type == PdaEventEntityType.USER else int(team_id)
-        try:
-            _assert_panel_editable_entity(panel_scope, entity_type_key, entity_id_value)
-        except HTTPException:
-            reason = "Scoring access denied for this row in panel mode"
-            other_required_rows.append({
-                "row": row_idx,
-                "identifier": identifier,
-                "name": provided_name or str(entity.get("name") or ""),
-                "reason": reason,
-            })
-            _append_error(f"Row {row_idx}: {reason}")
-            continue
-
         has_any_score_input = False
         for name in criteria_max.keys():
             idx = criteria_indices.get(name)
@@ -3579,6 +3770,19 @@ def import_scores(
                     "row": row_idx,
                     "identifier": identifier,
                     "name": provided_name,
+                    "reason": reason,
+                })
+                _append_error(f"Row {row_idx}: {reason}")
+                continue
+
+        if bool(round_row.panel_mode_enabled) and is_present:
+            assignment_row = panel_assignment_map.get(_panel_entity_key(entity_type_key, entity_id_value))
+            if assignment_row is None or assignment_row.panel_id is None:
+                reason = "Panel assignment required for present scoring in panel mode"
+                other_required_rows.append({
+                    "row": row_idx,
+                    "identifier": identifier,
+                    "name": provided_name or str(entity.get("name") or ""),
                     "reason": reason,
                 })
                 _append_error(f"Row {row_idx}: {reason}")
@@ -3737,6 +3941,7 @@ def import_scores(
                 )
             )
 
+    _recompute_round_normalized_scores(db, event, round_row)
     db.commit()
     _log_event_admin_action(
         db,
@@ -3831,7 +4036,18 @@ def freeze_round(
                 )
             )
     round_row.is_frozen = True
+    if bool(round_row.panel_mode_enabled):
+        _recompute_round_normalized_scores(db, event, round_row)
     db.commit()
+    db.refresh(round_row)
+    freeze_audit_meta = _upload_round_audit_snapshot(
+        db=db,
+        event=event,
+        round_row=round_row,
+        admin=admin,
+        audit_type="freeze_snapshot",
+        folder="freeze",
+    )
     _log_event_admin_action(
         db,
         admin,
@@ -3839,9 +4055,9 @@ def freeze_round(
         "freeze_pda_event_round",
         method="POST",
         path=f"/pda-admin/events/{slug}/rounds/{round_id}/freeze",
-        meta={"round_id": round_id},
+        meta={"round_id": round_id, **freeze_audit_meta},
     )
-    return {"message": "Round frozen"}
+    return {"message": "Round frozen", **freeze_audit_meta}
 
 
 @router.post("/pda-admin/events/{slug}/rounds/{round_id}/unfreeze")
@@ -4438,6 +4654,50 @@ def _export_to_xlsx(headers: List[str], rows: List[List[object]]) -> bytes:
     return out.read()
 
 
+def _normalize_excel_sheet_title(value: Optional[str], fallback: str = "Sheet") -> str:
+    raw = str(value or "").strip()
+    if raw:
+        raw = re.sub(r"[\[\]\:\*\?\/\\]", " ", raw)
+        raw = re.sub(r"\s+", " ", raw).strip()
+    candidate = raw or fallback
+    return candidate[:31] if len(candidate) > 31 else candidate
+
+
+def _unique_excel_sheet_title(value: Optional[str], used_titles: Set[str], fallback: str = "Sheet") -> str:
+    base = _normalize_excel_sheet_title(value, fallback=fallback)
+    if not base:
+        base = fallback
+    index = 1
+    while True:
+        suffix = f" ({index})" if index > 1 else ""
+        max_base_len = max(31 - len(suffix), 1)
+        candidate = f"{base[:max_base_len]}{suffix}"
+        key = candidate.lower()
+        if key not in used_titles:
+            used_titles.add(key)
+            return candidate
+        index += 1
+
+
+def _export_to_multi_sheet_xlsx(headers: List[str], sheets: List[Tuple[str, List[List[object]]]]) -> bytes:
+    wb = Workbook()
+    default_sheet = wb.active
+    wb.remove(default_sheet)
+
+    used_titles: Set[str] = set()
+    safe_sheets = sheets if sheets else [("Participants", [])]
+    for sheet_name, rows in safe_sheets:
+        ws = wb.create_sheet(title=_unique_excel_sheet_title(sheet_name, used_titles, fallback="Participants"))
+        ws.append(headers)
+        for row in rows:
+            ws.append(row)
+
+    out = io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+    return out.read()
+
+
 def _extract_round_state_text(value) -> str:
     if hasattr(value, "value"):
         return str(value.value or "").strip().lower()
@@ -4870,10 +5130,10 @@ def export_round(
     slug: str,
     round_id: int,
     format: str = Query("csv"),
-    _: PdaUser = Depends(require_pda_event_admin),
+    admin: PdaUser = Depends(require_pda_event_admin),
     db: Session = Depends(get_db),
 ):
-    result = round_participants(slug=slug, round_id=round_id, _=None, db=db)
+    result = round_participants(slug=slug, round_id=round_id, admin=admin, db=db)
     headers = ["Entity Type", "Name", "Register/Team Code", "Total Score", "Normalized Score", "Present"]
     rows = [
         [
@@ -4895,6 +5155,86 @@ def export_round(
         content = _export_to_csv(headers, rows)
         media_type = "text/csv"
         filename = f"{event.event_code}_round_{round_id}.csv"
+    return StreamingResponse(io.BytesIO(content), media_type=media_type, headers={"Content-Disposition": f"attachment; filename={filename}"})
+
+
+@router.get("/pda-admin/events/{slug}/export/round/{round_id}/panel-wise")
+def export_round_panel_wise(
+    slug: str,
+    round_id: int,
+    format: str = Query("xlsx"),
+    admin: PdaUser = Depends(require_pda_event_admin),
+    db: Session = Depends(get_db),
+):
+    normalized_format = str(format or "xlsx").strip().lower()
+    if normalized_format != "xlsx":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only xlsx export is supported for panel-wise export")
+
+    event = _get_event_or_404(db, slug)
+    round_row = _get_event_round_or_404(db, event.id, round_id)
+    result = round_participants(slug=slug, round_id=round_id, search=None, admin=admin, db=db)
+
+    headers = ["Entity Type", "Name", "Register/Team Code", "Total Score", "Normalized Score", "Present"]
+
+    def _to_export_row(row: dict) -> List[object]:
+        return [
+            row.get("entity_type"),
+            row.get("name"),
+            row.get("regno_or_code"),
+            row.get("total_score"),
+            row.get("normalized_score"),
+            row.get("is_present"),
+        ]
+
+    sheets: List[Tuple[str, List[List[object]]]] = []
+    if bool(round_row.panel_mode_enabled):
+        panel_rows = (
+            db.query(PdaEventRoundPanel)
+            .filter(
+                PdaEventRoundPanel.event_id == event.id,
+                PdaEventRoundPanel.round_id == round_row.id,
+            )
+            .order_by(PdaEventRoundPanel.panel_no.asc(), PdaEventRoundPanel.id.asc())
+            .all()
+        )
+        rows_by_panel_id: Dict[int, List[List[object]]] = {}
+        unassigned_rows: List[List[object]] = []
+        for participant in result:
+            panel_id = participant.get("panel_id")
+            export_row = _to_export_row(participant)
+            if panel_id is None:
+                unassigned_rows.append(export_row)
+                continue
+            try:
+                safe_panel_id = int(panel_id)
+            except Exception:
+                unassigned_rows.append(export_row)
+                continue
+            rows_by_panel_id.setdefault(safe_panel_id, []).append(export_row)
+
+        known_panel_ids: Set[int] = set()
+        for panel in panel_rows:
+            panel_id = int(panel.id)
+            known_panel_ids.add(panel_id)
+            panel_no = int(panel.panel_no) if panel.panel_no is not None else panel_id
+            panel_name = str(panel.name or "").strip()
+            label = f"Panel {panel_no}"
+            if panel_name:
+                label = f"{label} - {panel_name}"
+            sheets.append((label, rows_by_panel_id.get(panel_id, [])))
+
+        orphan_panel_ids = sorted([panel_id for panel_id in rows_by_panel_id.keys() if panel_id not in known_panel_ids])
+        for panel_id in orphan_panel_ids:
+            sheets.append((f"Panel {panel_id}", rows_by_panel_id.get(panel_id, [])))
+
+        if unassigned_rows or not sheets:
+            sheets.append(("Unassigned", unassigned_rows))
+    else:
+        sheets.append(("All Participants", [_to_export_row(row) for row in result]))
+
+    content = _export_to_multi_sheet_xlsx(headers, sheets)
+    media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    filename = f"{event.event_code}_round_{round_row.round_no}_panel_wise.xlsx"
     return StreamingResponse(io.BytesIO(content), media_type=media_type, headers={"Content-Disposition": f"attachment; filename={filename}"})
 
 
