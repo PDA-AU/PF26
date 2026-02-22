@@ -98,7 +98,7 @@ const getRoundStatusLabel = (round, effectiveStatus) => {
     if (roundState === 'published') return 'Pending';
     if (roundState === 'active') return 'In Progress';
     if (roundState === 'completed' || roundState === 'reveal') {
-        if (roundStatus === 'active' || roundStatus === 'eliminated') {
+        if (roundStatus === 'active' || roundStatus === 'eliminated' || roundStatus === 'pending') {
             return titleCaseStatus(roundStatus);
         }
         return fallbackCompletedStatus;
