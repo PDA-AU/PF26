@@ -4439,6 +4439,8 @@ def send_bulk_event_email(
         batch=payload.batch,
         status_filter=payload.status,
         search=payload.search,
+        round_ids=None,
+        sort="rank",
         page=1,
         page_size=10000,
         response=None,
