@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import loadingVideo from '@/assets/loading.webm';
 
 export default function LoadingState({
@@ -10,6 +10,7 @@ export default function LoadingState({
     cardClassName = '',
 }) {
     const [videoFailed, setVideoFailed] = useState(false);
+    const videoRef = useRef(null);
     const minDurationAttr = Number.isFinite(Number(minDurationMs)) ? Math.max(0, Number(minDurationMs)) : 400;
     const sharedVideoProps = useMemo(() => ({
         src: loadingVideo,
@@ -26,12 +27,28 @@ export default function LoadingState({
         }
         return (
             <video
+                ref={videoRef}
                 {...sharedVideoProps}
-                className={className}
+                controls={false}
+                disablePictureInPicture
+                controlsList="nodownload nofullscreen noplaybackrate noremoteplayback"
+                className={`${className} pointer-events-none select-none`.trim()}
                 onError={() => setVideoFailed(true)}
             />
         );
     };
+
+    useEffect(() => {
+        if (videoFailed) return;
+        const node = videoRef.current;
+        if (!node) return;
+        const playPromise = node.play?.();
+        if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch(() => {
+                setVideoFailed(true);
+            });
+        }
+    }, [videoFailed]);
 
     if (fullScreen) {
         return (
