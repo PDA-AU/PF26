@@ -140,13 +140,11 @@ def get_chakravyuha_public_content(
     return _normalize_chakravyuha_content(sympo.content)
 
 
-def _serialize_chakravyuha_event(event: PersohubEvent, community: Optional[PersohubCommunity], club: Optional[PersohubClub]) -> Dict[str, Any]:
+def _serialize_chakravyuha_event(event: PersohubEvent) -> Dict[str, Any]:
     return {
         "id": event.id,
         "slug": event.slug,
         "event_code": event.event_code,
-        "community_id": (community.profile_id if community else None),
-        "community_name": (community.name if community else (club.name if club else None)),
         "title": event.title,
         "description": event.description,
         "start_date": event.start_date.isoformat() if event.start_date else None,
@@ -190,10 +188,40 @@ def get_chakravyuha_public_events(
         .outerjoin(PersohubCommunity, PersohubCommunity.id == PersohubEvent.community_id)
         .outerjoin(PersohubClub, PersohubClub.id == PersohubEvent.club_id)
         .filter(PersohubSympoEvent.sympo_id == sympo.id)
-        .order_by(PersohubEvent.start_date.asc().nullslast(), PersohubEvent.id.asc())
+        .order_by(PersohubClub.name.asc().nullslast(), PersohubEvent.start_date.asc().nullslast(), PersohubEvent.id.asc())
         .all()
     )
-    return [_serialize_chakravyuha_event(event, community, club) for event, community, club in rows]
+    fallback_club_ids = {
+        int(community.club_id)
+        for _, community, club in rows
+        if not club and community and community.club_id is not None
+    }
+    fallback_club_map: Dict[int, PersohubClub] = {}
+    if fallback_club_ids:
+        fallback_clubs = db.query(PersohubClub).filter(PersohubClub.id.in_(fallback_club_ids)).all()
+        fallback_club_map = {int(item.id): item for item in fallback_clubs}
+
+    grouped: Dict[int, Dict[str, Any]] = {}
+    for event, community, club in rows:
+        resolved_club = club
+        if not resolved_club and community and community.club_id is not None:
+            resolved_club = fallback_club_map.get(int(community.club_id))
+        if not resolved_club:
+            continue
+        club_id = int(resolved_club.id)
+        if club_id not in grouped:
+            grouped[club_id] = {
+                "club_id": club_id,
+                "club_name": resolved_club.name,
+                "club_url": resolved_club.club_url,
+                "club_tagline": resolved_club.club_tagline,
+                "club_logo_url": resolved_club.club_logo_url,
+                "events": [],
+            }
+        grouped[club_id]["events"].append(_serialize_chakravyuha_event(event))
+
+    ordered_club_ids = sorted(grouped.keys(), key=lambda value: str(grouped[value].get("club_name") or "").lower())
+    return [grouped[club_id] for club_id in ordered_club_ids]
 
 
 @router.post("/persohub/communities/{profile_id}/follow-toggle")
