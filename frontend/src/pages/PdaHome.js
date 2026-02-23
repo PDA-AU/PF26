@@ -879,29 +879,33 @@ export default function PdaHome() {
                                 >
                                     {filteredTeamMembers.map((member) => (
                                         <div key={member.regno} className="min-w-[250px] max-w-[260px] snap-start">
-                                            <div className="flex h-[350px] w-full flex-col rounded-3xl border border-black/10 bg-white p-5 text-center shadow-sm">
-                                            <img
-                                                src={member.photo_url || pdaLogo}
-                                                alt={member.name}
-                                                className="mx-auto h-36 w-36 rounded-3xl border border-black/10 object-cover"
-                                            />
-                                            <p className="mt-3 line-clamp-1 text-[10px] uppercase tracking-[0.28em] text-slate-500">
-                                                {member.team}
+                                            <div className="flex h-[360px] w-full flex-col overflow-hidden rounded-3xl border border-black/10 bg-white p-5 text-center shadow-sm">
+                                            <div className="mx-auto h-36 w-36 shrink-0 overflow-hidden rounded-3xl border border-black/10">
+                                                <img
+                                                    src={member.photo_url || pdaLogo}
+                                                    alt={member.name}
+                                                    className="h-full w-full object-cover"
+                                                />
+                                            </div>
+                                            <p className="mt-3 h-4 truncate text-[10px] uppercase tracking-[0.28em] text-slate-500">
+                                                {member.team || '\u00A0'}
                                             </p>
-                                            {member.designation ? (
-                                                <div className="mt-2 flex justify-center">
+                                            <div className="mt-2 flex h-7 justify-center">
+                                                {member.designation ? (
                                                     <div className="inline-flex max-w-full items-center truncate rounded-full border border-[#f6c347]/60 bg-[#fff3c4] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.25em] text-[#7a5a00]">
                                                         {member.designation === 'JS' ? 'Joint Secretary' : member.designation}
                                                     </div>
-                                                </div>
-                                            ) : null}
-                                            <h3 className="mt-2 line-clamp-1 text-lg font-heading font-bold">{member.name}</h3>
-                                            <p className="line-clamp-1 text-xs text-slate-600">{member.regno}</p>
-                                            {member.dept ? (
-                                                <p className="mt-2 line-clamp-1 text-[11px] uppercase tracking-[0.2em] text-slate-500">
-                                                    {shortDept(member.dept)}
+                                                ) : (
+                                                    <span className="opacity-0">-</span>
+                                                )}
+                                            </div>
+                                            <div className="mt-2 h-[58px] overflow-hidden">
+                                                <h3 className="line-clamp-1 text-lg font-heading font-bold">{member.name}</h3>
+                                                <p className="line-clamp-1 text-xs text-slate-600">{member.regno}</p>
+                                                <p className="mt-1 line-clamp-1 text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                                                    {shortDept(member.dept) || '\u00A0'}
                                                 </p>
-                                            ) : null}
+                                            </div>
                                             <div className="mt-auto pt-3">
                                                 <div className="mx-auto h-px w-16 bg-black/10"></div>
                                             </div>
