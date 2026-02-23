@@ -49,6 +49,22 @@ def _column_exists(conn, table_name: str, column_name: str) -> bool:
     return bool(result)
 
 
+def _column_udt_name(conn, table_name: str, column_name: str) -> Optional[str]:
+    result = conn.execute(
+        text(
+            """
+            SELECT udt_name
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = :table
+              AND column_name = :column
+            """
+        ),
+        {"table": table_name, "column": column_name},
+    ).fetchone()
+    return str(result[0]) if result and result[0] else None
+
+
 def _index_exists(conn, index_name: str) -> bool:
     result = conn.execute(
         text(
@@ -3206,6 +3222,16 @@ def ensure_persohub_admins_table(engine):
         conn.execute(text("ALTER TABLE persohub_admins ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER"))
         conn.execute(text("ALTER TABLE persohub_admins ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now()"))
         conn.execute(text("ALTER TABLE persohub_admins ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ"))
+        if _column_udt_name(conn, "persohub_admins", "policy") == "json":
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE persohub_admins
+                    ALTER COLUMN policy TYPE JSONB
+                    USING policy::jsonb
+                    """
+                )
+            )
 
         conn.execute(text("UPDATE persohub_admins SET role = 'admin' WHERE role IS NULL OR btrim(role) = ''"))
         conn.execute(text("UPDATE persohub_admins SET role = lower(role)"))
