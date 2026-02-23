@@ -22,6 +22,19 @@ const highlightStats = [
     { label: 'PDA Library Books', value: '8000+' }
 ];
 
+const DEPT_SHORT = {
+    'Artificial Intelligence and Data Science': 'AI & DS',
+    'Aerospace Engineering': 'AERO',
+    'Automobile Engineering': 'AUTO',
+    'Computer Technology': 'CT',
+    'Electronics and Communication Engineering': 'ECE',
+    'Electronics and Instrumentation Engineering': 'EIE',
+    'Production Technology': 'PROD',
+    'Robotics and Automation': 'RAE',
+    'Rubber and Plastics Technology': 'RPT',
+    'Information Technology': 'IT',
+};
+
 const values = [
     {
         title: 'Confidence',
@@ -80,6 +93,11 @@ const extractEventSlug = (item) => {
     return match?.[1] ? String(match[1]).trim().toLowerCase() : '';
 };
 
+const shortDept = (value) => {
+    const key = String(value || '').trim();
+    return DEPT_SHORT[key] || key || '';
+};
+
 export default function PdaHome() {
     const { user } = useAuth();
     const revealObserverRef = useRef(null);
@@ -100,6 +118,7 @@ export default function PdaHome() {
     const [activeFeaturedIndex, setActiveFeaturedIndex] = useState(0);
     const [isFeaturedFading, setIsFeaturedFading] = useState(false);
     const [teamMembers, setTeamMembers] = useState([]);
+    const [birthdayUsers, setBirthdayUsers] = useState([]);
     const [galleryItems, setGalleryItems] = useState([]);
     const [teamFilter, setTeamFilter] = useState('Executive');
     const [managedEvents, setManagedEvents] = useState([]);
@@ -139,13 +158,14 @@ export default function PdaHome() {
     useEffect(() => {
         const fetchPdaContent = async () => {
             try {
-                const [programsRes, eventsRes, teamRes, galleryRes, managedRes, allManagedRes] = await Promise.all([
+                const [programsRes, eventsRes, teamRes, galleryRes, managedRes, allManagedRes, birthdaysRes] = await Promise.all([
                     axios.get(`${API}/pda/programs`, { params: { limit: PROGRAMS_FETCH_LIMIT } }),
                     axios.get(`${API}/pda/events`, { params: { limit: EVENTS_FETCH_LIMIT } }),
                     axios.get(`${API}/pda/team`),
                     axios.get(`${API}/pda/gallery`, { params: { limit: GALLERY_FETCH_LIMIT } }),
                     axios.get(`${API}/pda/events/ongoing`),
-                    axios.get(`${API}/pda/events/all`)
+                    axios.get(`${API}/pda/events/all`),
+                    axios.get(`${API}/pda/birthdays/today`)
                 ]);
                 const programData = programsRes.data || [];
                 const eventData = eventsRes.data || [];
@@ -187,6 +207,7 @@ export default function PdaHome() {
                 setFeaturedItems(featuredList);
                 setActiveFeaturedIndex(0);
                 setTeamMembers(teamRes.data || []);
+                setBirthdayUsers(birthdaysRes.data || []);
                 setGalleryItems(galleryRes.data || []);
                 setManagedEvents(managedRes.data || []);
             } catch (error) {
@@ -323,6 +344,28 @@ export default function PdaHome() {
             return (a.name || '').localeCompare(b.name || '');
         });
 
+    const todayBirthdayWishes = useMemo(() => {
+        const wishes = (birthdayUsers || [])
+            .map((member) => {
+                const name = String(member?.name || '').trim();
+                const regno = String(member?.regno || '').trim();
+                if (!name) return null;
+                return `PDA Wishes ${name}${regno ? ` (${regno})` : ''} Happy Birthday 🎂🥳 `;
+            })
+            .filter(Boolean);
+        return Array.from(new Set(wishes));
+    }, [birthdayUsers]);
+
+    const birthdayMarqueeText = useMemo(() => {
+        if (!todayBirthdayWishes.length) return '';
+        const unit = `${todayBirthdayWishes.join('  •  ')}  •  `;
+        let loopText = unit;
+        while (loopText.length < 240) {
+            loopText += unit;
+        }
+        return loopText;
+    }, [todayBirthdayWishes]);
+
     const openPoster = (poster) => {
         if (!poster?.assets?.length) return;
         setSelectedPoster({
@@ -458,6 +501,17 @@ export default function PdaHome() {
                     </div>
                 </section>
 
+                {todayBirthdayWishes.length ? (
+                    <section className="mx-auto w-full max-w-6xl px-5 pb-4 md:pb-6">
+                        <div className="birthday-marquee-shell rounded-2xl border border-black/10 bg-[#fff5d6] px-0 py-2 shadow-sm">
+                            <div className="birthday-marquee-track" aria-label="Birthday wishes ticker">
+                                <span className="birthday-marquee-text">{birthdayMarqueeText}</span>
+                                <span className="birthday-marquee-text" aria-hidden="true">{birthdayMarqueeText}</span>
+                            </div>
+                        </div>
+                    </section>
+                ) : null}
+
                 {combinedFeaturedItems.length > 0 ? (
                     <section className="mx-auto w-full max-w-6xl px-5 pb-8">
                         <div className="featured-glow-card grid gap-6 rounded-3xl border border-black/10 bg-gradient-to-r from-[#fff1c7] via-[#fff8e8] to-white p-6 md:grid-cols-2 md:min-h-[320px] lg:grid-cols-[1.2fr_0.8fr]" data-reveal>
@@ -525,18 +579,40 @@ export default function PdaHome() {
                                 />
                             </div>
                             {combinedFeaturedItems.length > 1 ? (
-                                <div className="md:col-span-2 flex items-center justify-center gap-2 pt-2">
-                                    {combinedFeaturedItems.map((event, index) => (
-                                        <button
-                                            key={`${event.title}-${index}`}
-                                            type="button"
-                                            onClick={() => setActiveFeaturedIndex(index)}
-                                            className={`h-2.5 w-2.5 rounded-full transition ${
-                                                index === activeFeaturedIndex ? 'bg-[#0f1115]' : 'bg-black/20'
-                                            }`}
-                                            aria-label={`Show featured event ${index + 1}`}
-                                        />
-                                    ))}
+                                <div className="md:col-span-2 flex items-center justify-center gap-3 pt-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setActiveFeaturedIndex((prev) => (
+                                            (prev - 1 + combinedFeaturedItems.length) % combinedFeaturedItems.length
+                                        ))}
+                                        className="rounded-full border border-[#c99612] bg-[#f6c347] p-2 text-[#11131a] transition hover:bg-[#ffd16b]"
+                                        aria-label="Previous featured item"
+                                    >
+                                        <ChevronLeft className="h-4 w-4" />
+                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        {combinedFeaturedItems.map((event, index) => (
+                                            <button
+                                                key={`${event.title}-${index}`}
+                                                type="button"
+                                                onClick={() => setActiveFeaturedIndex(index)}
+                                                className={`h-2.5 w-2.5 rounded-full transition ${
+                                                    index === activeFeaturedIndex ? 'bg-[#0f1115]' : 'bg-black/20'
+                                                }`}
+                                                aria-label={`Show featured event ${index + 1}`}
+                                            />
+                                        ))}
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setActiveFeaturedIndex((prev) => (
+                                            (prev + 1) % combinedFeaturedItems.length
+                                        ))}
+                                        className="rounded-full border border-[#c99612] bg-[#f6c347] p-2 text-[#11131a] transition hover:bg-[#ffd16b]"
+                                        aria-label="Next featured item"
+                                    >
+                                        <ChevronRight className="h-4 w-4" />
+                                    </button>
                                 </div>
                             ) : null}
                         </div>
@@ -789,7 +865,7 @@ export default function PdaHome() {
                                 >
                                     {filteredTeamMembers.map((member) => (
                                         <div key={member.regno} className="min-w-[250px] max-w-[260px] snap-start">
-                                            <div className="flex h-[320px] w-full flex-col rounded-3xl border border-black/10 bg-white p-5 text-center shadow-sm">
+                                            <div className="flex min-h-[350px] w-full flex-col rounded-3xl border border-black/10 bg-white p-5 text-center shadow-sm">
                                             <img
                                                 src={member.photo_url || pdaLogo}
                                                 alt={member.name}
@@ -809,16 +885,19 @@ export default function PdaHome() {
                                             <p className="line-clamp-1 text-xs text-slate-600">{member.regno}</p>
                                             {member.dept ? (
                                                 <p className="mt-2 line-clamp-1 text-[11px] uppercase tracking-[0.2em] text-slate-500">
-                                                    {member.dept}
+                                                    {shortDept(member.dept)}
                                                 </p>
                                             ) : null}
-                                            <div className="mt-3 flex items-center justify-center gap-4 text-xs text-slate-600">
+                                            <div className="mt-auto pt-3">
+                                                <div className="mx-auto h-px w-16 bg-black/10"></div>
+                                            </div>
+                                            <div className="mt-3 flex flex-wrap items-center justify-center gap-3 text-xs text-slate-600">
                                                 {member.instagram_url ? (
                                                     <a
                                                         href={member.instagram_url}
                                                         target="_blank"
                                                         rel="noreferrer"
-                                                        className="inline-flex max-w-[110px] items-center gap-2 truncate text-[#b8890b] hover:text-[#0f1115]"
+                                                        className="inline-flex items-center gap-2 rounded-full border border-black/10 px-3 py-1 text-[#b8890b] hover:text-[#0f1115]"
                                                     >
                                                         <Instagram className="h-4 w-4 text-[#f6c347]" />
                                                         Instagram
@@ -829,10 +908,28 @@ export default function PdaHome() {
                                                     href={member.linkedin_url}
                                                     target="_blank"
                                                     rel="noreferrer"
-                                                    className="inline-flex max-w-[110px] items-center gap-2 truncate text-[#b8890b] hover:text-[#0f1115]"
+                                                    className="inline-flex items-center gap-2 rounded-full border border-black/10 px-3 py-1 text-[#b8890b] hover:text-[#0f1115]"
                                                 >
                                                     <Linkedin className="h-4 w-4 text-[#f6c347]" />
                                                     LinkedIn
+                                                </a>
+                                            ) : null}
+                                            {member.github_url ? (
+                                                <a
+                                                    href={member.github_url}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="inline-flex items-center gap-2 rounded-full border border-black/10 px-3 py-1 text-[#b8890b] hover:text-[#0f1115]"
+                                                >
+                                                    <svg
+                                                        viewBox="0 0 24 24"
+                                                        className="h-4 w-4 text-[#f6c347]"
+                                                        fill="currentColor"
+                                                        aria-hidden="true"
+                                                    >
+                                                        <path d="M12 .5a12 12 0 0 0-3.79 23.39c.6.11.82-.26.82-.58v-2.03c-3.34.73-4.05-1.41-4.05-1.41-.55-1.38-1.34-1.75-1.34-1.75-1.1-.74.08-.72.08-.72 1.21.08 1.85 1.24 1.85 1.24 1.08 1.85 2.84 1.31 3.53 1 .11-.79.42-1.31.76-1.61-2.67-.31-5.47-1.33-5.47-5.92 0-1.31.47-2.38 1.24-3.22-.12-.31-.54-1.57.12-3.27 0 0 1.01-.32 3.3 1.23a11.44 11.44 0 0 1 6 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.7.24 2.96.12 3.27.77.84 1.24 1.91 1.24 3.22 0 4.6-2.8 5.61-5.48 5.91.43.37.81 1.1.81 2.21v3.28c0 .32.21.69.82.58A12 12 0 0 0 12 .5Z" />
+                                                    </svg>
+                                                    GitHub
                                                 </a>
                                             ) : null}
                                         </div>

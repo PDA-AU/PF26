@@ -157,7 +157,7 @@ def _create_mock_users(db, *, count: int, stamp: str) -> List[PdaUser]:
         user = PdaUser(
             regno=regno,
             email=email,
-            hashed_password=get_password_hash("mockph123"),
+            hashed_password=get_password_hash("password"),
             name=f"{MOCK_MARKER}User_{next_idx}",
             profile_name=profile_name,
             dept="Information Technology",
@@ -200,6 +200,7 @@ def _seed_event_bundle(
         event = PersohubEvent(
             slug=_next_event_slug(db, f"mockph-{community.profile_id}-{stamp[-6:]}-{event_idx + 1}"),
             event_code=f"MOCKPH{stamp[-8:]}{community.id:02d}{event_idx + 1:02d}"[:20],
+            club_id=community.club_id,
             community_id=community.id,
             title=event_title,
             description=f"{MOCK_MARKER}Generated event for {community.profile_id}",
@@ -605,7 +606,7 @@ def seed_mock_data(
                 profile_id=profile_id,
                 club_id=club.id,
                 admin_id=admin.id,
-                hashed_password=get_password_hash(f"{profile_id}@123"),
+                hashed_password=get_password_hash("password"),
                 logo_url=f"https://placehold.co/300x300?text={profile_id}",
                 description=f"{MOCK_MARKER}Generated community for Persohub testing",
                 is_active=True,
@@ -731,6 +732,9 @@ def main() -> int:
     print("Persohub mock seed summary")
     for key, value in counts.items():
         print(f"- {key}: {value}")
+    if counts.get("users"):
+        print("- mock user password: password")
+    print("- mock community password: password")
     print("Cleanup with: python backend/scripts/cleanup_persohub_mock_data.py")
     if counts.get("users"):
         print("To also remove created MOCKPH users: python backend/scripts/cleanup_persohub_mock_data.py --include-users")

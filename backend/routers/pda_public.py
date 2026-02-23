@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 from typing import List, Optional
+from datetime import datetime, timedelta, timezone
 
 from database import get_db
-from models import PdaItem, PdaTeam, PdaGallery, PdaUser
-from schemas import ProgramResponse, EventResponse, PdaTeamResponse, PdaGalleryResponse
+from models import PdaItem, PdaTeam, PdaGallery, PdaUser, PdaAdmin
+from schemas import ProgramResponse, EventResponse, PdaTeamResponse, PdaGalleryResponse, PdaBirthdayWishResponse
 
 router = APIRouter()
 
@@ -96,3 +97,41 @@ def get_pda_gallery(
         .all()
     )
     return [PdaGalleryResponse.model_validate(item) for item in gallery]
+
+
+@router.get("/pda/birthdays/today", response_model=List[PdaBirthdayWishResponse])
+def get_pda_birthdays_today(db: Session = Depends(get_db)):
+    ist_now = datetime.now(timezone(timedelta(hours=5, minutes=30)))
+    month = ist_now.month
+    day = ist_now.day
+
+    rows = (
+        db.query(PdaUser.name, PdaUser.regno, PdaAdmin.policy)
+        .outerjoin(PdaAdmin, PdaAdmin.user_id == PdaUser.id)
+        .filter(
+            PdaUser.dob.isnot(None),
+            PdaUser.name.isnot(None),
+            func.upper(func.coalesce(PdaUser.college, "MIT")) == "MIT",
+            func.extract("month", PdaUser.dob) == month,
+            func.extract("day", PdaUser.dob) == day,
+        )
+        .order_by(PdaUser.name.asc().nullslast(), PdaUser.regno.asc().nullslast())
+        .all()
+    )
+
+    wishes: List[PdaBirthdayWishResponse] = []
+    for name, regno, policy in rows:
+        if not name:
+            continue
+        if str(regno or "").strip() == "0000000000":
+            continue
+        if isinstance(policy, dict) and bool(policy.get("superAdmin")):
+            continue
+        wishes.append(
+            PdaBirthdayWishResponse(
+                name=str(name).strip(),
+                regno=(str(regno).strip() if regno else None),
+            )
+        )
+
+    return wishes

@@ -14,6 +14,7 @@ import sys
 from typing import Dict, List
 
 from sqlalchemy import or_, text
+from sqlalchemy.exc import IntegrityError
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -282,9 +283,14 @@ def cleanup_db(dry_run: bool, include_users: bool) -> Dict[str, int]:
         ).delete(synchronize_session=False) or 0
 
         if user_ids:
-            counts["users"] = db.query(PdaUser).filter(
-                PdaUser.id.in_(user_ids)
-            ).delete(synchronize_session=False) or 0
+            deleted_users = 0
+            for user_id in user_ids:
+                try:
+                    with db.begin_nested():
+                        deleted_users += db.query(PdaUser).filter(PdaUser.id == user_id).delete(synchronize_session=False) or 0
+                except IntegrityError:
+                    continue
+            counts["users"] = deleted_users
 
         if dry_run:
             db.rollback()

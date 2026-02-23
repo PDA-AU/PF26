@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import LoadingState from '@/components/common/LoadingState';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import AdminLayout from '@/pages/HomeAdmin/AdminLayout';
@@ -686,7 +687,7 @@ export default function UsersAdmin() {
 
                 <div className="mt-6">
                     {loading ? (
-                        <div className="text-center text-sm text-slate-500">Loading...</div>
+                        <LoadingState variant="inline" />
                     ) : paged.length ? (
                         <div
                             className="overflow-hidden rounded-2xl border border-black/10"

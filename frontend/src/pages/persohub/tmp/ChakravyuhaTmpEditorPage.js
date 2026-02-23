@@ -5,6 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import { ccAdminApi } from '@/pages/HomeAdmin/ccAdminApi';
 import { uploadPoster } from '@/pages/HomeAdmin/adminApi';
 import { Button } from '@/components/ui/button';
+import LoadingState from '@/components/common/LoadingState';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -374,7 +375,7 @@ export default function ChakravyuhaTmpEditorPage() {
                     </div>
                 </div>
 
-                {loading ? <p className="text-sm text-slate-500">Loading...</p> : null}
+                {loading ? <LoadingState variant="inline" /> : null}
 
                 <Section title="Hero">
                     <div className="grid gap-3 md:grid-cols-2">

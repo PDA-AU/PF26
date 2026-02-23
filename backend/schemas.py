@@ -1300,6 +1300,11 @@ class PdaGalleryResponse(BaseModel):
         from_attributes = True
 
 
+class PdaBirthdayWishResponse(BaseModel):
+    name: str
+    regno: Optional[str] = None
+
+
 class RecruitmentApprovalItem(BaseModel):
     id: int
     team: Optional["PdaTeamName"] = None
@@ -1319,6 +1324,11 @@ class PdaManagedEventTypeEnum(str, Enum):
     SESSION = "Session"
     WORKSHOP = "Workshop"
     EVENT = "Event"
+    TECHNICAL = "Technical"
+    FUNTECHINICAL = "FunTechinical"
+    HACKATHON = "Hackathon"
+    SIGNATURE = "Signature"
+    NONTECHINICAL = "NonTechinical"
 
 
 class PdaManagedEventFormatEnum(str, Enum):
@@ -1891,7 +1901,7 @@ class PdaManagedScoreEntry(BaseModel):
     entity_type: PdaManagedEntityTypeEnum
     user_id: Optional[int] = None
     team_id: Optional[int] = None
-    criteria_scores: Dict[str, float] = Field(default_factory=dict)
+    criteria_scores: Dict[str, Any] = Field(default_factory=dict)
     is_present: bool = True
 
 

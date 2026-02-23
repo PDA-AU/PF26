@@ -28,6 +28,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
+import LoadingState from '@/components/common/LoadingState';
 
 import { usePersohubAdminAuth } from '@/context/PersohubAdminAuthContext';
 import EventAdminShell, { useEventAdminShell } from './EventAdminShell';
@@ -237,6 +238,7 @@ const scoreSnapshotForRow = (row, criteriaList) => {
     return JSON.stringify({
         is_present: Boolean(row?.is_present),
         criteria_values: criteriaValues,
+        judge_feedback: String(row?.criteria_scores?.__judge_feedback || '').trim(),
     });
 };
 
@@ -252,7 +254,11 @@ const parseScoreSnapshot = (snapshot, criteriaList) => {
         }, {});
         return {
             is_present: parsed.is_present === true,
-            criteria_scores: criteriaScores,
+            criteria_scores: (() => {
+                const feedback = String(parsed.judge_feedback || '').trim();
+                if (!feedback) return criteriaScores;
+                return { ...criteriaScores, __judge_feedback: feedback };
+            })(),
         };
     } catch {
         return {
@@ -792,12 +798,19 @@ function ScoringContent() {
         const present = isPresent === true;
         updateRowScoreDraft(entityType, entityId, (row) => {
             if (!canEditScoreRow(row)) return row;
+            const sourceScores = row.criteria_scores && typeof row.criteria_scores === 'object' ? row.criteria_scores : {};
+            const metadataScores = Object.keys(sourceScores).reduce((acc, key) => {
+                if (String(key).startsWith('__')) {
+                    acc[key] = sourceScores[key];
+                }
+                return acc;
+            }, {});
             if (!present) {
                 const zeroed = Object.fromEntries(criteria.map((criterion) => [criterion.name, 0]));
-                return { ...row, is_present: false, criteria_scores: zeroed };
+                return { ...row, is_present: false, criteria_scores: { ...zeroed, ...metadataScores } };
             }
             const unscored = Object.fromEntries(criteria.map((criterion) => [criterion.name, -1]));
-            return { ...row, is_present: true, criteria_scores: unscored };
+            return { ...row, is_present: true, criteria_scores: { ...unscored, ...metadataScores } };
         });
     }, [canEditScoreRow, criteria, updateRowScoreDraft]);
 
@@ -805,14 +818,22 @@ function ScoringContent() {
         if (!row) return;
         setScoreModalEntity({ entityType: row._entityType, entityId: row._entityId });
         setScoreModalDraft(
-            criteria.reduce((acc, criterion) => {
-                const value = row.criteria_scores?.[criterion.name];
-                acc[criterion.name] = value == null ? '' : String(value);
-                return acc;
-            }, {})
+            (() => {
+                const next = criteria.reduce((acc, criterion) => {
+                    const value = row.criteria_scores?.[criterion.name];
+                    acc[criterion.name] = value == null ? '' : String(value);
+                    return acc;
+                }, {});
+                next.__judge_feedback = String(row?.criteria_scores?.__judge_feedback || '');
+                return next;
+            })()
         );
         setScoreModalOpen(true);
     }, [criteria]);
+
+    const handleScoreModalFeedbackChange = useCallback((value) => {
+        setScoreModalDraft((prev) => ({ ...prev, __judge_feedback: value }));
+    }, []);
 
     const closeScoreModal = useCallback(() => {
         setScoreModalOpen(false);
@@ -829,6 +850,13 @@ function ScoringContent() {
         if (!scoreModalEntity || !scoreModalRow) return;
         updateRowScoreDraft(scoreModalEntity.entityType, scoreModalEntity.entityId, (row) => {
             if (!canEditScoreRow(row)) return row;
+            const sourceScores = row.criteria_scores && typeof row.criteria_scores === 'object' ? row.criteria_scores : {};
+            const metadataScores = Object.keys(sourceScores).reduce((acc, key) => {
+                if (String(key).startsWith('__') && key !== '__judge_feedback' && key !== '__participant_notes_snapshot') {
+                    acc[key] = sourceScores[key];
+                }
+                return acc;
+            }, {});
             const nextScores = criteria.reduce((acc, criterion) => {
                 const maxMarks = Number(criterion.max_marks ?? 100);
                 const parsed = Number.parseFloat(scoreModalDraft?.[criterion.name]);
@@ -838,9 +866,15 @@ function ScoringContent() {
                 acc[criterion.name] = row.is_present ? normalized : 0;
                 return acc;
             }, {});
+            const feedback = String(scoreModalDraft?.__judge_feedback || '').trim();
+            if (feedback) {
+                metadataScores.__judge_feedback = feedback;
+            } else {
+                delete metadataScores.__judge_feedback;
+            }
             return {
                 ...row,
-                criteria_scores: nextScores,
+                criteria_scores: { ...nextScores, ...metadataScores },
             };
         });
         closeScoreModal();
@@ -1241,15 +1275,22 @@ function ScoringContent() {
                 entity_type: row._entityType,
                 user_id: row._entityType === 'user' ? row._entityId : null,
                 team_id: row._entityType === 'team' ? row._entityId : null,
-                criteria_scores: Object.keys(maxByCriteria).reduce((acc, criteriaName) => {
-                    const max = maxByCriteria[criteriaName];
-                    const parsed = Number.parseFloat(row.criteria_scores?.[criteriaName]);
-                    const safe = Number.isNaN(parsed)
-                        ? (row.is_present ? -1 : 0)
-                        : Math.min(parsed, max);
-                    acc[criteriaName] = safe;
-                    return acc;
-                }, {}),
+                criteria_scores: (() => {
+                    const scores = Object.keys(maxByCriteria).reduce((acc, criteriaName) => {
+                        const max = maxByCriteria[criteriaName];
+                        const parsed = Number.parseFloat(row.criteria_scores?.[criteriaName]);
+                        const safe = Number.isNaN(parsed)
+                            ? (row.is_present ? -1 : 0)
+                            : Math.min(parsed, max);
+                        acc[criteriaName] = safe;
+                        return acc;
+                    }, {});
+                    const feedback = String(row?.criteria_scores?.__judge_feedback || '').trim();
+                    if (feedback) {
+                        scores.__judge_feedback = feedback;
+                    }
+                    return scores;
+                })(),
                 is_present: Boolean(row.is_present),
             }));
             const restoreEntries = sourceRows.map((row) => {
@@ -1578,12 +1619,7 @@ function ScoringContent() {
     const previewReadyCount = Number(previewData.ready_to_import || 0);
 
     if (loading) {
-        return (
-            <div className="neo-card text-center py-12">
-                <div className="loading-spinner mx-auto"></div>
-                <p className="mt-4">Loading...</p>
-            </div>
-        );
+        return <LoadingState />;
     }
 
     if (!round) {
@@ -2584,6 +2620,12 @@ function ScoringContent() {
                                 <p className="mt-2 text-xs font-semibold text-orange-700">Participant is marked absent. Scores will be saved as 0.</p>
                             ) : null}
                         </div>
+                        <div className="rounded-md border border-slate-300 bg-white p-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Participant Notes</p>
+                            <p className="mt-1 whitespace-pre-wrap text-sm text-slate-800">
+                                {String(scoreModalRow?.submission_notes || '').trim() || 'No participant notes provided.'}
+                            </p>
+                        </div>
                         <div className="space-y-3">
                             {criteria.map((criterion, index) => (
                                 <div key={`${criterion.name}-${index}`} className="space-y-2 rounded-md border border-slate-300 p-3">
@@ -2616,6 +2658,18 @@ function ScoringContent() {
                                     ) : null}
                                 </div>
                             ))}
+                        </div>
+                        <div className="space-y-2 rounded-md border border-slate-300 p-3">
+                            <Label className="font-semibold">Judge Feedback (optional)</Label>
+                            <Textarea
+                                value={scoreModalDraft?.__judge_feedback ?? ''}
+                                onChange={(e) => handleScoreModalFeedbackChange(e.target.value)}
+                                className="neo-input min-h-[88px]"
+                                placeholder="Add qualitative feedback for this submission..."
+                                disabled={!canEditScoreRow(scoreModalRow)}
+                                maxLength={2000}
+                            />
+                            <p className="text-[11px] text-slate-600">Saved with score data.</p>
                         </div>
                         <p className="text-xs font-semibold text-orange-700">Changes are only saved locally</p>
                         <div className="flex items-center justify-end gap-2">

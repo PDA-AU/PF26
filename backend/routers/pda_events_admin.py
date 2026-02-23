@@ -8,7 +8,7 @@ import ssl
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, Response, UploadFile, status
@@ -59,6 +59,8 @@ from schemas import (
     PdaManagedEventCreate,
     PdaManagedEventRegistrationUpdate,
     PdaManagedEventResponse,
+    PdaManagedEventTypeEnum,
+    PdaManagedEventStatusEnum,
     PdaManagedEventStatusUpdate,
     PdaManagedEventVisibilityUpdate,
     PdaManagedEventUpdate,
@@ -396,6 +398,65 @@ def _to_event_open_for(value) -> str:
 
 def _to_round_state(value) -> PdaEventRoundState:
     return PdaEventRoundState[value.name] if hasattr(value, "name") else PdaEventRoundState(value)
+
+
+def _to_managed_event_type(value) -> PdaManagedEventTypeEnum:
+    raw = str(value.name if hasattr(value, "name") else value or "").strip().upper()
+    if raw == "SESSION":
+        return PdaManagedEventTypeEnum.SESSION
+    if raw == "WORKSHOP":
+        return PdaManagedEventTypeEnum.WORKSHOP
+    if raw == "TECHNICAL":
+        return PdaManagedEventTypeEnum.TECHNICAL
+    if raw == "FUNTECHINICAL":
+        return PdaManagedEventTypeEnum.FUNTECHINICAL
+    if raw == "HACKATHON":
+        return PdaManagedEventTypeEnum.HACKATHON
+    if raw == "SIGNATURE":
+        return PdaManagedEventTypeEnum.SIGNATURE
+    if raw == "NONTECHINICAL":
+        return PdaManagedEventTypeEnum.NONTECHINICAL
+    return PdaManagedEventTypeEnum.EVENT
+
+
+def _to_managed_event_status(value) -> PdaManagedEventStatusEnum:
+    raw = str(value.name if hasattr(value, "name") else value or "").strip().upper()
+    if raw == "OPEN":
+        return PdaManagedEventStatusEnum.OPEN
+    return PdaManagedEventStatusEnum.CLOSED
+
+
+def _managed_event_payload(event: PdaEvent) -> dict:
+    payload = {
+        key: getattr(event, key)
+        for key in (
+            "id",
+            "slug",
+            "event_code",
+            "club_id",
+            "title",
+            "description",
+            "start_date",
+            "end_date",
+            "poster_url",
+            "whatsapp_url",
+            "external_url_name",
+            "format",
+            "template_option",
+            "participant_mode",
+            "round_mode",
+            "round_count",
+            "team_min_size",
+            "team_max_size",
+            "is_visible",
+            "registration_open",
+            "open_for",
+            "created_at",
+        )
+    }
+    payload["event_type"] = _to_managed_event_type(event.event_type)
+    payload["status"] = _to_managed_event_status(event.status)
+    return payload
 
 
 def _validate_event_dates(start_date, end_date) -> None:
@@ -845,7 +906,7 @@ def list_managed_events(
             return []
         query = query.filter(PdaEvent.slug.in_(allowed_slugs))
     events = query.order_by(PdaEvent.created_at.desc()).all()
-    return [PdaManagedEventResponse.model_validate(event) for event in events]
+    return [PdaManagedEventResponse.model_validate(_managed_event_payload(event)) for event in events]
 
 
 @router.post("/pda-admin/events", response_model=PdaManagedEventResponse)
@@ -936,7 +997,7 @@ def create_managed_event(
         path="/pda-admin/events",
         meta={"slug": new_event.slug, "event_id": new_event.id},
     )
-    return PdaManagedEventResponse.model_validate(new_event)
+    return PdaManagedEventResponse.model_validate(_managed_event_payload(new_event))
 
 
 @router.put("/pda-admin/events/{slug}", response_model=PdaManagedEventResponse)
@@ -995,7 +1056,7 @@ def update_managed_event(
         path=f"/pda-admin/events/{slug}",
         meta={"slug": slug},
     )
-    return PdaManagedEventResponse.model_validate(event)
+    return PdaManagedEventResponse.model_validate(_managed_event_payload(event))
 
 
 @router.get("/pda-admin/events/{slug}", response_model=PdaManagedEventResponse)
@@ -1005,7 +1066,7 @@ def get_managed_event(
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
-    return PdaManagedEventResponse.model_validate(event)
+    return PdaManagedEventResponse.model_validate(_managed_event_payload(event))
 
 
 @router.delete("/pda-admin/events/{slug}")
@@ -1107,7 +1168,7 @@ def update_managed_event_status(
         path=f"/pda-admin/events/{slug}/status",
         meta={"slug": slug, "status": payload.status.value},
     )
-    return PdaManagedEventResponse.model_validate(event)
+    return PdaManagedEventResponse.model_validate(_managed_event_payload(event))
 
 
 @router.put("/pda-admin/events/{slug}/registration", response_model=PdaManagedEventResponse)
@@ -1130,7 +1191,7 @@ def update_managed_event_registration(
         path=f"/pda-admin/events/{slug}/registration",
         meta={"slug": slug, "registration_open": bool(payload.registration_open)},
     )
-    return PdaManagedEventResponse.model_validate(event)
+    return PdaManagedEventResponse.model_validate(_managed_event_payload(event))
 
 
 @router.put("/pda-admin/events/{slug}/visibility", response_model=PdaManagedEventResponse)
@@ -1153,7 +1214,7 @@ def update_managed_event_visibility(
         path=f"/pda-admin/events/{slug}/visibility",
         meta={"slug": slug, "is_visible": bool(payload.is_visible)},
     )
-    return PdaManagedEventResponse.model_validate(event)
+    return PdaManagedEventResponse.model_validate(_managed_event_payload(event))
 
 
 @router.get("/pda-admin/events/{slug}/dashboard")
@@ -1235,7 +1296,7 @@ def event_dashboard(
     leaderboard_avg_score = (sum(leaderboard_scores) / len(leaderboard_scores)) if leaderboard_scores else None
 
     return {
-        "event": PdaManagedEventResponse.model_validate(event),
+        "event": PdaManagedEventResponse.model_validate(_managed_event_payload(event)),
         "registrations": registrations,
         "rounds": rounds,
         "attendance_present": attendance_present,
@@ -3272,6 +3333,7 @@ def round_participants(
             "submission_type": submission_row.submission_type if submission_row else None,
             "submission_file_url": submission_row.file_url if submission_row else None,
             "submission_link_url": submission_row.link_url if submission_row else None,
+            "submission_notes": submission_row.notes if submission_row else None,
             "submission_is_locked": bool(submission_row.is_locked) if submission_row else False,
             "panel_id": panel_id,
             "panel_no": int(panel_row.panel_no) if panel_row and panel_row.panel_no is not None else None,
@@ -3572,6 +3634,14 @@ def save_scores(
         score_row = score_user_map.get(entity_id_value) if is_user else score_team_map.get(entity_id_value)
         attendance_row = attendance_user_map.get(entity_id_value) if is_user else attendance_team_map.get(entity_id_value)
 
+        raw_scores = entry.criteria_scores if isinstance(entry.criteria_scores, dict) else {}
+        meta_scores: Dict[str, Any] = {}
+        raw_feedback = raw_scores.get("__judge_feedback")
+        if raw_feedback is not None:
+            cleaned_feedback = str(raw_feedback).strip()
+            if cleaned_feedback:
+                meta_scores["__judge_feedback"] = cleaned_feedback[:2000]
+
         if not entry.is_present:
             safe_scores = {name: 0.0 for name in criteria_max.keys()}
             total = 0.0
@@ -3579,15 +3649,16 @@ def save_scores(
         else:
             safe_scores = {}
             for name, max_marks in criteria_max.items():
-                value = float((entry.criteria_scores or {}).get(name, 0.0))
+                value = float(raw_scores.get(name, 0.0))
                 if value < 0 or value > max_marks:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Score for {name} must be between 0 and {max_marks}")
                 safe_scores[name] = value
             total = float(sum(safe_scores.values()))
             normalized = float((total / max_total * 100) if max_total > 0 else 0.0)
+        persisted_scores = {**safe_scores, **meta_scores}
 
         if score_row:
-            score_row.criteria_scores = safe_scores
+            score_row.criteria_scores = persisted_scores
             score_row.total_score = total
             score_row.normalized_score = normalized
             score_row.is_present = bool(entry.is_present)
@@ -3598,7 +3669,7 @@ def save_scores(
                 entity_type=entity_type,
                 user_id=user_id,
                 team_id=team_id,
-                criteria_scores=safe_scores,
+                criteria_scores=persisted_scores,
                 total_score=total,
                 normalized_score=normalized,
                 is_present=bool(entry.is_present),

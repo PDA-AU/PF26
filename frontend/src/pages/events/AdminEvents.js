@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { uploadPoster } from '@/pages/HomeAdmin/adminApi';
 import { compressImageToWebp } from '@/utils/imageCompression';
 import ParsedDescription from '@/components/common/ParsedDescription';
+import LoadingState from '@/components/common/LoadingState';
 import {
     filterPosterAssetsByRatio,
     parsePosterAssets,
@@ -536,7 +537,7 @@ export default function AdminEvents() {
             <section className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
                 <h2 className="text-2xl font-heading font-black">Available Events</h2>
                 {loading ? (
-                    <p className="mt-4 text-sm text-slate-500">Loading...</p>
+                    <LoadingState variant="inline" containerClassName="mt-4" />
                 ) : events.length === 0 ? (
                     <p className="mt-4 text-sm text-slate-500">No events available for your policy.</p>
                 ) : (

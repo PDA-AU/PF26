@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import LoadingState from '@/components/common/LoadingState';
 import { useAuth } from '@/context/AuthContext';
 import PdaLogo from '@/assets/pda-logo.png';
 
@@ -79,13 +80,7 @@ export default function AdminLayout({ title, subtitle, children, allowEventAdmin
     );
 
     if (authLoading) {
-        return (
-            <div className="min-h-screen bg-[#f7f5f0] flex items-center justify-center">
-                <div className="rounded-3xl border border-black/10 bg-white p-8 text-center shadow-lg">
-                    <p className="text-lg font-heading font-black">Checking admin access...</p>
-                </div>
-            </div>
-        );
+        return <LoadingState fullScreen message="Checking admin access..." />;
     }
 
     const allowPanel = canAccessHome || (allowEventAdmin && canAccessEvents);

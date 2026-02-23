@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import LoadingState from '@/components/common/LoadingState';
 import PersohubAdminLayout from '@/pages/persohub/admin/PersohubAdminLayout';
 import { persohubAdminApi } from '@/pages/persohub/admin/api';
 
@@ -247,7 +248,7 @@ export default function PersohubAdminCommunitiesPage() {
                 </div>
 
                 {loading ? (
-                    <p className="mt-4 text-sm text-slate-500">Loading...</p>
+                    <LoadingState variant="inline" containerClassName="mt-4" />
                 ) : rows.length === 0 ? (
                     <p className="mt-4 text-sm text-slate-500">No communities in this club yet.</p>
                 ) : (

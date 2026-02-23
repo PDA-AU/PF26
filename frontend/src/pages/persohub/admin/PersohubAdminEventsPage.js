@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import ParsedDescription from '@/components/common/ParsedDescription';
+import LoadingState from '@/components/common/LoadingState';
 import { usePersohubAdminAuth } from '@/context/PersohubAdminAuthContext';
 import { persohubAdminApi } from '@/pages/persohub/admin/api';
 import PersohubAdminLayout from '@/pages/persohub/admin/PersohubAdminLayout';
@@ -700,7 +701,7 @@ export default function PersohubAdminEventsPage() {
                     />
                 </div>
                 {loading ? (
-                    <p className="mt-4 text-sm text-slate-500">Loading...</p>
+                    <LoadingState variant="inline" containerClassName="mt-4" />
                 ) : events.length === 0 ? (
                     <p className="mt-4 text-sm text-slate-500">No events available yet.</p>
                 ) : (

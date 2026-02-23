@@ -2,6 +2,7 @@ import React from "react";
 import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
+import LoadingState from "@/components/common/LoadingState";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { PersohubAdminAuthProvider, usePersohubAdminAuth } from "@/context/PersohubAdminAuthContext";
 
@@ -59,13 +60,7 @@ const ProtectedPdaRoute = ({ children, requirePf = false, requireHome = false, r
     const { user, loading } = useAuth();
 
     if (loading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-white">
-                <div className="neo-card animate-pulse">
-                    <p className="font-heading text-xl">Loading...</p>
-                </div>
-            </div>
-        );
+        return <LoadingState fullScreen />;
     }
 
     if (!user) {
@@ -111,13 +106,7 @@ const ProtectedPersohubEventsRoute = ({ children }) => {
     const { community, loading } = usePersohubAdminAuth();
 
     if (loading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-white">
-                <div className="neo-card animate-pulse">
-                    <p className="font-heading text-xl">Loading...</p>
-                </div>
-            </div>
-        );
+        return <LoadingState fullScreen />;
     }
 
     if (!community) {
@@ -135,13 +124,7 @@ const ProtectedPersohubOwnerRoute = ({ children }) => {
     const { community, loading } = usePersohubAdminAuth();
 
     if (loading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-white">
-                <div className="neo-card animate-pulse">
-                    <p className="font-heading text-xl">Loading...</p>
-                </div>
-            </div>
-        );
+        return <LoadingState fullScreen />;
     }
 
     if (!community) {

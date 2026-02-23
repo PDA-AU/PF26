@@ -8,7 +8,7 @@ import ssl
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, Response, UploadFile, status
@@ -3318,6 +3318,7 @@ def round_participants(
             "submission_type": submission_row.submission_type if submission_row else None,
             "submission_file_url": submission_row.file_url if submission_row else None,
             "submission_link_url": submission_row.link_url if submission_row else None,
+            "submission_notes": submission_row.notes if submission_row else None,
             "submission_is_locked": bool(submission_row.is_locked) if submission_row else False,
             "panel_id": panel_id,
             "panel_no": int(panel_row.panel_no) if panel_row and panel_row.panel_no is not None else None,
@@ -3618,6 +3619,14 @@ def save_scores(
         score_row = score_user_map.get(entity_id_value) if is_user else score_team_map.get(entity_id_value)
         attendance_row = attendance_user_map.get(entity_id_value) if is_user else attendance_team_map.get(entity_id_value)
 
+        raw_scores = entry.criteria_scores if isinstance(entry.criteria_scores, dict) else {}
+        meta_scores: Dict[str, Any] = {}
+        raw_feedback = raw_scores.get("__judge_feedback")
+        if raw_feedback is not None:
+            cleaned_feedback = str(raw_feedback).strip()
+            if cleaned_feedback:
+                meta_scores["__judge_feedback"] = cleaned_feedback[:2000]
+
         if not entry.is_present:
             safe_scores = {name: 0.0 for name in criteria_max.keys()}
             total = 0.0
@@ -3625,15 +3634,16 @@ def save_scores(
         else:
             safe_scores = {}
             for name, max_marks in criteria_max.items():
-                value = float((entry.criteria_scores or {}).get(name, 0.0))
+                value = float(raw_scores.get(name, 0.0))
                 if value < 0 or value > max_marks:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Score for {name} must be between 0 and {max_marks}")
                 safe_scores[name] = value
             total = float(sum(safe_scores.values()))
             normalized = float((total / max_total * 100) if max_total > 0 else 0.0)
+        persisted_scores = {**safe_scores, **meta_scores}
 
         if score_row:
-            score_row.criteria_scores = safe_scores
+            score_row.criteria_scores = persisted_scores
             score_row.total_score = total
             score_row.normalized_score = normalized
             score_row.is_present = bool(entry.is_present)
@@ -3644,7 +3654,7 @@ def save_scores(
                 entity_type=entity_type,
                 user_id=user_id,
                 team_id=team_id,
-                criteria_scores=safe_scores,
+                criteria_scores=persisted_scores,
                 total_score=total,
                 normalized_score=normalized,
                 is_present=bool(entry.is_present),

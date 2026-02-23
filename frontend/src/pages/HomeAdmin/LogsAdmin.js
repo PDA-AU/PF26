@@ -3,6 +3,7 @@ import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import LoadingState from '@/components/common/LoadingState';
 import { useAuth } from '@/context/AuthContext';
 import AdminLayout from '@/pages/HomeAdmin/AdminLayout';
 import { API } from '@/pages/HomeAdmin/adminApi';
@@ -142,8 +143,8 @@ export default function LogsAdmin() {
                         <tbody className="divide-y divide-black/5">
                             {loading ? (
                                 <tr>
-                                    <td colSpan={8} className="px-3 py-6 text-center text-slate-500">
-                                        Loading...
+                                    <td colSpan={8} className="px-3 py-6">
+                                        <LoadingState variant="inline" />
                                     </td>
                                 </tr>
                             ) : filteredLogs.length ? filteredLogs.map((log) => (

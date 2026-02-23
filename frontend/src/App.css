@@ -253,3 +253,50 @@
         animation: none;
     }
 }
+
+.birthday-marquee-shell {
+    overflow: hidden;
+    position: relative;
+}
+
+.birthday-marquee-track {
+    display: flex;
+    width: max-content;
+    white-space: nowrap;
+    animation: birthday-marquee 22s linear infinite;
+    will-change: transform;
+}
+
+.birthday-marquee-text {
+    display: inline-block;
+    flex: 0 0 auto;
+    padding: 0 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #6e5300;
+}
+
+@keyframes birthday-marquee {
+    0% {
+        transform: translateX(0);
+    }
+    100% {
+        transform: translateX(-50%);
+    }
+}
+
+@media (max-width: 640px) {
+    .birthday-marquee-text {
+        font-size: 0.6875rem;
+        padding: 0 0.5rem;
+        letter-spacing: 0.06em;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .birthday-marquee-track {
+        animation: none;
+    }
+}
