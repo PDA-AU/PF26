@@ -11,12 +11,6 @@ import LogoUploadField from '@/pages/persohub/admin/components/LogoUploadField';
 import ProfileEditModal from '@/pages/persohub/admin/components/ProfileEditModal';
 import ProfileSummaryCard from '@/pages/persohub/admin/components/ProfileSummaryCard';
 
-const emptyCommunityForm = {
-    name: '',
-    logo_url: '',
-    description: '',
-};
-
 const emptyClubForm = {
     name: '',
     club_logo_url: '',
@@ -31,13 +25,10 @@ export default function PersohubAdminProfilePage() {
     const [loading, setLoading] = useState(true);
     const [profile, setProfile] = useState(null);
 
-    const [communityModalOpen, setCommunityModalOpen] = useState(false);
     const [clubModalOpen, setClubModalOpen] = useState(false);
 
-    const [communityForm, setCommunityForm] = useState(emptyCommunityForm);
     const [clubForm, setClubForm] = useState(emptyClubForm);
 
-    const [savingCommunity, setSavingCommunity] = useState(false);
     const [savingClub, setSavingClub] = useState(false);
 
     const loadProfile = useCallback(async () => {
@@ -62,16 +53,6 @@ export default function PersohubAdminProfilePage() {
         loadProfile();
     }, [loadProfile]);
 
-    const openCommunityModal = () => {
-        if (!profile?.community) return;
-        setCommunityForm({
-            name: profile.community.name || '',
-            logo_url: profile.community.logo_url || '',
-            description: profile.community.description || '',
-        });
-        setCommunityModalOpen(true);
-    };
-
     const openClubModal = () => {
         if (!profile?.club) return;
         setClubForm({
@@ -82,24 +63,6 @@ export default function PersohubAdminProfilePage() {
             club_url: profile.club.club_url || '',
         });
         setClubModalOpen(true);
-    };
-
-    const handleSaveCommunity = async () => {
-        setSavingCommunity(true);
-        try {
-            const response = await persohubAdminApi.updateAdminCommunity({
-                name: communityForm.name,
-                logo_url: communityForm.logo_url || null,
-                description: communityForm.description || null,
-            });
-            setProfile(response);
-            setCommunityModalOpen(false);
-            toast.success('Community profile updated');
-        } catch (error) {
-            toast.error(persohubAdminApi.parseApiError(error, 'Failed to update community profile'));
-        } finally {
-            setSavingCommunity(false);
-        }
     };
 
     const handleSaveClub = async () => {
@@ -122,17 +85,6 @@ export default function PersohubAdminProfilePage() {
         }
     };
 
-    const communityFields = useMemo(() => {
-        if (!profile?.community) return [];
-        return [
-            { label: 'Name', value: profile.community.name },
-            { label: 'Profile ID', value: profile.community.profile_id },
-            { label: 'Logo URL', value: profile.community.logo_url },
-            { label: 'Active', value: profile.community.is_active ? 'Yes' : 'No' },
-            { label: 'Description', value: profile.community.description, fullWidth: true },
-        ];
-    }, [profile]);
-
     const clubFields = useMemo(() => {
         if (!profile?.club) return [];
         return [
@@ -148,22 +100,13 @@ export default function PersohubAdminProfilePage() {
     return (
         <PersohubAdminLayout
             title="Persohub Admin Profile"
-            subtitle="Manage your community and linked club profile metadata."
+            subtitle="Manage your linked club profile metadata."
             activeTab="profile"
         >
             {loading ? (
                 <section className="rounded-2xl border border-black/10 bg-white p-5 text-sm text-slate-600">
                     Loading profile details...
                 </section>
-            ) : null}
-
-            {!loading && profile?.community ? (
-                <ProfileSummaryCard
-                    title="Community Profile"
-                    subtitle="Editable by the logged-in community admin account"
-                    fields={communityFields}
-                    onEdit={openCommunityModal}
-                />
             ) : null}
 
             {!loading && profile?.club ? (
@@ -186,49 +129,6 @@ export default function PersohubAdminProfilePage() {
                     No club is currently linked to this community account.
                 </section>
             ) : null}
-
-            <ProfileEditModal
-                open={communityModalOpen}
-                onOpenChange={setCommunityModalOpen}
-                title="Edit Community Profile"
-                subtitle="Update your own community details."
-                submitting={savingCommunity}
-                onSubmit={handleSaveCommunity}
-            >
-                <div className="space-y-2">
-                    <Label htmlFor="community-name">Community Name</Label>
-                    <Input
-                        id="community-name"
-                        value={communityForm.name}
-                        onChange={(event) => setCommunityForm((prev) => ({ ...prev, name: event.target.value }))}
-                        required
-                    />
-                </div>
-
-                <div className="space-y-2">
-                    <Label htmlFor="community-profile-id">Profile ID (read-only)</Label>
-                    <Input id="community-profile-id" value={profile?.community?.profile_id || ''} readOnly disabled />
-                </div>
-
-                <LogoUploadField
-                    id="community-logo-url"
-                    label="Community Logo URL"
-                    value={communityForm.logo_url}
-                    onChange={(value) => setCommunityForm((prev) => ({ ...prev, logo_url: value }))}
-                    onUploadFile={(file) => persohubAdminApi.uploadProfileImage(file)}
-                    parseApiError={persohubAdminApi.parseApiError}
-                />
-
-                <div className="space-y-2">
-                    <Label htmlFor="community-description">Description</Label>
-                    <Textarea
-                        id="community-description"
-                        value={communityForm.description}
-                        onChange={(event) => setCommunityForm((prev) => ({ ...prev, description: event.target.value }))}
-                        rows={5}
-                    />
-                </div>
-            </ProfileEditModal>
 
             <ProfileEditModal
                 open={clubModalOpen}

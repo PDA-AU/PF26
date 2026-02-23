@@ -119,7 +119,7 @@ def list_public_club_community_info(
             clubName=club.name,
             clubUrl=club.club_url,
             clubTagline=club.club_tagline,
-            clubImage=community.logo_url or club.club_logo_url,
+            clubImage=club.club_logo_url or community.logo_url,
             clubDescription=club.club_description or community.description,
         )
         for community, club in rows
