@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Calendar, Sparkles, ChevronLeft, ChevronRight, Instagram, Linkedin } from 'lucide-react';
+import { ArrowRight, Calendar, Sparkles, ChevronLeft, ChevronRight, Instagram, Linkedin, Github } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import HomeHeader from '@/components/layout/HomeHeader';
 import HomeFooter from '@/components/layout/HomeFooter';
@@ -412,26 +412,40 @@ export default function PdaHome() {
                     cardAssets.length ? 'cursor-pointer' : 'cursor-default'
                 }`}
             >
-                {preferredSrc ? (
-                    <img
-                        src={preferredSrc}
-                        alt={item.title}
-                        loading="lazy"
-                        className="mb-4 aspect-[4/5] w-full rounded-xl object-cover"
-                    />
-                ) : null}
-                {meta ? (
-                    <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-slate-600">
-                        <Calendar className="h-4 w-4 text-[#f6c347]" />
-                        {meta}
-                    </div>
-                ) : null}
+                <div className="mb-4 aspect-[4/5] w-full overflow-hidden rounded-xl border border-black/10 bg-[#fff7dc]">
+                    {preferredSrc ? (
+                        <img
+                            src={preferredSrc}
+                            alt={item.title}
+                            loading="lazy"
+                            className="h-full w-full object-cover"
+                        />
+                    ) : (
+                        <div className="flex h-full w-full items-center justify-center text-xs uppercase tracking-[0.25em] text-slate-500">
+                            No Poster
+                        </div>
+                    )}
+                </div>
+                <div className="min-h-[20px] text-xs uppercase tracking-[0.2em] text-slate-600">
+                    {meta ? (
+                        <span className="flex items-center gap-2">
+                            <Calendar className="h-4 w-4 text-[#f6c347]" />
+                            {meta}
+                        </span>
+                    ) : (
+                        <span className="opacity-0">Meta</span>
+                    )}
+                </div>
                 <h3 className="mt-4 text-xl font-heading font-bold line-clamp-2">{item.title}</h3>
-                {description ? (
-                    <div className="mt-2 max-h-24 space-y-1 overflow-y-auto pr-2 text-sm text-slate-700">
-                        <ParsedDescription description={description} />
-                    </div>
-                ) : null}
+                <div className="mt-2 min-h-[96px] pr-2 text-sm text-slate-700">
+                    {description ? (
+                        <div className="max-h-24 space-y-1 overflow-y-auto">
+                            <ParsedDescription description={description} />
+                        </div>
+                    ) : (
+                        <p className="text-slate-400">No description provided.</p>
+                    )}
+                </div>
                 <span className="mt-auto" />
             </button>
         );
@@ -865,7 +879,7 @@ export default function PdaHome() {
                                 >
                                     {filteredTeamMembers.map((member) => (
                                         <div key={member.regno} className="min-w-[250px] max-w-[260px] snap-start">
-                                            <div className="flex min-h-[350px] w-full flex-col rounded-3xl border border-black/10 bg-white p-5 text-center shadow-sm">
+                                            <div className="flex h-[350px] w-full flex-col rounded-3xl border border-black/10 bg-white p-5 text-center shadow-sm">
                                             <img
                                                 src={member.photo_url || pdaLogo}
                                                 alt={member.name}
@@ -891,16 +905,17 @@ export default function PdaHome() {
                                             <div className="mt-auto pt-3">
                                                 <div className="mx-auto h-px w-16 bg-black/10"></div>
                                             </div>
-                                            <div className="mt-3 flex flex-wrap items-center justify-center gap-3 text-xs text-slate-600">
+                                            <div className="mt-3 flex h-9 items-center justify-center gap-3 text-xs text-slate-600">
                                                 {member.instagram_url ? (
                                                     <a
                                                         href={member.instagram_url}
                                                         target="_blank"
                                                         rel="noreferrer"
-                                                        className="inline-flex items-center gap-2 rounded-full border border-black/10 px-3 py-1 text-[#b8890b] hover:text-[#0f1115]"
+                                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-black/10 text-[#b8890b] hover:text-[#0f1115]"
+                                                        aria-label={`${member.name} Instagram`}
+                                                        title="Instagram"
                                                     >
                                                         <Instagram className="h-4 w-4 text-[#f6c347]" />
-                                                        Instagram
                                                     </a>
                                                 ) : null}
                                             {member.linkedin_url ? (
@@ -908,10 +923,11 @@ export default function PdaHome() {
                                                     href={member.linkedin_url}
                                                     target="_blank"
                                                     rel="noreferrer"
-                                                    className="inline-flex items-center gap-2 rounded-full border border-black/10 px-3 py-1 text-[#b8890b] hover:text-[#0f1115]"
+                                                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-black/10 text-[#b8890b] hover:text-[#0f1115]"
+                                                    aria-label={`${member.name} LinkedIn`}
+                                                    title="LinkedIn"
                                                 >
                                                     <Linkedin className="h-4 w-4 text-[#f6c347]" />
-                                                    LinkedIn
                                                 </a>
                                             ) : null}
                                             {member.github_url ? (
@@ -919,17 +935,11 @@ export default function PdaHome() {
                                                     href={member.github_url}
                                                     target="_blank"
                                                     rel="noreferrer"
-                                                    className="inline-flex items-center gap-2 rounded-full border border-black/10 px-3 py-1 text-[#b8890b] hover:text-[#0f1115]"
+                                                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-black/10 text-[#b8890b] hover:text-[#0f1115]"
+                                                    aria-label={`${member.name} GitHub`}
+                                                    title="GitHub"
                                                 >
-                                                    <svg
-                                                        viewBox="0 0 24 24"
-                                                        className="h-4 w-4 text-[#f6c347]"
-                                                        fill="currentColor"
-                                                        aria-hidden="true"
-                                                    >
-                                                        <path d="M12 .5a12 12 0 0 0-3.79 23.39c.6.11.82-.26.82-.58v-2.03c-3.34.73-4.05-1.41-4.05-1.41-.55-1.38-1.34-1.75-1.34-1.75-1.1-.74.08-.72.08-.72 1.21.08 1.85 1.24 1.85 1.24 1.08 1.85 2.84 1.31 3.53 1 .11-.79.42-1.31.76-1.61-2.67-.31-5.47-1.33-5.47-5.92 0-1.31.47-2.38 1.24-3.22-.12-.31-.54-1.57.12-3.27 0 0 1.01-.32 3.3 1.23a11.44 11.44 0 0 1 6 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.7.24 2.96.12 3.27.77.84 1.24 1.91 1.24 3.22 0 4.6-2.8 5.61-5.48 5.91.43.37.81 1.1.81 2.21v3.28c0 .32.21.69.82.58A12 12 0 0 0 12 .5Z" />
-                                                    </svg>
-                                                    GitHub
+                                                    <Github className="h-4 w-4 text-[#f6c347]" />
                                                 </a>
                                             ) : null}
                                         </div>
