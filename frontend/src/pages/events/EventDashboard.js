@@ -307,6 +307,14 @@ export default function EventDashboard() {
         });
         return { byNo, byName };
     }, [publishedRounds]);
+    const eventActiveRoundIds = useMemo(
+        () => new Set(
+            (publishedRounds || [])
+                .filter((round) => normalizeText(round?.state) === 'active')
+                .map((round) => String(round?.id))
+        ),
+        [publishedRounds]
+    );
 
     const eventDateLabel = useMemo(
         () => getEventDateLabel(eventInfo?.start_date, eventInfo?.end_date),
@@ -967,6 +975,31 @@ export default function EventDashboard() {
                                         {eventInfo.round_count} rounds
                                     </span>
                                 </div>
+                                {publishedRounds.length ? (
+                                    <div className="mt-3">
+                                        <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-600">Rounds</p>
+                                        <div className="mt-2 flex flex-wrap gap-2">
+                                            {publishedRounds.map((round) => {
+                                                const isActiveRound = eventActiveRoundIds.has(String(round?.id));
+                                                return (
+                                                    <button
+                                                        key={round.id}
+                                                        type="button"
+                                                        className={`rounded-md border-2 border-black px-2 py-1 text-xs font-bold uppercase tracking-[0.1em] shadow-neo ${
+                                                            isActiveRound
+                                                                ? 'bg-[#22C55E] text-black'
+                                                                : 'bg-white text-slate-700'
+                                                        }`}
+                                                        onClick={() => setSelectedRound(round)}
+                                                    >
+                                                        {round?.round_no || 'Round'}: {round?.name || 'Untitled'}
+                                                        {isActiveRound ? ' (Active)' : ''}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                ) : null}
                                 <div className="mt-3 inline-flex items-center gap-2 rounded-md border-2 border-black bg-white px-3 py-2 text-xs font-bold uppercase tracking-[0.1em] text-slate-700 shadow-neo">
                                     <Calendar className="h-4 w-4 text-[#8B5CF6]" />
                                     <span>{eventDateLabel}</span>
@@ -1337,6 +1370,22 @@ export default function EventDashboard() {
                                                                 ? formatDateTimeIst(linkedRound?.submission_deadline)
                                                                 : ''
                                                         );
+                                                        const fallbackRound = {
+                                                            id: round?.round_id ?? null,
+                                                            round_no: round?.round_no,
+                                                            name: round?.round_name,
+                                                            description: round?.round_description || '',
+                                                            mode: round?.round_mode || 'round',
+                                                            state: round?.round_state || round?.displayStatus || 'published',
+                                                            date: round?.round_date || null,
+                                                            requires_submission: Boolean(round?.requires_submission),
+                                                            submission_mode: round?.submission_mode || null,
+                                                            submission_deadline: round?.submission_deadline || null,
+                                                            external_url: round?.external_url || '',
+                                                            external_url_name: round?.external_url_name || '',
+                                                            round_poster: round?.round_poster || null,
+                                                        };
+                                                        const roundForDetails = linkedRound || fallbackRound;
                                                         return (
                                                             <div key={`${round.round_no}-${round.round_name}`} className="flex flex-wrap items-center justify-between gap-3 rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
                                                                 <div className="flex items-center gap-3">
@@ -1390,7 +1439,7 @@ export default function EventDashboard() {
                                                                             <span className="text-xs font-bold uppercase tracking-[0.12em]">{attendance.label}</span>
                                                                         </div>
                                                                     ) : null}
-                                                                    {linkedRound ? (
+                                                                    {roundForDetails ? (
                                                                         <Button
                                                                             type="button"
                                                                             variant="outline"
@@ -1399,10 +1448,10 @@ export default function EventDashboard() {
                                                                                     ? 'bg-[#22C55E] hover:bg-[#16A34A]'
                                                                                     : 'bg-[#FDE047]'
                                                                             }`}
-                                                                            onClick={() => setSelectedRound(linkedRound)}
+                                                                            onClick={() => setSelectedRound(roundForDetails)}
                                                                             data-testid={`event-dashboard-round-action-${round.round_no}`}
                                                                         >
-                                                                            {linkedRound?.requires_submission
+                                                                            {roundForDetails?.requires_submission
                                                                                 ? (hasRoundSubmission ? 'View Work' : 'Submit Work')
                                                                                 : 'View Round'}
                                                                         </Button>
@@ -1919,7 +1968,11 @@ export default function EventDashboard() {
                                                     Mode: {selectedRound?.submission_mode || 'file_or_link'}
                                                     {selectedRoundDeadlineLabel ? ` | Deadline (IST): ${selectedRoundDeadlineLabel}` : ' | Deadline (IST): Not Set'}
                                                 </p>
-                                                {!isLoggedIn ? (
+                                                {!isParticipantRoute ? (
+                                                    <p className="mt-3 text-sm font-medium text-slate-700">
+                                                        Submission is available only in Participant Dashboard. Open your participant dashboard to submit work.
+                                                    </p>
+                                                ) : !isLoggedIn ? (
                                                     <p className="mt-3 text-sm font-medium text-slate-700">
                                                         Login to submit work for this round.
                                                     </p>
