@@ -22,18 +22,18 @@ const EMPTY_CLUB = {
     club_logo_url: '',
     club_tagline: '',
     club_description: '',
+    owner_user_id: '',
 };
 
 const EMPTY_COMMUNITY = {
     name: '',
     profile_id: '',
     club_id: 'none',
-    admin_id: '',
+    admins: [{ row_id: 'admin-0', user_id: '', is_active: true }],
     password: '',
     logo_url: '',
     description: '',
     is_active: true,
-    is_root: false,
 };
 
 const EMPTY_SYMPO = {
@@ -42,6 +42,7 @@ const EMPTY_SYMPO = {
     content_text: '',
 };
 const EVENTS_PAGE_SIZE = 20;
+const makeAdminRowId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 const parseApiError = (error, fallback) => {
     const detail = error?.response?.data?.detail;
@@ -61,14 +62,27 @@ const parseApiError = (error, fallback) => {
 };
 
 const normalizeCommunityPayload = (form, isCreate) => {
+    const normalizedAdmins = (form.admins || [])
+        .filter((item) => item?.user_id && String(item.user_id).trim())
+        .map((item) => ({
+            user_id: Number(item.user_id),
+            is_active: Boolean(item.is_active),
+        }));
+
+    const activeAdmins = normalizedAdmins.filter((item) => item.is_active);
+    if (!activeAdmins.length) {
+        throw new Error('At least one active admin is required');
+    }
+
     const payload = {
         name: form.name.trim(),
         club_id: form.club_id === 'none' ? null : Number(form.club_id),
-        admin_id: Number(form.admin_id),
+        admin_id: Number(activeAdmins[0].user_id),
+        admins: normalizedAdmins,
         logo_url: form.logo_url.trim() || null,
         description: form.description.trim() || null,
         is_active: Boolean(form.is_active),
-        is_root: Boolean(form.is_root),
+        is_root: false,
     };
     if (isCreate) {
         payload.profile_id = form.profile_id.trim().toLowerCase();
@@ -110,6 +124,7 @@ export default function CCAdmin() {
     const [communityModalOpen, setCommunityModalOpen] = useState(false);
     const [communityEditing, setCommunityEditing] = useState(null);
     const [communityForm, setCommunityForm] = useState(EMPTY_COMMUNITY);
+    const [communityAdminSearch, setCommunityAdminSearch] = useState('');
 
     const [sympoModalOpen, setSympoModalOpen] = useState(false);
     const [sympoEditing, setSympoEditing] = useState(null);
@@ -223,7 +238,7 @@ export default function CCAdmin() {
     const filteredClubs = useMemo(() => {
         const s = search.trim().toLowerCase();
         if (!s) return clubs;
-        return clubs.filter((club) => [club.name, club.profile_id, club.club_tagline]
+        return clubs.filter((club) => [club.name, club.profile_id, club.club_tagline, club.owner_name, club.owner_regno]
             .filter(Boolean)
             .join(' ')
             .toLowerCase()
@@ -233,11 +248,14 @@ export default function CCAdmin() {
     const filteredCommunities = useMemo(() => {
         const s = search.trim().toLowerCase();
         if (!s) return communities;
-        return communities.filter((community) => [community.name, community.profile_id, community.club_name, community.admin_name]
-            .filter(Boolean)
-            .join(' ')
-            .toLowerCase()
-            .includes(s));
+        return communities.filter((community) => {
+            const adminNames = (community.admins || []).map((item) => item.name).filter(Boolean).join(' ');
+            return [community.name, community.profile_id, community.club_name, community.admin_name, adminNames]
+                .filter(Boolean)
+                .join(' ')
+                .toLowerCase()
+                .includes(s);
+        });
     }, [communities, search]);
 
     const filteredSympos = useMemo(() => {
@@ -278,6 +296,7 @@ export default function CCAdmin() {
     };
 
     const openClubModal = (club = null) => {
+        loadAdminOptions();
         setClubEditing(club);
         setClubForm(club ? {
             name: club.name || '',
@@ -286,6 +305,7 @@ export default function CCAdmin() {
             club_logo_url: club.club_logo_url || '',
             club_tagline: club.club_tagline || '',
             club_description: club.club_description || '',
+            owner_user_id: club.owner_user_id ? String(club.owner_user_id) : '',
         } : EMPTY_CLUB);
         setClubModalOpen(true);
     };
@@ -293,6 +313,10 @@ export default function CCAdmin() {
     const submitClub = async (e) => {
         e.preventDefault();
         if (submitting) return;
+        if (!clubForm.owner_user_id || !String(clubForm.owner_user_id).trim()) {
+            toast.error('Select a club owner');
+            return;
+        }
         setSubmitting(true);
         try {
             const payload = {
@@ -302,6 +326,7 @@ export default function CCAdmin() {
                 club_logo_url: clubForm.club_logo_url.trim() || null,
                 club_tagline: clubForm.club_tagline.trim() || null,
                 club_description: clubForm.club_description.trim() || null,
+                owner_user_id: clubForm.owner_user_id ? Number(clubForm.owner_user_id) : null,
             };
             if (clubEditing) {
                 await ccAdminApi.updateClub(clubEditing.id, payload, headers);
@@ -322,17 +347,30 @@ export default function CCAdmin() {
     const openCommunityModal = (community = null) => {
         loadAdminOptions();
         setCommunityEditing(community);
+        setCommunityAdminSearch('');
+        const sourceAdmins = (community?.admins || []).length
+            ? community.admins
+            : (community?.admin_id ? [{
+                user_id: Number(community.admin_id),
+                is_active: true,
+            }] : [{ user_id: '', is_active: true }]);
         setCommunityForm(community ? {
             name: community.name || '',
             profile_id: community.profile_id || '',
             club_id: community.club_id ? String(community.club_id) : 'none',
-            admin_id: community.admin_id ? String(community.admin_id) : '',
+            admins: sourceAdmins.map((item, index) => ({
+                row_id: `edit-${index}-${makeAdminRowId()}`,
+                user_id: item.user_id ? String(item.user_id) : '',
+                is_active: item.is_active !== false,
+            })),
             password: '',
             logo_url: community.logo_url || '',
             description: community.description || '',
             is_active: Boolean(community.is_active),
-            is_root: Boolean(community.is_root),
-        } : EMPTY_COMMUNITY);
+        } : {
+            ...EMPTY_COMMUNITY,
+            admins: [{ row_id: `new-${makeAdminRowId()}`, user_id: '', is_active: true }],
+        });
         setCommunityModalOpen(true);
     };
 
@@ -508,6 +546,48 @@ export default function CCAdmin() {
         return map;
     }, [clubs]);
 
+    const usedCommunityAdminIds = useMemo(() => {
+        return new Set((communityForm.admins || []).map((item) => String(item.user_id || '')).filter(Boolean));
+    }, [communityForm.admins]);
+
+    const filteredCommunityAdminOptions = useMemo(() => {
+        const query = String(communityAdminSearch || '').trim().toLowerCase();
+        if (!query) return adminOptions;
+        return (adminOptions || []).filter((user) => (
+            `${user.name || ''} ${user.regno || ''} ${user.id || ''}`.toLowerCase().includes(query)
+        ));
+    }, [adminOptions, communityAdminSearch]);
+
+    const communityAdminSuggestions = useMemo(() => {
+        const query = String(communityAdminSearch || '').trim();
+        if (!query) return [];
+        return (filteredCommunityAdminOptions || [])
+            .filter((user) => !usedCommunityAdminIds.has(String(user.id)))
+            .slice(0, 8);
+    }, [filteredCommunityAdminOptions, usedCommunityAdminIds, communityAdminSearch]);
+
+    const applyCommunityAdminSuggestion = (userId) => {
+        const nextUserId = String(userId || '');
+        if (!nextUserId) return;
+        if (usedCommunityAdminIds.has(nextUserId)) {
+            toast.error('Admin already added');
+            return;
+        }
+        setCommunityForm((prev) => {
+            const rows = [...(prev.admins || [])];
+            const emptyRowIndex = rows.findIndex((row) => !String(row.user_id || '').trim());
+            if (emptyRowIndex >= 0) {
+                rows[emptyRowIndex] = { ...rows[emptyRowIndex], user_id: nextUserId };
+                return { ...prev, admins: rows };
+            }
+            return {
+                ...prev,
+                admins: [...rows, { row_id: `add-${makeAdminRowId()}`, user_id: nextUserId, is_active: true }],
+            };
+        });
+        setCommunityAdminSearch('');
+    };
+
     return (
         <AdminLayout title="C&C" subtitle="Manage Persohub clubs, communities, and sympos." allowEventAdmin>
             <section className="space-y-4">
@@ -547,6 +627,7 @@ export default function CCAdmin() {
                                     <tr>
                                         <th className="px-3 py-2 text-left">Name</th>
                                         <th className="px-3 py-2 text-left">Profile ID</th>
+                                        <th className="px-3 py-2 text-left">Owner</th>
                                         <th className="px-3 py-2 text-left">Linked Communities</th>
                                         <th className="px-3 py-2 text-right">Actions</th>
                                     </tr>
@@ -556,6 +637,7 @@ export default function CCAdmin() {
                                         <tr key={club.id} className="border-t border-black/10">
                                             <td className="px-3 py-2">{club.name}</td>
                                             <td className="px-3 py-2">{club.profile_id}</td>
+                                            <td className="px-3 py-2">{club.owner_name || club.owner_regno || '—'}</td>
                                             <td className="px-3 py-2">{club.linked_community_count}</td>
                                             <td className="px-3 py-2 text-right space-x-2">
                                                 <Button variant="outline" size="sm" onClick={() => openClubModal(club)}>Edit</Button>
@@ -581,6 +663,7 @@ export default function CCAdmin() {
                                 <div key={club.id} className="rounded-2xl border border-black/10 bg-white p-3">
                                     <p className="font-semibold">{club.name}</p>
                                     <p className="text-xs text-slate-500">{club.profile_id}</p>
+                                    <p className="text-xs mt-1">Owner: {club.owner_name || club.owner_regno || '—'}</p>
                                     <p className="text-xs mt-1">Linked communities: {club.linked_community_count}</p>
                                     <div className="mt-3 flex gap-2">
                                         <Button variant="outline" size="sm" onClick={() => openClubModal(club)}>Edit</Button>
@@ -600,10 +683,24 @@ export default function CCAdmin() {
                             <div key={community.id} className="rounded-2xl border border-black/10 bg-white p-4">
                                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                                     <div>
-                                        <p className="font-semibold">{community.name}</p>
-                                        <p className="text-xs text-slate-500">{community.profile_id}</p>
-                                        <p className="text-xs text-slate-500">Club: {community.club_name || '—'} | Admin: {community.admin_name || '—'} ({community.admin_regno || '—'})</p>
-                                        <p className="text-xs text-slate-500">Active: {community.is_active ? 'Yes' : 'No'} | Root: {community.is_root ? 'Yes' : 'No'}</p>
+                                        {(() => {
+                                            const adminSummary = (community.admins || [])
+                                                .map((member) => {
+                                                    const baseName = member.name || `User ${member.user_id}`;
+                                                    const activeLabel = member.is_active ? '' : ' (inactive)';
+                                                    return `${baseName}${activeLabel}`;
+                                                })
+                                                .join(', ');
+                                            return (
+                                                <>
+                                                    <p className="font-semibold">{community.name}</p>
+                                                    <p className="text-xs text-slate-500">{community.profile_id}</p>
+                                                    <p className="text-xs text-slate-500">Club: {community.club_name || '—'}</p>
+                                                    <p className="text-xs text-slate-500">Admins: {adminSummary || '—'}</p>
+                                                    <p className="text-xs text-slate-500">Active: {community.is_active ? 'Yes' : 'No'}</p>
+                                                </>
+                                            );
+                                        })()}
                                     </div>
                                     <div className="flex flex-wrap gap-2">
                                         <Button variant="outline" size="sm" onClick={() => openCommunityModal(community)}>Edit</Button>
@@ -813,6 +910,24 @@ export default function CCAdmin() {
                             <Label>Description</Label>
                             <Textarea rows={4} value={clubForm.club_description} onChange={(e) => setClubForm((p) => ({ ...p, club_description: e.target.value }))} />
                         </div>
+                        <div className="grid gap-2">
+                            <Label>Club Owner</Label>
+                            <Select
+                                value={clubForm.owner_user_id || 'none'}
+                                onValueChange={(value) => setClubForm((p) => ({ ...p, owner_user_id: value === 'none' ? '' : value }))}
+                            >
+                                <SelectTrigger><SelectValue placeholder="Select owner" /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="none">Select owner</SelectItem>
+                                    {adminOptions.map((user) => (
+                                        <SelectItem key={user.id} value={String(user.id)}>
+                                            {user.name} ({user.regno})
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            {adminOptionsLoading ? <p className="text-xs text-slate-500">Loading users...</p> : null}
+                        </div>
                         <div className="flex justify-end gap-2">
                             <Button type="button" variant="outline" onClick={() => setClubModalOpen(false)}>Cancel</Button>
                             <Button type="submit" disabled={submitting}>{submitting ? 'Saving...' : 'Save'}</Button>
@@ -862,16 +977,99 @@ export default function CCAdmin() {
                                 </SelectContent>
                             </Select>
                         </div>
-                        <div className="grid gap-2">
-                            <Label>Admin User</Label>
-                            <Select value={communityForm.admin_id} onValueChange={(v) => setCommunityForm((p) => ({ ...p, admin_id: v }))}>
-                                <SelectTrigger><SelectValue placeholder="Select admin" /></SelectTrigger>
-                                <SelectContent>
-                                    {adminOptions.map((user) => (
-                                        <SelectItem key={user.id} value={String(user.id)}>{user.name} ({user.regno})</SelectItem>
+                        <div className="space-y-2">
+                            <Label>Community Admins</Label>
+                            <Input
+                                value={communityAdminSearch}
+                                onChange={(e) => setCommunityAdminSearch(e.target.value)}
+                                placeholder="Search admin users by name, regno, or id"
+                            />
+                            {communityAdminSuggestions.length ? (
+                                <div className="max-h-44 overflow-auto rounded-md border border-black/10 bg-white p-1">
+                                    {communityAdminSuggestions.map((user) => (
+                                        <button
+                                            key={user.id}
+                                            type="button"
+                                            onClick={() => applyCommunityAdminSuggestion(user.id)}
+                                            className="w-full rounded px-2 py-1 text-left text-sm hover:bg-slate-100"
+                                        >
+                                            {user.name || user.regno || user.id} ({user.regno || user.id})
+                                        </button>
                                     ))}
-                                </SelectContent>
-                            </Select>
+                                </div>
+                            ) : null}
+                            <div className="space-y-2">
+                                {(communityForm.admins || []).map((member) => (
+                                    <div key={member.row_id} className="rounded-lg border border-black/10 p-3 space-y-2">
+                                        <Select
+                                            value={member.user_id || ''}
+                                            onValueChange={(value) => setCommunityForm((prev) => ({
+                                                ...prev,
+                                                admins: (prev.admins || []).map((row) => (row.row_id === member.row_id ? { ...row, user_id: value } : row)),
+                                            }))}
+                                        >
+                                            <SelectTrigger><SelectValue placeholder="Select admin user" /></SelectTrigger>
+                                            <SelectContent>
+                                                {filteredCommunityAdminOptions.map((user) => {
+                                                    const optionValue = String(user.id);
+                                                    const alreadyUsed = usedCommunityAdminIds.has(optionValue) && String(member.user_id || '') !== optionValue;
+                                                    return (
+                                                        <SelectItem key={user.id} value={optionValue} disabled={alreadyUsed}>
+                                                            {user.name} ({user.regno})
+                                                        </SelectItem>
+                                                    );
+                                                })}
+                                            </SelectContent>
+                                        </Select>
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <label className="flex items-center gap-2 text-xs">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={Boolean(member.is_active)}
+                                                    onChange={(e) => setCommunityForm((prev) => ({
+                                                        ...prev,
+                                                        admins: (prev.admins || []).map((row) => (
+                                                            row.row_id === member.row_id
+                                                                ? { ...row, is_active: e.target.checked }
+                                                                : row
+                                                        )),
+                                                    }))}
+                                                />
+                                                Active
+                                            </label>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                disabled={(communityForm.admins || []).length <= 1}
+                                                onClick={() => setCommunityForm((prev) => ({
+                                                    ...prev,
+                                                    admins: (prev.admins || []).filter((row) => row.row_id !== member.row_id),
+                                                }))}
+                                            >
+                                                Remove
+                                            </Button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="flex items-center justify-between gap-2">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setCommunityForm((prev) => ({
+                                        ...prev,
+                                        admins: [
+                                            ...(prev.admins || []),
+                                            { row_id: `add-${makeAdminRowId()}`, user_id: '', is_active: true },
+                                        ],
+                                    }))}
+                                >
+                                    Add Admin
+                                </Button>
+                                <p className="text-xs text-slate-500">At least one active admin is required.</p>
+                            </div>
                             {adminOptionsLoading ? <p className="text-xs text-slate-500">Loading admin users...</p> : null}
                         </div>
                         <div className="grid gap-2">
@@ -891,10 +1089,6 @@ export default function CCAdmin() {
                         <label className="flex items-center gap-2 text-sm">
                             <input type="checkbox" checked={communityForm.is_active} onChange={(e) => setCommunityForm((p) => ({ ...p, is_active: e.target.checked }))} />
                             Active
-                        </label>
-                        <label className="flex items-center gap-2 text-sm">
-                            <input type="checkbox" checked={communityForm.is_root} onChange={(e) => setCommunityForm((p) => ({ ...p, is_root: e.target.checked }))} />
-                            Root community
                         </label>
                         <div className="flex justify-end gap-2">
                             <Button type="button" variant="outline" onClick={() => setCommunityModalOpen(false)}>Cancel</Button>

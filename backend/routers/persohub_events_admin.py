@@ -23,6 +23,7 @@ from models import (
     PdaAdmin,
     PdaUser,
     PdaItem,
+    PersohubAdmin,
     PersohubEvent,
     PersohubEventType,
     PersohubEventFormat,
@@ -105,7 +106,7 @@ def _slugify(value: str) -> str:
 
 @router.get("/persohub/admin/persohub-events/parity-enabled")
 def get_persohub_events_parity_enabled(
-    _: PersohubCommunity = Depends(require_persohub_community),
+    _: PdaUser = Depends(require_persohub_root_community_admin),
 ):
     return {"enabled": True}
 
@@ -845,13 +846,17 @@ def list_managed_events(
     admin_ctx=Depends(get_persohub_admin_context),
     db: Session = Depends(get_db),
 ):
+    community = admin_ctx.get("community")
     admin_row = admin_ctx.get("admin_row")
     policy = admin_ctx.get("policy") if isinstance(admin_ctx.get("policy"), dict) else {}
     is_superadmin = bool(admin_ctx.get("is_superadmin"))
+    club_id = int((admin_row or {}).get("club_id") or int(getattr(community, "club_id", 0) or 0) or 0)
     if not is_superadmin and not admin_row:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    if club_id <= 0:
+        return []
 
-    query = db.query(PersohubEvent)
+    query = db.query(PersohubEvent).filter(PersohubEvent.club_id == club_id)
     if not is_superadmin:
         events = policy.get("events") if isinstance(policy.get("events"), dict) else {}
         allowed_slugs = [slug for slug, allowed in events.items() if allowed]
@@ -869,6 +874,8 @@ def create_managed_event(
     community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
+    if not community.club_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Community is not linked to a club")
     _validate_event_dates(payload.start_date, payload.end_date)
 
     if payload.participant_mode.value == "team":
@@ -887,7 +894,8 @@ def create_managed_event(
     new_event = PersohubEvent(
         slug=_next_slug(db, payload.title),
         event_code=_next_event_code(db),
-        community_id=int(community.id),
+        club_id=int(community.club_id or 0),
+        community_id=None,
         title=payload.title.strip(),
         description=payload.description,
         start_date=payload.start_date,
@@ -931,13 +939,15 @@ def create_managed_event(
     _sync_managed_event_to_home_item(db, new_event)
 
     # Add dynamic event policy key for all admins.
-    admin_rows = db.query(PdaAdmin).all()
+    admin_rows = (
+        db.query(PersohubAdmin)
+        .join(PersohubCommunity, PersohubCommunity.id == PersohubAdmin.community_id)
+        .filter(PersohubCommunity.club_id == int(community.club_id or 0))
+        .all()
+    )
     for row in admin_rows:
         policy = _ensure_events_policy_shape(row.policy)
-        if row.policy and row.policy.get("superAdmin"):
-            policy["events"][new_event.slug] = True
-        else:
-            policy["events"][new_event.slug] = bool(policy["events"].get(new_event.slug, False))
+        policy["events"][new_event.slug] = bool(policy["events"].get(new_event.slug, False))
         row.policy = policy
 
     db.commit()
@@ -959,9 +969,12 @@ def update_managed_event(
     slug: str,
     payload: PersohubManagedEventUpdate,
     admin: PdaUser = Depends(require_persohub_root_community_admin),
+    community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
+    if int(event.club_id or 0) != int(community.club_id or 0):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
     updates = payload.model_dump(exclude_unset=True)
     next_start_date = updates.get("start_date", event.start_date)
     next_end_date = updates.get("end_date", event.end_date)
@@ -1027,9 +1040,12 @@ def get_managed_event(
 def delete_managed_event(
     slug: str,
     admin: PdaUser = Depends(require_persohub_root_community_admin),
+    community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
+    if int(event.club_id or 0) != int(community.club_id or 0):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
     event_id = int(event.id)
     event_slug = str(event.slug)
 
@@ -1080,7 +1096,12 @@ def delete_managed_event(
         (PersohubEventLog.event_id == event_id) | (PersohubEventLog.event_slug == event_slug)
     ).delete(synchronize_session=False)
 
-    admin_rows = db.query(PdaAdmin).all()
+    admin_rows = (
+        db.query(PersohubAdmin)
+        .join(PersohubCommunity, PersohubCommunity.id == PersohubAdmin.community_id)
+        .filter(PersohubCommunity.club_id == int(event.club_id or 0))
+        .all()
+    )
     for row in admin_rows:
         policy = _ensure_events_policy_shape(row.policy)
         if event_slug in policy["events"]:
@@ -2102,7 +2123,7 @@ def create_round(
         external_url_name=(str(payload.external_url_name or "").strip() or "Explore Round"),
         date=payload.date,
         mode=_to_event_format(payload.mode),
-        evaluation_criteria=[c.model_dump() for c in payload.evaluation_criteria] if payload.evaluation_criteria else [{"name": "Score", "max_marks": 100}],
+        evaluation_criteria=[c.model_dump(exclude_none=True) for c in payload.evaluation_criteria] if payload.evaluation_criteria else [{"name": "Score", "max_marks": 100}],
         requires_submission=bool(payload.requires_submission),
         submission_mode=(payload.submission_mode.value if hasattr(payload.submission_mode, "value") else str(payload.submission_mode or "file_or_link")),
         submission_deadline=payload.submission_deadline,
@@ -2158,7 +2179,7 @@ def update_round(
     if "state" in updates:
         updates["state"] = _to_round_state(payload.state)
     if "evaluation_criteria" in updates and payload.evaluation_criteria is not None:
-        updates["evaluation_criteria"] = [c.model_dump() for c in payload.evaluation_criteria]
+        updates["evaluation_criteria"] = [c.model_dump(exclude_none=True) for c in payload.evaluation_criteria]
     if "submission_mode" in updates:
         updates["submission_mode"] = (
             payload.submission_mode.value
@@ -2365,20 +2386,30 @@ def delete_round(
 
 def _event_admin_options(db: Session, event: PersohubEvent) -> List[PersohubRoundPanelAdminOption]:
     joined = (
-        db.query(PdaAdmin, PdaUser)
-        .join(PdaUser, PdaAdmin.user_id == PdaUser.id)
+        db.query(PersohubAdmin, PdaUser, PersohubCommunity)
+        .join(PdaUser, PersohubAdmin.user_id == PdaUser.id)
+        .join(PersohubCommunity, PersohubCommunity.id == PersohubAdmin.community_id)
+        .filter(
+            PersohubCommunity.club_id == event.club_id,
+            PersohubCommunity.is_active == True,  # noqa: E712
+            PersohubAdmin.is_active == True,  # noqa: E712
+        )
         .order_by(PdaUser.name.asc(), PdaUser.regno.asc())
         .all()
     )
     options: List[PersohubRoundPanelAdminOption] = []
-    for admin_row, user in joined:
+    seen_user_ids: Set[int] = set()
+    for admin_row, user, _community in joined:
+        user_id = int(user.id)
+        if user_id in seen_user_ids:
+            continue
+        seen_user_ids.add(user_id)
         user_regno = str(user.regno or "").strip()
         if user_regno == "0000000000":
             continue
-        policy = admin_row.policy if isinstance(admin_row.policy, dict) else {}
         options.append(
             PersohubRoundPanelAdminOption(
-                admin_user_id=int(user.id),
+                admin_user_id=user_id,
                 regno=user_regno,
                 name=str(user.name or user.regno or f"User {user.id}"),
                 email=str(user.email or "").strip() or None,

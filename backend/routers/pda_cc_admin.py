@@ -12,6 +12,7 @@ from models import (
     PersohubSympo,
     PersohubSympoEvent,
     PdaUser,
+    PersohubAdmin,
     PersohubClub,
     PersohubCommunity,
     PersohubPost,
@@ -21,6 +22,7 @@ from schemas import (
     CcClubCreateRequest,
     CcClubResponse,
     CcClubUpdateRequest,
+    CcCommunityAdminMemberResponse,
     CcCommunityCreateRequest,
     CcPersohubEventOption,
     CcPersohubEventSympoAssignRequest,
@@ -49,6 +51,7 @@ def _build_club_response(db: Session, club: PersohubClub) -> CcClubResponse:
         .filter(PersohubCommunity.club_id == club.id)
         .count()
     )
+    owner = db.query(PdaUser).filter(PdaUser.id == club.owner_user_id).first() if club.owner_user_id else None
     return CcClubResponse(
         id=club.id,
         name=club.name,
@@ -57,6 +60,9 @@ def _build_club_response(db: Session, club: PersohubClub) -> CcClubResponse:
         club_logo_url=club.club_logo_url,
         club_tagline=club.club_tagline,
         club_description=club.club_description,
+        owner_user_id=(int(club.owner_user_id) if club.owner_user_id else None),
+        owner_name=(str(owner.name or "") or None) if owner else None,
+        owner_regno=(str(owner.regno or "") or None) if owner else None,
         linked_community_count=linked_community_count,
         created_at=club.created_at,
         updated_at=club.updated_at,
@@ -66,17 +72,21 @@ def _build_club_response(db: Session, club: PersohubClub) -> CcClubResponse:
 def _build_community_response(
     community: PersohubCommunity,
     club: Optional[PersohubClub],
-    admin_user: Optional[PdaUser],
+    admin_members: List[CcCommunityAdminMemberResponse],
 ) -> CcCommunityResponse:
+    active_admins = [member for member in admin_members if member.is_active]
+    active_admins.sort(key=lambda item: (int(item.user_id), str(item.name or "").lower()))
+    primary_admin = active_admins[0] if active_admins else None
     return CcCommunityResponse(
         id=community.id,
         name=community.name,
         profile_id=community.profile_id,
         club_id=community.club_id,
         club_name=(club.name if club else None),
-        admin_id=community.admin_id,
-        admin_name=(admin_user.name if admin_user else None),
-        admin_regno=(admin_user.regno if admin_user else None),
+        admin_id=(primary_admin.user_id if primary_admin else None),
+        admin_name=(primary_admin.name if primary_admin else None),
+        admin_regno=(primary_admin.regno if primary_admin else None),
+        admins=admin_members,
         logo_url=community.logo_url,
         description=community.description,
         is_active=community.is_active,
@@ -116,11 +126,140 @@ def _assert_club_exists(db: Session, club_id: Optional[int]) -> Optional[Persohu
     return club
 
 
-def _assert_admin_user_exists(db: Session, user_id: int) -> PdaUser:
-    user = db.query(PdaUser).filter(PdaUser.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Admin user not found")
-    return user
+def _normalize_requested_community_admins(
+    payload_admins: Optional[List[dict]],
+    fallback_admin_id: Optional[int],
+) -> List[dict]:
+    members: List[dict] = []
+    for raw in payload_admins or []:
+        user_id = int(raw.get("user_id") or 0)
+        is_active = bool(raw.get("is_active", True))
+        if user_id <= 0:
+            continue
+        members.append({"user_id": user_id, "role": "admin", "is_active": is_active})
+
+    if not members and fallback_admin_id:
+        members = [{"user_id": int(fallback_admin_id), "role": "admin", "is_active": True}]
+
+    if not members:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one admin assignment is required")
+
+    deduped_map: Dict[int, dict] = {}
+    for member in members:
+        deduped_map[int(member["user_id"])] = member
+    deduped = list(deduped_map.values())
+
+    for member in deduped:
+        member["role"] = "admin"
+        member["is_active"] = bool(member["is_active"])
+
+    active_count = sum(1 for member in deduped if member["is_active"])
+    if active_count < 1:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one active admin is required")
+
+    deduped.sort(key=lambda member: int(member["user_id"]))
+    return deduped
+
+
+def _assert_admin_users_exist(db: Session, user_ids: List[int]) -> Dict[int, PdaUser]:
+    if not user_ids:
+        return {}
+    rows = db.query(PdaUser).filter(PdaUser.id.in_(user_ids)).all()
+    users_by_id = {int(row.id): row for row in rows}
+    missing_ids = [user_id for user_id in user_ids if user_id not in users_by_id]
+    if missing_ids:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Admin user(s) not found: {', '.join(str(item) for item in missing_ids)}",
+        )
+    return users_by_id
+
+
+def _sync_community_admin_members(
+    db: Session,
+    *,
+    community_id: int,
+    member_specs: List[dict],
+    created_by_user_id: Optional[int],
+) -> int:
+    existing_rows = db.query(PersohubAdmin).filter(PersohubAdmin.community_id == community_id).all()
+    existing_by_user_id = {int(row.user_id): row for row in existing_rows}
+    incoming_user_ids = {int(item["user_id"]) for item in member_specs}
+
+    primary_admin_id = None
+    for spec in member_specs:
+        user_id = int(spec["user_id"])
+        role = "admin"
+        is_active = bool(spec["is_active"])
+        row = existing_by_user_id.get(user_id)
+        if row:
+            row.role = role
+            row.is_active = is_active
+            if created_by_user_id and not row.created_by_user_id:
+                row.created_by_user_id = created_by_user_id
+        else:
+            db.add(
+                PersohubAdmin(
+                    community_id=community_id,
+                    user_id=user_id,
+                    role=role,
+                    is_active=is_active,
+                    policy={"events": {}},
+                    created_by_user_id=created_by_user_id,
+                )
+            )
+        if is_active and primary_admin_id is None:
+            primary_admin_id = user_id
+
+    for row in existing_rows:
+        if int(row.user_id) in incoming_user_ids:
+            continue
+        row.is_active = False
+        row.role = "admin"
+
+    if primary_admin_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one active admin is required")
+    return primary_admin_id
+
+
+def _load_community_admin_members(
+    db: Session,
+    community_ids: List[int],
+) -> Dict[int, List[CcCommunityAdminMemberResponse]]:
+    if not community_ids:
+        return {}
+    rows = (
+        db.query(PersohubAdmin, PdaUser)
+        .join(PdaUser, PdaUser.id == PersohubAdmin.user_id)
+        .filter(PersohubAdmin.community_id.in_(community_ids))
+        .order_by(
+            PersohubAdmin.community_id.asc(),
+            PersohubAdmin.is_active.desc(),
+            PersohubAdmin.role.asc(),
+            PdaUser.name.asc(),
+            PdaUser.id.asc(),
+        )
+        .all()
+    )
+    grouped: Dict[int, List[CcCommunityAdminMemberResponse]] = {}
+    for membership, user in rows:
+        grouped.setdefault(int(membership.community_id), []).append(
+            CcCommunityAdminMemberResponse(
+                id=int(membership.id),
+                user_id=int(membership.user_id),
+                regno=str(user.regno or ""),
+                name=str(user.name or ""),
+                role="admin",
+                is_active=bool(membership.is_active),
+                created_at=membership.created_at,
+            )
+        )
+    for community_id, members in grouped.items():
+        grouped[community_id] = sorted(
+            members,
+            key=lambda item: (0 if item.is_active else 1, item.name or "", int(item.user_id)),
+        )
+    return grouped
 
 
 def _validate_event_ids(db: Session, event_ids: List[int]) -> None:
@@ -175,6 +314,9 @@ def create_cc_club(
     db: Session = Depends(get_db),
     request: Request = None,
 ):
+    if payload.owner_user_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="owner_user_id is required")
+    _assert_admin_users_exist(db, [int(payload.owner_user_id)])
     if db.query(PersohubClub).filter(PersohubClub.profile_id == payload.profile_id).first():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Club profile_id already exists")
 
@@ -211,6 +353,12 @@ def update_cc_club(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Club not found")
 
     updates = payload.model_dump(exclude_unset=True)
+    if "owner_user_id" in updates:
+        if updates["owner_user_id"] is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="owner_user_id cannot be null")
+        _assert_admin_users_exist(db, [int(updates["owner_user_id"])])
+    elif int(club.owner_user_id or 0) <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="owner_user_id is required")
     if "profile_id" in updates:
         existing = (
             db.query(PersohubClub)
@@ -269,9 +417,9 @@ def delete_cc_club(
         deleted_counts["linked_posts"] = int(
             db.query(PersohubPost).filter(PersohubPost.community_id.in_(community_ids)).count()
         )
-        deleted_counts["linked_events"] = int(
-            db.query(PersohubEvent).filter(PersohubEvent.community_id.in_(community_ids)).count()
-        )
+    deleted_counts["linked_events"] = int(
+        db.query(PersohubEvent).filter(PersohubEvent.club_id == club_id).count()
+    )
 
     deleted_counts["legacy_sympo_rows"] = 0
     deleted_counts["normalized_sympos"] = int(
@@ -305,13 +453,16 @@ def list_cc_communities(
     db: Session = Depends(get_db),
 ):
     rows = (
-        db.query(PersohubCommunity, PersohubClub, PdaUser)
+        db.query(PersohubCommunity, PersohubClub)
         .outerjoin(PersohubClub, PersohubClub.id == PersohubCommunity.club_id)
-        .outerjoin(PdaUser, PdaUser.id == PersohubCommunity.admin_id)
         .order_by(PersohubCommunity.name.asc(), PersohubCommunity.id.asc())
         .all()
     )
-    return [_build_community_response(community, club, admin_user) for community, club, admin_user in rows]
+    admin_members_map = _load_community_admin_members(db, [int(community.id) for community, _club in rows])
+    return [
+        _build_community_response(community, club, admin_members_map.get(int(community.id), []))
+        for community, club in rows
+    ]
 
 
 @router.post("/pda-admin/cc/communities", response_model=CcCommunityResponse)
@@ -322,7 +473,13 @@ def create_cc_community(
     request: Request = None,
 ):
     club = _assert_club_exists(db, payload.club_id)
-    admin_user = _assert_admin_user_exists(db, payload.admin_id)
+    requested_admins = _normalize_requested_community_admins(
+        [item.model_dump() for item in payload.admins],
+        payload.admin_id,
+    )
+    _assert_admin_users_exist(db, [int(item["user_id"]) for item in requested_admins])
+    active_admin_ids = sorted([int(item["user_id"]) for item in requested_admins if item["is_active"]])
+    primary_admin_id = int(active_admin_ids[0])
 
     if db.query(PersohubCommunity).filter(PersohubCommunity.profile_id == payload.profile_id).first():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Community profile_id already exists")
@@ -331,16 +488,24 @@ def create_cc_community(
         name=payload.name,
         profile_id=payload.profile_id,
         club_id=payload.club_id,
-        admin_id=payload.admin_id,
+        admin_id=primary_admin_id,
         hashed_password=get_password_hash(payload.password),
         logo_url=payload.logo_url,
         description=payload.description,
         is_active=payload.is_active,
-        is_root=payload.is_root,
+        is_root=False,
     )
     db.add(community)
 
     try:
+        db.flush()
+        resolved_admin_id = _sync_community_admin_members(
+            db,
+            community_id=int(community.id),
+            member_specs=requested_admins,
+            created_by_user_id=admin.id,
+        )
+        community.admin_id = int(resolved_admin_id)
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -355,7 +520,12 @@ def create_cc_community(
         request.url.path if request else None,
         {"community_id": community.id, "profile_id": community.profile_id},
     )
-    return _build_community_response(community, club, admin_user)
+    admin_members_map = _load_community_admin_members(db, [int(community.id)])
+    return _build_community_response(
+        community,
+        club,
+        admin_members_map.get(int(community.id), []),
+    )
 
 
 @router.put("/pda-admin/cc/communities/{community_id}", response_model=CcCommunityResponse)
@@ -371,12 +541,44 @@ def update_cc_community(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Community not found")
 
     updates = payload.model_dump(exclude_unset=True)
+    requested_admins_payload = updates.pop("admins", None)
+    requested_admin_id = updates.pop("admin_id", None)
 
     club = _assert_club_exists(db, updates.get("club_id", community.club_id))
-    admin_user = _assert_admin_user_exists(db, updates.get("admin_id", community.admin_id))
 
     for key, value in updates.items():
         setattr(community, key, value)
+
+    requested_admins = None
+    if requested_admins_payload is not None:
+        requested_admins = _normalize_requested_community_admins(
+            requested_admins_payload,
+            requested_admin_id,
+        )
+    elif requested_admin_id is not None:
+        existing_members = db.query(PersohubAdmin).filter(PersohubAdmin.community_id == community.id).all()
+        derived_members = []
+        for member in existing_members:
+            derived_members.append(
+                {
+                    "user_id": int(member.user_id),
+                    "role": "admin",
+                    "is_active": True if int(member.user_id) == int(requested_admin_id) else bool(member.is_active),
+                }
+            )
+        if not any(int(item["user_id"]) == int(requested_admin_id) for item in derived_members):
+            derived_members.append({"user_id": int(requested_admin_id), "role": "admin", "is_active": True})
+        requested_admins = _normalize_requested_community_admins(derived_members, None)
+
+    if requested_admins is not None:
+        _assert_admin_users_exist(db, [int(item["user_id"]) for item in requested_admins])
+        resolved_admin_id = _sync_community_admin_members(
+            db,
+            community_id=int(community.id),
+            member_specs=requested_admins,
+            created_by_user_id=admin.id,
+        )
+        community.admin_id = int(resolved_admin_id)
 
     try:
         db.commit()
@@ -385,15 +587,23 @@ def update_cc_community(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Community update conflicts with existing data")
 
     db.refresh(community)
+    updated_fields = sorted(list(updates.keys()))
+    if requested_admins_payload is not None or requested_admin_id is not None:
+        updated_fields.append("admins")
     log_admin_action(
         db,
         admin,
         "Update C&C community",
         request.method if request else None,
         request.url.path if request else None,
-        {"community_id": community.id, "updated_fields": sorted(list(updates.keys()))},
+        {"community_id": community.id, "updated_fields": updated_fields},
     )
-    return _build_community_response(community, club, admin_user)
+    admin_members_map = _load_community_admin_members(db, [int(community.id)])
+    return _build_community_response(
+        community,
+        club,
+        admin_members_map.get(int(community.id), []),
+    )
 
 
 @router.post("/pda-admin/cc/communities/{community_id}/reset-password")
@@ -435,9 +645,13 @@ def delete_cc_community(
     deleted_counts = {
         "community_id": community.id,
         "linked_posts": int(db.query(PersohubPost).filter(PersohubPost.community_id == community.id).count()),
-        "linked_events": int(db.query(PersohubEvent).filter(PersohubEvent.community_id == community.id).count()),
+        "detached_events": int(db.query(PersohubEvent).filter(PersohubEvent.community_id == community.id).count()),
     }
 
+    db.query(PersohubEvent).filter(PersohubEvent.community_id == community.id).update(
+        {PersohubEvent.community_id: None},
+        synchronize_session=False,
+    )
     db.delete(community)
     db.commit()
 
@@ -629,8 +843,9 @@ def list_cc_persohub_event_options(
     db: Session = Depends(get_db),
 ):
     query = (
-        db.query(PersohubEvent, PersohubCommunity, PersohubSympoEvent, PersohubSympo)
-        .join(PersohubCommunity, PersohubCommunity.id == PersohubEvent.community_id)
+        db.query(PersohubEvent, PersohubCommunity, PersohubClub, PersohubSympoEvent, PersohubSympo)
+        .outerjoin(PersohubCommunity, PersohubCommunity.id == PersohubEvent.community_id)
+        .outerjoin(PersohubClub, PersohubClub.id == PersohubEvent.club_id)
         .outerjoin(PersohubSympoEvent, PersohubSympoEvent.event_id == PersohubEvent.id)
         .outerjoin(PersohubSympo, PersohubSympo.id == PersohubSympoEvent.sympo_id)
     )
@@ -642,6 +857,7 @@ def list_cc_persohub_event_options(
                 PersohubEvent.slug.ilike(keyword),
                 PersohubEvent.event_code.ilike(keyword),
                 PersohubCommunity.name.ilike(keyword),
+                PersohubClub.name.ilike(keyword),
             )
         )
 
@@ -663,12 +879,14 @@ def list_cc_persohub_event_options(
             slug=event.slug,
             event_code=event.event_code,
             title=event.title,
-            community_id=community.id,
-            community_name=community.name,
+            club_id=(club.id if club else event.club_id),
+            club_name=(club.name if club else None),
+            community_id=(community.id if community else None),
+            community_name=(community.name if community else None),
             sympo_id=(sympo.id if sympo else None),
             sympo_name=(sympo.name if sympo else None),
         )
-        for event, community, _mapping, sympo in rows
+        for event, community, club, _mapping, sympo in rows
     ]
 
 

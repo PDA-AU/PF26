@@ -3,7 +3,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -30,7 +30,7 @@ from routers.persohub_shared import (
     replace_post_attachments,
     sync_post_tags_and_mentions,
 )
-from security import require_persohub_community
+from security import get_persohub_actor_user_id, require_persohub_community
 from utils import (
     S3_BUCKET_NAME,
     S3_CLIENT,
@@ -121,12 +121,16 @@ def _render_pdf_preview_images(pdf_bytes: bytes, max_pages: int) -> List[bytes]:
 @router.post("/persohub/community/posts", response_model=PersohubPostResponse)
 def create_community_post(
     payload: PersohubPostCreateRequest,
+    request: Request,
     community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
+    actor_user_id = int(get_persohub_actor_user_id(request) or int(community.admin_id or 0))
+    if actor_user_id <= 0:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Community admin mapping missing")
     post = PersohubPost(
         community_id=community.id,
-        admin_id=community.admin_id,
+        admin_id=actor_user_id,
         slug_token=generate_unique_post_slug(db),
         description=payload.description,
     )
@@ -138,16 +142,20 @@ def create_community_post(
 
     db.commit()
     db.refresh(post)
-    return build_post_response(db, post, current_user_id=community.admin_id)
+    return build_post_response(db, post, current_user_id=actor_user_id)
 
 
 @router.put("/persohub/community/posts/{slug_token}", response_model=PersohubPostResponse)
 def update_community_post(
     slug_token: str,
     payload: PersohubPostUpdateRequest,
+    request: Request,
     community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
+    actor_user_id = int(get_persohub_actor_user_id(request) or int(community.admin_id or 0))
+    if actor_user_id <= 0:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Community admin mapping missing")
     post = db.query(PersohubPost).filter(PersohubPost.slug_token == slug_token).first()
     if not post:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
@@ -162,7 +170,7 @@ def update_community_post(
 
     db.commit()
     db.refresh(post)
-    return build_post_response(db, post, current_user_id=community.admin_id)
+    return build_post_response(db, post, current_user_id=actor_user_id)
 
 
 @router.delete("/persohub/community/posts/{slug_token}")

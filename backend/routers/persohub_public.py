@@ -101,13 +101,18 @@ def list_communities(
 def list_public_club_community_info(
     db: Session = Depends(get_db),
 ):
-    rows = (
-        db.query(PersohubCommunity, PersohubClub)
-        .join(PersohubClub, PersohubCommunity.club_id == PersohubClub.id)
-        .filter(PersohubCommunity.is_root == True)  # noqa: E712
-        .order_by(PersohubClub.name.asc(), PersohubCommunity.profile_id.asc())
-        .all()
-    )
+    clubs = db.query(PersohubClub).order_by(PersohubClub.name.asc(), PersohubClub.id.asc()).all()
+    rows = []
+    for club in clubs:
+        community = (
+            db.query(PersohubCommunity)
+            .filter(PersohubCommunity.club_id == club.id)
+            .order_by(PersohubCommunity.id.asc())
+            .first()
+        )
+        if not community:
+            continue
+        rows.append((community, club))
     return [
         PersohubPublicClubCommunityInfo(
             clubId=community.profile_id,
@@ -135,13 +140,13 @@ def get_chakravyuha_public_content(
     return _normalize_chakravyuha_content(sympo.content)
 
 
-def _serialize_chakravyuha_event(event: PersohubEvent, community: PersohubCommunity) -> Dict[str, Any]:
+def _serialize_chakravyuha_event(event: PersohubEvent, community: Optional[PersohubCommunity], club: Optional[PersohubClub]) -> Dict[str, Any]:
     return {
         "id": event.id,
         "slug": event.slug,
         "event_code": event.event_code,
-        "community_id": community.profile_id,
-        "community_name": community.name,
+        "community_id": (community.profile_id if community else None),
+        "community_name": (community.name if community else (club.name if club else None)),
         "title": event.title,
         "description": event.description,
         "start_date": event.start_date.isoformat() if event.start_date else None,
@@ -180,14 +185,15 @@ def get_chakravyuha_public_events(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chakravyuha content not found")
 
     rows = (
-        db.query(PersohubEvent, PersohubCommunity)
+        db.query(PersohubEvent, PersohubCommunity, PersohubClub)
         .join(PersohubSympoEvent, PersohubSympoEvent.event_id == PersohubEvent.id)
-        .join(PersohubCommunity, PersohubCommunity.id == PersohubEvent.community_id)
+        .outerjoin(PersohubCommunity, PersohubCommunity.id == PersohubEvent.community_id)
+        .outerjoin(PersohubClub, PersohubClub.id == PersohubEvent.club_id)
         .filter(PersohubSympoEvent.sympo_id == sympo.id)
         .order_by(PersohubEvent.start_date.asc().nullslast(), PersohubEvent.id.asc())
         .all()
     )
-    return [_serialize_chakravyuha_event(event, community) for event, community in rows]
+    return [_serialize_chakravyuha_event(event, community, club) for event, community, club in rows]
 
 
 @router.post("/persohub/communities/{profile_id}/follow-toggle")

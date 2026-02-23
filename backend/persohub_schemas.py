@@ -5,6 +5,7 @@ from typing import List, Optional, Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import model_validator
 
 
 class PersohubRefreshRequest(BaseModel):
@@ -15,11 +16,21 @@ class PersohubCommunityAuthResponse(BaseModel):
     id: int
     name: str
     profile_id: str
-    admin_id: int
+    admin_id: Optional[int] = None
     admin_name: Optional[str] = None
+    admin_regno: Optional[str] = None
+    current_admin_user_id: Optional[int] = None
+    current_admin_name: Optional[str] = None
+    current_admin_regno: Optional[str] = None
+    current_admin_role: Optional[Literal["owner", "admin", "community_account"]] = None
     logo_url: Optional[str] = None
     club_id: Optional[int] = None
     club_name: Optional[str] = None
+    club_profile_id: Optional[str] = None
+    club_owner_user_id: Optional[int] = None
+    is_club_owner: bool = False
+    can_access_events: bool = False
+    event_policy: dict = Field(default_factory=lambda: {"events": {}})
     is_root: bool = False
 
 
@@ -29,6 +40,59 @@ class PersohubCommunityLoginRequest(BaseModel):
 
 
 class PersohubCommunityTokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    community: PersohubCommunityAuthResponse
+
+
+class PersohubAdminLoginRequest(BaseModel):
+    identifier: str = Field(..., min_length=2, max_length=255)
+    password: str = Field(..., min_length=6)
+
+    @field_validator("identifier", mode="before")
+    @classmethod
+    def normalize_identifier(cls, value):
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("identifier is required")
+        return normalized
+
+
+class PersohubAdminClubOption(BaseModel):
+    club_id: int
+    club_name: str
+    club_profile_id: Optional[str] = None
+    role: Literal["owner", "admin"]
+    can_access_events: bool = False
+
+
+class PersohubAdminLoginResponse(BaseModel):
+    requires_club_selection: bool = True
+    selection_token: str
+    clubs: List[PersohubAdminClubOption] = Field(default_factory=list)
+
+
+class PersohubAdminCommunitySelectRequest(BaseModel):
+    selection_token: str
+    club_id: Optional[int] = Field(default=None, ge=1)
+    community_id: Optional[int] = Field(default=None, ge=1)
+
+    @field_validator("community_id", "club_id", mode="before")
+    @classmethod
+    def _normalize_optional_int(cls, value):
+        if value is None:
+            return None
+        return int(value)
+
+    @model_validator(mode="after")
+    def _validate_target(self):
+        if self.club_id is None and self.community_id is None:
+            raise ValueError("club_id or community_id is required")
+        return self
+
+
+class PersohubAdminTokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
@@ -159,6 +223,11 @@ class PersohubAdminEventStatusEnum(str, Enum):
     CLOSED = "closed"
 
 
+class PersohubAdminEventOpenForEnum(str, Enum):
+    MIT = "MIT"
+    ALL = "ALL"
+
+
 class PersohubAdminEventCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -175,6 +244,7 @@ class PersohubAdminEventCreateRequest(BaseModel):
     template_option: PersohubAdminEventTemplateEnum
     participant_mode: PersohubAdminParticipantModeEnum
     round_mode: PersohubAdminRoundModeEnum
+    open_for: PersohubAdminEventOpenForEnum = PersohubAdminEventOpenForEnum.MIT
     round_count: int = Field(1, ge=1, le=20)
     team_min_size: Optional[int] = Field(None, ge=1, le=100)
     team_max_size: Optional[int] = Field(None, ge=1, le=100)
@@ -228,6 +298,7 @@ class PersohubAdminEventUpdateRequest(BaseModel):
     template_option: Optional[PersohubAdminEventTemplateEnum] = None
     participant_mode: Optional[PersohubAdminParticipantModeEnum] = None
     round_mode: Optional[PersohubAdminRoundModeEnum] = None
+    open_for: Optional[PersohubAdminEventOpenForEnum] = None
     round_count: Optional[int] = Field(default=None, ge=1, le=20)
     team_min_size: Optional[int] = Field(default=None, ge=1, le=100)
     team_max_size: Optional[int] = Field(default=None, ge=1, le=100)
@@ -275,7 +346,8 @@ class PersohubAdminEventResponse(BaseModel):
     id: int
     slug: str
     event_code: str
-    community_id: int
+    club_id: int
+    community_id: Optional[int] = None
     title: str
     description: Optional[str] = None
     start_date: Optional[date] = None
@@ -293,6 +365,7 @@ class PersohubAdminEventResponse(BaseModel):
     team_min_size: Optional[int] = None
     team_max_size: Optional[int] = None
     is_visible: bool = True
+    open_for: PersohubAdminEventOpenForEnum = PersohubAdminEventOpenForEnum.MIT
     status: PersohubAdminEventStatusEnum
     sympo_id: Optional[int] = None
     sympo_name: Optional[str] = None
@@ -380,6 +453,157 @@ class PersohubAdminClubUpdateRequest(BaseModel):
     def _normalize_club_url(cls, value):
         return _normalize_optional_http_url(value, "club_url")
 
+
+class PersohubAdminUserOption(BaseModel):
+    id: int
+    regno: Optional[str] = None
+    name: Optional[str] = None
+
+
+class PersohubAdminCommunityAdminInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: int = Field(..., ge=1)
+    is_active: bool = True
+
+
+class PersohubAdminCommunityAdminResponse(BaseModel):
+    user_id: int
+    regno: Optional[str] = None
+    name: Optional[str] = None
+    is_active: bool = True
+
+
+class PersohubAdminCommunityManageCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, max_length=120)
+    profile_id: str = Field(..., min_length=3, max_length=64)
+    password: str = Field(..., min_length=8)
+    admins: List[PersohubAdminCommunityAdminInput] = Field(default_factory=list)
+    logo_url: Optional[str] = Field(default=None, max_length=500)
+    description: Optional[str] = None
+    is_active: bool = True
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _normalize_name(cls, value):
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("name cannot be empty")
+        return normalized
+
+    @field_validator("profile_id", mode="before")
+    @classmethod
+    def _normalize_profile_id(cls, value):
+        normalized = str(value or "").strip().lower()
+        if not normalized:
+            raise ValueError("profile_id is required")
+        return normalized
+
+    @field_validator("logo_url", mode="before")
+    @classmethod
+    def _normalize_logo_url(cls, value):
+        return _normalize_optional_logo_url(value, "logo_url")
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _normalize_description(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+    @model_validator(mode="after")
+    def _validate_admins(self):
+        active_admins = [item for item in (self.admins or []) if bool(item.is_active)]
+        if not active_admins:
+            raise ValueError("At least one active admin is required")
+        return self
+
+
+class PersohubAdminCommunityManageUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    admins: Optional[List[PersohubAdminCommunityAdminInput]] = None
+    logo_url: Optional[str] = Field(default=None, max_length=500)
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _normalize_name(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        if not normalized:
+            raise ValueError("name cannot be empty")
+        return normalized
+
+    @field_validator("logo_url", mode="before")
+    @classmethod
+    def _normalize_logo_url(cls, value):
+        return _normalize_optional_logo_url(value, "logo_url")
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _normalize_description(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+    @model_validator(mode="after")
+    def _validate_admins(self):
+        if self.admins is None:
+            return self
+        active_admins = [item for item in self.admins if bool(item.is_active)]
+        if not active_admins:
+            raise ValueError("At least one active admin is required")
+        return self
+
+
+class PersohubAdminCommunityManageResponse(BaseModel):
+    id: int
+    name: str
+    profile_id: str
+    club_id: Optional[int] = None
+    club_name: Optional[str] = None
+    admin_id: Optional[int] = None
+    admin_name: Optional[str] = None
+    admin_regno: Optional[str] = None
+    admins: List[PersohubAdminCommunityAdminResponse] = Field(default_factory=list)
+    logo_url: Optional[str] = None
+    description: Optional[str] = None
+    is_active: bool
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class PersohubAdminCommunityResetPasswordRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    new_password: str = Field(..., min_length=8)
+
+
+class PersohubAdminEventPolicyAdminRow(BaseModel):
+    user_id: int
+    regno: Optional[str] = None
+    name: Optional[str] = None
+    is_club_owner: bool = False
+    policy: dict = Field(default_factory=lambda: {"events": {}})
+
+
+class PersohubAdminEventPoliciesResponse(BaseModel):
+    events: List[PersohubAdminEventResponse] = Field(default_factory=list)
+    admins: List[PersohubAdminEventPolicyAdminRow] = Field(default_factory=list)
+
+
+class PersohubAdminEventPolicyUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    policy: dict = Field(default_factory=lambda: {"events": {}})
 
 class PersohubAdminProfileUploadPresignRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")

@@ -7,18 +7,6 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models import (
-    PersohubEvent,
-    PersohubEventAttendance,
-    PersohubEventBadge,
-    PersohubEventInvite,
-    PersohubEventLog,
-    PersohubEventRegistration,
-    PersohubEventRound,
-    PersohubEventScore,
-    PersohubEventTeam,
-    PersohubEventTeamMember,
-    PersohubSympo,
-    PersohubSympoEvent,
     PdaEventFormat,
     PdaEventParticipantMode,
     PdaEventRoundMode,
@@ -27,8 +15,25 @@ from models import (
     PdaEventTemplate,
     PdaEventType,
     PdaUser,
+    PersohubAdmin,
     PersohubClub,
     PersohubCommunity,
+    PersohubEvent,
+    PersohubEventAttendance,
+    PersohubEventBadge,
+    PersohubEventInvite,
+    PersohubEventLog,
+    PersohubEventRegistration,
+    PersohubEventRound,
+    PersohubEventRoundPanel,
+    PersohubEventRoundPanelAssignment,
+    PersohubEventRoundPanelMember,
+    PersohubEventRoundSubmission,
+    PersohubEventScore,
+    PersohubEventTeam,
+    PersohubEventTeamMember,
+    PersohubSympo,
+    PersohubSympoEvent,
 )
 from persohub_schemas import (
     PersohubAdminEventCreateRequest,
@@ -38,7 +43,14 @@ from persohub_schemas import (
     PersohubAdminEventUpdateRequest,
     PersohubAdminSympoOption,
 )
-from security import require_persohub_community
+from security import (
+    can_access_persohub_events,
+    get_persohub_actor_club_id,
+    get_persohub_actor_policy,
+    get_persohub_actor_user_id,
+    is_persohub_club_owner,
+    require_persohub_community,
+)
 
 router = APIRouter()
 
@@ -65,23 +77,6 @@ def _next_event_code(db: Session) -> str:
     latest = db.query(PersohubEvent).order_by(PersohubEvent.id.desc()).first()
     next_id = (latest.id + 1) if latest else 1
     return f"CEV{next_id:03d}"
-
-
-def _resolve_root_community(db: Session, club_id: int) -> Optional[PersohubCommunity]:
-    return (
-        db.query(PersohubCommunity)
-        .filter(PersohubCommunity.club_id == club_id, PersohubCommunity.is_root == True)  # noqa: E712
-        .order_by(PersohubCommunity.id.asc())
-        .first()
-    )
-
-
-def _require_root_editor(community: PersohubCommunity) -> None:
-    if not community.is_root:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only root community can manage events",
-        )
 
 
 def _validate_event_dates(start_date, end_date) -> None:
@@ -131,10 +126,22 @@ def _to_event_status(value) -> PdaEventStatus:
     return PdaEventStatus(value.value if hasattr(value, "value") else str(value))
 
 
+def _to_event_open_for(value) -> str:
+    raw = str(value.value if hasattr(value, "value") else value or "").strip().upper()
+    return "ALL" if raw == "ALL" else "MIT"
+
+
 def _enum_value(value) -> str:
     if hasattr(value, "value"):
         return str(value.value)
     return str(value)
+
+
+def _ensure_events_policy_shape(policy: Optional[dict]) -> dict:
+    safe = dict(policy or {})
+    if not isinstance(safe.get("events"), dict):
+        safe["events"] = {}
+    return safe
 
 
 def _serialize_event(event: PersohubEvent, sympo: Optional[PersohubSympo] = None) -> PersohubAdminEventResponse:
@@ -142,7 +149,8 @@ def _serialize_event(event: PersohubEvent, sympo: Optional[PersohubSympo] = None
         id=event.id,
         slug=event.slug,
         event_code=event.event_code,
-        community_id=event.community_id,
+        club_id=int(event.club_id or 0),
+        community_id=(int(event.community_id) if event.community_id else None),
         title=event.title,
         description=event.description,
         start_date=event.start_date,
@@ -160,6 +168,7 @@ def _serialize_event(event: PersohubEvent, sympo: Optional[PersohubSympo] = None
         team_min_size=event.team_min_size,
         team_max_size=event.team_max_size,
         is_visible=bool(event.is_visible),
+        open_for=_to_event_open_for(event.open_for),
         status=_enum_value(event.status),
         sympo_id=(sympo.id if sympo else None),
         sympo_name=(sympo.name if sympo else None),
@@ -168,12 +177,12 @@ def _serialize_event(event: PersohubEvent, sympo: Optional[PersohubSympo] = None
     )
 
 
-def _get_event_or_404(db: Session, slug: str, root_community_id: int) -> PersohubEvent:
+def _get_event_or_404(db: Session, slug: str, club_id: int) -> PersohubEvent:
     event = (
         db.query(PersohubEvent)
         .filter(
             PersohubEvent.slug == slug,
-            PersohubEvent.community_id == root_community_id,
+            PersohubEvent.club_id == club_id,
         )
         .first()
     )
@@ -182,8 +191,16 @@ def _get_event_or_404(db: Session, slug: str, root_community_id: int) -> Persohu
     return event
 
 
-def _admin_identity(db: Session, community: PersohubCommunity) -> tuple[Optional[int], str, str]:
-    admin = db.query(PdaUser).filter(PdaUser.id == community.admin_id).first()
+def _admin_identity(
+    db: Session,
+    community: PersohubCommunity,
+    *,
+    actor_user_id: Optional[int] = None,
+) -> tuple[Optional[int], str, str]:
+    resolved_actor_id = int(actor_user_id or 0)
+    admin = db.query(PdaUser).filter(PdaUser.id == resolved_actor_id).first() if resolved_actor_id > 0 else None
+    if not admin:
+        admin = db.query(PdaUser).filter(PdaUser.id == community.admin_id).first()
     if not admin:
         return None, "", community.name
     return admin.id, str(admin.regno or ""), str(admin.name or community.name)
@@ -198,8 +215,9 @@ def _log_persohub_event_action(
     event: Optional[PersohubEvent] = None,
     event_slug: Optional[str] = None,
     meta: Optional[dict] = None,
+    actor_user_id: Optional[int] = None,
 ) -> None:
-    admin_id, admin_regno, admin_name = _admin_identity(db, community)
+    admin_id, admin_regno, admin_name = _admin_identity(db, community, actor_user_id=actor_user_id)
     resolved_slug = str(event_slug or (event.slug if event else "") or "")
     db.add(
         PersohubEventLog(
@@ -216,8 +234,62 @@ def _log_persohub_event_action(
     )
 
 
+def _resolve_actor_club_id(request: Request, community: PersohubCommunity) -> int:
+    club_id = int(get_persohub_actor_club_id(request) or int(community.club_id or 0) or 0)
+    if club_id <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Community is not linked to a club")
+    return club_id
+
+
+def _assert_persohub_admin_token(request: Request) -> None:
+    token_user_type = str(getattr(request.state, "persohub_token_user_type", "") or "").strip().lower()
+    if token_user_type != "persohub_admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Persohub admin access required")
+
+
+def _assert_owner(request: Request) -> None:
+    if not is_persohub_club_owner(request):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Club owner access required")
+
+
+def _assert_can_access_events(request: Request) -> None:
+    if is_persohub_club_owner(request):
+        return
+    if not can_access_persohub_events(request):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin policy does not allow event access")
+
+
+def _upsert_policy_slug_for_club_admin_rows(db: Session, club_id: int, slug: str) -> None:
+    rows = (
+        db.query(PersohubAdmin)
+        .join(PersohubCommunity, PersohubCommunity.id == PersohubAdmin.community_id)
+        .filter(PersohubCommunity.club_id == club_id)
+        .all()
+    )
+    for row in rows:
+        policy = _ensure_events_policy_shape(row.policy)
+        if slug not in policy["events"]:
+            policy["events"][slug] = False
+        row.policy = policy
+
+
+def _remove_policy_slug_for_club_admin_rows(db: Session, club_id: int, slug: str) -> None:
+    rows = (
+        db.query(PersohubAdmin)
+        .join(PersohubCommunity, PersohubCommunity.id == PersohubAdmin.community_id)
+        .filter(PersohubCommunity.club_id == club_id)
+        .all()
+    )
+    for row in rows:
+        policy = _ensure_events_policy_shape(row.policy)
+        if slug in policy["events"]:
+            del policy["events"][slug]
+            row.policy = policy
+
+
 @router.get("/persohub/admin/persohub-events", response_model=List[PersohubAdminEventResponse])
 def list_admin_events(
+    request: Request,
     response: Response,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
@@ -225,23 +297,25 @@ def list_admin_events(
     community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
-    if not community.club_id:
-        response.headers["X-Total-Count"] = "0"
-        response.headers["X-Page"] = str(page)
-        response.headers["X-Page-Size"] = str(page_size)
-        return []
-    root_community = _resolve_root_community(db, community.club_id)
-    if not root_community:
-        response.headers["X-Total-Count"] = "0"
-        response.headers["X-Page"] = str(page)
-        response.headers["X-Page-Size"] = str(page_size)
-        return []
+    _assert_persohub_admin_token(request)
+    _assert_can_access_events(request)
+
+    club_id = _resolve_actor_club_id(request, community)
     query = (
         db.query(PersohubEvent, PersohubSympo)
         .outerjoin(PersohubSympoEvent, PersohubSympoEvent.event_id == PersohubEvent.id)
         .outerjoin(PersohubSympo, PersohubSympo.id == PersohubSympoEvent.sympo_id)
-        .filter(PersohubEvent.community_id == root_community.id)
+        .filter(PersohubEvent.club_id == club_id)
     )
+
+    if not is_persohub_club_owner(request):
+        policy = get_persohub_actor_policy(request)
+        events_map = policy.get("events") if isinstance(policy.get("events"), dict) else {}
+        allowed_slugs = [slug for slug, allowed in events_map.items() if bool(allowed)]
+        if not allowed_slugs:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin policy does not allow event access")
+        query = query.filter(PersohubEvent.slug.in_(allowed_slugs))
+
     if q and q.strip():
         keyword = f"%{q.strip()}%"
         query = query.filter(
@@ -251,6 +325,7 @@ def list_admin_events(
                 PersohubEvent.event_code.ilike(keyword),
             )
         )
+
     total_count = int(query.count())
     rows = (
         query.order_by(PersohubEvent.created_at.desc(), PersohubEvent.id.desc())
@@ -258,6 +333,7 @@ def list_admin_events(
         .limit(page_size)
         .all()
     )
+
     response.headers["X-Total-Count"] = str(total_count)
     response.headers["X-Page"] = str(page)
     response.headers["X-Page-Size"] = str(page_size)
@@ -266,9 +342,12 @@ def list_admin_events(
 
 @router.get("/persohub/admin/persohub-sympo-options", response_model=List[PersohubAdminSympoOption])
 def list_admin_sympo_options(
-    _: PersohubCommunity = Depends(require_persohub_community),
+    request: Request,
+    community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
+    _assert_persohub_admin_token(request)
+    _assert_owner(request)
     rows = (
         db.query(PersohubSympo, PersohubClub)
         .join(PersohubClub, PersohubClub.id == PersohubSympo.organising_club_id)
@@ -293,14 +372,10 @@ def create_admin_event(
     community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
-    if not community.club_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Community is not linked to a club")
-    _require_root_editor(community)
+    _assert_persohub_admin_token(request)
+    _assert_owner(request)
 
-    root_community = _resolve_root_community(db, community.club_id)
-    if not root_community:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Root community not found")
-
+    club_id = _resolve_actor_club_id(request, community)
     _validate_event_dates(payload.start_date, payload.end_date)
     participant_mode = _to_participant_mode(payload.participant_mode)
     _validate_team_constraints(participant_mode, payload.team_min_size, payload.team_max_size)
@@ -316,7 +391,8 @@ def create_admin_event(
     event = PersohubEvent(
         slug=_next_slug(db, payload.title),
         event_code=_next_event_code(db),
-        community_id=root_community.id,
+        club_id=club_id,
+        community_id=None,
         title=payload.title.strip(),
         description=payload.description,
         start_date=payload.start_date,
@@ -334,6 +410,7 @@ def create_admin_event(
         team_min_size=team_min_size,
         team_max_size=team_max_size,
         is_visible=True,
+        open_for=_to_event_open_for(payload.open_for),
         status=PdaEventStatus.CLOSED,
     )
     db.add(event)
@@ -351,6 +428,7 @@ def create_admin_event(
             )
         )
 
+    _upsert_policy_slug_for_club_admin_rows(db, club_id, event.slug)
     _log_persohub_event_action(
         db,
         community,
@@ -358,7 +436,8 @@ def create_admin_event(
         method=request.method,
         path=request.url.path,
         event=event,
-        meta={"event_id": event.id, "slug": event.slug},
+        meta={"event_id": event.id, "slug": event.slug, "club_id": club_id},
+        actor_user_id=get_persohub_actor_user_id(request),
     )
 
     db.commit()
@@ -374,15 +453,11 @@ def update_admin_event(
     community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
-    if not community.club_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Community is not linked to a club")
-    _require_root_editor(community)
+    _assert_persohub_admin_token(request)
+    _assert_owner(request)
 
-    root_community = _resolve_root_community(db, community.club_id)
-    if not root_community:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Root community not found")
-
-    event = _get_event_or_404(db, slug, root_community.id)
+    club_id = _resolve_actor_club_id(request, community)
+    event = _get_event_or_404(db, slug, club_id)
     updates = payload.model_dump(exclude_unset=True)
 
     if "event_type" in updates:
@@ -397,6 +472,8 @@ def update_admin_event(
         updates["round_mode"] = _to_round_mode(payload.round_mode)
     if "status" in updates:
         updates["status"] = _to_event_status(payload.status)
+    if "open_for" in updates:
+        updates["open_for"] = _to_event_open_for(payload.open_for)
     if "external_url_name" in updates:
         updates["external_url_name"] = str(updates.get("external_url_name") or "").strip() or _DEFAULT_EVENT_ACTION
 
@@ -428,6 +505,7 @@ def update_admin_event(
         path=request.url.path,
         event=event,
         meta={"event_id": event.id, "slug": event.slug, "updated_fields": sorted(list(updates.keys()))},
+        actor_user_id=get_persohub_actor_user_id(request),
     )
 
     db.commit()
@@ -443,15 +521,11 @@ def assign_admin_event_sympo(
     community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
-    if not community.club_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Community is not linked to a club")
-    _require_root_editor(community)
+    _assert_persohub_admin_token(request)
+    _assert_owner(request)
 
-    root_community = _resolve_root_community(db, community.club_id)
-    if not root_community:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Root community not found")
-
-    event = _get_event_or_404(db, slug, root_community.id)
+    club_id = _resolve_actor_club_id(request, community)
+    event = _get_event_or_404(db, slug, club_id)
     existing = db.query(PersohubSympoEvent).filter(PersohubSympoEvent.event_id == event.id).first()
     previous_sympo_id = existing.sympo_id if existing else None
 
@@ -488,6 +562,7 @@ def assign_admin_event_sympo(
             "previous_sympo_id": previous_sympo_id,
             "next_sympo_id": (next_sympo.id if next_sympo else None),
         },
+        actor_user_id=get_persohub_actor_user_id(request),
     )
     db.commit()
     return PersohubAdminEventSympoAssignResponse(
@@ -505,15 +580,11 @@ def delete_admin_event(
     community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
-    if not community.club_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Community is not linked to a club")
-    _require_root_editor(community)
+    _assert_persohub_admin_token(request)
+    _assert_owner(request)
 
-    root_community = _resolve_root_community(db, community.club_id)
-    if not root_community:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Root community not found")
-
-    event = _get_event_or_404(db, slug, root_community.id)
+    club_id = _resolve_actor_club_id(request, community)
+    event = _get_event_or_404(db, slug, club_id)
     event_id = int(event.id)
     event_slug = str(event.slug)
 
@@ -527,20 +598,30 @@ def delete_admin_event(
     ]
 
     if team_ids:
+        db.query(PersohubEventRoundPanelAssignment).filter(PersohubEventRoundPanelAssignment.team_id.in_(team_ids)).delete(synchronize_session=False)
         db.query(PersohubEventInvite).filter(PersohubEventInvite.team_id.in_(team_ids)).delete(synchronize_session=False)
         db.query(PersohubEventBadge).filter(PersohubEventBadge.team_id.in_(team_ids)).delete(synchronize_session=False)
         db.query(PersohubEventScore).filter(PersohubEventScore.team_id.in_(team_ids)).delete(synchronize_session=False)
+        db.query(PersohubEventRoundSubmission).filter(PersohubEventRoundSubmission.team_id.in_(team_ids)).delete(synchronize_session=False)
         db.query(PersohubEventAttendance).filter(PersohubEventAttendance.team_id.in_(team_ids)).delete(synchronize_session=False)
         db.query(PersohubEventRegistration).filter(PersohubEventRegistration.team_id.in_(team_ids)).delete(synchronize_session=False)
         db.query(PersohubEventTeamMember).filter(PersohubEventTeamMember.team_id.in_(team_ids)).delete(synchronize_session=False)
 
     if round_ids:
+        db.query(PersohubEventRoundPanelAssignment).filter(PersohubEventRoundPanelAssignment.round_id.in_(round_ids)).delete(synchronize_session=False)
+        db.query(PersohubEventRoundPanelMember).filter(PersohubEventRoundPanelMember.round_id.in_(round_ids)).delete(synchronize_session=False)
+        db.query(PersohubEventRoundPanel).filter(PersohubEventRoundPanel.round_id.in_(round_ids)).delete(synchronize_session=False)
         db.query(PersohubEventScore).filter(PersohubEventScore.round_id.in_(round_ids)).delete(synchronize_session=False)
+        db.query(PersohubEventRoundSubmission).filter(PersohubEventRoundSubmission.round_id.in_(round_ids)).delete(synchronize_session=False)
         db.query(PersohubEventAttendance).filter(PersohubEventAttendance.round_id.in_(round_ids)).delete(synchronize_session=False)
 
     db.query(PersohubEventInvite).filter(PersohubEventInvite.event_id == event_id).delete(synchronize_session=False)
     db.query(PersohubEventBadge).filter(PersohubEventBadge.event_id == event_id).delete(synchronize_session=False)
+    db.query(PersohubEventRoundPanelAssignment).filter(PersohubEventRoundPanelAssignment.event_id == event_id).delete(synchronize_session=False)
+    db.query(PersohubEventRoundPanelMember).filter(PersohubEventRoundPanelMember.event_id == event_id).delete(synchronize_session=False)
+    db.query(PersohubEventRoundPanel).filter(PersohubEventRoundPanel.event_id == event_id).delete(synchronize_session=False)
     db.query(PersohubEventScore).filter(PersohubEventScore.event_id == event_id).delete(synchronize_session=False)
+    db.query(PersohubEventRoundSubmission).filter(PersohubEventRoundSubmission.event_id == event_id).delete(synchronize_session=False)
     db.query(PersohubEventAttendance).filter(PersohubEventAttendance.event_id == event_id).delete(synchronize_session=False)
     db.query(PersohubEventRegistration).filter(PersohubEventRegistration.event_id == event_id).delete(synchronize_session=False)
     db.query(PersohubEventTeamMember).filter(
@@ -555,6 +636,7 @@ def delete_admin_event(
         (PersohubEventLog.event_id == event_id) | (PersohubEventLog.event_slug == event_slug)
     ).delete(synchronize_session=False)
 
+    _remove_policy_slug_for_club_admin_rows(db, club_id, event_slug)
     _log_persohub_event_action(
         db,
         community,
@@ -563,7 +645,8 @@ def delete_admin_event(
         path=request.url.path,
         event=None,
         event_slug=event_slug,
-        meta={"event_id": event_id, "slug": event_slug},
+        meta={"event_id": event_id, "slug": event_slug, "club_id": club_id},
+        actor_user_id=get_persohub_actor_user_id(request),
     )
 
     db.delete(event)

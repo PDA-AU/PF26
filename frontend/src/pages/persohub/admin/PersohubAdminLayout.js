@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { usePersohubAdminAuth } from '@/context/PersohubAdminAuthContext';
 import { persohubAdminApi } from '@/pages/persohub/admin/api';
 import PdaLogo from '@/assets/pda-logo.png';
@@ -13,10 +14,29 @@ import PdaLogo from '@/assets/pda-logo.png';
 export default function PersohubAdminLayout({ children, title = 'Persohub Admin', subtitle = '', activeTab = 'profile' }) {
     const navigate = useNavigate();
     const location = useLocation();
-    const { community, loading, login, logout } = usePersohubAdminAuth();
+    const {
+        community,
+        loading,
+        login,
+        logout,
+        selectClub,
+        pendingSelectionToken,
+        availableClubs,
+        clearSelection,
+    } = usePersohubAdminAuth();
     const [loginLoading, setLoginLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
-    const [loginForm, setLoginForm] = useState({ profile_id: '', password: '' });
+    const [loginForm, setLoginForm] = useState({ identifier: '', password: '' });
+    const [selectedClubId, setSelectedClubId] = useState('');
+
+    useEffect(() => {
+        if (!availableClubs.length) {
+            setSelectedClubId('');
+            return;
+        }
+        if (selectedClubId) return;
+        setSelectedClubId(String(availableClubs[0].club_id));
+    }, [availableClubs, selectedClubId]);
 
     const handleLoginChange = (event) => {
         const { name, value } = event.target;
@@ -27,11 +47,38 @@ export default function PersohubAdminLayout({ children, title = 'Persohub Admin'
         event.preventDefault();
         setLoginLoading(true);
         try {
-            await login(loginForm.profile_id, loginForm.password);
-            toast.success('Community admin login successful');
-            navigate('/persohub/admin/profile', { replace: true });
+            const response = await login(loginForm.identifier, loginForm.password);
+            const options = response?.clubs || response?.communities || [];
+            if (options.length > 0) {
+                toast.success('Select a club to continue');
+                return;
+            }
+            toast.error('No Persohub admin access found for this account');
         } catch (error) {
-            toast.error(persohubAdminApi.parseApiError(error, 'Community login failed'));
+            toast.error(persohubAdminApi.parseApiError(error, 'Persohub admin login failed'));
+        } finally {
+            setLoginLoading(false);
+        }
+    };
+
+    const handleClubSelectionSubmit = async (event) => {
+        event.preventDefault();
+        if (!selectedClubId) {
+            toast.error('Select a club');
+            return;
+        }
+        setLoginLoading(true);
+        try {
+            await selectClub(Number(selectedClubId));
+            toast.success('Club selected');
+            const me = await persohubAdminApi.me();
+            if (me?.is_club_owner) {
+                navigate('/persohub/admin/profile', { replace: true });
+            } else {
+                navigate('/persohub/admin/persohub-events', { replace: true });
+            }
+        } catch (error) {
+            toast.error(persohubAdminApi.parseApiError(error, 'Failed to select club'));
         } finally {
             setLoginLoading(false);
         }
@@ -59,7 +106,7 @@ export default function PersohubAdminLayout({ children, title = 'Persohub Admin'
                             PERSOHUB ADMIN
                         </h1>
                         <p className="text-xl text-center max-w-md opacity-90">
-                            Sign in with your community profile credentials to manage Persohub profile details.
+                            Sign in with your user account, then choose a club to manage Persohub communities and events.
                         </p>
                     </div>
                 </div>
@@ -79,23 +126,23 @@ export default function PersohubAdminLayout({ children, title = 'Persohub Admin'
                         </div>
 
                         <h2 className="font-heading font-bold text-3xl md:text-4xl tracking-tight mb-2">
-                            Community Admin Login
+                            Persohub Admin Login
                         </h2>
                         <p className="text-gray-600 mb-8">
-                            Use your community profile ID and password
+                            Step 1: login with your user credentials
                         </p>
 
                         <form onSubmit={handleLoginSubmit} className="space-y-6">
                             <div className="space-y-2">
-                                <Label htmlFor="profile_id" className="font-bold">
-                                    Profile ID
+                                <Label htmlFor="identifier" className="font-bold">
+                                    Identifier
                                 </Label>
                                 <Input
-                                    id="profile_id"
-                                    name="profile_id"
+                                    id="identifier"
+                                    name="identifier"
                                     type="text"
-                                    placeholder="Enter your profile id"
-                                    value={loginForm.profile_id}
+                                    placeholder="Reg no, profile name, or email"
+                                    value={loginForm.identifier}
                                     onChange={handleLoginChange}
                                     required
                                     className="neo-input"
@@ -133,18 +180,56 @@ export default function PersohubAdminLayout({ children, title = 'Persohub Admin'
                                 disabled={loginLoading}
                                 className="w-full bg-primary text-white border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all py-6 text-lg font-bold"
                             >
-                                {loginLoading ? 'Logging in...' : 'Login'}
+                                {loginLoading ? 'Logging in...' : 'Continue'}
                             </Button>
                         </form>
+
+                        {pendingSelectionToken && availableClubs.length > 0 ? (
+                            <form onSubmit={handleClubSelectionSubmit} className="mt-8 space-y-4 border-t border-black/10 pt-6">
+                                <p className="text-gray-700 font-semibold">Step 2: select your club</p>
+                                <div className="space-y-2">
+                                    <Label htmlFor="club-select">Club</Label>
+                                    <Select value={selectedClubId} onValueChange={setSelectedClubId}>
+                                        <SelectTrigger id="club-select" className="neo-input">
+                                            <SelectValue placeholder="Select a club" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {availableClubs.map((option) => (
+                                                <SelectItem key={option.club_id} value={String(option.club_id)}>
+                                                    {option.club_name || `Club ${option.club_id}`} ({option.role})
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="flex gap-2">
+                                    <Button type="submit" disabled={loginLoading} className="flex-1">
+                                        {loginLoading ? 'Entering...' : 'Enter Club'}
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        onClick={clearSelection}
+                                        disabled={loginLoading}
+                                    >
+                                        Clear
+                                    </Button>
+                                </div>
+                            </form>
+                        ) : null}
                     </div>
                 </div>
             </div>
         );
     }
 
+    const isOwner = Boolean(community?.is_club_owner);
+    const canAccessEvents = Boolean(community?.can_access_events);
     const navItems = [
-        { id: 'profile', label: 'Profile', path: '/persohub/admin/profile' },
-        { id: 'events', label: 'Events', path: '/persohub/admin/persohub-events' },
+        ...(isOwner ? [{ id: 'profile', label: 'Profile', path: '/persohub/admin/profile' }] : []),
+        ...(isOwner ? [{ id: 'communities', label: 'Communities', path: '/persohub/admin/communities' }] : []),
+        ...(canAccessEvents ? [{ id: 'events', label: 'Events', path: '/persohub/admin/persohub-events' }] : []),
+        ...(isOwner ? [{ id: 'policies', label: 'Policies', path: '/persohub/admin/policies' }] : []),
     ];
 
     const navClass = (path) => (
@@ -161,13 +246,13 @@ export default function PersohubAdminLayout({ children, title = 'Persohub Admin'
                 <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 px-5 py-6">
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <div className="min-w-0">
-                            <p className="text-xs uppercase tracking-[0.4em] text-slate-400">Persohub Community Admin</p>
+                            <p className="text-xs uppercase tracking-[0.4em] text-slate-400">Persohub Club Admin</p>
                             <h1 className="text-3xl font-heading font-black">{title}</h1>
                             {subtitle ? <p className="mt-2 text-sm text-slate-600">{subtitle}</p> : null}
                         </div>
                         <div className="flex min-w-0 flex-wrap items-center gap-2 sm:justify-end">
                             <span className="max-w-full break-all text-xs rounded-full border border-black/10 bg-slate-50 px-3 py-1 text-slate-700">
-                                @{community.profile_id}
+                                @{community.club_profile_id || community.profile_id}
                             </span>
                             <Button variant="outline" onClick={logout} className="shrink-0 border-black/10 text-sm">
                                 Logout

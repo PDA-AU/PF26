@@ -552,7 +552,8 @@ class PersohubEvent(Base):
     id = Column(Integer, primary_key=True, index=True)
     slug = Column(String(120), unique=True, nullable=False, index=True)
     event_code = Column(String(20), unique=True, nullable=False, index=True)
-    community_id = Column(Integer, ForeignKey("persohub_communities.id"), nullable=False, index=True)
+    club_id = Column(Integer, ForeignKey("persohub_clubs.id", ondelete="CASCADE"), nullable=False, index=True)
+    community_id = Column(Integer, ForeignKey("persohub_communities.id", ondelete="SET NULL"), nullable=True, index=True)
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     start_date = Column(Date, nullable=True)
@@ -873,6 +874,7 @@ class PersohubClub(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(120), unique=True, nullable=False, index=True)
     profile_id = Column(String(64), unique=True, nullable=False, index=True)
+    owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     club_url = Column(String(500), nullable=True)
     club_logo_url = Column(String(500), nullable=True)
     club_tagline = Column(String(255), nullable=True)
@@ -894,6 +896,23 @@ class PersohubCommunity(Base):
     description = Column(Text, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
     is_root = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PersohubAdmin(Base):
+    __tablename__ = "persohub_admins"
+    __table_args__ = (
+        UniqueConstraint("community_id", "user_id", name="uq_persohub_admins_community_user"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    community_id = Column(Integer, ForeignKey("persohub_communities.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    role = Column(String(16), nullable=False, default="admin", server_default="admin")
+    is_active = Column(Boolean, nullable=False, default=True, server_default="true")
+    policy = Column(JSON, nullable=True)
+    created_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

@@ -1869,7 +1869,8 @@ def ensure_persohub_event_tables(engine):
                     id SERIAL PRIMARY KEY,
                     slug VARCHAR(120) UNIQUE NOT NULL,
                     event_code VARCHAR(20) UNIQUE NOT NULL,
-                    community_id INTEGER NOT NULL REFERENCES persohub_communities(id) ON DELETE CASCADE,
+                    club_id INTEGER REFERENCES persohub_clubs(id) ON DELETE CASCADE,
+                    community_id INTEGER REFERENCES persohub_communities(id) ON DELETE SET NULL,
                     title VARCHAR(255) NOT NULL,
                     description TEXT,
                     start_date DATE,
@@ -1899,6 +1900,8 @@ def ensure_persohub_event_tables(engine):
         conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS start_date DATE"))
         conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS end_date DATE"))
         conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS event_time TIME"))
+        conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS club_id INTEGER"))
+        conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS community_id INTEGER"))
         conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS whatsapp_url VARCHAR(500)"))
         conn.execute(
             text(
@@ -2869,6 +2872,7 @@ def ensure_persohub_tables(engine):
                     id SERIAL PRIMARY KEY,
                     name VARCHAR(120) UNIQUE NOT NULL,
                     profile_id VARCHAR(64) UNIQUE NOT NULL,
+                    owner_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
                     club_url VARCHAR(500),
                     club_logo_url VARCHAR(500),
                     club_tagline VARCHAR(255),
@@ -2880,8 +2884,10 @@ def ensure_persohub_tables(engine):
             )
         )
         conn.execute(text("ALTER TABLE persohub_clubs ADD COLUMN IF NOT EXISTS profile_id VARCHAR(64)"))
+        conn.execute(text("ALTER TABLE persohub_clubs ADD COLUMN IF NOT EXISTS owner_user_id INTEGER"))
         conn.execute(text("ALTER TABLE persohub_clubs ADD COLUMN IF NOT EXISTS club_tagline VARCHAR(255)"))
         conn.execute(text("ALTER TABLE persohub_clubs ADD COLUMN IF NOT EXISTS club_description TEXT"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_clubs_owner_user_id ON persohub_clubs(owner_user_id)"))
 
         conn.execute(
             text(
@@ -3170,6 +3176,296 @@ def ensure_persohub_tables(engine):
                 """
             )
         )
+
+
+def ensure_persohub_admins_table(engine):
+    with engine.begin() as conn:
+        if not _table_exists(conn, "persohub_communities") or not _table_exists(conn, "users"):
+            return
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS persohub_admins (
+                    id SERIAL PRIMARY KEY,
+                    community_id INTEGER NOT NULL REFERENCES persohub_communities(id) ON DELETE CASCADE,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    role VARCHAR(16) NOT NULL DEFAULT 'admin',
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    policy JSONB,
+                    created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ
+                )
+                """
+            )
+        )
+        conn.execute(text("ALTER TABLE persohub_admins ADD COLUMN IF NOT EXISTS role VARCHAR(16)"))
+        conn.execute(text("ALTER TABLE persohub_admins ADD COLUMN IF NOT EXISTS is_active BOOLEAN"))
+        conn.execute(text("ALTER TABLE persohub_admins ADD COLUMN IF NOT EXISTS policy JSONB"))
+        conn.execute(text("ALTER TABLE persohub_admins ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER"))
+        conn.execute(text("ALTER TABLE persohub_admins ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now()"))
+        conn.execute(text("ALTER TABLE persohub_admins ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ"))
+
+        conn.execute(text("UPDATE persohub_admins SET role = 'admin' WHERE role IS NULL OR btrim(role) = ''"))
+        conn.execute(text("UPDATE persohub_admins SET role = lower(role)"))
+        conn.execute(text("UPDATE persohub_admins SET role = 'admin' WHERE role <> 'admin'"))
+        conn.execute(text("UPDATE persohub_admins SET is_active = TRUE WHERE is_active IS NULL"))
+        conn.execute(
+            text(
+                """
+                UPDATE persohub_admins
+                SET policy = '{"events":{}}'::jsonb
+                WHERE policy IS NULL OR jsonb_typeof(policy) <> 'object'
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                UPDATE persohub_admins
+                SET policy = jsonb_set(policy, '{events}', '{}'::jsonb, TRUE)
+                WHERE jsonb_typeof(policy->'events') IS DISTINCT FROM 'object'
+                """
+            )
+        )
+
+        conn.execute(text("ALTER TABLE persohub_admins ALTER COLUMN role SET NOT NULL"))
+        conn.execute(text("ALTER TABLE persohub_admins ALTER COLUMN role SET DEFAULT 'admin'"))
+        conn.execute(text("ALTER TABLE persohub_admins ALTER COLUMN is_active SET NOT NULL"))
+        conn.execute(text("ALTER TABLE persohub_admins ALTER COLUMN is_active SET DEFAULT TRUE"))
+        conn.execute(text("ALTER TABLE persohub_admins ALTER COLUMN policy SET NOT NULL"))
+        conn.execute(text("ALTER TABLE persohub_admins ALTER COLUMN policy SET DEFAULT '{\"events\":{}}'::jsonb"))
+
+        if _constraint_exists(conn, "persohub_admins", "chk_persohub_admins_role"):
+            conn.execute(text("ALTER TABLE persohub_admins DROP CONSTRAINT chk_persohub_admins_role"))
+        if not _constraint_exists(conn, "persohub_admins", "chk_persohub_admins_role_admin_only"):
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE persohub_admins
+                    ADD CONSTRAINT chk_persohub_admins_role_admin_only
+                    CHECK (role = 'admin')
+                    """
+                )
+            )
+
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_persohub_admins_community_user
+                ON persohub_admins(community_id, user_id)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS idx_persohub_admins_community_active
+                ON persohub_admins(community_id, is_active)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS idx_persohub_admins_user_active
+                ON persohub_admins(user_id, is_active)
+                """
+            )
+        )
+        conn.execute(text("DROP INDEX IF EXISTS uq_persohub_admins_owner_active"))
+
+        community_rows = conn.execute(
+            text("SELECT id, admin_id FROM persohub_communities ORDER BY id ASC")
+        ).mappings().all()
+
+        for community_row in community_rows:
+            community_id = int(community_row["id"])
+            admin_id_raw = community_row.get("admin_id")
+            admin_id = int(admin_id_raw) if admin_id_raw is not None else None
+
+            if admin_id:
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO persohub_admins (community_id, user_id, role, is_active, policy, created_by_user_id)
+                        VALUES (:community_id, :user_id, 'admin', TRUE, '{"events":{}}'::jsonb, :created_by_user_id)
+                        ON CONFLICT (community_id, user_id) DO UPDATE
+                        SET role = 'admin',
+                            is_active = TRUE,
+                            policy = CASE
+                                WHEN jsonb_typeof(persohub_admins.policy) = 'object'
+                                THEN jsonb_set(persohub_admins.policy, '{events}', COALESCE(persohub_admins.policy->'events', '{}'::jsonb), TRUE)
+                                ELSE '{"events":{}}'::jsonb
+                            END
+                        """
+                    ),
+                    {"community_id": community_id, "user_id": admin_id, "created_by_user_id": admin_id},
+                )
+
+            active_admin_row = conn.execute(
+                text(
+                    """
+                    SELECT user_id
+                    FROM persohub_admins
+                    WHERE community_id = :community_id
+                      AND is_active = TRUE
+                    ORDER BY id ASC
+                    LIMIT 1
+                    """
+                ),
+                {"community_id": community_id},
+            ).fetchone()
+            if active_admin_row:
+                resolved_admin_id = int(active_admin_row[0])
+                if admin_id != resolved_admin_id:
+                    conn.execute(
+                        text(
+                            """
+                            UPDATE persohub_communities
+                            SET admin_id = :resolved_admin_id
+                            WHERE id = :community_id
+                            """
+                        ),
+                        {"community_id": community_id, "resolved_admin_id": resolved_admin_id},
+                    )
+
+
+def ensure_persohub_owner_policy_refactor(engine):
+    with engine.begin() as conn:
+        if not _table_exists(conn, "persohub_events") or not _table_exists(conn, "persohub_clubs"):
+            return
+
+        # Club owner assignment (single owner per club, nullable until resolved by superadmin).
+        conn.execute(text("ALTER TABLE persohub_clubs ADD COLUMN IF NOT EXISTS owner_user_id INTEGER"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_clubs_owner_user_id ON persohub_clubs(owner_user_id)"))
+
+        club_rows = conn.execute(text("SELECT id, owner_user_id FROM persohub_clubs ORDER BY id ASC")).mappings().all()
+        for row in club_rows:
+            club_id = int(row["id"])
+            owner_user_id = row.get("owner_user_id")
+            if owner_user_id is not None:
+                continue
+
+            # Root-owner-first (legacy root community), then community admin pointer, then earliest active admin in club.
+            candidate_row = conn.execute(
+                text(
+                    """
+                    SELECT pa.user_id
+                    FROM persohub_admins pa
+                    JOIN persohub_communities pc ON pc.id = pa.community_id
+                    JOIN users u ON u.id = pa.user_id
+                    WHERE pc.club_id = :club_id
+                      AND pc.is_root = TRUE
+                      AND pa.is_active = TRUE
+                    ORDER BY pa.id ASC
+                    LIMIT 1
+                    """
+                ),
+                {"club_id": club_id},
+            ).fetchone()
+            if not candidate_row:
+                candidate_row = conn.execute(
+                    text(
+                        """
+                        SELECT pc.admin_id
+                        FROM persohub_communities pc
+                        JOIN users u ON u.id = pc.admin_id
+                        WHERE pc.club_id = :club_id
+                          AND pc.admin_id IS NOT NULL
+                        ORDER BY pc.is_root DESC, pc.id ASC
+                        LIMIT 1
+                        """
+                    ),
+                    {"club_id": club_id},
+                ).fetchone()
+            if not candidate_row:
+                candidate_row = conn.execute(
+                    text(
+                        """
+                        SELECT pa.user_id
+                        FROM persohub_admins pa
+                        JOIN persohub_communities pc ON pc.id = pa.community_id
+                        JOIN users u ON u.id = pa.user_id
+                        WHERE pc.club_id = :club_id
+                          AND pa.is_active = TRUE
+                        ORDER BY pa.id ASC
+                        LIMIT 1
+                        """
+                    ),
+                    {"club_id": club_id},
+                ).fetchone()
+            if candidate_row:
+                conn.execute(
+                    text("UPDATE persohub_clubs SET owner_user_id = :owner_user_id WHERE id = :club_id"),
+                    {"owner_user_id": int(candidate_row[0]), "club_id": club_id},
+                )
+
+        # Event ownership moved to club scope with optional provenance community_id.
+        conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS club_id INTEGER"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_events_club_id ON persohub_events(club_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_events_community_id ON persohub_events(community_id)"))
+
+        conn.execute(
+            text(
+                """
+                UPDATE persohub_events e
+                SET club_id = pc.club_id
+                FROM persohub_communities pc
+                WHERE e.community_id = pc.id
+                  AND e.club_id IS NULL
+                  AND pc.club_id IS NOT NULL
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                UPDATE persohub_events e
+                SET club_id = ps.organising_club_id
+                FROM persohub_sympo_events pse
+                JOIN persohub_sympos ps ON ps.id = pse.sympo_id
+                WHERE pse.event_id = e.id
+                  AND e.club_id IS NULL
+                """
+            )
+        )
+
+        single_club_row = conn.execute(text("SELECT id FROM persohub_clubs ORDER BY id ASC LIMIT 1")).fetchone()
+        if single_club_row:
+            conn.execute(
+                text("UPDATE persohub_events SET club_id = :club_id WHERE club_id IS NULL"),
+                {"club_id": int(single_club_row[0])},
+            )
+
+        conn.execute(text("ALTER TABLE persohub_events ALTER COLUMN community_id DROP NOT NULL"))
+        conn.execute(text("ALTER TABLE persohub_events DROP CONSTRAINT IF EXISTS persohub_events_community_id_fkey"))
+        conn.execute(
+            text(
+                """
+                ALTER TABLE persohub_events
+                ADD CONSTRAINT persohub_events_community_id_fkey
+                FOREIGN KEY (community_id) REFERENCES persohub_communities(id) ON DELETE SET NULL
+                """
+            )
+        )
+        conn.execute(text("ALTER TABLE persohub_events DROP CONSTRAINT IF EXISTS persohub_events_club_id_fkey"))
+        conn.execute(
+            text(
+                """
+                ALTER TABLE persohub_events
+                ADD CONSTRAINT persohub_events_club_id_fkey
+                FOREIGN KEY (club_id) REFERENCES persohub_clubs(id) ON DELETE CASCADE
+                """
+            )
+        )
+
+        unresolved_event_count = int(conn.execute(text("SELECT COUNT(*) FROM persohub_events WHERE club_id IS NULL")).scalar() or 0)
+        if unresolved_event_count == 0:
+            conn.execute(text("ALTER TABLE persohub_events ALTER COLUMN club_id SET NOT NULL"))
+        else:
+            conn.execute(text("ALTER TABLE persohub_events ALTER COLUMN club_id DROP NOT NULL"))
 
 
 def ensure_persohub_defaults(db: Session):

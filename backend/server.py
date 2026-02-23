@@ -54,6 +54,8 @@ from migrations import (
     remove_legacy_persofest_once,
     clear_legacy_poster_urls_once,
     ensure_persohub_tables,
+    ensure_persohub_admins_table,
+    ensure_persohub_owner_policy_refactor,
     ensure_persohub_defaults,
 )
 
@@ -65,6 +67,7 @@ from routers import (
     persohub_community_admin,
     persohub_admin_profile,
     persohub_admin_events,
+    persohub_admin_governance,
     persohub_events_admin,
     persohub_events,
 )
@@ -174,6 +177,8 @@ async def startup_event():
     drop_legacy_persohub_sympo_table(engine)
     backfill_pda_event_round_count_once(engine)
     ensure_persohub_tables(engine)
+    ensure_persohub_admins_table(engine)
+    ensure_persohub_owner_policy_refactor(engine)
     ensure_pda_recruitment_tables(engine)
     ensure_system_config_recruit_url_column(engine)
     resolve_user_identifier_collisions_once(engine)
@@ -224,5 +229,6 @@ app.include_router(persohub_community_auth.router, prefix="/api")
 app.include_router(persohub_community_admin.router, prefix="/api")
 app.include_router(persohub_admin_profile.router, prefix="/api")
 app.include_router(persohub_admin_events.router, prefix="/api")
+app.include_router(persohub_admin_governance.router, prefix="/api")
 app.include_router(persohub_events_admin.router, prefix="/api")
 app.include_router(persohub_events.router, prefix="/api")

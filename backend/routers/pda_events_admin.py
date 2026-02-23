@@ -2087,7 +2087,7 @@ def create_round(
         external_url_name=(str(payload.external_url_name or "").strip() or "Explore Round"),
         date=payload.date,
         mode=_to_event_format(payload.mode),
-        evaluation_criteria=[c.model_dump() for c in payload.evaluation_criteria] if payload.evaluation_criteria else [{"name": "Score", "max_marks": 100}],
+        evaluation_criteria=[c.model_dump(exclude_none=True) for c in payload.evaluation_criteria] if payload.evaluation_criteria else [{"name": "Score", "max_marks": 100}],
         requires_submission=bool(payload.requires_submission),
         submission_mode=(payload.submission_mode.value if hasattr(payload.submission_mode, "value") else str(payload.submission_mode or "file_or_link")),
         submission_deadline=payload.submission_deadline,
@@ -2143,7 +2143,7 @@ def update_round(
     if "state" in updates:
         updates["state"] = _to_round_state(payload.state)
     if "evaluation_criteria" in updates and payload.evaluation_criteria is not None:
-        updates["evaluation_criteria"] = [c.model_dump() for c in payload.evaluation_criteria]
+        updates["evaluation_criteria"] = [c.model_dump(exclude_none=True) for c in payload.evaluation_criteria]
     if "submission_mode" in updates:
         updates["submission_mode"] = (
             payload.submission_mode.value

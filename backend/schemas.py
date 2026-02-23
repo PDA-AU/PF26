@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from enum import Enum
 from datetime import datetime, date
 from enum import Enum
@@ -626,6 +626,7 @@ class CcClubCreateRequest(BaseModel):
     club_logo_url: Optional[str] = Field(default=None, max_length=500)
     club_tagline: Optional[str] = Field(default=None, max_length=255)
     club_description: Optional[str] = None
+    owner_user_id: int = Field(..., ge=1)
 
     @field_validator("name", mode="before")
     @classmethod
@@ -671,6 +672,7 @@ class CcClubUpdateRequest(BaseModel):
     club_logo_url: Optional[str] = Field(default=None, max_length=500)
     club_tagline: Optional[str] = Field(default=None, max_length=255)
     club_description: Optional[str] = None
+    owner_user_id: Optional[int] = Field(default=None, ge=1)
 
     @field_validator("name", mode="before")
     @classmethod
@@ -719,9 +721,35 @@ class CcClubResponse(BaseModel):
     club_logo_url: Optional[str] = None
     club_tagline: Optional[str] = None
     club_description: Optional[str] = None
+    owner_user_id: Optional[int] = None
+    owner_name: Optional[str] = None
+    owner_regno: Optional[str] = None
     linked_community_count: int = 0
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+
+class CcCommunityAdminMemberInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: int = Field(..., ge=1)
+    role: Literal["admin"] = "admin"
+    is_active: bool = True
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def normalize_role(cls, value):
+        return "admin"
+
+
+class CcCommunityAdminMemberResponse(BaseModel):
+    id: int
+    user_id: int
+    regno: Optional[str] = None
+    name: Optional[str] = None
+    role: Literal["admin"] = "admin"
+    is_active: bool
+    created_at: Optional[datetime] = None
 
 
 class CcCommunityCreateRequest(BaseModel):
@@ -730,7 +758,8 @@ class CcCommunityCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=120)
     profile_id: str = Field(..., min_length=3, max_length=64)
     club_id: Optional[int] = Field(default=None, ge=1)
-    admin_id: int = Field(..., ge=1)
+    admin_id: Optional[int] = Field(default=None, ge=1)
+    admins: List[CcCommunityAdminMemberInput] = Field(default_factory=list)
     password: str = Field(..., min_length=8)
     logo_url: Optional[str] = Field(default=None, max_length=500)
     description: Optional[str] = None
@@ -766,6 +795,12 @@ class CcCommunityCreateRequest(BaseModel):
         normalized = str(value).strip()
         return normalized or None
 
+    @model_validator(mode="after")
+    def ensure_admins_present(self):
+        if not self.admins and not self.admin_id:
+            raise ValueError("Provide admins or admin_id")
+        return self
+
 
 class CcCommunityUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -773,6 +808,7 @@ class CcCommunityUpdateRequest(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=120)
     club_id: Optional[int] = Field(default=None, ge=1)
     admin_id: Optional[int] = Field(default=None, ge=1)
+    admins: Optional[List[CcCommunityAdminMemberInput]] = None
     logo_url: Optional[str] = Field(default=None, max_length=500)
     description: Optional[str] = None
     is_active: Optional[bool] = None
@@ -801,6 +837,12 @@ class CcCommunityUpdateRequest(BaseModel):
         normalized = str(value).strip()
         return normalized or None
 
+    @model_validator(mode="after")
+    def ensure_non_empty_admins_when_provided(self):
+        if self.admins is not None and len(self.admins) == 0:
+            raise ValueError("admins cannot be empty")
+        return self
+
 
 class CcCommunityResetPasswordRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -814,9 +856,10 @@ class CcCommunityResponse(BaseModel):
     profile_id: str
     club_id: Optional[int] = None
     club_name: Optional[str] = None
-    admin_id: int
+    admin_id: Optional[int] = None
     admin_name: Optional[str] = None
     admin_regno: Optional[str] = None
+    admins: List[CcCommunityAdminMemberResponse] = Field(default_factory=list)
     logo_url: Optional[str] = None
     description: Optional[str] = None
     is_active: bool
@@ -919,8 +962,10 @@ class CcPersohubEventOption(BaseModel):
     slug: str
     event_code: str
     title: str
-    community_id: int
-    community_name: str
+    club_id: Optional[int] = None
+    club_name: Optional[str] = None
+    community_id: Optional[int] = None
+    community_name: Optional[str] = None
     sympo_id: Optional[int] = None
     sympo_name: Optional[str] = None
 
@@ -1340,15 +1385,17 @@ class PdaManagedPanelTeamDistributionModeEnum(str, Enum):
     MEMBER_COUNT_WEIGHTED = "member_count_weighted"
 
 
-def _normalize_optional_http_url(value: Optional[str], field_name: str) -> Optional[str]:
+def _normalize_optional_http_url(value: Optional[str], field_name: str, max_length: int = 500) -> Optional[str]:
     if value is None:
         return None
     cleaned = str(value).strip()
     if not cleaned:
         return None
-    lowered = cleaned.lower()
-    if not (lowered.startswith("http://") or lowered.startswith("https://")):
-        raise ValueError(f"{field_name} must start with http:// or https://")
+    if len(cleaned) > max_length:
+        raise ValueError(f"{field_name} must be at most {max_length} characters")
+    parsed = urlparse(cleaned)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(f"{field_name} must be a valid http/https URL")
     return cleaned
 
 
@@ -1515,9 +1562,73 @@ class PdaManagedTeamResponse(BaseModel):
     members: List[PdaManagedTeamMemberResponse] = Field(default_factory=list)
 
 
+LIKERT_RUBRIC_LABELS_BY_LEVEL = {
+    1: "Very Poor",
+    2: "Poor",
+    3: "Average",
+    4: "Good",
+    5: "Excellent",
+}
+
+
+class LikertRubricBand(BaseModel):
+    level: int = Field(..., ge=1, le=5)
+    label: str
+    min_marks: float
+    max_marks: float
+
+    @model_validator(mode="after")
+    def validate_label_for_level(self):
+        expected = LIKERT_RUBRIC_LABELS_BY_LEVEL.get(int(self.level))
+        if str(self.label or "").strip() != expected:
+            raise ValueError(f"Rubric label for level {self.level} must be '{expected}'")
+        return self
+
+    @model_validator(mode="after")
+    def validate_min_max(self):
+        if float(self.min_marks) > float(self.max_marks):
+            raise ValueError("Rubric band min_marks must be less than or equal to max_marks")
+        return self
+
+
+class LikertRubric(BaseModel):
+    scale: Literal["likert_5"] = "likert_5"
+    bands: List[LikertRubricBand]
+
+    @field_validator("bands")
+    @classmethod
+    def validate_bands_shape(cls, value):
+        safe = list(value or [])
+        if len(safe) != 5:
+            raise ValueError("Rubric must contain exactly 5 bands")
+        levels = [int(item.level) for item in safe]
+        if sorted(levels) != [1, 2, 3, 4, 5]:
+            raise ValueError("Rubric bands must include levels 1,2,3,4,5 exactly once")
+        return safe
+
+
 class PdaManagedRoundCriteria(BaseModel):
     name: str
     max_marks: float
+    rubric: Optional[LikertRubric] = None
+
+    @model_validator(mode="after")
+    def validate_rubric_ranges(self):
+        if self.rubric is None:
+            return self
+        max_marks = float(self.max_marks)
+        if max_marks < 0:
+            raise ValueError("max_marks must be greater than or equal to 0")
+        for band in self.rubric.bands:
+            min_marks = float(band.min_marks)
+            max_band_marks = float(band.max_marks)
+            if min_marks < 0 or max_band_marks < 0:
+                raise ValueError("Rubric band marks must be greater than or equal to 0")
+            if min_marks > max_band_marks:
+                raise ValueError("Rubric band min_marks must be less than or equal to max_marks")
+            if min_marks > max_marks or max_band_marks > max_marks:
+                raise ValueError("Rubric band marks must be within criterion max_marks")
+        return self
 
 
 class PdaManagedRoundCreate(BaseModel):
@@ -2074,7 +2185,8 @@ class PersohubManagedEventResponse(BaseModel):
     id: int
     slug: str
     event_code: str
-    community_id: int
+    club_id: int
+    community_id: Optional[int] = None
     title: str
     description: Optional[str] = None
     start_date: Optional[date] = None

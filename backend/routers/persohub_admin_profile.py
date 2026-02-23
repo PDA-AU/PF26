@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -13,7 +13,7 @@ from persohub_schemas import (
     PersohubAdminProfileUploadPresignRequest,
     PersohubAdminProfileUploadPresignResponse,
 )
-from security import require_persohub_community
+from security import is_persohub_club_owner, require_persohub_community
 from utils import _generate_presigned_put_url
 
 router = APIRouter()
@@ -26,7 +26,7 @@ def _build_club_profile(
     db: Session,
     club_id: int | None,
     *,
-    editor_is_root: bool = False,
+    can_edit: bool = False,
 ) -> PersohubAdminClubProfile | None:
     if not club_id:
         return None
@@ -39,7 +39,6 @@ def _build_club_profile(
         .scalar()
         or 0
     )
-    can_edit = bool(editor_is_root)
     return PersohubAdminClubProfile(
         id=club.id,
         name=club.name,
@@ -48,11 +47,11 @@ def _build_club_profile(
         club_description=club.club_description,
         club_url=club.club_url,
         linked_community_count=linked_count,
-        can_edit=can_edit,
+        can_edit=bool(can_edit),
     )
 
 
-def _build_profile_response(db: Session, community: PersohubCommunity) -> PersohubAdminProfileResponse:
+def _build_profile_response(db: Session, community: PersohubCommunity, *, can_edit: bool) -> PersohubAdminProfileResponse:
     return PersohubAdminProfileResponse(
         community=PersohubAdminCommunityProfile(
             id=community.id,
@@ -67,25 +66,30 @@ def _build_profile_response(db: Session, community: PersohubCommunity) -> Persoh
         club=_build_club_profile(
             db,
             community.club_id,
-            editor_is_root=bool(community.is_root),
+            can_edit=bool(can_edit),
         ),
     )
 
 
 @router.get("/persohub/admin/profile", response_model=PersohubAdminProfileResponse)
 def get_persohub_admin_profile(
+    request: Request,
     community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
-    return _build_profile_response(db, community)
+    return _build_profile_response(db, community, can_edit=is_persohub_club_owner(request))
 
 
 @router.put("/persohub/admin/profile/community", response_model=PersohubAdminProfileResponse)
 def update_persohub_admin_community_profile(
     payload: PersohubAdminCommunityUpdateRequest,
+    request: Request,
     community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
+    if not is_persohub_club_owner(request):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Club owner access required")
+
     updates = payload.model_dump(exclude_unset=True)
 
     if "name" in updates:
@@ -97,12 +101,13 @@ def update_persohub_admin_community_profile(
 
     db.commit()
     db.refresh(community)
-    return _build_profile_response(db, community)
+    return _build_profile_response(db, community, can_edit=True)
 
 
 @router.put("/persohub/admin/profile/club", response_model=PersohubAdminProfileResponse)
 def update_persohub_admin_club_profile(
     payload: PersohubAdminClubUpdateRequest,
+    request: Request,
     community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
@@ -113,10 +118,10 @@ def update_persohub_admin_club_profile(
     if not club:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Linked club not found")
 
-    if not community.is_root:
+    if not is_persohub_club_owner(request):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only root community can edit club profile",
+            detail="Club owner access required",
         )
 
     updates = payload.model_dump(exclude_unset=True)
@@ -134,7 +139,7 @@ def update_persohub_admin_club_profile(
 
     db.commit()
     db.refresh(community)
-    return _build_profile_response(db, community)
+    return _build_profile_response(db, community, can_edit=True)
 
 
 @router.post(

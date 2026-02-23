@@ -7,11 +7,19 @@ const PersohubAdminAuthContext = createContext(null);
 export function PersohubAdminAuthProvider({ children }) {
     const [community, setCommunity] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [selectionToken, setSelectionToken] = useState('');
+    const [availableClubs, setAvailableClubs] = useState([]);
+
+    const clearSelection = useCallback(() => {
+        setSelectionToken('');
+        setAvailableClubs([]);
+    }, []);
 
     const logout = useCallback(() => {
         persohubAdminApi.logout();
         setCommunity(null);
-    }, []);
+        clearSelection();
+    }, [clearSelection]);
 
     const loadSession = useCallback(async () => {
         if (!persohubAdminApi.getAuthHeader().Authorization) {
@@ -23,23 +31,46 @@ export function PersohubAdminAuthProvider({ children }) {
         try {
             const me = await persohubAdminApi.me();
             setCommunity(me || null);
+            clearSelection();
         } catch {
             persohubAdminApi.logout();
             setCommunity(null);
+            clearSelection();
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [clearSelection]);
 
     useEffect(() => {
         loadSession();
     }, [loadSession]);
 
-    const login = useCallback(async (profileId, password) => {
-        const response = await persohubAdminApi.login(profileId, password);
-        setCommunity(response?.community || null);
+    const login = useCallback(async (identifier, password) => {
+        const response = await persohubAdminApi.login(identifier, password);
+        setSelectionToken(response?.selection_token || '');
+        setAvailableClubs(response?.clubs || response?.communities || []);
         return response;
     }, []);
+
+    const selectClub = useCallback(async (clubId, communityId = null) => {
+        if (!selectionToken) {
+            throw new Error('No pending club selection');
+        }
+        const response = await persohubAdminApi.selectClub(selectionToken, clubId, communityId);
+        setCommunity(response?.community || null);
+        clearSelection();
+        return response;
+    }, [clearSelection, selectionToken]);
+
+    const selectCommunity = useCallback(async (communityId) => {
+        if (!selectionToken) {
+            throw new Error('No pending club selection');
+        }
+        const response = await persohubAdminApi.selectCommunity(selectionToken, communityId);
+        setCommunity(response?.community || null);
+        clearSelection();
+        return response;
+    }, [clearSelection, selectionToken]);
 
     const getAuthHeader = useCallback(() => persohubAdminApi.getAuthHeader(), []);
 
@@ -48,9 +79,27 @@ export function PersohubAdminAuthProvider({ children }) {
         loading,
         login,
         logout,
+        selectClub,
+        selectCommunity,
+        pendingSelectionToken: selectionToken,
+        availableClubs,
+        availableCommunities: availableClubs,
         getAuthHeader,
         reloadSession: loadSession,
-    }), [community, loading, login, logout, getAuthHeader, loadSession]);
+        clearSelection,
+    }), [
+        availableClubs,
+        clearSelection,
+        community,
+        getAuthHeader,
+        loadSession,
+        loading,
+        login,
+        logout,
+        selectClub,
+        selectCommunity,
+        selectionToken,
+    ]);
 
     return (
         <PersohubAdminAuthContext.Provider value={value}>

@@ -34,6 +34,7 @@ const initialForm = {
     format: 'Offline',
     template_option: 'attendance_scoring',
     participant_mode: 'individual',
+    open_for: 'MIT',
     round_mode: 'single',
     round_count: 1,
     team_min_size: '',
@@ -93,6 +94,7 @@ const toEventForm = (eventRow = {}) => ({
     format: eventRow.format || 'Offline',
     template_option: eventRow.template_option || 'attendance_scoring',
     participant_mode: eventRow.participant_mode || 'individual',
+    open_for: eventRow.open_for || 'MIT',
     round_mode: eventRow.round_mode || 'single',
     round_count: Number(eventRow.round_count || 1),
     team_min_size: eventRow.team_min_size ?? '',
@@ -127,6 +129,7 @@ const buildEventPayload = (formState, posterUrl) => ({
     format: formState.format,
     template_option: formState.template_option,
     participant_mode: formState.participant_mode,
+    open_for: formState.open_for || 'MIT',
     round_mode: formState.round_mode,
     round_count: Number(formState.round_count || 1),
     team_min_size: formState.participant_mode === 'team' ? Number(formState.team_min_size || 1) : null,
@@ -323,6 +326,16 @@ function EventFormFields({
                 </Select>
             </div>
             <div>
+                <Label>Open For</Label>
+                <Select value={form.open_for || 'MIT'} onValueChange={(value) => setForm((prev) => ({ ...prev, open_for: value }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="MIT">MIT Students</SelectItem>
+                        <SelectItem value="ALL">All Colleges</SelectItem>
+                    </SelectContent>
+                </Select>
+            </div>
+            <div>
                 <Label>Round Mode</Label>
                 <Select value={form.round_mode} onValueChange={(value) => setForm((prev) => ({ ...prev, round_mode: value }))}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
@@ -361,7 +374,8 @@ function EventFormFields({
 
 export default function PersohubAdminEventsPage() {
     const { community } = usePersohubAdminAuth();
-    const canMutate = Boolean(community?.is_root);
+    const canMutate = Boolean(community?.is_club_owner);
+    const canAccessEvents = Boolean(community?.can_access_events);
 
     const [events, setEvents] = useState([]);
     const [sympoOptions, setSympoOptions] = useState([]);
@@ -396,7 +410,7 @@ export default function PersohubAdminEventsPage() {
     }, [query]);
 
     const fetchEvents = useCallback(async () => {
-        if (!community) {
+        if (!community || !canAccessEvents) {
             setEvents([]);
             setTotalCount(0);
             setLoading(false);
@@ -423,10 +437,10 @@ export default function PersohubAdminEventsPage() {
         } finally {
             setLoading(false);
         }
-    }, [community, page, pageSize, queryDebounced]);
+    }, [canAccessEvents, community, page, pageSize, queryDebounced]);
 
     const fetchSympoOptions = useCallback(async () => {
-        if (!community) {
+        if (!community || !canMutate) {
             setSympoOptions([]);
             return;
         }
@@ -436,10 +450,10 @@ export default function PersohubAdminEventsPage() {
         } catch (error) {
             toast.error(persohubAdminApi.parseApiError(error, 'Failed to load sympos'));
         }
-    }, [community]);
+    }, [canMutate, community]);
 
     const fetchParityEnabled = useCallback(async () => {
-        if (!community) {
+        if (!community || !canMutate) {
             setParityEnabled(false);
             return;
         }
@@ -450,7 +464,7 @@ export default function PersohubAdminEventsPage() {
             setParityEnabled(false);
             toast.error(persohubAdminApi.parseApiError(error, 'Failed to read parity status'));
         }
-    }, [community]);
+    }, [canMutate, community]);
 
     useEffect(() => {
         fetchEvents();
@@ -621,6 +635,20 @@ export default function PersohubAdminEventsPage() {
         }
     };
 
+    if (!canAccessEvents) {
+        return (
+            <PersohubAdminLayout
+                title="Persohub Admin Events"
+                subtitle="Manage events delegated for your club."
+                activeTab="events"
+            >
+                <section className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                    Access denied. Your account does not have event access in this club.
+                </section>
+            </PersohubAdminLayout>
+        );
+    }
+
     const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
     const startIndex = totalCount ? ((page - 1) * pageSize) + 1 : 0;
     const endIndex = totalCount ? Math.min(totalCount, page * pageSize) : 0;
@@ -628,14 +656,9 @@ export default function PersohubAdminEventsPage() {
     return (
         <PersohubAdminLayout
             title="Persohub Admin Events"
-            subtitle="Manage root-owned events for your club community."
+            subtitle={canMutate ? "Manage club-owned events for your club." : "Manage only the events assigned by policy."}
             activeTab="events"
         >
-            {!canMutate ? (
-                <section className="rounded-2xl border border-[#c99612]/40 bg-[#fff8df] p-4 text-sm text-[#7a5a00]">
-                    Read-only mode: only the root community account for your club can create, edit, close, or delete events.
-                </section>
-            ) : null}
             {canMutate && !parityEnabled ? (
                 <section className="rounded-2xl border border-black/10 bg-slate-50 p-4 text-sm text-slate-700">
                     Parity admin screens are currently disabled by feature flag. Core event CRUD is still available here.
@@ -665,7 +688,7 @@ export default function PersohubAdminEventsPage() {
 
             <section className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <h2 className="text-2xl font-heading font-black">Root-Owned Club Events</h2>
+                    <h2 className="text-2xl font-heading font-black">Club Events</h2>
                     <Input
                         value={query}
                         onChange={(e) => {
@@ -679,7 +702,7 @@ export default function PersohubAdminEventsPage() {
                 {loading ? (
                     <p className="mt-4 text-sm text-slate-500">Loading...</p>
                 ) : events.length === 0 ? (
-                    <p className="mt-4 text-sm text-slate-500">No root-owned events available yet.</p>
+                    <p className="mt-4 text-sm text-slate-500">No events available yet.</p>
                 ) : (
                     <div className="mt-4 grid gap-4 md:grid-cols-2">
                         {events.map((eventRow) => {
@@ -733,6 +756,7 @@ export default function PersohubAdminEventsPage() {
                                         <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.event_type}</span>
                                         <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.format}</span>
                                         <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.participant_mode}</span>
+                                        <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.open_for || 'MIT'}</span>
                                         <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.template_option}</span>
                                     </div>
                                     <div className="mt-4 rounded-xl border border-black/10 bg-white p-3">

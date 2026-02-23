@@ -52,7 +52,77 @@ const createCriterionDraft = (name = '', maxMarks = 0) => ({
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     name,
     max_marks: maxMarks,
+    rubric: null,
 });
+
+const LIKERT_RUBRIC_LEVELS = [
+    { level: 1, label: 'Very Poor' },
+    { level: 2, label: 'Poor' },
+    { level: 3, label: 'Average' },
+    { level: 4, label: 'Good' },
+    { level: 5, label: 'Excellent' },
+];
+
+const buildEqualLikertBands = (maxMarks = 0) => {
+    const safeMax = Number.isFinite(Number(maxMarks)) ? Math.max(Number(maxMarks), 0) : 0;
+    const step = safeMax / LIKERT_RUBRIC_LEVELS.length;
+    return LIKERT_RUBRIC_LEVELS.map((item, index) => ({
+        level: item.level,
+        label: item.label,
+        min_marks: index === 0 ? 0 : (step * index),
+        max_marks: index === LIKERT_RUBRIC_LEVELS.length - 1 ? safeMax : (step * (index + 1)),
+    }));
+};
+
+const createDefaultRubric = (maxMarks = 0) => ({
+    scale: 'likert_5',
+    bands: buildEqualLikertBands(maxMarks),
+});
+
+const normalizeCriterionRubric = (rubric, maxMarks = 0) => {
+    if (!rubric || typeof rubric !== 'object') return null;
+    const bands = Array.isArray(rubric.bands) ? rubric.bands : [];
+    return {
+        scale: 'likert_5',
+        bands: LIKERT_RUBRIC_LEVELS.map((item, index) => {
+            const source = bands.find((band) => Number(band?.level) === item.level) || bands[index] || {};
+            return {
+                level: item.level,
+                label: item.label,
+                min_marks: Number.parseFloat(source.min_marks) || 0,
+                max_marks: Number.parseFloat(source.max_marks) || maxMarks,
+            };
+        }),
+    };
+};
+
+const validateCriterionRubric = (criterion) => {
+    const rubric = criterion?.rubric;
+    if (!rubric) return null;
+    if (rubric.scale !== 'likert_5') return 'Rubric scale must be likert_5';
+    if (!Array.isArray(rubric.bands) || rubric.bands.length !== 5) return `Criterion "${criterion.name}": rubric must have 5 levels`;
+    const maxMarks = Number.parseFloat(criterion.max_marks);
+    const safeMax = Number.isFinite(maxMarks) ? maxMarks : 0;
+    for (const level of LIKERT_RUBRIC_LEVELS) {
+        const band = rubric.bands.find((item) => Number(item.level) === level.level);
+        if (!band) return `Criterion "${criterion.name}": missing rubric level ${level.label}`;
+        if (String(band.label || '').trim() !== level.label) {
+            return `Criterion "${criterion.name}": invalid label for level ${level.level}`;
+        }
+        const minMarks = Number.parseFloat(band.min_marks);
+        const maxBandMarks = Number.parseFloat(band.max_marks);
+        if (!Number.isFinite(minMarks) || !Number.isFinite(maxBandMarks)) {
+            return `Criterion "${criterion.name}": rubric marks must be numeric`;
+        }
+        if (minMarks < 0 || maxBandMarks < 0 || minMarks > maxBandMarks) {
+            return `Criterion "${criterion.name}": rubric marks are invalid`;
+        }
+        if (minMarks > safeMax || maxBandMarks > safeMax) {
+            return `Criterion "${criterion.name}": rubric marks must be within max marks`;
+        }
+    }
+    return null;
+};
 
 const createPanelDraft = (panelNo = 1) => ({
     _draftId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -276,6 +346,9 @@ function ScoringContent() {
     const [activeContentTab, setActiveContentTab] = useState('scoring');
     const [scoreDraftOriginalByEntity, setScoreDraftOriginalByEntity] = useState({});
     const [scoreDirtyByEntity, setScoreDirtyByEntity] = useState({});
+    const [scoreModalOpen, setScoreModalOpen] = useState(false);
+    const [scoreModalEntity, setScoreModalEntity] = useState(null);
+    const [scoreModalDraft, setScoreModalDraft] = useState({});
     const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false);
     const [unsavedDialogMessage, setUnsavedDialogMessage] = useState('You have unsaved changes. Continue without saving?');
     const [panelModeDisableConfirmOpen, setPanelModeDisableConfirmOpen] = useState(false);
@@ -508,6 +581,13 @@ function ScoringContent() {
         return map;
     }, [round?.is_frozen, rows]);
 
+    const scoreModalRow = useMemo(() => {
+        if (!scoreModalEntity) return null;
+        return rows.find(
+            (row) => row._entityType === scoreModalEntity.entityType && row._entityId === scoreModalEntity.entityId
+        ) || null;
+    }, [rows, scoreModalEntity]);
+
     const displayedRows = useMemo(() => {
         const needle = search.trim().toLowerCase();
         const filtered = rows.filter((row) => {
@@ -716,33 +796,55 @@ function ScoringContent() {
                 const zeroed = Object.fromEntries(criteria.map((criterion) => [criterion.name, 0]));
                 return { ...row, is_present: false, criteria_scores: zeroed };
             }
-            return { ...row, is_present: true };
+            const unscored = Object.fromEntries(criteria.map((criterion) => [criterion.name, -1]));
+            return { ...row, is_present: true, criteria_scores: unscored };
         });
     }, [canEditScoreRow, criteria, updateRowScoreDraft]);
 
-    const handleScoreChange = useCallback((entityType, entityId, criteriaName, value) => {
+    const openScoreModal = useCallback((row) => {
+        if (!row) return;
+        setScoreModalEntity({ entityType: row._entityType, entityId: row._entityId });
+        setScoreModalDraft(
+            criteria.reduce((acc, criterion) => {
+                const value = row.criteria_scores?.[criterion.name];
+                acc[criterion.name] = value == null ? '' : String(value);
+                return acc;
+            }, {})
+        );
+        setScoreModalOpen(true);
+    }, [criteria]);
+
+    const closeScoreModal = useCallback(() => {
+        setScoreModalOpen(false);
+        setScoreModalEntity(null);
+        setScoreModalDraft({});
+    }, []);
+
+    const handleScoreModalDraftChange = useCallback((criteriaName, value) => {
         if (!/^$|^\d*\.?\d*$/.test(value)) return;
-        updateRowScoreDraft(entityType, entityId, (row) => {
-            if (!canEditScoreRow(row)) return row;
-            return {
-                ...row,
-                criteria_scores: { ...row.criteria_scores, [criteriaName]: value },
-            };
-        });
-    }, [canEditScoreRow, updateRowScoreDraft]);
+        setScoreModalDraft((prev) => ({ ...prev, [criteriaName]: value }));
+    }, []);
 
-    const handleScoreBlur = useCallback((entityType, entityId, criteriaName) => {
-        const maxMarks = Number(criteria.find((criterion) => criterion.name === criteriaName)?.max_marks ?? 100);
-        updateRowScoreDraft(entityType, entityId, (row) => {
+    const saveScoreModalDraft = useCallback(() => {
+        if (!scoreModalEntity || !scoreModalRow) return;
+        updateRowScoreDraft(scoreModalEntity.entityType, scoreModalEntity.entityId, (row) => {
             if (!canEditScoreRow(row)) return row;
-            const parsed = Number.parseFloat(row.criteria_scores?.[criteriaName]);
-            const clamped = Number.isNaN(parsed) ? 0 : Math.min(Math.max(parsed, 0), maxMarks);
+            const nextScores = criteria.reduce((acc, criterion) => {
+                const maxMarks = Number(criterion.max_marks ?? 100);
+                const parsed = Number.parseFloat(scoreModalDraft?.[criterion.name]);
+                const normalized = Number.isNaN(parsed)
+                    ? (row.is_present ? -1 : 0)
+                    : Math.min(parsed, maxMarks);
+                acc[criterion.name] = row.is_present ? normalized : 0;
+                return acc;
+            }, {});
             return {
                 ...row,
-                criteria_scores: { ...row.criteria_scores, [criteriaName]: clamped },
+                criteria_scores: nextScores,
             };
         });
-    }, [canEditScoreRow, criteria, updateRowScoreDraft]);
+        closeScoreModal();
+    }, [canEditScoreRow, closeScoreModal, criteria, scoreModalDraft, scoreModalEntity, scoreModalRow, updateRowScoreDraft]);
 
     useEffect(() => {
         if (!hasUnsavedChanges) return undefined;
@@ -1142,7 +1244,9 @@ function ScoringContent() {
                 criteria_scores: Object.keys(maxByCriteria).reduce((acc, criteriaName) => {
                     const max = maxByCriteria[criteriaName];
                     const parsed = Number.parseFloat(row.criteria_scores?.[criteriaName]);
-                    const safe = Number.isNaN(parsed) ? 0 : Math.min(Math.max(parsed, 0), max);
+                    const safe = Number.isNaN(parsed)
+                        ? (row.is_present ? -1 : 0)
+                        : Math.min(parsed, max);
                     acc[criteriaName] = safe;
                     return acc;
                 }, {}),
@@ -1397,7 +1501,10 @@ function ScoringContent() {
         const base = (round?.evaluation_criteria && round.evaluation_criteria.length > 0)
             ? round.evaluation_criteria
             : [{ name: 'Score', max_marks: 100 }];
-        setCriteriaDraft(base.map((criterion) => createCriterionDraft(criterion.name || '', criterion.max_marks || 0)));
+        setCriteriaDraft(base.map((criterion) => ({
+            ...createCriterionDraft(criterion.name || '', criterion.max_marks || 0),
+            rubric: normalizeCriterionRubric(criterion.rubric, criterion.max_marks || 0),
+        })));
         setCriteriaDialogOpen(true);
     };
 
@@ -1412,6 +1519,7 @@ function ScoringContent() {
         const normalized = criteriaDraft.map((criterion) => ({
             name: String(criterion.name || '').trim(),
             max_marks: Number.parseFloat(criterion.max_marks),
+            rubric: criterion.rubric ? normalizeCriterionRubric(criterion.rubric, Number.parseFloat(criterion.max_marks) || 0) : null,
         }));
 
         if (!normalized.length) {
@@ -1432,6 +1540,13 @@ function ScoringContent() {
 
         if (normalized.some((criterion) => Number.isNaN(criterion.max_marks) || !Number.isFinite(criterion.max_marks) || criterion.max_marks <= 0)) {
             toast.error('Max marks must be a number greater than 0');
+            return;
+        }
+        const rubricError = normalized
+            .map((criterion) => validateCriterionRubric(criterion))
+            .find(Boolean);
+        if (rubricError) {
+            toast.error(rubricError);
             return;
         }
 
@@ -1487,7 +1602,7 @@ function ScoringContent() {
         <>
             <div className="neo-card mb-6">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-start gap-4 min-w-0">
                         <Link
                             to={`/admin/events/${eventSlug}/rounds`}
                             onClick={(event) => {
@@ -1502,7 +1617,7 @@ function ScoringContent() {
                                 <ArrowLeft className="w-4 h-4" />
                             </Button>
                         </Link>
-                        <div>
+                        <div className="min-w-0">
                             <div className="flex items-center gap-2">
                                 <span className="bg-primary text-white px-2 py-1 border-2 border-black font-bold text-sm">Round {round.round_no}</span>
                                 {round.is_frozen ? (
@@ -1511,20 +1626,20 @@ function ScoringContent() {
                                     </span>
                                 ) : null}
                             </div>
-                            <h1 className="font-heading font-bold text-2xl mt-2">{round.name}</h1>
+                            <h1 className="font-heading font-bold text-2xl mt-2 break-words">{round.name}</h1>
                             {!isRoundActive ? (
                                 <p className="mt-2 text-xs font-semibold text-slate-600">
                                     Attendance can be edited only when round is Active.
                                 </p>
                             ) : null}
-                            <div className="mt-3 flex items-center gap-3">
-                                <Label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">Enable Panel Mode</Label>
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                                <Label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-600 shrink-0">Enable Panel Mode</Label>
                                 <Switch
                                     checked={panelModeEnabled}
                                     onCheckedChange={requestPanelModeChange}
                                     disabled={panelModeSaving || round.is_frozen}
                                 />
-                                <span className="text-xs text-slate-500">
+                                <span className="text-xs text-slate-500 break-words">
                                     {panelModeEnabled ? 'Scoring permissions are panel-aware.' : 'Classic scoring mode'}
                                 </span>
                             </div>
@@ -1612,7 +1727,7 @@ function ScoringContent() {
             >
                 <DialogContent className="border-4 border-black max-w-3xl w-[calc(100vw-2rem)] sm:w-full max-h-[85vh] overflow-y-auto">
                     <DialogHeader>
-                        <DialogTitle className="font-heading font-bold text-xl">Edit Evaluation Criteria</DialogTitle>
+                        <DialogTitle className="font-heading font-bold text-lg sm:text-xl leading-tight break-words pr-8">Edit Evaluation Criteria</DialogTitle>
                     </DialogHeader>
                     <div className="space-y-4">
                         <p className="text-sm text-gray-600">
@@ -1620,43 +1735,121 @@ function ScoringContent() {
                         </p>
                         <div className="space-y-2">
                             {criteriaDraft.map((criterion) => (
-                                <div key={criterion.id} className="grid grid-cols-1 sm:grid-cols-[1fr_130px_auto] gap-2 items-end">
-                                    <div className="space-y-1">
-                                        <Label className="text-xs uppercase tracking-wide text-gray-500">Criterion</Label>
-                                        <Input
-                                            value={criterion.name}
-                                            onChange={(e) => setCriteriaDraft((prev) => prev.map((item) => (
-                                                item.id === criterion.id ? { ...item, name: e.target.value } : item
-                                            )))}
-                                            placeholder="Criteria name"
-                                            className="neo-input"
+                                <div key={criterion.id} className="rounded-md border-2 border-black p-3 space-y-3">
+                                    <div className="grid grid-cols-1 sm:grid-cols-[1fr_130px_auto] gap-2 items-end">
+                                        <div className="space-y-1">
+                                            <Label className="text-xs uppercase tracking-wide text-gray-500">Criterion</Label>
+                                            <Input
+                                                value={criterion.name}
+                                                onChange={(e) => setCriteriaDraft((prev) => prev.map((item) => (
+                                                    item.id === criterion.id ? { ...item, name: e.target.value } : item
+                                                )))}
+                                                placeholder="Criteria name"
+                                                className="neo-input"
+                                                disabled={savingCriteria}
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <Label className="text-xs uppercase tracking-wide text-gray-500">Max Marks</Label>
+                                            <Input
+                                                type="number"
+                                                value={criterion.max_marks}
+                                                onChange={(e) => setCriteriaDraft((prev) => prev.map((item) => {
+                                                    if (item.id !== criterion.id) return item;
+                                                    const nextMax = Number.parseFloat(e.target.value);
+                                                    return {
+                                                        ...item,
+                                                        max_marks: e.target.value,
+                                                        rubric: item.rubric
+                                                            ? normalizeCriterionRubric(item.rubric, Number.isFinite(nextMax) ? nextMax : 0)
+                                                            : null,
+                                                    };
+                                                }))}
+                                                min={0}
+                                                step="0.01"
+                                                placeholder="100"
+                                                className="neo-input"
+                                                disabled={savingCriteria}
+                                            />
+                                        </div>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            className="border-2 border-black"
+                                            onClick={() => setCriteriaDraft((prev) => (prev.length > 1 ? prev.filter((item) => item.id !== criterion.id) : prev))}
+                                            disabled={savingCriteria || criteriaDraft.length === 1}
+                                        >
+                                            <X className="w-4 h-4" />
+                                        </Button>
+                                    </div>
+                                    <div className="flex items-center justify-between rounded-md border border-slate-300 bg-slate-50 px-3 py-2">
+                                        <Label className="text-sm font-semibold">Rubric (Likert 5-point)</Label>
+                                        <Switch
+                                            checked={Boolean(criterion.rubric)}
+                                            onCheckedChange={(checked) => setCriteriaDraft((prev) => prev.map((item) => {
+                                                if (item.id !== criterion.id) return item;
+                                                return {
+                                                    ...item,
+                                                    rubric: checked ? createDefaultRubric(parseFloat(item.max_marks) || 0) : null,
+                                                };
+                                            }))}
                                             disabled={savingCriteria}
                                         />
                                     </div>
-                                    <div className="space-y-1">
-                                        <Label className="text-xs uppercase tracking-wide text-gray-500">Max Marks</Label>
-                                        <Input
-                                            type="number"
-                                            value={criterion.max_marks}
-                                            onChange={(e) => setCriteriaDraft((prev) => prev.map((item) => (
-                                                item.id === criterion.id ? { ...item, max_marks: e.target.value } : item
-                                            )))}
-                                            min={0}
-                                            step="0.01"
-                                            placeholder="100"
-                                            className="neo-input"
-                                            disabled={savingCriteria}
-                                        />
-                                    </div>
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        className="border-2 border-black"
-                                        onClick={() => setCriteriaDraft((prev) => (prev.length > 1 ? prev.filter((item) => item.id !== criterion.id) : prev))}
-                                        disabled={savingCriteria || criteriaDraft.length === 1}
-                                    >
-                                        <X className="w-4 h-4" />
-                                    </Button>
+                                    {criterion.rubric ? (
+                                        <div className="space-y-2">
+                                            {LIKERT_RUBRIC_LEVELS.map((level) => {
+                                                const band = (criterion.rubric?.bands || []).find((item) => Number(item.level) === level.level) || {};
+                                                return (
+                                                    <div key={`${criterion.id}-rubric-${level.level}`} className="grid grid-cols-1 sm:grid-cols-[120px_1fr_1fr] gap-2 items-center">
+                                                        <Label className="text-xs font-semibold">{level.label}</Label>
+                                                        <Input
+                                                            type="number"
+                                                            value={band.min_marks ?? ''}
+                                                            onChange={(e) => setCriteriaDraft((prev) => prev.map((item) => {
+                                                                if (item.id !== criterion.id || !item.rubric) return item;
+                                                                return {
+                                                                    ...item,
+                                                                    rubric: {
+                                                                        ...item.rubric,
+                                                                        bands: item.rubric.bands.map((rubricBand) => (
+                                                                            Number(rubricBand.level) === level.level
+                                                                                ? { ...rubricBand, min_marks: e.target.value }
+                                                                                : rubricBand
+                                                                        )),
+                                                                    },
+                                                                };
+                                                            }))}
+                                                            className="neo-input"
+                                                            placeholder="Min"
+                                                            disabled={savingCriteria}
+                                                        />
+                                                        <Input
+                                                            type="number"
+                                                            value={band.max_marks ?? ''}
+                                                            onChange={(e) => setCriteriaDraft((prev) => prev.map((item) => {
+                                                                if (item.id !== criterion.id || !item.rubric) return item;
+                                                                return {
+                                                                    ...item,
+                                                                    rubric: {
+                                                                        ...item.rubric,
+                                                                        bands: item.rubric.bands.map((rubricBand) => (
+                                                                            Number(rubricBand.level) === level.level
+                                                                                ? { ...rubricBand, max_marks: e.target.value }
+                                                                                : rubricBand
+                                                                        )),
+                                                                    },
+                                                                };
+                                                            }))}
+                                                            className="neo-input"
+                                                            placeholder="Max"
+                                                            disabled={savingCriteria}
+                                                        />
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    ) : null}
                                 </div>
                             ))}
                         </div>
@@ -2252,9 +2445,7 @@ function ScoringContent() {
                                 {panelModeEnabled ? <th>Panel</th> : null}
                                 {isSubmissionRound ? <th>Submission</th> : null}
                                 <th>Present</th>
-                                {criteria.map((criterion, index) => (
-                                    <th key={`${criterion.name}-${index}`} className="min-w-[140px] whitespace-nowrap">{criterion.name} (/{criterion.max_marks})</th>
-                                ))}
+                                <th>Action</th>
                                 <th>Total</th>
                                 <th className="min-w-[140px] whitespace-nowrap">Round Score</th>
                                 {round?.is_frozen ? <th>Round Rank</th> : null}
@@ -2278,9 +2469,18 @@ function ScoringContent() {
                                     : (roundStatus === 'Eliminated'
                                         ? 'bg-red-100 text-red-800 border-red-500'
                                         : 'bg-orange-100 text-orange-800 border-orange-500');
+                                const rowKey = entityKey(row._entityType, row._entityId);
+                                const rowScoreDirty = Boolean(scoreDirtyByEntity?.[rowKey]);
+                                const rowPanelOriginal = panelAssignmentOriginal?.[rowKey] == null ? null : Number(panelAssignmentOriginal[rowKey]);
+                                const rowPanelDraft = panelAssignmentDraft?.[rowKey] == null ? null : Number(panelAssignmentDraft[rowKey]);
+                                const rowPanelDirty = rowPanelOriginal !== rowPanelDraft;
+                                const rowHasUnsavedChanges = rowScoreDirty || rowPanelDirty;
 
                                 return (
-                                    <tr key={`${row._entityType}-${row._entityId}`}>
+                                    <tr
+                                        key={`${row._entityType}-${row._entityId}`}
+                                        className={rowHasUnsavedChanges ? 'bg-orange-100/60' : ''}
+                                    >
                                         <td className="font-mono font-bold">{row._code || '—'}</td>
                                         <td className="font-medium">{row._name || '—'}</td>
                                         <td>
@@ -2339,20 +2539,17 @@ function ScoringContent() {
                                                 className="border-2 border-black data-[state=checked]:bg-primary"
                                             />
                                         </td>
-                                        {criteria.map((criterion, index) => (
-                                            <td key={`${criterion.name}-${index}`} className="min-w-[140px]">
-                                                <Input
-                                                    type="number"
-                                                    value={row.criteria_scores?.[criterion.name] ?? ''}
-                                                    onChange={(e) => handleScoreChange(row._entityType, row._entityId, criterion.name, e.target.value)}
-                                                    onBlur={() => handleScoreBlur(row._entityType, row._entityId, criterion.name)}
-                                                    disabled={!row.is_present || !rowEditable}
-                                                    className="neo-input h-10 w-full min-w-[110px]"
-                                                    min={0}
-                                                    max={criterion.max_marks}
-                                                />
-                                            </td>
-                                        ))}
+                                        <td>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                onClick={() => openScoreModal(row)}
+                                                disabled={!rowEditable}
+                                                className="border-2 border-black shadow-neo"
+                                            >
+                                                Score
+                                            </Button>
+                                        </td>
                                         <td className="font-bold">{totalScore}</td>
                                         <td className="min-w-[140px]">
                                             <span className="inline-flex h-10 w-full min-w-[110px] items-center justify-center bg-primary text-white px-2 py-1 border-2 border-black font-bold">
@@ -2367,6 +2564,81 @@ function ScoringContent() {
                     </table>
                 </div>
             )}
+
+            <Dialog
+                open={scoreModalOpen}
+                onOpenChange={(open) => {
+                    if (open) return;
+                    closeScoreModal();
+                }}
+            >
+                <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-[560px] max-h-[85vh] overflow-y-auto border-2 border-black shadow-neo bg-white">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading font-bold text-lg sm:text-xl leading-tight break-words pr-8">Score Evaluation Criteria</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <div className="rounded-md border-2 border-black bg-slate-50 p-3 text-sm">
+                            <p className="font-semibold">{scoreModalRow?._name || 'Participant'}</p>
+                            <p className="font-mono text-xs text-slate-600">{scoreModalRow?._code || '—'}</p>
+                            {!scoreModalRow?.is_present ? (
+                                <p className="mt-2 text-xs font-semibold text-orange-700">Participant is marked absent. Scores will be saved as 0.</p>
+                            ) : null}
+                        </div>
+                        <div className="space-y-3">
+                            {criteria.map((criterion, index) => (
+                                <div key={`${criterion.name}-${index}`} className="space-y-2 rounded-md border border-slate-300 p-3">
+                                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_140px] sm:items-center">
+                                        <Label className="font-semibold">{criterion.name} (/{criterion.max_marks})</Label>
+                                        <Input
+                                            type="number"
+                                            value={scoreModalDraft?.[criterion.name] ?? ''}
+                                            onChange={(e) => handleScoreModalDraftChange(criterion.name, e.target.value)}
+                                            disabled={!scoreModalRow?.is_present || !canEditScoreRow(scoreModalRow)}
+                                            className="neo-input h-10 w-full"
+                                            min={0}
+                                            max={criterion.max_marks}
+                                        />
+                                    </div>
+                                    {criterion?.rubric?.scale === 'likert_5' && Array.isArray(criterion?.rubric?.bands) ? (
+                                        <div className="rounded-md border border-blue-300 bg-blue-50 p-2">
+                                            <p className="text-[11px] font-semibold uppercase tracking-wide text-blue-700">Rubric Guide</p>
+                                            <div className="mt-1 grid gap-1 text-xs text-blue-900 sm:grid-cols-2">
+                                                {LIKERT_RUBRIC_LEVELS.map((level) => {
+                                                    const band = criterion.rubric.bands.find((item) => Number(item.level) === level.level) || {};
+                                                    return (
+                                                        <p key={`${criterion.name}-${level.level}`}>
+                                                            {level.label}: {band.min_marks ?? 0}-{band.max_marks ?? 0}
+                                                        </p>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    ) : null}
+                                </div>
+                            ))}
+                        </div>
+                        <p className="text-xs font-semibold text-orange-700">Changes are only saved locally</p>
+                        <div className="flex items-center justify-end gap-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="border-2 border-black"
+                                onClick={closeScoreModal}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                type="button"
+                                className="bg-primary text-white border-2 border-black shadow-neo"
+                                disabled={!scoreModalRow || !canEditScoreRow(scoreModalRow)}
+                                onClick={saveScoreModalDraft}
+                            >
+                                Confirm
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
 
                     {!loading && totalRows > 0 ? (
                         <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

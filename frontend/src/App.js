@@ -3,7 +3,7 @@ import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
-import { PersohubAdminAuthProvider } from "@/context/PersohubAdminAuthContext";
+import { PersohubAdminAuthProvider, usePersohubAdminAuth } from "@/context/PersohubAdminAuthContext";
 
 // Pages
 import PdaHome from "@/pages/PdaHome";
@@ -40,7 +40,9 @@ import PersohubProfilePage from "@/pages/persohub/PersohubProfilePage";
 import ChakravyuhaTmpEditorPage from "@/pages/persohub/tmp/ChakravyuhaTmpEditorPage";
 import PersohubAdminEntryPage from "@/pages/persohub/admin/PersohubAdminEntryPage";
 import PersohubAdminProfilePage from "@/pages/persohub/admin/PersohubAdminProfilePage";
+import PersohubAdminCommunitiesPage from "@/pages/persohub/admin/PersohubAdminCommunitiesPage";
 import PersohubAdminEventsPage from "@/pages/persohub/admin/PersohubAdminEventsPage";
+import PersohubAdminPoliciesPage from "@/pages/persohub/admin/PersohubAdminPoliciesPage";
 import PersohubEventDashboard from "@/pages/persohub/events/PersohubEventDashboard";
 import PersohubEventAdminDashboardPage from "@/pages/persohub/events/admin/EventAdminDashboardPage";
 import PersohubEventAdminAttendancePage from "@/pages/persohub/events/admin/EventAdminAttendancePage";
@@ -103,6 +105,54 @@ const PersohubEventAdminBaseRedirect = () => {
     const { eventSlug } = useParams();
     if (!eventSlug) return <Navigate to="/persohub/admin/persohub-events" replace />;
     return <Navigate to={`/persohub/admin/persohub-events/${eventSlug}/dashboard`} replace />;
+};
+
+const ProtectedPersohubEventsRoute = ({ children }) => {
+    const { community, loading } = usePersohubAdminAuth();
+
+    if (loading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-white">
+                <div className="neo-card animate-pulse">
+                    <p className="font-heading text-xl">Loading...</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (!community) {
+        return <Navigate to="/persohub/admin" replace />;
+    }
+
+    if (!community.can_access_events) {
+        return <Navigate to="/persohub/admin" replace />;
+    }
+
+    return children;
+};
+
+const ProtectedPersohubOwnerRoute = ({ children }) => {
+    const { community, loading } = usePersohubAdminAuth();
+
+    if (loading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-white">
+                <div className="neo-card animate-pulse">
+                    <p className="font-heading text-xl">Loading...</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (!community) {
+        return <Navigate to="/persohub/admin" replace />;
+    }
+
+    if (!community.is_club_owner) {
+        return <Navigate to="/persohub/admin/persohub-events" replace />;
+    }
+
+    return children;
 };
 
 function AppRoutes() {
@@ -207,18 +257,76 @@ function AppRoutes() {
                 </ProtectedPdaRoute>
             } />
             <Route path="/persohub/admin" element={<PersohubAdminEntryPage />} />
-            <Route path="/persohub/admin/profile" element={<PersohubAdminProfilePage />} />
-            <Route path="/persohub/admin/persohub-events" element={<PersohubAdminEventsPage />} />
-            <Route path="/persohub/admin/persohub-events/:eventSlug" element={<PersohubEventAdminBaseRedirect />} />
-            <Route path="/persohub/admin/persohub-events/:eventSlug/dashboard" element={<PersohubEventAdminDashboardPage />} />
-            <Route path="/persohub/admin/persohub-events/:eventSlug/attendance" element={<PersohubEventAdminAttendancePage />} />
-            <Route path="/persohub/admin/persohub-events/:eventSlug/rounds" element={<PersohubEventAdminRoundsPage />} />
-            <Route path="/persohub/admin/persohub-events/:eventSlug/rounds/:roundId/scoring" element={<PersohubEventAdminScoringPage />} />
-            <Route path="/persohub/admin/persohub-events/:eventSlug/participants" element={<PersohubEventAdminParticipantsPage />} />
-            <Route path="/persohub/admin/persohub-events/:eventSlug/leaderboard" element={<PersohubEventAdminLeaderboardPage />} />
-            <Route path="/persohub/admin/persohub-events/:eventSlug/email" element={<PersohubEventAdminEmailPage />} />
-            <Route path="/persohub/admin/persohub-events/:eventSlug/badges" element={<PersohubEventAdminBadgesPage />} />
-            <Route path="/persohub/admin/persohub-events/:eventSlug/logs" element={<PersohubEventAdminLogsPage />} />
+            <Route path="/persohub/admin/profile" element={
+                <ProtectedPersohubOwnerRoute>
+                    <PersohubAdminProfilePage />
+                </ProtectedPersohubOwnerRoute>
+            } />
+            <Route path="/persohub/admin/communities" element={
+                <ProtectedPersohubOwnerRoute>
+                    <PersohubAdminCommunitiesPage />
+                </ProtectedPersohubOwnerRoute>
+            } />
+            <Route path="/persohub/admin/policies" element={
+                <ProtectedPersohubOwnerRoute>
+                    <PersohubAdminPoliciesPage />
+                </ProtectedPersohubOwnerRoute>
+            } />
+            <Route path="/persohub/admin/persohub-events" element={
+                <ProtectedPersohubEventsRoute>
+                    <PersohubAdminEventsPage />
+                </ProtectedPersohubEventsRoute>
+            } />
+            <Route path="/persohub/admin/persohub-events/:eventSlug" element={
+                <ProtectedPersohubEventsRoute>
+                    <PersohubEventAdminBaseRedirect />
+                </ProtectedPersohubEventsRoute>
+            } />
+            <Route path="/persohub/admin/persohub-events/:eventSlug/dashboard" element={
+                <ProtectedPersohubEventsRoute>
+                    <PersohubEventAdminDashboardPage />
+                </ProtectedPersohubEventsRoute>
+            } />
+            <Route path="/persohub/admin/persohub-events/:eventSlug/attendance" element={
+                <ProtectedPersohubEventsRoute>
+                    <PersohubEventAdminAttendancePage />
+                </ProtectedPersohubEventsRoute>
+            } />
+            <Route path="/persohub/admin/persohub-events/:eventSlug/rounds" element={
+                <ProtectedPersohubEventsRoute>
+                    <PersohubEventAdminRoundsPage />
+                </ProtectedPersohubEventsRoute>
+            } />
+            <Route path="/persohub/admin/persohub-events/:eventSlug/rounds/:roundId/scoring" element={
+                <ProtectedPersohubEventsRoute>
+                    <PersohubEventAdminScoringPage />
+                </ProtectedPersohubEventsRoute>
+            } />
+            <Route path="/persohub/admin/persohub-events/:eventSlug/participants" element={
+                <ProtectedPersohubEventsRoute>
+                    <PersohubEventAdminParticipantsPage />
+                </ProtectedPersohubEventsRoute>
+            } />
+            <Route path="/persohub/admin/persohub-events/:eventSlug/leaderboard" element={
+                <ProtectedPersohubEventsRoute>
+                    <PersohubEventAdminLeaderboardPage />
+                </ProtectedPersohubEventsRoute>
+            } />
+            <Route path="/persohub/admin/persohub-events/:eventSlug/email" element={
+                <ProtectedPersohubEventsRoute>
+                    <PersohubEventAdminEmailPage />
+                </ProtectedPersohubEventsRoute>
+            } />
+            <Route path="/persohub/admin/persohub-events/:eventSlug/badges" element={
+                <ProtectedPersohubEventsRoute>
+                    <PersohubEventAdminBadgesPage />
+                </ProtectedPersohubEventsRoute>
+            } />
+            <Route path="/persohub/admin/persohub-events/:eventSlug/logs" element={
+                <ProtectedPersohubEventsRoute>
+                    <PersohubEventAdminLogsPage />
+                </ProtectedPersohubEventsRoute>
+            } />
             <Route path="/persohub/events/:eventSlug" element={<PersohubEventDashboard />} />
             <Route path="/persohub/events/:eventSlug/:profileName" element={<PersohubEventDashboard />} />
             <Route path="/persohub/:profileName" element={<PersohubProfilePage />} />
