@@ -3216,7 +3216,7 @@ def ensure_persohub_admins_table(engine):
                 """
                 UPDATE persohub_admins
                 SET policy = '{"events":{}}'::jsonb
-                WHERE policy IS NULL OR jsonb_typeof(policy) <> 'object'
+                WHERE policy IS NULL OR jsonb_typeof(policy::jsonb) <> 'object'
                 """
             )
         )
@@ -3224,8 +3224,8 @@ def ensure_persohub_admins_table(engine):
             text(
                 """
                 UPDATE persohub_admins
-                SET policy = jsonb_set(policy, '{events}', '{}'::jsonb, TRUE)
-                WHERE jsonb_typeof(policy->'events') IS DISTINCT FROM 'object'
+                SET policy = jsonb_set(policy::jsonb, '{events}', '{}'::jsonb, TRUE)
+                WHERE jsonb_typeof((policy::jsonb)->'events') IS DISTINCT FROM 'object'
                 """
             )
         )
@@ -3295,8 +3295,8 @@ def ensure_persohub_admins_table(engine):
                         SET role = 'admin',
                             is_active = TRUE,
                             policy = CASE
-                                WHEN jsonb_typeof(persohub_admins.policy) = 'object'
-                                THEN jsonb_set(persohub_admins.policy, '{events}', COALESCE(persohub_admins.policy->'events', '{}'::jsonb), TRUE)
+                                WHEN jsonb_typeof(persohub_admins.policy::jsonb) = 'object'
+                                THEN jsonb_set(persohub_admins.policy::jsonb, '{events}', COALESCE((persohub_admins.policy::jsonb)->'events', '{}'::jsonb), TRUE)
                                 ELSE '{"events":{}}'::jsonb
                             END
                         """
