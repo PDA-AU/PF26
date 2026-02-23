@@ -1055,6 +1055,7 @@ export default function EventDashboard() {
                                 {publishedRounds.map((round) => {
                                     const roundPosterAssets = parsePosterAssets(round?.round_poster);
                                     const roundDateLabel = formatEventDate(round?.date);
+                                    const roundDeadlineLabel = formatDateTimeIst(round?.submission_deadline);
                                     return (
                                         <button
                                             type="button"
@@ -1062,9 +1063,16 @@ export default function EventDashboard() {
                                             className="flex h-[34rem] w-full flex-col overflow-hidden rounded-md border-4 border-black bg-[#fffdf9] p-5 text-left shadow-[6px_6px_0px_0px_#000000] transition-transform duration-150 hover:-translate-y-[2px]"
                                             onClick={() => setSelectedRound(round)}
                                         >
-                                            <h3 className="inline-flex w-fit rounded-md border-2 border-black bg-[#FDE047] px-3 py-1 font-heading text-lg font-black uppercase tracking-tight text-black">
-                                                {round.name}
-                                            </h3>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <h3 className="inline-flex w-fit rounded-md border-2 border-black bg-[#FDE047] px-3 py-1 font-heading text-lg font-black uppercase tracking-tight text-black">
+                                                    {round.name}
+                                                </h3>
+                                                {roundDeadlineLabel ? (
+                                                    <span className="rounded-md border-2 border-black bg-[#fee2e2] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-red-700 shadow-neo">
+                                                        Deadline: {roundDeadlineLabel}
+                                                    </span>
+                                                ) : null}
+                                            </div>
                                             {roundPosterAssets.length ? (
                                                 <div className="mt-3 overflow-hidden rounded-md border-2 border-black bg-[#11131a]">
                                                     <PosterCarousel
@@ -1393,7 +1401,14 @@ export default function EventDashboard() {
                                                                         {String(round.round_no || '').slice(-2)}
                                                                     </div>
                                                                     <div>
-                                                                        <p className="font-heading text-lg font-black uppercase tracking-tight">{round.round_name}</p>
+                                                                        <div className="flex flex-wrap items-center gap-2">
+                                                                            <p className="font-heading text-lg font-black uppercase tracking-tight">{round.round_name}</p>
+                                                                            {submissionDeadlineLabel ? (
+                                                                                <span className="rounded-md border-2 border-black bg-[#fee2e2] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-red-700 shadow-neo">
+                                                                                    Deadline: {submissionDeadlineLabel}
+                                                                                </span>
+                                                                            ) : null}
+                                                                        </div>
                                                                         <p className="text-xs font-medium uppercase tracking-[0.1em] text-slate-600">{round.round_no}</p>
                                                                         {panelNo !== null ? (
                                                                             <p className="mt-1 text-xs font-semibold uppercase tracking-[0.08em] text-slate-700">
@@ -1894,6 +1909,11 @@ export default function EventDashboard() {
                                 <h3 className="inline-flex w-fit rounded-md border-2 border-black bg-[#FDE047] px-3 py-1 font-heading text-xl font-black uppercase tracking-tight text-black">
                                     {selectedRound.name}
                                 </h3>
+                                {selectedRoundDeadlineLabel ? (
+                                    <div className="inline-flex items-center rounded-md border-2 border-black bg-[#fee2e2] px-3 py-1 text-xs font-bold uppercase tracking-[0.08em] text-red-700 shadow-neo">
+                                        Deadline: {selectedRoundDeadlineLabel}
+                                    </div>
+                                ) : null}
                                 <div className={`${selectedRoundPosterAssets.length ? 'grid gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:items-start' : 'space-y-4'}`}>
                                     {selectedRoundPosterAssets.length ? (
                                         <div className="space-y-3">
