@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 
 from database import get_db, SessionLocal
+from badge_service import delete_badges_for_pda_teams, delete_badges_for_user
 from models import (
     PdaItem,
     PdaTeam,
@@ -23,7 +24,7 @@ from models import (
     PdaEventTeamMember,
     PdaEventAttendance,
     PdaEventScore,
-    PdaEventBadge,
+    BadgeAssignment,
     PdaEventInvite,
     PersohubCommunity,
     PersohubCommunityFollow,
@@ -288,7 +289,7 @@ def _user_dependency_checks(db: Session, user_id: int) -> List[str]:
             (PdaEventAttendance.user_id == user_id) | (PdaEventAttendance.marked_by_user_id == user_id)
         ).first()),
         ("pda_event_scores", db.query(PdaEventScore).filter(PdaEventScore.user_id == user_id).first()),
-        ("pda_event_badges", db.query(PdaEventBadge).filter(PdaEventBadge.user_id == user_id).first()),
+        ("badge_assignments", db.query(BadgeAssignment).filter(BadgeAssignment.user_id == user_id).first()),
         ("pda_event_invites", db.query(PdaEventInvite).filter(
             (PdaEventInvite.invited_user_id == user_id) | (PdaEventInvite.invited_by_user_id == user_id)
         ).first()),
@@ -987,7 +988,7 @@ def delete_pda_user(
             db.query(PdaEventRegistration).filter(PdaEventRegistration.team_id.in_(team_ids)).delete(synchronize_session=False)
             db.query(PdaEventAttendance).filter(PdaEventAttendance.team_id.in_(team_ids)).delete(synchronize_session=False)
             db.query(PdaEventScore).filter(PdaEventScore.team_id.in_(team_ids)).delete(synchronize_session=False)
-            db.query(PdaEventBadge).filter(PdaEventBadge.team_id.in_(team_ids)).delete(synchronize_session=False)
+            delete_badges_for_pda_teams(db, team_ids)
             db.query(PdaEventInvite).filter(PdaEventInvite.team_id.in_(team_ids)).delete(synchronize_session=False)
             db.query(PdaEventTeamMember).filter(PdaEventTeamMember.team_id.in_(team_ids)).delete(synchronize_session=False)
             db.query(PdaEventTeam).filter(PdaEventTeam.id.in_(team_ids_led)).delete(synchronize_session=False)
@@ -998,7 +999,7 @@ def delete_pda_user(
             (PdaEventAttendance.user_id == user_id) | (PdaEventAttendance.marked_by_user_id == user_id)
         ).delete(synchronize_session=False)
         db.query(PdaEventScore).filter(PdaEventScore.user_id == user_id).delete(synchronize_session=False)
-        db.query(PdaEventBadge).filter(PdaEventBadge.user_id == user_id).delete(synchronize_session=False)
+        delete_badges_for_user(db, user_id)
         db.query(PdaEventInvite).filter(
             (PdaEventInvite.invited_user_id == user_id) | (PdaEventInvite.invited_by_user_id == user_id)
         ).delete(synchronize_session=False)

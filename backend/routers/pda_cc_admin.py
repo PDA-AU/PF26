@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -10,6 +10,8 @@ from auth import get_password_hash, verify_password
 from database import get_db
 from emailer import send_email_async
 from models import (
+    Badge,
+    BadgeAssignment,
     PersohubEvent,
     PersohubEventEntityType,
     PersohubEventRegistration,
@@ -17,11 +19,15 @@ from models import (
     PersohubPayment,
     PersohubSympo,
     PersohubSympoEvent,
+    PdaEvent,
+    PdaEventTeam,
+    PdaTeam,
     PdaUser,
     PersohubAdmin,
     PersohubClub,
     PersohubCommunity,
     PersohubPost,
+    PersohubEventTeam,
 )
 from schemas import (
     CcAdminUserOption,
@@ -40,6 +46,13 @@ from schemas import (
     CcCommunityResponse,
     CcCommunityUpdateRequest,
     CcDeleteSummaryResponse,
+    CcBadgeCreateRequest,
+    CcBadgeUpdateRequest,
+    CcBadgeResponse,
+    CcBadgeAssignmentCreateRequest,
+    CcBadgeAssignmentBulkCreateRequest,
+    CcBadgeAssignmentResponse,
+    CcBadgeUserOption,
     CcSympoCreateRequest,
     CcSympoResponse,
     CcSympoUpdateRequest,
@@ -48,10 +61,12 @@ from schemas import (
 )
 from security import require_superadmin
 from utils import _generate_presigned_put_url, log_admin_action
+from badge_service import create_badge_assignment, get_or_create_badge
 
 router = APIRouter()
 
 _ALLOWED_LOGO_TYPES = ["image/png", "image/jpeg", "image/webp"]
+_ALLOWED_REVEAL_VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime"]
 
 
 def _build_club_response(db: Session, club: PersohubClub) -> CcClubResponse:
@@ -451,6 +466,327 @@ def _send_payment_status_email(
         send_email_async(participant.email, subject, html, text)
     except Exception:
         pass
+
+
+def _build_cc_badge_response(row: Badge) -> CcBadgeResponse:
+    return CcBadgeResponse(
+        id=int(row.id),
+        badge_name=str(row.badge_name or ""),
+        image_url=(str(row.image_url).strip() if row.image_url else None),
+        reveal_video_url=(str(row.reveal_video_url).strip() if row.reveal_video_url else None),
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _build_cc_badge_assignment_response(row: BadgeAssignment, badge: Badge, user: Optional[PdaUser] = None) -> CcBadgeAssignmentResponse:
+    return CcBadgeAssignmentResponse(
+        id=int(row.id),
+        badge_id=int(row.badge_id),
+        badge_name=str(badge.badge_name or ""),
+        badge_image_url=(str(badge.image_url).strip() if badge.image_url else None),
+        badge_reveal_video_url=(str(badge.reveal_video_url).strip() if badge.reveal_video_url else None),
+        user_id=(int(row.user_id) if row.user_id is not None else None),
+        user_name=((str(user.name or "").strip() or None) if user else None),
+        user_regno=((str(user.regno or "").strip() or None) if user else None),
+        pda_team_id=(int(row.pda_team_id) if row.pda_team_id is not None else None),
+        persohub_team_id=(int(row.persohub_team_id) if row.persohub_team_id is not None else None),
+        pda_event_id=(int(row.pda_event_id) if row.pda_event_id is not None else None),
+        persohub_event_id=(int(row.persohub_event_id) if row.persohub_event_id is not None else None),
+        meta=(row.meta if isinstance(row.meta, dict) else {}),
+        created_at=row.created_at,
+    )
+
+
+def _validate_cc_badge_assignment_refs(
+    db: Session,
+    *,
+    user_id: Optional[int] = None,
+    pda_team_id: Optional[int] = None,
+    persohub_team_id: Optional[int] = None,
+    pda_event_id: Optional[int] = None,
+    persohub_event_id: Optional[int] = None,
+) -> None:
+    if user_id is not None and not db.query(PdaUser.id).filter(PdaUser.id == int(user_id)).first():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User {user_id} not found")
+    if pda_team_id is not None and not db.query(PdaEventTeam.id).filter(PdaEventTeam.id == int(pda_team_id)).first():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"PDA team {pda_team_id} not found")
+    if persohub_team_id is not None and not db.query(PersohubEventTeam.id).filter(PersohubEventTeam.id == int(persohub_team_id)).first():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Persohub team {persohub_team_id} not found")
+    if pda_event_id is not None and not db.query(PdaEvent.id).filter(PdaEvent.id == int(pda_event_id)).first():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"PDA event {pda_event_id} not found")
+    if persohub_event_id is not None and not db.query(PersohubEvent.id).filter(PersohubEvent.id == int(persohub_event_id)).first():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Persohub event {persohub_event_id} not found")
+
+
+def _normalize_batch_from_regno(regno: Optional[str]) -> Optional[str]:
+    value = str(regno or "").strip()
+    if len(value) < 4:
+        return None
+    prefix = value[:4]
+    if not prefix.isdigit():
+        return None
+    return prefix
+
+
+@router.get("/pda-admin/cc/badges", response_model=List[CcBadgeResponse])
+def list_cc_badges(
+    _: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+):
+    rows = db.query(Badge).order_by(Badge.badge_name.asc(), Badge.id.asc()).all()
+    return [_build_cc_badge_response(row) for row in rows]
+
+
+@router.post("/pda-admin/cc/badges", response_model=CcBadgeResponse)
+def create_cc_badge(
+    payload: CcBadgeCreateRequest,
+    admin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    try:
+        row = get_or_create_badge(
+            db,
+            badge_name=payload.badge_name,
+            image_url=payload.image_url,
+            reveal_video_url=payload.reveal_video_url,
+        )
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Badge already exists")
+    db.refresh(row)
+    log_admin_action(
+        db,
+        admin,
+        "Create C&C badge",
+        request.method if request else None,
+        request.url.path if request else None,
+        {"badge_id": row.id, "badge_name": row.badge_name},
+    )
+    return _build_cc_badge_response(row)
+
+
+@router.patch("/pda-admin/cc/badges/{badge_id}", response_model=CcBadgeResponse)
+def update_cc_badge(
+    badge_id: int,
+    payload: CcBadgeUpdateRequest,
+    admin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    row = db.query(Badge).filter(Badge.id == badge_id).first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Badge not found")
+    updates = payload.model_dump(exclude_unset=True)
+    if not updates:
+        return _build_cc_badge_response(row)
+    for key, value in updates.items():
+        setattr(row, key, value)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Badge update conflicts with existing badge")
+    db.refresh(row)
+    log_admin_action(
+        db,
+        admin,
+        "Update C&C badge",
+        request.method if request else None,
+        request.url.path if request else None,
+        {"badge_id": row.id, "updated_fields": sorted(list(updates.keys()))},
+    )
+    return _build_cc_badge_response(row)
+
+
+@router.delete("/pda-admin/cc/badges/{badge_id}", response_model=CcDeleteSummaryResponse)
+def delete_cc_badge(
+    badge_id: int,
+    admin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    row = db.query(Badge).filter(Badge.id == badge_id).first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Badge not found")
+    linked_assignments = int(db.query(BadgeAssignment).filter(BadgeAssignment.badge_id == badge_id).count())
+    db.delete(row)
+    db.commit()
+    log_admin_action(
+        db,
+        admin,
+        "Delete C&C badge",
+        request.method if request else None,
+        request.url.path if request else None,
+        {"badge_id": badge_id, "linked_assignments": linked_assignments},
+    )
+    return CcDeleteSummaryResponse(
+        message="Badge deleted",
+        deleted_counts={"linked_assignments": linked_assignments},
+    )
+
+
+@router.get("/pda-admin/cc/badge-assignments", response_model=List[CcBadgeAssignmentResponse])
+def list_cc_badge_assignments(
+    response: Response,
+    badge_id: Optional[int] = Query(default=None, ge=1),
+    user_id: Optional[int] = Query(default=None, ge=1),
+    pda_team_id: Optional[int] = Query(default=None, ge=1),
+    persohub_team_id: Optional[int] = Query(default=None, ge=1),
+    pda_event_id: Optional[int] = Query(default=None, ge=1),
+    persohub_event_id: Optional[int] = Query(default=None, ge=1),
+    scope: str = Query(default="non_event"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=200),
+    _: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+):
+    normalized_scope = str(scope or "non_event").strip().lower()
+    if normalized_scope not in {"non_event", "event", "all"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="scope must be one of: non_event, event, all")
+
+    query = (
+        db.query(BadgeAssignment, Badge, PdaUser)
+        .join(Badge, Badge.id == BadgeAssignment.badge_id)
+        .outerjoin(PdaUser, PdaUser.id == BadgeAssignment.user_id)
+    )
+    if normalized_scope == "non_event":
+        query = query.filter(BadgeAssignment.pda_event_id.is_(None), BadgeAssignment.persohub_event_id.is_(None))
+    elif normalized_scope == "event":
+        query = query.filter(or_(BadgeAssignment.pda_event_id.isnot(None), BadgeAssignment.persohub_event_id.isnot(None)))
+    if badge_id is not None:
+        query = query.filter(BadgeAssignment.badge_id == int(badge_id))
+    if user_id is not None:
+        query = query.filter(BadgeAssignment.user_id == int(user_id))
+    if pda_team_id is not None:
+        query = query.filter(BadgeAssignment.pda_team_id == int(pda_team_id))
+    if persohub_team_id is not None:
+        query = query.filter(BadgeAssignment.persohub_team_id == int(persohub_team_id))
+    if pda_event_id is not None:
+        query = query.filter(BadgeAssignment.pda_event_id == int(pda_event_id))
+    if persohub_event_id is not None:
+        query = query.filter(BadgeAssignment.persohub_event_id == int(persohub_event_id))
+
+    total_count = int(query.count())
+    rows = (
+        query.order_by(BadgeAssignment.created_at.desc(), BadgeAssignment.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    response.headers["X-Total-Count"] = str(total_count)
+    response.headers["X-Page"] = str(page)
+    response.headers["X-Page-Size"] = str(page_size)
+    response.headers["X-Scope"] = normalized_scope
+    return [_build_cc_badge_assignment_response(assignment, badge, user) for assignment, badge, user in rows]
+
+
+@router.post("/pda-admin/cc/badge-assignments", response_model=CcBadgeAssignmentResponse)
+def create_cc_badge_assignment(
+    payload: CcBadgeAssignmentCreateRequest,
+    admin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    badge = db.query(Badge).filter(Badge.id == payload.badge_id).first()
+    if not badge:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Badge not found")
+    _validate_cc_badge_assignment_refs(
+        db,
+        user_id=payload.user_id,
+    )
+    assignment = create_badge_assignment(
+        db,
+        badge_name=badge.badge_name,
+        image_url=badge.image_url,
+        reveal_video_url=badge.reveal_video_url,
+        user_id=payload.user_id,
+        meta=payload.meta if isinstance(payload.meta, dict) else {},
+    )
+    db.commit()
+    db.refresh(assignment)
+    log_admin_action(
+        db,
+        admin,
+        "Create C&C badge assignment",
+        request.method if request else None,
+        request.url.path if request else None,
+        {"assignment_id": assignment.id, "badge_id": assignment.badge_id},
+    )
+    user = db.query(PdaUser).filter(PdaUser.id == assignment.user_id).first() if assignment.user_id else None
+    return _build_cc_badge_assignment_response(assignment, badge, user)
+
+
+@router.post("/pda-admin/cc/badge-assignments/bulk")
+def bulk_create_cc_badge_assignments(
+    payload: CcBadgeAssignmentBulkCreateRequest,
+    admin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    badge = db.query(Badge).filter(Badge.id == payload.badge_id).first()
+    if not badge:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Badge not found")
+    created_ids: List[int] = []
+    for user_id in payload.user_ids:
+        _validate_cc_badge_assignment_refs(
+            db,
+            user_id=user_id,
+        )
+        row = create_badge_assignment(
+            db,
+            badge_name=badge.badge_name,
+            image_url=badge.image_url,
+            reveal_video_url=badge.reveal_video_url,
+            user_id=int(user_id),
+            meta=payload.meta if isinstance(payload.meta, dict) else {},
+        )
+        created_ids.append(int(row.id))
+
+    db.commit()
+    log_admin_action(
+        db,
+        admin,
+        "Bulk create C&C badge assignments",
+        request.method if request else None,
+        request.url.path if request else None,
+        {
+            "badge_id": badge.id,
+            "created_count": len(created_ids),
+            "target_counts": {
+                "users": len(payload.user_ids),
+            },
+        },
+    )
+    return {"created_count": len(created_ids), "assignment_ids": created_ids}
+
+
+@router.delete("/pda-admin/cc/badge-assignments/{assignment_id}", response_model=CcDeleteSummaryResponse)
+def delete_cc_badge_assignment(
+    assignment_id: int,
+    admin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    row = db.query(BadgeAssignment).filter(BadgeAssignment.id == assignment_id).first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Badge assignment not found")
+    db.delete(row)
+    db.commit()
+    log_admin_action(
+        db,
+        admin,
+        "Delete C&C badge assignment",
+        request.method if request else None,
+        request.url.path if request else None,
+        {"assignment_id": assignment_id},
+    )
+    return CcDeleteSummaryResponse(
+        message="Badge assignment deleted",
+        deleted_counts={"badge_assignments": 1},
+    )
 
 
 @router.get("/pda-admin/cc/clubs", response_model=List[CcClubResponse])
@@ -1250,6 +1586,89 @@ def list_cc_admin_user_options(
     return [CcAdminUserOption(id=user.id, regno=user.regno, name=user.name) for user in users]
 
 
+@router.get("/pda-admin/cc/options/users", response_model=List[CcBadgeUserOption])
+def list_cc_badge_user_options(
+    response: Response,
+    q: Optional[str] = Query(default=None),
+    college: str = Query(default="all"),
+    membership: str = Query(default="all"),
+    batch: str = Query(default="all"),
+    team: str = Query(default="all"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=200),
+    _: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+):
+    normalized_college = str(college or "all").strip().lower()
+    if normalized_college not in {"all", "mit", "non_mit"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="college must be one of: all, mit, non_mit")
+    normalized_membership = str(membership or "all").strip().lower()
+    if normalized_membership not in {"all", "member", "non_member"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="membership must be one of: all, member, non_member")
+
+    normalized_batch = str(batch or "all").strip()
+    normalized_team = str(team or "all").strip().lower()
+
+    query = (
+        db.query(PdaUser, PdaTeam)
+        .outerjoin(PdaTeam, PdaTeam.user_id == PdaUser.id)
+    )
+
+    if q and q.strip():
+        keyword = f"%{q.strip()}%"
+        query = query.filter(
+            or_(
+                PdaUser.name.ilike(keyword),
+                PdaUser.regno.ilike(keyword),
+                PdaUser.profile_name.ilike(keyword),
+            )
+        )
+    if normalized_college == "mit":
+        query = query.filter(func.lower(func.trim(func.coalesce(PdaUser.college, ""))) == "mit")
+    elif normalized_college == "non_mit":
+        query = query.filter(func.lower(func.trim(func.coalesce(PdaUser.college, ""))) != "mit")
+
+    if normalized_membership == "member":
+        query = query.filter(PdaUser.is_member.is_(True))
+    elif normalized_membership == "non_member":
+        query = query.filter(or_(PdaUser.is_member.is_(False), PdaUser.is_member.is_(None)))
+
+    if normalized_team == "unassigned":
+        query = query.filter(or_(PdaTeam.team.is_(None), func.trim(func.coalesce(PdaTeam.team, "")) == ""))
+    elif normalized_team != "all":
+        query = query.filter(func.lower(func.trim(func.coalesce(PdaTeam.team, ""))) == normalized_team)
+
+    if normalized_batch.lower() != "all":
+        query = query.filter(PdaUser.regno.like(f"{normalized_batch}%"))
+
+    total_count = int(query.count())
+    rows = (
+        query.order_by(PdaUser.name.asc(), PdaUser.id.asc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    response.headers["X-Total-Count"] = str(total_count)
+    response.headers["X-Page"] = str(page)
+    response.headers["X-Page-Size"] = str(page_size)
+
+    payload: List[CcBadgeUserOption] = []
+    for user, member in rows:
+        payload.append(
+            CcBadgeUserOption(
+                id=int(user.id),
+                name=str(user.name or ""),
+                regno=str(user.regno or ""),
+                profile_name=(str(user.profile_name or "") or None),
+                college=(str(user.college or "") or None),
+                is_member=bool(user.is_member),
+                team=(str(member.team or "") or None) if member else None,
+                batch=_normalize_batch_from_regno(user.regno),
+            )
+        )
+    return payload
+
+
 @router.post("/pda-admin/cc/logos/presign", response_model=PresignResponse)
 def presign_cc_logo_upload(
     payload: PresignRequest,
@@ -1260,4 +1679,17 @@ def presign_cc_logo_upload(
         payload.filename,
         payload.content_type,
         allowed_types=_ALLOWED_LOGO_TYPES,
+    )
+
+
+@router.post("/pda-admin/cc/badges/reveal-video/presign", response_model=PresignResponse)
+def presign_cc_badge_reveal_video_upload(
+    payload: PresignRequest,
+    _: PdaUser = Depends(require_superadmin),
+):
+    return _generate_presigned_put_url(
+        "persohub/cc/badges/reveal-videos",
+        payload.filename,
+        payload.content_type,
+        allowed_types=_ALLOWED_REVEAL_VIDEO_TYPES,
     )

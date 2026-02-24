@@ -24,11 +24,15 @@ function BadgesContent() {
     const [badges, setBadges] = useState([]);
     const [entities, setEntities] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [imageFile, setImageFile] = useState(null);
+    const [revealVideoFile, setRevealVideoFile] = useState(null);
+    const [imageUploading, setImageUploading] = useState(false);
     const [form, setForm] = useState({
         title: '',
         place: 'Winner',
         score: '',
         image_url: '',
+        reveal_video_url: '',
         entity_id: '',
     });
 
@@ -84,11 +88,39 @@ function BadgesContent() {
             return;
         }
         try {
+            let imageUrl = form.image_url || null;
+            let revealVideoUrl = form.reveal_video_url || null;
+            if (imageFile) {
+                setImageUploading(true);
+                const presignRes = await axios.post(
+                    `${API}/persohub/admin/persohub-events/${eventSlug}/badges/presign`,
+                    { filename: imageFile.name, content_type: imageFile.type || 'application/octet-stream' },
+                    { headers: getAuthHeader() }
+                );
+                const { upload_url, public_url, content_type } = presignRes.data || {};
+                await axios.put(upload_url, imageFile, {
+                    headers: { 'Content-Type': content_type || imageFile.type || 'application/octet-stream' },
+                });
+                imageUrl = public_url || null;
+            }
+            if (revealVideoFile) {
+                const revealPresignRes = await axios.post(
+                    `${API}/persohub/admin/persohub-events/${eventSlug}/badges/reveal-video/presign`,
+                    { filename: revealVideoFile.name, content_type: revealVideoFile.type || 'application/octet-stream' },
+                    { headers: getAuthHeader() }
+                );
+                const { upload_url, public_url, content_type } = revealPresignRes.data || {};
+                await axios.put(upload_url, revealVideoFile, {
+                    headers: { 'Content-Type': content_type || revealVideoFile.type || 'application/octet-stream' },
+                });
+                revealVideoUrl = public_url || null;
+            }
             await axios.post(`${API}/persohub/admin/persohub-events/${eventSlug}/badges`, {
                 title: form.title,
                 place: form.place,
                 score: form.score ? Number(form.score) : null,
-                image_url: form.image_url || null,
+                image_url: imageUrl,
+                reveal_video_url: revealVideoUrl,
                 user_id: isTeamMode ? null : Number(form.entity_id),
                 team_id: isTeamMode ? Number(form.entity_id) : null,
             }, { headers: getAuthHeader() });
@@ -99,11 +131,16 @@ function BadgesContent() {
                 place: 'Winner',
                 score: '',
                 image_url: '',
+                reveal_video_url: '',
                 entity_id: '',
             });
+            setImageFile(null);
+            setRevealVideoFile(null);
             fetchBadges();
         } catch (error) {
             toast.error(getErrorMessage(error, 'Failed to add badge'));
+        } finally {
+            setImageUploading(false);
         }
     };
 
@@ -208,22 +245,37 @@ function BadgesContent() {
                         </Select>
                     </div>
                     <div className="md:col-span-3">
-                        <Label>Image URL</Label>
+                        <Label>Badge Image Upload</Label>
                         <Input
-                            value={form.image_url}
-                            onChange={(e) => {
-                                const previous = { ...form };
-                                const nextValue = e.target.value;
-                                setForm((prev) => ({ ...prev, image_url: nextValue }));
-                                pushLocalUndo({
-                                    label: 'Undo badge image URL edit',
-                                    undoFn: () => setForm(previous),
-                                });
-                            }}
+                            type="file"
+                            accept="image/png,image/jpeg,image/webp"
+                            onChange={(e) => setImageFile(e.target.files?.[0] || null)}
                         />
+                        <p className="text-xs text-gray-500 mt-1">Uploads via S3 presigned URL.</p>
+                        {form.image_url ? (
+                            <a href={form.image_url} target="_blank" rel="noreferrer" className="text-xs text-blue-600 underline break-all">
+                                {form.image_url}
+                            </a>
+                        ) : null}
+                    </div>
+                    <div className="md:col-span-3">
+                        <Label>Badge Reveal Video Upload (optional)</Label>
+                        <Input
+                            type="file"
+                            accept="video/mp4,video/webm,video/quicktime"
+                            onChange={(e) => setRevealVideoFile(e.target.files?.[0] || null)}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">Uses S3 presigned URL. Fallback animation is used if empty.</p>
+                        {form.reveal_video_url ? (
+                            <a href={form.reveal_video_url} target="_blank" rel="noreferrer" className="text-xs text-blue-600 underline break-all">
+                                {form.reveal_video_url}
+                            </a>
+                        ) : null}
                     </div>
                     <div className="md:col-span-3 flex justify-end">
-                        <Button type="submit" className="bg-[#11131a] text-white hover:bg-[#1f2330] border-2 border-black">Add Badge</Button>
+                        <Button type="submit" disabled={imageUploading} className="bg-[#11131a] text-white hover:bg-[#1f2330] border-2 border-black">
+                            {imageUploading ? 'Uploading...' : 'Add Badge'}
+                        </Button>
                     </div>
                 </form>
             </div>

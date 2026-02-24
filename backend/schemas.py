@@ -983,10 +983,127 @@ class CcDeleteSummaryResponse(BaseModel):
     deleted_counts: Dict[str, int] = Field(default_factory=dict)
 
 
+class CcBadgeCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    badge_name: str = Field(..., min_length=1, max_length=255)
+    image_url: Optional[str] = Field(default=None, max_length=500)
+    reveal_video_url: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("badge_name", mode="before")
+    @classmethod
+    def normalize_badge_name(cls, value):
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("badge_name is required")
+        return normalized
+
+    @field_validator("image_url", mode="before")
+    @classmethod
+    def normalize_image_url(cls, value):
+        return _normalize_optional_logo_url(value, "image_url")
+
+    @field_validator("reveal_video_url", mode="before")
+    @classmethod
+    def normalize_reveal_video_url(cls, value):
+        return _normalize_optional_logo_url(value, "reveal_video_url")
+
+
+class CcBadgeUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    badge_name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    image_url: Optional[str] = Field(default=None, max_length=500)
+    reveal_video_url: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("badge_name", mode="before")
+    @classmethod
+    def normalize_badge_name(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        if not normalized:
+            raise ValueError("badge_name cannot be empty")
+        return normalized
+
+    @field_validator("image_url", mode="before")
+    @classmethod
+    def normalize_image_url(cls, value):
+        if value is None:
+            return None
+        return _normalize_optional_logo_url(value, "image_url")
+
+    @field_validator("reveal_video_url", mode="before")
+    @classmethod
+    def normalize_reveal_video_url(cls, value):
+        if value is None:
+            return None
+        return _normalize_optional_logo_url(value, "reveal_video_url")
+
+
+class CcBadgeResponse(BaseModel):
+    id: int
+    badge_name: str
+    image_url: Optional[str] = None
+    reveal_video_url: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class CcBadgeAssignmentCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    badge_id: int = Field(..., ge=1)
+    user_id: int = Field(..., ge=1)
+    meta: Optional[Dict[str, Any]] = None
+
+
+class CcBadgeAssignmentBulkCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    badge_id: int = Field(..., ge=1)
+    user_ids: List[int] = Field(default_factory=list)
+    meta: Optional[Dict[str, Any]] = None
+
+    @model_validator(mode="after")
+    def validate_targets(self):
+        if not self.user_ids:
+            raise ValueError("At least one user_id is required")
+        return self
+
+
+class CcBadgeAssignmentResponse(BaseModel):
+    id: int
+    badge_id: int
+    badge_name: str
+    badge_image_url: Optional[str] = None
+    badge_reveal_video_url: Optional[str] = None
+    user_id: Optional[int] = None
+    user_name: Optional[str] = None
+    user_regno: Optional[str] = None
+    pda_team_id: Optional[int] = None
+    persohub_team_id: Optional[int] = None
+    pda_event_id: Optional[int] = None
+    persohub_event_id: Optional[int] = None
+    meta: Optional[Dict[str, Any]] = None
+    created_at: Optional[datetime] = None
+
+
 class CcAdminUserOption(BaseModel):
     id: int
     regno: str
     name: str
+
+
+class CcBadgeUserOption(BaseModel):
+    id: int
+    name: str
+    regno: str
+    profile_name: Optional[str] = None
+    college: Optional[str] = None
+    is_member: bool = False
+    team: Optional[str] = None
+    batch: Optional[str] = None
 
 
 class CcPersohubEventOption(BaseModel):
@@ -2101,6 +2218,7 @@ class PdaManagedParticipantListItem(BaseModel):
 class PdaManagedBadgeCreate(BaseModel):
     title: str = Field(..., min_length=2)
     image_url: Optional[str] = None
+    reveal_video_url: Optional[str] = None
     place: PdaManagedBadgePlaceEnum
     score: Optional[float] = None
     user_id: Optional[int] = None
@@ -2112,6 +2230,7 @@ class PdaManagedBadgeResponse(BaseModel):
     event_id: int
     title: str
     image_url: Optional[str] = None
+    reveal_video_url: Optional[str] = None
     place: PdaManagedBadgePlaceEnum
     score: Optional[float] = None
     user_id: Optional[int] = None
@@ -2120,6 +2239,28 @@ class PdaManagedBadgeResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class BadgeCatalogLite(BaseModel):
+    id: int
+    badge_name: str
+    image_url: Optional[str] = None
+    reveal_video_url: Optional[str] = None
+
+
+class BadgeAssignmentTarget(BaseModel):
+    user_id: Optional[int] = None
+    pda_team_id: Optional[int] = None
+    persohub_team_id: Optional[int] = None
+
+
+class BadgeAssignmentContext(BaseModel):
+    pda_event_id: Optional[int] = None
+    pda_event_slug: Optional[str] = None
+    pda_event_title: Optional[str] = None
+    persohub_event_id: Optional[int] = None
+    persohub_event_slug: Optional[str] = None
+    persohub_event_title: Optional[str] = None
 
 
 class PdaManagedMyEvent(BaseModel):
@@ -2132,12 +2273,11 @@ class PdaManagedMyEvent(BaseModel):
 
 
 class PdaManagedAchievement(BaseModel):
-    event_slug: str
-    event_title: str
-    badge_title: str
-    badge_place: PdaManagedBadgePlaceEnum
-    image_url: Optional[str] = None
-    score: Optional[float] = None
+    assignment_id: int
+    badge: BadgeCatalogLite
+    target: BadgeAssignmentTarget
+    context: BadgeAssignmentContext
+    meta: Optional[Dict[str, Any]] = None
 
 
 class PdaManagedCertificateResponse(BaseModel):

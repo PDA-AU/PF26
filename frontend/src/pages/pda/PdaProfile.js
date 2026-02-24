@@ -1,16 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
+import QRCode from 'qrcode';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
-import { Award, Download, ExternalLink, Share2 } from 'lucide-react';
+import { Award, Download, ExternalLink, QrCode, X } from 'lucide-react';
 
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import PdaHeader from '@/components/layout/PdaHeader';
 import PdaFooter from '@/components/layout/PdaFooter';
+import BadgeRevealModal from '@/components/common/BadgeRevealModal';
+import zestAvatar from '@/assets/zest.png';
+import zynaAvatar from '@/assets/zyna.png';
+import badgeUnlockVideo from '@/assets/loading.mp4';
 import { compressImageToWebp } from '@/utils/imageCompression';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -73,6 +79,16 @@ const normalizeGenderValue = (value) => {
     if (upper === 'FEMALE') return 'Female';
     if (upper.endsWith('.MALE')) return 'Male';
     if (upper.endsWith('.FEMALE')) return 'Female';
+    return raw;
+};
+
+const normalizeProfileImageUrl = (value) => {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '';
+    const lowered = raw.toLowerCase();
+    if (lowered === 'null' || lowered === 'undefined' || lowered === 'none' || lowered === 'n/a') {
+        return '';
+    }
     return raw;
 };
 
@@ -212,7 +228,8 @@ const selectContentClass = 'border-2 border-black bg-white shadow-[4px_4px_0px_0
 const primaryButtonClass = 'rounded-md border-2 border-black bg-[#8B5CF6] text-xs font-bold uppercase tracking-[0.14em] text-white shadow-neo transition-[background-color,transform,box-shadow] duration-150 hover:bg-[#7C3AED] hover:-translate-x-[1px] hover:-translate-y-[1px] hover:shadow-[6px_6px_0px_0px_#000000] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none';
 const accentButtonClass = 'rounded-md border-2 border-black bg-[#FDE047] text-xs font-bold uppercase tracking-[0.14em] text-black shadow-neo transition-[transform,box-shadow,background-color] duration-150 hover:bg-[#f9d729] hover:-translate-x-[1px] hover:-translate-y-[1px] hover:shadow-[6px_6px_0px_0px_#000000] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none';
 const neutralButtonClass = 'rounded-md border-2 border-black bg-white text-xs font-bold uppercase tracking-[0.14em] text-black shadow-neo transition-[transform,box-shadow,background-color] duration-150 hover:bg-[#C4B5FD] hover:-translate-x-[1px] hover:-translate-y-[1px] hover:shadow-[6px_6px_0px_0px_#000000] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none';
-const ENABLE_PROFILE_ACHIEVEMENTS_AND_CERTIFICATES = false;
+const ENABLE_PROFILE_ACHIEVEMENTS_AND_CERTIFICATES = true;
+const ENABLE_PROFILE_CERTIFICATE_DOWNLOAD = false;
 
 export default function PdaProfile() {
     const { user, getAuthHeader, updateUser } = useAuth();
@@ -244,8 +261,10 @@ export default function PdaProfile() {
     const [sendingVerification, setSendingVerification] = useState(false);
     const [resumeUrl, setResumeUrl] = useState('');
     const [recruitmentDocFile, setRecruitmentDocFile] = useState(null);
+    const [selectedProfileImagePreviewUrl, setSelectedProfileImagePreviewUrl] = useState('');
     const [selectedDocPreviewUrl, setSelectedDocPreviewUrl] = useState('');
     const [docInputKey, setDocInputKey] = useState(0);
+    const [removeProfileImageOnSave, setRemoveProfileImageOnSave] = useState(false);
     const [removeResumeOnSave, setRemoveResumeOnSave] = useState(false);
     const [uploadingRecruitmentDoc, setUploadingRecruitmentDoc] = useState(false);
     const [recruitUrl, setRecruitUrl] = useState('');
@@ -254,6 +273,11 @@ export default function PdaProfile() {
     const [achievements, setAchievements] = useState([]);
     const [managedLoading, setManagedLoading] = useState(false);
     const [certificateLoadingSlug, setCertificateLoadingSlug] = useState('');
+    const [profileQrOpen, setProfileQrOpen] = useState(false);
+    const [profileQrImageUrl, setProfileQrImageUrl] = useState('');
+    const [profileQrLoading, setProfileQrLoading] = useState(false);
+    const [badgeModalOpen, setBadgeModalOpen] = useState(false);
+    const [selectedBadge, setSelectedBadge] = useState(null);
 
     const getErrorMessage = (error, fallback) => {
         const detail = error?.response?.data?.detail;
@@ -288,6 +312,7 @@ export default function PdaProfile() {
             github_url: user.github_url || ''
         });
         setImageFile(null);
+        setRemoveProfileImageOnSave(false);
     }, [user]);
 
     useEffect(() => {
@@ -298,13 +323,28 @@ export default function PdaProfile() {
         if (!user) return;
         setManagedLoading(true);
         try {
+            const normalizeAchievement = (row) => {
+                const badge = row?.badge || {};
+                const context = row?.context || {};
+                const meta = row?.meta || {};
+                return {
+                    assignment_id: row?.assignment_id,
+                    badge_title: badge?.badge_name || '',
+                    badge_place: meta?.place || '',
+                    image_url: badge?.image_url || '',
+                    reveal_video_url: badge?.reveal_video_url || '',
+                    score: meta?.score ?? null,
+                    event_title: context?.pda_event_title || context?.persohub_event_title || '',
+                    event_slug: context?.pda_event_slug || context?.persohub_event_slug || '',
+                };
+            };
             if (ENABLE_PROFILE_ACHIEVEMENTS_AND_CERTIFICATES) {
                 const [eventsRes, achievementsRes] = await Promise.all([
                     axios.get(`${API}/pda/me/events`, { headers: getAuthHeader() }),
                     axios.get(`${API}/pda/me/achievements`, { headers: getAuthHeader() })
                 ]);
                 setMyEvents(eventsRes.data || []);
-                setAchievements(achievementsRes.data || []);
+                setAchievements((achievementsRes.data || []).map(normalizeAchievement));
             } else {
                 const eventsRes = await axios.get(`${API}/pda/me/events`, { headers: getAuthHeader() });
                 setMyEvents(eventsRes.data || []);
@@ -353,6 +393,16 @@ export default function PdaProfile() {
         setSelectedDocPreviewUrl(previewUrl);
         return () => URL.revokeObjectURL(previewUrl);
     }, [recruitmentDocFile]);
+
+    useEffect(() => {
+        if (!imageFile) {
+            setSelectedProfileImagePreviewUrl('');
+            return undefined;
+        }
+        const previewUrl = URL.createObjectURL(imageFile);
+        setSelectedProfileImagePreviewUrl(previewUrl);
+        return () => URL.revokeObjectURL(previewUrl);
+    }, [imageFile]);
 
     const sortedMyEvents = useMemo(() => {
         return [...myEvents].sort((a, b) => {
@@ -426,6 +476,9 @@ export default function PdaProfile() {
             if (normalizedDept) {
                 payload.dept = normalizedDept;
             }
+            if (removeProfileImageOnSave && !imageFile) {
+                payload.image_url = null;
+            }
 
             const response = await axios.put(`${API}/me`, payload, { headers: getAuthHeader() });
             let updatedUser = response.data;
@@ -468,6 +521,7 @@ export default function PdaProfile() {
             toast.success('Profile updated');
             setIsEditing(false);
             setImageFile(null);
+            setRemoveProfileImageOnSave(false);
             clearSelectedRecruitmentDoc();
             setRemoveResumeOnSave(false);
         } catch (error) {
@@ -520,26 +574,18 @@ export default function PdaProfile() {
         }
     };
 
-    const handleShareAchievement = async (achievement) => {
-        const shareText = `${user?.name || 'I'} secured ${achievement.badge_title} (${achievement.badge_place}) in ${achievement.event_title} on PDA MIT.`;
-        try {
-            if (navigator.share) {
-                await navigator.share({
-                    title: 'PDA Achievement',
-                    text: shareText,
-                    url: `${window.location.origin}/profile`
-                });
-                return;
-            }
-            if (navigator.clipboard?.writeText) {
-                await navigator.clipboard.writeText(shareText);
-                toast.success('Achievement text copied to clipboard');
-                return;
-            }
-            toast.message(shareText);
-        } catch (error) {
-            toast.error('Unable to share achievement right now');
-        }
+    const handleOpenBadgeModal = (achievement) => {
+        if (!achievement) return;
+        const subtitleParts = [achievement.badge_place, achievement.event_title].filter(Boolean);
+        setSelectedBadge({
+            title: achievement.badge_title || 'Badge',
+            imageUrl: achievement.image_url || '',
+            revealVideoUrl: achievement.reveal_video_url || '',
+            subtitle: subtitleParts.join(' · '),
+            userName: user?.name || '',
+            regno: user?.regno || '',
+        });
+        setBadgeModalOpen(true);
     };
 
     const handleDownloadCertificate = async (eventSlug) => {
@@ -562,6 +608,32 @@ export default function PdaProfile() {
             toast.error(getErrorMessage(error, 'Failed to generate certificate'));
         } finally {
             setCertificateLoadingSlug('');
+        }
+    };
+
+    const handleOpenProfileQr = async () => {
+        const targetProfileName = String(user?.profile_name || '').trim();
+        if (!targetProfileName) {
+            toast.error('Set your profile name first to generate QR');
+            return;
+        }
+        setProfileQrLoading(true);
+        try {
+            const profileUrl = `${window.location.origin}/persohub/${encodeURIComponent(targetProfileName)}`;
+            const dataUrl = await QRCode.toDataURL(profileUrl, {
+                width: 360,
+                margin: 1,
+                color: {
+                    dark: '#000000',
+                    light: '#FFFFFF',
+                },
+            });
+            setProfileQrImageUrl(dataUrl);
+            setProfileQrOpen(true);
+        } catch {
+            toast.error('Failed to generate profile QR');
+        } finally {
+            setProfileQrLoading(false);
         }
     };
 
@@ -624,6 +696,10 @@ export default function PdaProfile() {
 
     if (!user) return null;
     const displayGender = isEditing ? formData.gender : normalizeGenderValue(user.gender);
+    const defaultAvatarByGender = displayGender === 'Female' ? zynaAvatar : zestAvatar;
+    const profileAvatarSrc = normalizeProfileImageUrl(user.image_url) || defaultAvatarByGender;
+    const persistedProfileImageUrl = normalizeProfileImageUrl(user.image_url);
+    const removableProfileImagePreview = selectedProfileImagePreviewUrl || (removeProfileImageOnSave ? '' : persistedProfileImageUrl);
     const displayDept = isEditing
         ? (formData.deptChoice === DEPARTMENT_OTHER ? formData.deptOther : formData.deptChoice)
         : normalizeDepartmentValue(user.dept);
@@ -667,23 +743,34 @@ export default function PdaProfile() {
                                 </p>
 
                                 <div className="mt-5 flex flex-wrap items-center gap-4 rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
-                                    {user.image_url ? (
-                                        <img src={user.image_url} alt={user.name} className="h-20 w-20 border-2 border-black object-cover" />
-                                    ) : (
-                                        <div className="flex h-20 w-20 items-center justify-center border-2 border-black bg-[#FDE047] font-heading text-2xl font-black">
-                                            {user.name ? user.name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase() : 'PD'}
-                                        </div>
-                                    )}
+                                    <img
+                                        src={profileAvatarSrc}
+                                        alt={user.name}
+                                        className="h-20 w-20 border-2 border-black object-cover"
+                                        onError={(event) => {
+                                            event.currentTarget.onerror = null;
+                                            event.currentTarget.src = defaultAvatarByGender;
+                                        }}
+                                    />
                                     <div className="space-y-1">
                                         <p className="font-heading text-xl font-black tracking-tight">{user.name || 'PDA Member'}</p>
                                         <p className="font-mono text-xs font-bold tracking-[0.12em] text-[#8B5CF6]">@{user.profile_name || 'n/a'}</p>
                                         <p className="font-mono text-xs font-bold uppercase tracking-[0.12em] text-slate-600">{user.regno}</p>
                                         <p className="text-sm font-medium text-slate-700">{user.email}</p>
                                     </div>
-                                    <div className="ml-auto">
+                                    <div className="ml-auto flex flex-col items-end gap-2">
                                         <span className="inline-flex items-center rounded-md border-2 border-black bg-[#C4B5FD] px-3 py-1 text-xs font-bold uppercase tracking-[0.12em] shadow-neo">
                                             {user.is_member ? 'Member' : user.is_applied ? 'Applied' : 'Applicant'}
                                         </span>
+                                        <Button
+                                            type="button"
+                                            onClick={handleOpenProfileQr}
+                                            disabled={profileQrLoading}
+                                            className={neutralButtonClass}
+                                        >
+                                            <QrCode className="mr-2 h-4 w-4" />
+                                            {profileQrLoading ? 'Generating...' : 'Profile QR'}
+                                        </Button>
                                     </div>
                                 </div>
 
@@ -705,7 +792,7 @@ export default function PdaProfile() {
                                 </div>
                             </div>
 
-                            <div className="relative min-h-[300px] overflow-hidden border-4 border-black bg-[#11131a] shadow-[8px_8px_0px_0px_#000000]">
+                            <div className="relative hidden min-h-[300px] overflow-hidden border-4 border-black bg-[#11131a] shadow-[8px_8px_0px_0px_#000000] lg:block">
                                 <img src={TROPHY_IMAGE} alt="Achievement trophy" className="absolute inset-0 h-full w-full object-cover opacity-45" />
                                 <div className="relative z-10 flex h-full flex-col justify-between p-5 text-white">
                                     <p className="inline-flex w-fit rounded-md border-2 border-black bg-[#FDE047] px-3 py-1 font-mono text-xs font-bold uppercase tracking-[0.14em] text-black">
@@ -740,7 +827,7 @@ export default function PdaProfile() {
                                     No managed event registrations yet.
                                 </p>
                             ) : (
-                                <div className="mt-4 space-y-3">
+                                <div className="mt-4 max-h-[360px] space-y-3 overflow-y-auto pr-1">
                                     {sortedMyEvents.map((row) => (
                                         <div key={`${row.event?.slug}-${row.entity_type}-${row.entity_id}`} className="rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
                                             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -772,7 +859,7 @@ export default function PdaProfile() {
                                                         </Button>
                                                     </a>
                                                 ) : null}
-                                                {ENABLE_PROFILE_ACHIEVEMENTS_AND_CERTIFICATES ? (
+                                                {ENABLE_PROFILE_ACHIEVEMENTS_AND_CERTIFICATES && ENABLE_PROFILE_CERTIFICATE_DOWNLOAD ? (
                                                     <Button
                                                         type="button"
                                                         onClick={() => handleDownloadCertificate(row.event.slug)}
@@ -804,34 +891,36 @@ export default function PdaProfile() {
                                         No badges yet. Win rounds to unlock achievements.
                                     </p>
                                 ) : (
-                                    <div className="mt-4 space-y-3">
+                                    <div className="mt-4 grid max-h-[360px] gap-3 overflow-y-auto pr-1 sm:grid-cols-2">
                                         {achievements.map((achievement, index) => (
-                                            <div key={`${achievement.event_slug}-${achievement.badge_title}-${index}`} className="rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
-                                                <div className="flex items-start gap-3">
+                                            <div
+                                                key={`${achievement.assignment_id || achievement.event_slug}-${achievement.badge_title}-${index}`}
+                                                className="cursor-pointer rounded-md border-2 border-black bg-[#fffdf0] p-2 shadow-neo transition-transform duration-100 hover:-translate-x-[1px] hover:-translate-y-[1px] aspect-square grid grid-rows-[1fr_auto] gap-2"
+                                                role="button"
+                                                tabIndex={0}
+                                                onClick={() => handleOpenBadgeModal(achievement)}
+                                                onKeyDown={(event) => {
+                                                    if (event.target !== event.currentTarget) return;
+                                                    if (event.key === 'Enter' || event.key === ' ') {
+                                                        event.preventDefault();
+                                                        handleOpenBadgeModal(achievement);
+                                                    }
+                                                }}
+                                            >
+                                                <div className="min-h-0 overflow-hidden rounded-md border-2 border-black bg-[#11131a]">
                                                     {achievement.image_url ? (
-                                                        <img src={achievement.image_url} alt={achievement.badge_title} className="h-14 w-14 border-2 border-black object-cover" />
+                                                        <img src={achievement.image_url} alt={achievement.badge_title} className="h-full w-full object-cover" />
                                                     ) : (
-                                                        <div className="flex h-14 w-14 items-center justify-center border-2 border-black bg-[#FDE047]">
-                                                            <Award className="h-5 w-5 text-black" />
+                                                        <div className="flex h-full w-full items-center justify-center bg-[#11131a]">
+                                                            <span className="font-heading text-xs font-black uppercase tracking-[0.08em] text-[#FDE047]">Badge</span>
                                                         </div>
                                                     )}
-                                                    <div className="flex-1">
-                                                        <p className="font-heading text-lg font-black uppercase tracking-tight">{achievement.badge_title}</p>
-                                                        <p className="text-xs font-medium uppercase tracking-[0.1em] text-slate-700">
-                                                            {achievement.badge_place} · {achievement.event_title}
-                                                        </p>
-                                                    </div>
                                                 </div>
-                                                <div className="mt-3 flex justify-end">
-                                                    <Button
-                                                        type="button"
-                                                        onClick={() => handleShareAchievement(achievement)}
-                                                        data-testid={`pda-profile-share-achievement-${achievement.event_slug || index}`}
-                                                        className={neutralButtonClass}
-                                                    >
-                                                        <Share2 className="mr-2 h-4 w-4" />
-                                                        Share
-                                                    </Button>
+                                                <div>
+                                                    <p className="font-heading text-sm font-black uppercase tracking-tight text-black">{achievement.badge_title}</p>
+                                                    <p className="mt-1 font-mono text-[10px] font-bold uppercase tracking-[0.08em] text-slate-700">
+                                                        {[achievement.badge_place, achievement.event_title].filter(Boolean).join(' · ') || 'Achievement'}
+                                                    </p>
                                                 </div>
                                             </div>
                                         ))}
@@ -1025,16 +1114,49 @@ export default function PdaProfile() {
                             </div>
                             <div className="md:col-span-2">
                                 <Label htmlFor="profile-picture" className="text-xs font-bold uppercase tracking-[0.12em]">Change Profile Picture</Label>
+                                {removableProfileImagePreview ? (
+                                    <div className="mt-2">
+                                        <div className="relative inline-flex h-16 w-16 overflow-hidden rounded-md border-2 border-black bg-white shadow-neo">
+                                            <img
+                                                src={removableProfileImagePreview}
+                                                alt="Profile preview"
+                                                className="h-full w-full object-cover"
+                                            />
+                                            {isEditing ? (
+                                                <button
+                                                    type="button"
+                                                    aria-label="Remove profile image"
+                                                    className="absolute right-0 top-0 inline-flex h-6 w-6 items-center justify-center border-l-2 border-b-2 border-black bg-[#fee2e2] text-black hover:bg-[#fecaca]"
+                                                    onClick={() => {
+                                                        if (selectedProfileImagePreviewUrl) {
+                                                            setImageFile(null);
+                                                            return;
+                                                        }
+                                                        setRemoveProfileImageOnSave(true);
+                                                    }}
+                                                >
+                                                    <X className="h-3.5 w-3.5" />
+                                                </button>
+                                            ) : null}
+                                        </div>
+                                    </div>
+                                ) : null}
                                 <Input
                                     id="profile-picture"
                                     type="file"
                                     accept="image/png,image/jpeg,image/webp"
-                                    onChange={(e) => setImageFile(e.target.files?.[0] || null)}
+                                    onChange={(e) => {
+                                        setImageFile(e.target.files?.[0] || null);
+                                        setRemoveProfileImageOnSave(false);
+                                    }}
                                     disabled={!isEditing}
                                     data-testid="pda-profile-picture-input"
                                     className="border-2 border-black bg-white text-sm shadow-neo file:mr-3 file:rounded-md file:border-2 file:border-black file:bg-[#FDE047] file:px-3 file:py-1 file:text-xs file:font-bold disabled:bg-[#f3f4f6]"
                                 />
                                 <p className="mt-2 text-xs font-medium text-slate-600">Upload a new image to replace the current one.</p>
+                                {removeProfileImageOnSave && !selectedProfileImagePreviewUrl ? (
+                                    <p className="mt-2 text-xs font-semibold text-rose-700">Profile image will be removed on save.</p>
+                                ) : null}
                             </div>
                             <div className="md:col-span-2">
                                 <Label htmlFor="profile-recruitment-doc-file" className="text-xs font-bold uppercase tracking-[0.12em]">Resume / About Yourslef PPT[max 5 slides]</Label>
@@ -1114,6 +1236,7 @@ export default function PdaProfile() {
                                             setIsEditing(false);
                                             resetProfileForm();
                                             clearSelectedRecruitmentDoc();
+                                            setRemoveProfileImageOnSave(false);
                                             setRemoveResumeOnSave(false);
                                         }}
                                         disabled={saving}
@@ -1169,6 +1292,39 @@ export default function PdaProfile() {
                 </div>
             </main>
             <PdaFooter />
+
+            <Dialog open={profileQrOpen} onOpenChange={setProfileQrOpen}>
+                <DialogContent className="max-h-[calc(100vh-2rem)] overflow-x-hidden overflow-y-auto border-4 border-black bg-white">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading text-2xl font-black uppercase tracking-tight">
+                            Public Profile QR
+                        </DialogTitle>
+                    </DialogHeader>
+                    <p className="text-sm font-medium text-slate-700">
+                        Scan to open your public Persohub profile page.
+                    </p>
+                    <div className="flex justify-center py-2">
+                        {profileQrImageUrl ? (
+                            <img src={profileQrImageUrl} alt="Public profile QR" className="h-72 w-72 max-w-full border-2 border-black bg-white p-2" />
+                        ) : (
+                            <p className="text-sm font-medium text-slate-600">Unable to render QR.</p>
+                        )}
+                    </div>
+                    <div className="flex justify-end">
+                        <Button type="button" onClick={() => setProfileQrOpen(false)} className={accentButtonClass}>
+                            Close
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <BadgeRevealModal
+                open={badgeModalOpen}
+                onOpenChange={setBadgeModalOpen}
+                badge={selectedBadge}
+                videoSrc={selectedBadge?.revealVideoUrl || badgeUnlockVideo}
+                switchDelayMs={3000}
+            />
         </div>
     );
 }

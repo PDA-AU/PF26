@@ -613,7 +613,7 @@ export default function CCAdmin() {
                 </div>
 
                 <Tabs value={activeTab} onValueChange={setActiveTab}>
-                    <TabsList className="grid w-full grid-cols-4 md:w-[560px]">
+                    <TabsList className="grid w-full grid-cols-4 md:w-[700px]">
                         <TabsTrigger value="clubs">Clubs</TabsTrigger>
                         <TabsTrigger value="communities">Communities</TabsTrigger>
                         <TabsTrigger value="sympos">Sympos</TabsTrigger>

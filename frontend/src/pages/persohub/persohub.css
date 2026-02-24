@@ -371,6 +371,111 @@
     box-shadow: 2px 2px 0 0 #000;
 }
 
+.ph-badge-chip-btn {
+    cursor: pointer;
+    font-family: inherit;
+    line-height: 1;
+}
+
+.ph-badge-chip-btn:focus-visible {
+    outline: 2px solid #000;
+    outline-offset: 2px;
+}
+
+.ph-badge-grid-scroll {
+    max-height: 360px;
+    overflow-y: auto;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.7rem;
+    padding-right: 0.2rem;
+}
+
+.ph-badge-card {
+    border: 2px solid #000;
+    border-radius: 0.5rem;
+    background: #fffdf0;
+    box-shadow: 3px 3px 0 0 #000;
+    text-align: left;
+    padding: 0.5rem;
+    cursor: pointer;
+    transition: transform 120ms ease, background-color 120ms ease;
+    aspect-ratio: 1 / 1;
+    display: grid;
+    grid-template-rows: 1fr auto;
+    gap: 0.45rem;
+}
+
+.ph-badge-card:hover {
+    background: #fff9dd;
+    transform: translate(-1px, -1px);
+}
+
+.ph-badge-card:focus-visible {
+    outline: 2px solid #000;
+    outline-offset: 2px;
+}
+
+.ph-badge-media {
+    border: 2px solid #000;
+    background: #11131a;
+    height: 100%;
+    border-radius: 0.35rem;
+    overflow: hidden;
+    min-height: 0;
+}
+
+.ph-badge-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.ph-badge-fallback {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Lexend', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: #fef08a;
+}
+
+.ph-badge-copy {
+    margin-top: 0;
+}
+
+.ph-badge-title {
+    margin: 0;
+    font-family: 'Lexend', sans-serif;
+    font-size: 0.84rem;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    color: #000;
+}
+
+.ph-badge-meta {
+    margin: 0.22rem 0 0;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.67rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #3a4252;
+}
+
+@media (max-width: 540px) {
+    .ph-badge-grid-scroll {
+        grid-template-columns: 1fr;
+    }
+}
+
 .ph-chip-mention {
     background: #c4b5fd;
 }
@@ -406,6 +511,20 @@
 .ph-btn:hover {
     transform: translate(-1px, -1px);
     box-shadow: 5px 5px 0 0 #000;
+}
+
+.ph-action-btn.ph-action-btn-danger-hover:hover {
+    background: #ef4444;
+    color: #fff;
+}
+
+.ph-btn.ph-btn-whatsapp:hover {
+    background: #25d366;
+    color: #fff;
+}
+
+.ph-share-modal-head {
+    margin-bottom: 0.55rem;
 }
 
 .ph-action-btn:active,
@@ -543,17 +662,27 @@
     background: #fffdf0;
     padding: 0.6rem;
     box-shadow: 3px 3px 0 0 #000;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .ph-community-link {
+    display: block;
     color: #000;
     font-family: 'Lexend', sans-serif;
     font-weight: 800;
     text-decoration: none;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .ph-community-meta {
     margin-top: 0.2rem;
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 @media (min-width: 1024px) {
@@ -707,6 +836,8 @@
 
 .ph-feed-page .ph-side-card {
     padding: 0.75rem;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .ph-feed-page .ph-community-item,

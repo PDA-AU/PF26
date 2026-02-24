@@ -177,6 +177,10 @@ export const PostCard = ({
     onDelete,
     onEdit,
 }) => {
+    const fallbackLogo = 'https://placehold.co/64x64?text=PDA';
+    const [communityAvatarSrc, setCommunityAvatarSrc] = useState(
+        post?.community?.logo_url || post?.community?.club_logo_url || fallbackLogo,
+    );
     const [expanded, setExpanded] = useState(false);
     const [commentsOpen, setCommentsOpen] = useState(false);
     const [comments, setComments] = useState([]);
@@ -186,6 +190,10 @@ export const PostCard = ({
     const [commentsHasMore, setCommentsHasMore] = useState(false);
     const [commentText, setCommentText] = useState('');
     const [commentSubmitting, setCommentSubmitting] = useState(false);
+
+    useEffect(() => {
+        setCommunityAvatarSrc(post?.community?.logo_url || post?.community?.club_logo_url || fallbackLogo);
+    }, [post?.community?.logo_url, post?.community?.club_logo_url]);
 
     const tokens = useMemo(() => tokenizeDescription(post.description || ''), [post.description]);
     const showReadMore = (post.description || '').length > 180;
@@ -240,7 +248,18 @@ export const PostCard = ({
         <article className="ph-card ph-post" data-testid={`ph-post-${post.slug_token}`}>
             <div className="ph-post-head">
                 <div className="ph-post-head-left">
-                    <img src={post.community.logo_url || 'https://placehold.co/64x64?text=PDA'} alt={post.community.name} className="ph-avatar" />
+                    <img
+                        src={communityAvatarSrc}
+                        alt={post.community.name}
+                        className="ph-avatar"
+                        onError={() => {
+                            if (communityAvatarSrc === (post?.community?.club_logo_url || fallbackLogo)) {
+                                setCommunityAvatarSrc(fallbackLogo);
+                                return;
+                            }
+                            setCommunityAvatarSrc(post?.community?.club_logo_url || fallbackLogo);
+                        }}
+                    />
                     <div>
                         <Link to={`/persohub/${post.community.profile_id}`} className="ph-community-name">
                             {post.community.name}
@@ -346,9 +365,15 @@ export const PostCard = ({
                         {!commentsLoading && comments.length === 0 ? <p className="ph-muted">No comments yet</p> : null}
                         {comments.map((comment) => (
                             <div key={comment.id} className="ph-comment">
-                                <div style={{ fontWeight: 700, fontSize: '0.83rem' }}>
-                                    @{comment.profile_name || 'user'}
-                                </div>
+                                {comment.profile_name ? (
+                                    <Link to={`/persohub/${comment.profile_name}`} style={{ fontWeight: 700, fontSize: '0.83rem', textDecoration: 'none', color: 'inherit' }}>
+                                        @{comment.profile_name}
+                                    </Link>
+                                ) : (
+                                    <div style={{ fontWeight: 700, fontSize: '0.83rem' }}>
+                                        @user
+                                    </div>
+                                )}
                                 <div style={{ fontSize: '0.88rem' }}>{comment.comment_text}</div>
                             </div>
                         ))}
@@ -380,7 +405,7 @@ export const CommunityListPanel = ({ communities, onToggleFollow, isLoggedIn }) 
                         <div className="ph-muted ph-community-meta">@{item.profile_id} {item.club_name ? `· ${item.club_name}` : ''}</div>
                         <button
                             type="button"
-                            className="ph-action-btn"
+                            className={`ph-action-btn ${item.is_following ? 'ph-btn-accent' : ''}`.trim()}
                             disabled={!isLoggedIn}
                             onClick={() => onToggleFollow?.(item.profile_id)}
                             style={{ marginTop: '0.35rem' }}

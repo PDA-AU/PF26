@@ -848,6 +848,7 @@ class PersohubCommunityCard(BaseModel):
     name: str
     profile_id: str
     logo_url: Optional[str] = None
+    club_logo_url: Optional[str] = None
     club_id: Optional[int] = None
     club_name: Optional[str] = None
     is_following: Optional[bool] = None
@@ -940,7 +941,9 @@ class PersohubPublicProfileResponse(BaseModel):
     profile_type: Literal["user", "community"]
     profile_name: str
     name: str
+    regno: Optional[str] = None
     image_url: Optional[str] = None
+    gender: Optional[str] = None
     about: Optional[str] = None
     is_member: Optional[bool] = None
     team: Optional[str] = None

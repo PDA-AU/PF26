@@ -3614,3 +3614,177 @@ def ensure_persohub_owner_policy_refactor(engine):
 
 def ensure_persohub_defaults(db: Session):
     ensure_default_persohub_setup(db)
+
+
+def ensure_badge_catalog_refactor(engine):
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS badges (
+                    id SERIAL PRIMARY KEY,
+                    badge_name VARCHAR(255) NOT NULL,
+                    image_url VARCHAR(500),
+                    reveal_video_url VARCHAR(500),
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ
+                )
+                """
+            )
+        )
+        conn.execute(text("ALTER TABLE badges ADD COLUMN IF NOT EXISTS reveal_video_url VARCHAR(500)"))
+        conn.execute(text("DROP INDEX IF EXISTS uq_badges_name_image"))
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_badges_name_image
+                ON badges (lower(badge_name), COALESCE(image_url, ''), COALESCE(reveal_video_url, ''))
+                """
+            )
+        )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS badge_assignments (
+                    id SERIAL PRIMARY KEY,
+                    badge_id INTEGER NOT NULL REFERENCES badges(id) ON DELETE CASCADE,
+                    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    pda_team_id INTEGER REFERENCES pda_event_teams(id) ON DELETE SET NULL,
+                    persohub_team_id INTEGER REFERENCES persohub_event_teams(id) ON DELETE SET NULL,
+                    pda_event_id INTEGER REFERENCES pda_events(id) ON DELETE SET NULL,
+                    persohub_event_id INTEGER REFERENCES persohub_events(id) ON DELETE SET NULL,
+                    meta JSONB,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ,
+                    CONSTRAINT chk_badge_assignment_target_exactly_one
+                    CHECK (
+                        (
+                            CASE WHEN user_id IS NOT NULL THEN 1 ELSE 0 END +
+                            CASE WHEN pda_team_id IS NOT NULL THEN 1 ELSE 0 END +
+                            CASE WHEN persohub_team_id IS NOT NULL THEN 1 ELSE 0 END
+                        ) = 1
+                    ),
+                    CONSTRAINT chk_badge_assignment_event_at_most_one
+                    CHECK (
+                        (
+                            CASE WHEN pda_event_id IS NOT NULL THEN 1 ELSE 0 END +
+                            CASE WHEN persohub_event_id IS NOT NULL THEN 1 ELSE 0 END
+                        ) <= 1
+                    )
+                )
+                """
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_badge_assignments_badge_id ON badge_assignments(badge_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_badge_assignments_user_id ON badge_assignments(user_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_badge_assignments_pda_team_id ON badge_assignments(pda_team_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_badge_assignments_persohub_team_id ON badge_assignments(persohub_team_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_badge_assignments_pda_event_id ON badge_assignments(pda_event_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_badge_assignments_persohub_event_id ON badge_assignments(persohub_event_id)"))
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_badge_assignments_identity
+                ON badge_assignments(
+                    badge_id,
+                    COALESCE(user_id, 0),
+                    COALESCE(pda_team_id, 0),
+                    COALESCE(persohub_team_id, 0),
+                    COALESCE(pda_event_id, 0),
+                    COALESCE(persohub_event_id, 0)
+                )
+                """
+            )
+        )
+
+        pda_exists = _table_exists(conn, "pda_event_badges")
+        persohub_exists = _table_exists(conn, "persohub_event_badges")
+
+        if pda_exists or persohub_exists:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO badges (badge_name, image_url)
+                    SELECT DISTINCT t.title, t.image_url
+                    FROM (
+                        SELECT title, image_url FROM pda_event_badges
+                        UNION ALL
+                        SELECT title, image_url FROM persohub_event_badges
+                    ) t
+                    WHERE trim(COALESCE(t.title, '')) <> ''
+                    ON CONFLICT DO NOTHING
+                    """
+                )
+            )
+
+        if pda_exists:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO badge_assignments (
+                        badge_id,
+                        user_id,
+                        pda_team_id,
+                        pda_event_id,
+                        meta,
+                        created_at,
+                        updated_at
+                    )
+                    SELECT
+                        b.id,
+                        peb.user_id,
+                        peb.team_id,
+                        peb.event_id,
+                        jsonb_build_object(
+                            'title', peb.title,
+                            'place', peb.place::text,
+                            'score', peb.score
+                        ),
+                        peb.created_at,
+                        peb.updated_at
+                    FROM pda_event_badges peb
+                    JOIN badges b
+                      ON lower(b.badge_name) = lower(peb.title)
+                     AND COALESCE(b.image_url, '') = COALESCE(peb.image_url, '')
+                    ON CONFLICT DO NOTHING
+                    """
+                )
+            )
+
+        if persohub_exists:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO badge_assignments (
+                        badge_id,
+                        user_id,
+                        persohub_team_id,
+                        persohub_event_id,
+                        meta,
+                        created_at,
+                        updated_at
+                    )
+                    SELECT
+                        b.id,
+                        ceb.user_id,
+                        ceb.team_id,
+                        ceb.event_id,
+                        jsonb_build_object(
+                            'title', ceb.title,
+                            'place', ceb.place::text,
+                            'score', ceb.score
+                        ),
+                        ceb.created_at,
+                        ceb.updated_at
+                    FROM persohub_event_badges ceb
+                    JOIN badges b
+                      ON lower(b.badge_name) = lower(ceb.title)
+                     AND COALESCE(b.image_url, '') = COALESCE(ceb.image_url, '')
+                    ON CONFLICT DO NOTHING
+                    """
+                )
+            )
+
+        conn.execute(text("DROP TABLE IF EXISTS pda_event_badges"))
+        conn.execute(text("DROP TABLE IF EXISTS persohub_event_badges"))

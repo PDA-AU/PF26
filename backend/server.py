@@ -57,6 +57,7 @@ from migrations import (
     ensure_persohub_tables,
     ensure_persohub_admins_table,
     ensure_persohub_owner_policy_refactor,
+    ensure_badge_catalog_refactor,
     ensure_persohub_defaults,
 )
 
@@ -181,6 +182,7 @@ async def startup_event():
     ensure_persohub_tables(engine)
     ensure_persohub_admins_table(engine)
     ensure_persohub_owner_policy_refactor(engine)
+    ensure_badge_catalog_refactor(engine)
     ensure_pda_recruitment_tables(engine)
     ensure_system_config_recruit_url_column(engine)
     resolve_user_identifier_collisions_once(engine)

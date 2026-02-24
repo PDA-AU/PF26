@@ -11,6 +11,7 @@ from sqlalchemy import func, text, or_
 from auth import create_access_token
 from database import get_db
 from emailer import send_email_async
+from badge_service import count_event_badges, get_user_achievements
 from models import (
     PdaUser,
     PersohubEvent,
@@ -27,7 +28,6 @@ from models import (
     PersohubEventInviteStatus,
     PersohubEventRound,
     PersohubEventRoundState,
-    PersohubEventBadge,
     PersohubEventAttendance,
     PersohubEventScore,
     PersohubEventRoundSubmission,
@@ -760,7 +760,7 @@ def get_event_dashboard(
         ]
 
     rounds_count = db.query(PersohubEventRound).filter(PersohubEventRound.event_id == event.id).count()
-    badges_count = db.query(PersohubEventBadge).filter(PersohubEventBadge.event_id == event.id).count()
+    badges_count = count_event_badges(db, platform="persohub", event_id=event.id)
 
     entity_type = None
     entity_id = None
@@ -1470,22 +1470,32 @@ def my_round_status(
 def my_achievements(user: PdaUser = Depends(require_pda_user), db: Session = Depends(get_db)):
     team = db.query(PersohubEventTeamMember).filter(PersohubEventTeamMember.user_id == user.id).all()
     team_ids = [row.team_id for row in team]
-    badge_query = db.query(PersohubEventBadge, PersohubEvent).join(PersohubEvent, PersohubEventBadge.event_id == PersohubEvent.id)
-    if team_ids:
-        badge_query = badge_query.filter(or_(PersohubEventBadge.user_id == user.id, PersohubEventBadge.team_id.in_(team_ids)))
-    else:
-        badge_query = badge_query.filter(PersohubEventBadge.user_id == user.id)
-    badges = badge_query.order_by(PersohubEventBadge.created_at.desc()).all()
+    badges = get_user_achievements(db, platform="persohub", user_id=user.id, team_ids=team_ids)
     return [
         PersohubManagedAchievement(
-            event_slug=event.slug,
-            event_title=event.title,
-            badge_title=badge.title,
-            badge_place=badge.place,
-            image_url=badge.image_url,
-            score=badge.score,
+            assignment_id=int(assignment.id),
+            badge={
+                "id": int(badge.id),
+                "badge_name": badge.badge_name,
+                "image_url": badge.image_url,
+                "reveal_video_url": badge.reveal_video_url,
+            },
+            target={
+                "user_id": assignment.user_id,
+                "pda_team_id": assignment.pda_team_id,
+                "persohub_team_id": assignment.persohub_team_id,
+            },
+            context={
+                "pda_event_id": assignment.pda_event_id,
+                "pda_event_slug": None,
+                "pda_event_title": None,
+                "persohub_event_id": assignment.persohub_event_id,
+                "persohub_event_slug": event.slug if event else None,
+                "persohub_event_title": event.title if event else None,
+            },
+            meta=assignment.meta if isinstance(assignment.meta, dict) else {},
         )
-        for badge, event in badges
+        for assignment, badge, event in badges
     ]
 
 

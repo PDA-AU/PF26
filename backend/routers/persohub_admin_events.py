@@ -7,6 +7,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from auth import verify_password
+from badge_service import delete_badges_for_persohub_event, delete_badges_for_persohub_teams
 from database import get_db
 from emailer import send_email_async
 from models import (
@@ -25,7 +26,6 @@ from models import (
     PersohubCommunity,
     PersohubEvent,
     PersohubEventAttendance,
-    PersohubEventBadge,
     PersohubEventInvite,
     PersohubEventLog,
     PersohubEventRegistration,
@@ -955,7 +955,7 @@ def delete_admin_event(
     if team_ids:
         db.query(PersohubEventRoundPanelAssignment).filter(PersohubEventRoundPanelAssignment.team_id.in_(team_ids)).delete(synchronize_session=False)
         db.query(PersohubEventInvite).filter(PersohubEventInvite.team_id.in_(team_ids)).delete(synchronize_session=False)
-        db.query(PersohubEventBadge).filter(PersohubEventBadge.team_id.in_(team_ids)).delete(synchronize_session=False)
+        delete_badges_for_persohub_teams(db, team_ids)
         db.query(PersohubEventScore).filter(PersohubEventScore.team_id.in_(team_ids)).delete(synchronize_session=False)
         db.query(PersohubEventRoundSubmission).filter(PersohubEventRoundSubmission.team_id.in_(team_ids)).delete(synchronize_session=False)
         db.query(PersohubEventAttendance).filter(PersohubEventAttendance.team_id.in_(team_ids)).delete(synchronize_session=False)
@@ -971,7 +971,7 @@ def delete_admin_event(
         db.query(PersohubEventAttendance).filter(PersohubEventAttendance.round_id.in_(round_ids)).delete(synchronize_session=False)
 
     db.query(PersohubEventInvite).filter(PersohubEventInvite.event_id == event_id).delete(synchronize_session=False)
-    db.query(PersohubEventBadge).filter(PersohubEventBadge.event_id == event_id).delete(synchronize_session=False)
+    delete_badges_for_persohub_event(db, event_id)
     db.query(PersohubEventRoundPanelAssignment).filter(PersohubEventRoundPanelAssignment.event_id == event_id).delete(synchronize_session=False)
     db.query(PersohubEventRoundPanelMember).filter(PersohubEventRoundPanelMember.event_id == event_id).delete(synchronize_session=False)
     db.query(PersohubEventRoundPanel).filter(PersohubEventRoundPanel.event_id == event_id).delete(synchronize_session=False)

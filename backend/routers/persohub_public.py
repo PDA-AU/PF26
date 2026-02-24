@@ -9,7 +9,6 @@ from models import (
     PersohubEvent,
     PersohubSympo,
     PersohubSympoEvent,
-    PdaEventBadge,
     PdaTeam,
     PdaUser,
     PersohubClub,
@@ -22,6 +21,7 @@ from models import (
     PersohubPostLike,
     PersohubPostMention,
 )
+from badge_service import get_user_badge_assignments
 from persohub_schemas import (
     PersohubCommentCreateRequest,
     PersohubCommentPageResponse,
@@ -94,7 +94,16 @@ def list_communities(
         .all()
     )
     cards = build_community_cards_bulk(db, communities, current_user_id=(user.id if user else None))
-    return [cards[c.id] for c in communities if c.id in cards]
+    ordered = [c for c in communities if c.id in cards]
+    ordered.sort(
+        key=lambda c: (
+            0 if cards[c.id].is_following else 1,
+            c.club_id is None,
+            c.club_id if c.club_id is not None else 10**12,
+            str(c.name or "").lower(),
+        )
+    )
+    return [cards[c.id] for c in ordered]
 
 
 @router.get("/persohub/clubs", response_model=List[PersohubPublicClubCommunityInfo])
@@ -574,6 +583,7 @@ def get_public_profile(
 
     community = db.query(PersohubCommunity).filter(PersohubCommunity.profile_id == key).first()
     if community:
+        community_card = build_community_card(db, community, current_user_id=(user.id if user else None))
         posts = (
             db.query(PersohubPost)
             .filter(PersohubPost.community_id == community.id)
@@ -585,9 +595,9 @@ def get_public_profile(
             profile_type="community",
             profile_name=community.profile_id,
             name=community.name,
-            image_url=community.logo_url,
+            image_url=community_card.logo_url,
             about=community.description,
-            community=build_community_card(db, community, current_user_id=(user.id if user else None)),
+            community=community_card,
             posts=build_post_responses_bulk(db, posts, current_user_id=(user.id if user else None)),
             can_edit=bool(community_auth and community_auth.id == community.id),
         )
@@ -597,13 +607,7 @@ def get_public_profile(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
 
     team = db.query(PdaTeam).filter(PdaTeam.user_id == person.id).first()
-    badges_rows = (
-        db.query(PdaEventBadge)
-        .filter(PdaEventBadge.user_id == person.id)
-        .order_by(PdaEventBadge.created_at.desc())
-        .limit(50)
-        .all()
-    )
+    badges_rows = get_user_badge_assignments(db, person.id, limit=50)
     mentioned_posts = (
         db.query(PersohubPost)
         .join(PersohubPostMention, PersohubPostMention.post_id == PersohubPost.id)
@@ -617,20 +621,23 @@ def get_public_profile(
         profile_type="user",
         profile_name=person.profile_name or "",
         name=person.name,
+        regno=person.regno,
         image_url=person.image_url,
+        gender=person.gender,
         is_member=person.is_member,
         team=team.team if person.is_member and team else None,
         designation=team.designation if person.is_member and team else None,
         badges=[
             {
-                "id": badge.id,
-                "title": badge.title,
+                "id": assignment.id,
+                "title": badge.badge_name,
                 "image_url": badge.image_url,
-                "place": badge.place.value if hasattr(badge.place, "value") else str(badge.place),
-                "score": badge.score,
-                "event_id": badge.event_id,
+                "reveal_video_url": badge.reveal_video_url,
+                "place": str((assignment.meta or {}).get("place") or "SpecialMention"),
+                "score": (assignment.meta or {}).get("score"),
+                "event_id": assignment.pda_event_id or assignment.persohub_event_id,
             }
-            for badge in badges_rows
+            for assignment, badge in badges_rows
         ],
         posts=build_post_responses_bulk(db, mentioned_posts, current_user_id=(user.id if user else None)),
         can_edit=bool(user and user.id == person.id),

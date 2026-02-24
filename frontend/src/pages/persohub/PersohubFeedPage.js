@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Plus, X } from 'lucide-react';
+import { MessageCircle, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useAuth } from '@/context/AuthContext';
@@ -599,28 +599,42 @@ export default function PersohubFeedPage() {
             {sharePost ? (
                 <div className="ph-modal-overlay" role="dialog" aria-modal="true">
                     <div className="ph-modal">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div className="ph-share-modal-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <h2 style={{ marginTop: 0 }}>Share Post</h2>
-                            <button type="button" className="ph-action-btn" onClick={() => setSharePost(null)}>
+                            <button type="button" className="ph-action-btn ph-action-btn-danger-hover" onClick={() => setSharePost(null)}>
                                 <X size={16} />
                             </button>
                         </div>
                         <input className="ph-input" readOnly value={sharePost.share_url} />
-                        <button
-                            type="button"
-                            className="ph-btn ph-btn-accent"
-                            onClick={async () => {
-                                try {
-                                    const copied = await copyTextToClipboard(sharePost.share_url);
-                                    if (!copied) throw new Error('copy-failed');
-                                    toast.success('Share link copied');
-                                } catch {
-                                    toast.error('Failed to copy link');
-                                }
-                            }}
-                        >
-                            Copy Link
-                        </button>
+                        <div style={{ display: 'flex', gap: '0.55rem', marginTop: '0.6rem', flexWrap: 'wrap' }}>
+                            <button
+                                type="button"
+                                className="ph-btn ph-btn-accent"
+                                onClick={async () => {
+                                    try {
+                                        const copied = await copyTextToClipboard(sharePost.share_url);
+                                        if (!copied) throw new Error('copy-failed');
+                                        toast.success('Share link copied');
+                                    } catch {
+                                        toast.error('Failed to copy link');
+                                    }
+                                }}
+                            >
+                                Copy Link
+                            </button>
+                            <button
+                                type="button"
+                                className="ph-btn ph-btn-whatsapp"
+                                onClick={() => {
+                                    const text = encodeURIComponent(`Check this post on Persohub: ${sharePost.share_url}`);
+                                    window.open(`https://wa.me/?text=${text}`, '_blank', 'noopener,noreferrer');
+                                }}
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                            >
+                                <MessageCircle size={14} />
+                                Share on WhatsApp
+                            </button>
+                        </div>
                     </div>
                 </div>
             ) : null}

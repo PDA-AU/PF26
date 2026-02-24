@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { LogOut, Menu, Sparkles, User, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import pdaLogo from '@/assets/pda-logo.png';
+import persohubLogo from '@/assets/persohub.png';
 import { useAuth } from '@/context/AuthContext';
 
 const navItems = [
@@ -15,6 +16,9 @@ export default function PdaHeader() {
     const { user, logout } = useAuth();
     const location = useLocation();
     const [menuOpen, setMenuOpen] = useState(false);
+    const isPersohubRoute = location.pathname.startsWith('/persohub');
+    const headerLogo = isPersohubRoute ? persohubLogo : pdaLogo;
+    const headerLogoAlt = isPersohubRoute ? 'Persohub logo' : 'PDA logo';
 
     const userInitials = user?.name
         ? user.name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase()
@@ -32,7 +36,7 @@ export default function PdaHeader() {
                         data-testid="pda-header-logo-link"
                         className="inline-flex items-center gap-3 rounded-md border-2 border-black bg-white px-3 py-2 shadow-neo transition-[transform,box-shadow] duration-150 hover:-translate-x-[1px] hover:-translate-y-[1px] hover:shadow-[6px_6px_0px_0px_#000000]"
                     >
-                        <img src={pdaLogo} alt="PDA logo" className="h-10 w-10 border-2 border-black bg-white object-contain p-1" />
+                        <img src={headerLogo} alt={headerLogoAlt} className="h-10 w-10 object-contain" />
                         <div className="leading-tight">
                             <p className="font-heading text-sm font-black uppercase tracking-[0.2em] text-black sm:text-base">
                                 PERSOHUB

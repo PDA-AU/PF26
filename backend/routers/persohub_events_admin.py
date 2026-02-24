@@ -18,6 +18,15 @@ from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from auth import decode_token
+from badge_service import (
+    count_event_badges,
+    create_badge_assignment,
+    delete_badges_for_persohub_event,
+    delete_badges_for_persohub_event_team,
+    delete_badges_for_persohub_event_user,
+    delete_badges_for_persohub_teams,
+    list_event_badges,
+)
 from database import get_db, SessionLocal
 from models import (
     PdaAdmin,
@@ -45,8 +54,6 @@ from models import (
     PersohubEventAttendance,
     PersohubEventScore,
     PersohubEventRoundSubmission,
-    PersohubEventBadge,
-    PersohubEventBadgePlace,
     PersohubEventInvite,
     PersohubEventLog,
     PersohubClub,
@@ -57,6 +64,8 @@ from schemas import (
     PersohubManagedAttendanceScanRequest,
     PersohubManagedBadgeCreate,
     PersohubManagedBadgeResponse,
+    PresignRequest,
+    PresignResponse,
     PersohubManagedEntityTypeEnum,
     PersohubManagedEventCreate,
     PersohubManagedEventRegistrationUpdate,
@@ -93,7 +102,7 @@ from security import (
     require_persohub_root_community_admin,
     require_persohub_community,
 )
-from utils import log_admin_action, log_persohub_event_action, _upload_bytes_to_s3
+from utils import log_admin_action, log_persohub_event_action, _upload_bytes_to_s3, _generate_presigned_put_url
 
 router = APIRouter(dependencies=[Depends(require_persohub_events_parity_enabled)])
 OFFICIAL_LETTERHEAD_LEFT_LOGO_URL = ""
@@ -1067,7 +1076,7 @@ def delete_managed_event(
     if team_ids:
         db.query(PersohubEventRoundPanelAssignment).filter(PersohubEventRoundPanelAssignment.team_id.in_(team_ids)).delete(synchronize_session=False)
         db.query(PersohubEventInvite).filter(PersohubEventInvite.team_id.in_(team_ids)).delete(synchronize_session=False)
-        db.query(PersohubEventBadge).filter(PersohubEventBadge.team_id.in_(team_ids)).delete(synchronize_session=False)
+        delete_badges_for_persohub_teams(db, team_ids)
         db.query(PersohubEventScore).filter(PersohubEventScore.team_id.in_(team_ids)).delete(synchronize_session=False)
         db.query(PersohubEventRoundSubmission).filter(PersohubEventRoundSubmission.team_id.in_(team_ids)).delete(synchronize_session=False)
         db.query(PersohubEventAttendance).filter(PersohubEventAttendance.team_id.in_(team_ids)).delete(synchronize_session=False)
@@ -1083,7 +1092,7 @@ def delete_managed_event(
         db.query(PersohubEventAttendance).filter(PersohubEventAttendance.round_id.in_(round_ids)).delete(synchronize_session=False)
 
     db.query(PersohubEventInvite).filter(PersohubEventInvite.event_id == event_id).delete(synchronize_session=False)
-    db.query(PersohubEventBadge).filter(PersohubEventBadge.event_id == event_id).delete(synchronize_session=False)
+    delete_badges_for_persohub_event(db, event_id)
     db.query(PersohubEventRoundPanelAssignment).filter(PersohubEventRoundPanelAssignment.event_id == event_id).delete(synchronize_session=False)
     db.query(PersohubEventRoundPanelMember).filter(PersohubEventRoundPanelMember.event_id == event_id).delete(synchronize_session=False)
     db.query(PersohubEventRoundPanel).filter(PersohubEventRoundPanel.event_id == event_id).delete(synchronize_session=False)
@@ -1213,7 +1222,7 @@ def event_dashboard(
         PersohubEventAttendance.is_present == True,  # noqa: E712
     ).count()
     scores = db.query(PersohubEventScore).filter(PersohubEventScore.event_id == event.id).count()
-    badges = db.query(PersohubEventBadge).filter(PersohubEventBadge.event_id == event.id).count()
+    badges = count_event_badges(db, platform="persohub", event_id=event.id)
     active_count = db.query(PersohubEventRegistration).filter(
         PersohubEventRegistration.event_id == event.id,
         PersohubEventRegistration.status == PersohubEventRegistrationStatus.ACTIVE,
@@ -1553,10 +1562,7 @@ def delete_participant_with_cascade(
         PersohubEventInvite.event_id == event.id,
         PersohubEventInvite.invited_by_user_id == user_id,
     ).delete(synchronize_session=False)
-    db.query(PersohubEventBadge).filter(
-        PersohubEventBadge.event_id == event.id,
-        PersohubEventBadge.user_id == user_id,
-    ).delete(synchronize_session=False)
+    delete_badges_for_persohub_event_user(db, event.id, user_id)
     db.query(PersohubEventScore).filter(
         PersohubEventScore.event_id == event.id,
         PersohubEventScore.user_id == user_id,
@@ -1933,10 +1939,7 @@ def delete_team_with_cascade(
         PersohubEventInvite.event_id == event.id,
         PersohubEventInvite.team_id == team_id,
     ).delete(synchronize_session=False)
-    db.query(PersohubEventBadge).filter(
-        PersohubEventBadge.event_id == event.id,
-        PersohubEventBadge.team_id == team_id,
-    ).delete(synchronize_session=False)
+    delete_badges_for_persohub_event_team(db, event.id, team_id)
     db.query(PersohubEventScore).filter(
         PersohubEventScore.event_id == event.id,
         PersohubEventScore.team_id == team_id,
@@ -5338,18 +5341,22 @@ def create_badge(
     event = _get_event_or_404(db, slug)
     if payload.user_id and payload.team_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only one of user_id or team_id is allowed")
-    badge = PersohubEventBadge(
-        event_id=event.id,
-        title=payload.title,
+    assignment = create_badge_assignment(
+        db,
+        badge_name=payload.title,
         image_url=payload.image_url,
-        place=PersohubEventBadgePlace[payload.place.name],
-        score=payload.score,
+        reveal_video_url=payload.reveal_video_url,
         user_id=payload.user_id,
-        team_id=payload.team_id,
+        persohub_team_id=payload.team_id,
+        persohub_event_id=event.id,
+        meta={
+            "title": payload.title,
+            "place": payload.place.value,
+            "score": payload.score,
+        },
     )
-    db.add(badge)
     db.commit()
-    db.refresh(badge)
+    db.refresh(assignment)
     _log_event_admin_action(
         db,
         admin,
@@ -5357,9 +5364,60 @@ def create_badge(
         "create_persohub_event_badge",
         method="POST",
         path=f"/persohub/admin/persohub-events/{slug}/badges",
-        meta={"badge_id": badge.id},
+        meta={"badge_id": assignment.badge_id, "assignment_id": assignment.id},
     )
-    return PersohubManagedBadgeResponse.model_validate(badge)
+    rows = list_event_badges(db, platform="persohub", event_id=event.id)
+    current = next((row for row in rows if int(row[0].id) == int(assignment.id)), None)
+    if not current:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to load created badge")
+    created_assignment, created_badge = current
+    meta = created_assignment.meta or {}
+    return PersohubManagedBadgeResponse(
+        id=int(created_assignment.id),
+        event_id=int(event.id),
+        title=str(created_badge.badge_name),
+        image_url=created_badge.image_url,
+        reveal_video_url=created_badge.reveal_video_url,
+        place=str(meta.get("place") or "SpecialMention"),
+        score=meta.get("score"),
+        user_id=created_assignment.user_id,
+        team_id=created_assignment.persohub_team_id,
+        created_at=created_assignment.created_at,
+    )
+
+
+@router.post("/persohub/admin/persohub-events/{slug}/badges/presign", response_model=PresignResponse)
+def presign_badge_image_upload(
+    slug: str,
+    payload: PresignRequest,
+    _: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    presign = _generate_presigned_put_url(
+        key_prefix=f"badges/persohub_events/{event.slug}",
+        filename=payload.filename,
+        content_type=payload.content_type,
+        allowed_types=["image/png", "image/jpeg", "image/webp"],
+    )
+    return PresignResponse(**presign)
+
+
+@router.post("/persohub/admin/persohub-events/{slug}/badges/reveal-video/presign", response_model=PresignResponse)
+def presign_badge_reveal_video_upload(
+    slug: str,
+    payload: PresignRequest,
+    _: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    presign = _generate_presigned_put_url(
+        key_prefix=f"badges/persohub_events/{event.slug}/reveal-videos",
+        filename=payload.filename,
+        content_type=payload.content_type,
+        allowed_types=["video/mp4", "video/webm", "video/quicktime"],
+    )
+    return PresignResponse(**presign)
 
 
 @router.get("/persohub/admin/persohub-events/{slug}/badges", response_model=List[PersohubManagedBadgeResponse])
@@ -5369,5 +5427,22 @@ def list_badges(
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
-    badges = db.query(PersohubEventBadge).filter(PersohubEventBadge.event_id == event.id).order_by(PersohubEventBadge.created_at.desc()).all()
-    return [PersohubManagedBadgeResponse.model_validate(badge) for badge in badges]
+    rows = list_event_badges(db, platform="persohub", event_id=event.id)
+    payload = []
+    for assignment, badge in rows:
+        meta = assignment.meta or {}
+        payload.append(
+            PersohubManagedBadgeResponse(
+                id=int(assignment.id),
+                event_id=int(event.id),
+                title=str(badge.badge_name),
+                image_url=badge.image_url,
+                reveal_video_url=badge.reveal_video_url,
+                place=str(meta.get("place") or "SpecialMention"),
+                score=meta.get("score"),
+                user_id=assignment.user_id,
+                team_id=assignment.persohub_team_id,
+                created_at=assignment.created_at,
+            )
+        )
+    return payload

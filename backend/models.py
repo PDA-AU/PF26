@@ -270,6 +270,32 @@ PersohubEventInviteStatus = PdaEventInviteStatus
 PersohubEventBadgePlace = PdaEventBadgePlace
 
 
+class Badge(Base):
+    __tablename__ = "badges"
+
+    id = Column(Integer, primary_key=True, index=True)
+    badge_name = Column(String(255), nullable=False, index=True)
+    image_url = Column(String(500), nullable=True)
+    reveal_video_url = Column(String(500), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class BadgeAssignment(Base):
+    __tablename__ = "badge_assignments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    badge_id = Column(Integer, ForeignKey("badges.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    pda_team_id = Column(Integer, ForeignKey("pda_event_teams.id", ondelete="SET NULL"), nullable=True, index=True)
+    persohub_team_id = Column(Integer, ForeignKey("persohub_event_teams.id", ondelete="SET NULL"), nullable=True, index=True)
+    pda_event_id = Column(Integer, ForeignKey("pda_events.id", ondelete="SET NULL"), nullable=True, index=True)
+    persohub_event_id = Column(Integer, ForeignKey("persohub_events.id", ondelete="SET NULL"), nullable=True, index=True)
+    meta = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
 class PdaEvent(Base):
     __tablename__ = "pda_events"
 

@@ -334,8 +334,9 @@ def update_pda_me(
         user.dept = str(update_data.dept or "").strip() or None
     if "college" in update_data.model_fields_set:
         user.college = _normalize_college(update_data.college)
-    if update_data.image_url is not None:
-        user.image_url = update_data.image_url
+    if "image_url" in update_data.model_fields_set:
+        normalized_image_url = str(update_data.image_url or "").strip()
+        user.image_url = normalized_image_url or None
     if "instagram_url" in update_data.model_fields_set:
         normalized_instagram = str(update_data.instagram_url or "").strip()
         user.instagram_url = normalized_instagram or None

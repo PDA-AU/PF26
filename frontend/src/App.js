@@ -17,6 +17,7 @@ import LogsAdmin from "@/pages/HomeAdmin/LogsAdmin";
 import RecruitmentsAdmin from "@/pages/HomeAdmin/RecruitmentsAdmin";
 import EmailAdmin from "@/pages/HomeAdmin/EmailAdmin";
 import CCAdmin from "@/pages/HomeAdmin/CCAdmin";
+import BadgesAdmin from "@/pages/HomeAdmin/BadgesAdmin";
 import PersohubPaymentsAdminPage from "@/pages/HomeAdmin/PersohubPaymentsAdminPage";
 import AdminEvents from "@/pages/events/AdminEvents";
 import EventDashboard from "@/pages/events/EventDashboard";
@@ -169,6 +170,11 @@ function AppRoutes() {
             <Route path="/admin/cc" element={
                 <ProtectedPdaRoute requireSuperAdmin>
                     <CCAdmin />
+                </ProtectedPdaRoute>
+            } />
+            <Route path="/admin/badges" element={
+                <ProtectedPdaRoute requireSuperAdmin>
+                    <BadgesAdmin />
                 </ProtectedPdaRoute>
             } />
             <Route path="/admin/payments" element={

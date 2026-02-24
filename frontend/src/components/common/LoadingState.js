@@ -12,8 +12,8 @@ export default function LoadingState({
     const [videoFailed, setVideoFailed] = useState(false);
     const videoRef = useRef(null);
     const minDurationAttr = Number.isFinite(Number(minDurationMs)) ? Math.max(0, Number(minDurationMs)) : 400;
+    const loadingVideoMp4 = useMemo(() => loadingVideo.replace(/\.webm(\?.*)?$/i, '.mp4$1'), []);
     const sharedVideoProps = useMemo(() => ({
-        src: loadingVideo,
         autoPlay: true,
         loop: true,
         muted: true,
@@ -29,12 +29,16 @@ export default function LoadingState({
             <video
                 ref={videoRef}
                 {...sharedVideoProps}
+                src={loadingVideo}
                 controls={false}
                 disablePictureInPicture
                 controlsList="nodownload nofullscreen noplaybackrate noremoteplayback"
                 className={`${className} pointer-events-none select-none`.trim()}
                 onError={() => setVideoFailed(true)}
-            />
+            >
+                <source src={loadingVideoMp4} type="video/mp4" />
+                <source src={loadingVideo} type="video/webm" />
+            </video>
         );
     };
 

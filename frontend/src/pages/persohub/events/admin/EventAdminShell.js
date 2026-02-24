@@ -3,7 +3,6 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import axios from 'axios';
 import { toast } from 'sonner';
 import {
-    Sparkles,
     LogOut,
     Undo2,
     AlertTriangle,
@@ -21,6 +20,7 @@ import { usePersohubAdminAuth } from '@/context/PersohubAdminAuthContext';
 import LoadingState from '@/components/common/LoadingState';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import persohubLogo from '@/assets/persohub.png';
 import { clearUndoEntry, getUndoEntry, setUndoEntry, subscribeUndoEntry } from './undo/eventAdminUndoStore';
 import { executeUndoCommand } from './undo/undoExecutors';
 
@@ -246,9 +246,7 @@ export default function EventAdminShell({
                     <div className="flex justify-between items-center h-16">
                         <div className="flex items-center gap-4">
                             <Link to="/persohub/admin/persohub-events" className="flex items-center gap-2">
-                                <div className="w-10 h-10 bg-white border-2 border-black shadow-neo flex items-center justify-center">
-                                    <Sparkles className="w-6 h-6 text-primary" />
-                                </div>
+                                <img src={persohubLogo} alt="Persohub logo" className="h-10 w-10 object-contain" />
                                 <div className="hidden md:block">
                                     <div className="font-heading font-black text-lg tracking-tight leading-none">{eventInfo.title}</div>
                                     <div className="text-xs opacity-90">{eventInfo.event_code}</div>
