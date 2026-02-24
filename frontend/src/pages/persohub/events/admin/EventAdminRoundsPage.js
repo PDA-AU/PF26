@@ -181,7 +181,6 @@ function RoundsContent() {
     const [submissionDeadlineTime, setSubmissionDeadlineTime] = useState('');
     const [allowedMimeTypes, setAllowedMimeTypes] = useState(DEFAULT_ALLOWED_MIME_TYPES.join(', '));
     const [maxFileSizeMb, setMaxFileSizeMb] = useState('25');
-    const [criteria, setCriteria] = useState([createCriterion('Score', 100)]);
     const [roundStats, setRoundStats] = useState({});
     const [revealRound, setRevealRound] = useState(null);
     const [revealing, setRevealing] = useState(false);
@@ -288,7 +287,6 @@ function RoundsContent() {
         setSubmissionDeadlineTime('');
         setAllowedMimeTypes(DEFAULT_ALLOWED_MIME_TYPES.join(', '));
         setMaxFileSizeMb('25');
-        setCriteria([createCriterion('Score', 100)]);
         setEditingRound(null);
     };
 
@@ -305,21 +303,6 @@ function RoundsContent() {
     const handleSubmit = async (e) => {
         e.preventDefault();
         setSavingRound(true);
-        const cleanedCriteria = criteria
-            .map((criterion) => ({
-                name: String(criterion.name || '').trim(),
-                max_marks: parseFloat(criterion.max_marks) || 0,
-                rubric: criterion.rubric ? normalizeCriterionRubric(criterion.rubric, parseFloat(criterion.max_marks) || 0) : null,
-            }))
-            .filter((criterion) => criterion.name);
-        const rubricError = cleanedCriteria
-            .map((criterion) => validateCriterionRubric(criterion))
-            .find(Boolean);
-        if (rubricError) {
-            toast.error(rubricError);
-            setSavingRound(false);
-            return;
-        }
         const parsedMimeTypes = String(allowedMimeTypes || '')
             .split(',')
             .map((item) => String(item || '').trim().toLowerCase())
@@ -367,7 +350,6 @@ function RoundsContent() {
                 external_url_name: String(externalUrlName || '').trim() || 'Explore Round',
                 date: date ? new Date(date).toISOString() : null,
                 mode,
-                evaluation_criteria: cleanedCriteria.length > 0 ? cleanedCriteria : [{ name: 'Score', max_marks: 100 }],
                 requires_submission: Boolean(requiresSubmission),
                 allow_late_submission: Boolean(requiresSubmission && allowLateSubmission),
                 submission_mode: submissionMode || 'file_or_link',
@@ -375,6 +357,9 @@ function RoundsContent() {
                 allowed_mime_types: parsedMimeTypes.length ? parsedMimeTypes : DEFAULT_ALLOWED_MIME_TYPES,
                 max_file_size_mb: Math.max(1, parseInt(maxFileSizeMb, 10) || 25),
             };
+            if (!editingRound) {
+                payload.evaluation_criteria = [{ name: 'Score', max_marks: 100 }];
+            }
             if (editingRound) {
                 const restorePayload = {
                     round_no: Number(editingRound.round_no),
@@ -385,9 +370,6 @@ function RoundsContent() {
                     external_url_name: editingRound.external_url_name || 'Explore Round',
                     date: editingRound.date || null,
                     mode: editingRound.mode || 'Offline',
-                    evaluation_criteria: Array.isArray(editingRound.evaluation_criteria) && editingRound.evaluation_criteria.length
-                        ? editingRound.evaluation_criteria
-                        : [{ name: 'Score', max_marks: 100 }],
                     requires_submission: Boolean(editingRound.requires_submission),
                     allow_late_submission: Boolean(editingRound.allow_late_submission),
                     submission_mode: String(editingRound.submission_mode || 'file_or_link'),
@@ -456,9 +438,6 @@ function RoundsContent() {
                 : DEFAULT_ALLOWED_MIME_TYPES.join(', ')
         );
         setMaxFileSizeMb(String(round.max_file_size_mb || 25));
-        setCriteria((round.evaluation_criteria && round.evaluation_criteria.length > 0)
-            ? round.evaluation_criteria.map((criterion) => createCriterion(criterion.name || '', criterion.max_marks || 0, criterion.rubric || null))
-            : [createCriterion('Score', 100)]);
         setDialogOpen(true);
     };
 
@@ -597,7 +576,7 @@ function RoundsContent() {
                             Create Round
                         </Button>
                     </DialogTrigger>
-                    <DialogContent className="border-4 border-black max-h-[90vh] overflow-y-auto">
+                    <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-[900px] lg:max-w-[1040px] border-4 border-black max-h-[94vh] overflow-y-auto">
                         <DialogHeader>
                             <DialogTitle className="font-heading font-bold text-2xl">{editingRound ? 'Edit Round' : 'Create Round'}</DialogTitle>
                         </DialogHeader>
@@ -630,7 +609,7 @@ function RoundsContent() {
                                         setDescription(next);
                                         registerRoundFormUndo('Undo round description edit', () => setDescription(previous));
                                     }}
-                                    className="neo-input"
+                                    className="neo-input min-h-[160px] sm:min-h-[190px]"
                                 />
                             </div>
                             <div>
@@ -746,12 +725,11 @@ function RoundsContent() {
                             <div className="space-y-3 rounded-md border-2 border-black p-3">
                                 <div className="flex items-center justify-between gap-3">
                                     <Label className="font-bold">Require Participant Submission</Label>
-                                    <input
-                                        type="checkbox"
+                                    <Switch
                                         checked={requiresSubmission}
-                                        onChange={(e) => {
+                                        onCheckedChange={(checked) => {
                                             const previous = requiresSubmission;
-                                            const next = e.target.checked;
+                                            const next = checked === true;
                                             setRequiresSubmission(next);
                                             registerRoundFormUndo('Undo submission requirement change', () => setRequiresSubmission(previous));
                                         }}
@@ -854,153 +832,6 @@ function RoundsContent() {
                                         </div>
                                     </>
                                 ) : null}
-                            </div>
-                            <div className="space-y-3">
-                                <div className="flex items-center justify-between">
-                                    <Label className="font-bold">Evaluation Criteria</Label>
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        className="border-2 border-black"
-                                        onClick={() => {
-                                            const previous = criteria;
-                                            setCriteria((prev) => [...prev, createCriterion('', 0)]);
-                                            registerRoundFormUndo('Undo add criterion', () => setCriteria(previous));
-                                        }}
-                                    >
-                                        <Plus className="w-4 h-4 mr-2" /> Add
-                                    </Button>
-                                </div>
-                                <div className="space-y-2">
-                                    {criteria.map((criterion) => (
-                                        <div key={criterion.id} className="rounded-md border-2 border-black p-3 space-y-3">
-                                            <div className="grid grid-cols-[1fr_120px_auto] gap-2 items-center">
-                                                <Input
-                                                    value={criterion.name}
-                                                    onChange={(e) => {
-                                                        const previous = criteria;
-                                                        const next = e.target.value;
-                                                        setCriteria((prev) => prev.map((item) => item.id === criterion.id ? { ...item, name: next } : item));
-                                                        registerRoundFormUndo('Undo criterion name edit', () => setCriteria(previous));
-                                                    }}
-                                                    placeholder="Criteria name"
-                                                    className="neo-input"
-                                                />
-                                                <Input
-                                                    type="number"
-                                                    value={criterion.max_marks}
-                                                    onChange={(e) => {
-                                                        const previous = criteria;
-                                                        const next = e.target.value;
-                                                        setCriteria((prev) => prev.map((item) => {
-                                                            if (item.id !== criterion.id) return item;
-                                                            const nextMax = Number.parseFloat(next);
-                                                            const normalizedRubric = item.rubric
-                                                                ? normalizeCriterionRubric(item.rubric, Number.isFinite(nextMax) ? nextMax : 0)
-                                                                : null;
-                                                            return { ...item, max_marks: next, rubric: normalizedRubric };
-                                                        }));
-                                                        registerRoundFormUndo('Undo criterion max marks edit', () => setCriteria(previous));
-                                                    }}
-                                                    placeholder="Max marks"
-                                                    className="neo-input"
-                                                />
-                                                <Button
-                                                    type="button"
-                                                    variant="outline"
-                                                    className="border-2 border-black"
-                                                    onClick={() => {
-                                                        const previous = criteria;
-                                                        setCriteria((prev) => (prev.length > 1 ? prev.filter((item) => item.id !== criterion.id) : prev));
-                                                        registerRoundFormUndo('Undo criterion remove', () => setCriteria(previous));
-                                                    }}
-                                                    disabled={criteria.length === 1}
-                                                >
-                                                    <X className="w-4 h-4" />
-                                                </Button>
-                                            </div>
-                                            <div className="flex items-center justify-between rounded-md border border-slate-300 bg-slate-50 px-3 py-2">
-                                                <Label className="text-sm font-semibold">Rubric (Likert 5-point)</Label>
-                                                <Switch
-                                                    checked={Boolean(criterion.rubric)}
-                                                    onCheckedChange={(checked) => {
-                                                        const previous = criteria;
-                                                        setCriteria((prev) => prev.map((item) => {
-                                                            if (item.id !== criterion.id) return item;
-                                                            return {
-                                                                ...item,
-                                                                rubric: checked ? createDefaultRubric(parseFloat(item.max_marks) || 0) : null,
-                                                            };
-                                                        }));
-                                                        registerRoundFormUndo('Undo criterion rubric toggle', () => setCriteria(previous));
-                                                    }}
-                                                />
-                                            </div>
-                                            {criterion.rubric ? (
-                                                <div className="space-y-2">
-                                                    {LIKERT_RUBRIC_LEVELS.map((level) => {
-                                                        const band = (criterion.rubric?.bands || []).find((item) => Number(item.level) === level.level) || {};
-                                                        return (
-                                                            <div key={`${criterion.id}-rubric-${level.level}`} className="grid grid-cols-[120px_1fr_1fr] gap-2 items-center">
-                                                                <Label className="text-xs font-semibold">{level.label}</Label>
-                                                                <Input
-                                                                    type="number"
-                                                                    value={band.min_marks ?? ''}
-                                                                    onChange={(e) => {
-                                                                        const previous = criteria;
-                                                                        const nextValue = e.target.value;
-                                                                        setCriteria((prev) => prev.map((item) => {
-                                                                            if (item.id !== criterion.id || !item.rubric) return item;
-                                                                            return {
-                                                                                ...item,
-                                                                                rubric: {
-                                                                                    ...item.rubric,
-                                                                                    bands: item.rubric.bands.map((rubricBand) => (
-                                                                                        Number(rubricBand.level) === level.level
-                                                                                            ? { ...rubricBand, min_marks: nextValue }
-                                                                                            : rubricBand
-                                                                                    )),
-                                                                                },
-                                                                            };
-                                                                        }));
-                                                                        registerRoundFormUndo('Undo rubric min marks edit', () => setCriteria(previous));
-                                                                    }}
-                                                                    className="neo-input"
-                                                                    placeholder="Min"
-                                                                />
-                                                                <Input
-                                                                    type="number"
-                                                                    value={band.max_marks ?? ''}
-                                                                    onChange={(e) => {
-                                                                        const previous = criteria;
-                                                                        const nextValue = e.target.value;
-                                                                        setCriteria((prev) => prev.map((item) => {
-                                                                            if (item.id !== criterion.id || !item.rubric) return item;
-                                                                            return {
-                                                                                ...item,
-                                                                                rubric: {
-                                                                                    ...item.rubric,
-                                                                                    bands: item.rubric.bands.map((rubricBand) => (
-                                                                                        Number(rubricBand.level) === level.level
-                                                                                            ? { ...rubricBand, max_marks: nextValue }
-                                                                                            : rubricBand
-                                                                                    )),
-                                                                                },
-                                                                            };
-                                                                        }));
-                                                                        registerRoundFormUndo('Undo rubric max marks edit', () => setCriteria(previous));
-                                                                    }}
-                                                                    className="neo-input"
-                                                                    placeholder="Max"
-                                                                />
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            ) : null}
-                                        </div>
-                                    ))}
-                                </div>
                             </div>
                             <Button type="submit" disabled={savingRound} className="w-full bg-primary text-white border-2 border-black shadow-neo">
                                 {savingRound ? 'Saving...' : (editingRound ? 'Update' : 'Create')}

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from auth import create_access_token, create_refresh_token, decode_token, verify_password
 from database import get_db
-from models import PdaUser, PersohubAdmin, PersohubClub, PersohubCommunity
+from models import PdaAdmin, PdaUser, PersohubAdmin, PersohubClub, PersohubCommunity
 from persohub_schemas import (
     PersohubAdminClubOption,
     PersohubAdminCommunitySelectRequest,
@@ -28,6 +28,12 @@ from security import (
 )
 
 router = APIRouter()
+
+
+def _is_pda_superadmin_user(db: Session, user_id: int) -> bool:
+    admin_row = db.query(PdaAdmin).filter(PdaAdmin.user_id == int(user_id)).first()
+    policy = admin_row.policy if admin_row and isinstance(admin_row.policy, dict) else {}
+    return bool(admin_row and policy.get("superAdmin"))
 
 
 def _normalize_events_policy(policy: Optional[dict]) -> dict:
@@ -125,6 +131,20 @@ def _build_community_auth_response(
 
 def _club_options_for_user(db: Session, user_id: int) -> List[PersohubAdminClubOption]:
     options: Dict[int, Dict[str, object]] = {}
+    is_pda_superadmin = _is_pda_superadmin_user(db, int(user_id))
+
+    if is_pda_superadmin:
+        all_clubs = (
+            db.query(PersohubClub)
+            .order_by(PersohubClub.name.asc(), PersohubClub.id.asc())
+            .all()
+        )
+        for club in all_clubs:
+            options[int(club.id)] = {
+                "club": club,
+                "role": "owner",
+                "can_access_events": True,
+            }
 
     owned = (
         db.query(PersohubClub)
@@ -206,6 +226,7 @@ def _resolve_club_admin_context(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Club not found")
 
     is_owner = int(club.owner_user_id or 0) == int(user_id)
+    is_pda_superadmin = _is_pda_superadmin_user(db, int(user_id))
     memberships = (
         db.query(PersohubAdmin, PersohubCommunity)
         .join(PersohubCommunity, PersohubCommunity.id == PersohubAdmin.community_id)
@@ -220,7 +241,7 @@ def _resolve_club_admin_context(
     )
     membership_community_ids = {int(community.id) for _admin_row, community in memberships}
 
-    if not is_owner and not memberships:
+    if not is_owner and not is_pda_superadmin and not memberships:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Community admin access revoked")
 
     selected_community = None
@@ -234,7 +255,7 @@ def _resolve_club_admin_context(
             )
             .first()
         )
-        if selected_community and not is_owner and int(selected_community.id) not in membership_community_ids:
+        if selected_community and not is_owner and not is_pda_superadmin and int(selected_community.id) not in membership_community_ids:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Community admin access revoked")
 
     if not selected_community and memberships:
@@ -255,12 +276,12 @@ def _resolve_club_admin_context(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No active communities in this club")
 
     merged_policy = _merge_admin_policy([row[0] for row in memberships])
-    can_access_events = bool(is_owner or any(bool(value) for value in merged_policy["events"].values()))
+    can_access_events = bool(is_owner or is_pda_superadmin or any(bool(value) for value in merged_policy["events"].values()))
 
     return {
         "club": club,
         "community": selected_community,
-        "is_owner": bool(is_owner),
+        "is_owner": bool(is_owner or is_pda_superadmin),
         "event_policy": merged_policy,
         "can_access_events": can_access_events,
     }

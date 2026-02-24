@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 
 import { usePersohubAdminAuth } from '@/context/PersohubAdminAuthContext';
+import LoadingState from '@/components/common/LoadingState';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { clearUndoEntry, getUndoEntry, setUndoEntry, subscribeUndoEntry } from './undo/eventAdminUndoStore';
@@ -203,13 +204,7 @@ export default function EventAdminShell({
     }, []);
 
     if (loading || authLoading) {
-        return (
-            <div className="min-h-screen bg-muted flex items-center justify-center">
-                <div className="neo-card animate-pulse">
-                    <p className="font-heading text-xl">Loading event admin...</p>
-                </div>
-            </div>
-        );
+        return <LoadingState fullScreen />;
     }
 
     if (!community || !eventInfo) {

@@ -143,6 +143,12 @@ def _merge_persohub_admin_policy(rows) -> dict:
     return merged
 
 
+def _is_pda_superadmin_user(db: Session, user_id: int) -> bool:
+    admin_row = db.query(PdaAdmin).filter(PdaAdmin.user_id == int(user_id)).first()
+    policy = admin_row.policy if admin_row and isinstance(admin_row.policy, dict) else {}
+    return bool(admin_row and policy.get("superAdmin"))
+
+
 def _club_memberships_for_user(
     db: Session,
     *,
@@ -286,7 +292,8 @@ def require_persohub_community(
 
         membership_rows = _club_memberships_for_user(db, club_id=resolved_club_id, user_id=user_id)
         is_club_owner = int(club.owner_user_id or 0) == int(user_id)
-        if not is_club_owner and not membership_rows:
+        is_pda_superadmin = _is_pda_superadmin_user(db, int(user_id))
+        if not is_club_owner and not is_pda_superadmin and not membership_rows:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Community admin access revoked")
 
         selected_community = None
@@ -317,10 +324,11 @@ def require_persohub_community(
 
         community = selected_community
         actor_user_id = int(user_id)
-        actor_role = "owner" if is_club_owner else "admin"
+        actor_role = "owner" if (is_club_owner or is_pda_superadmin) else "admin"
         actor_club_id = resolved_club_id
         event_policy = _merge_persohub_admin_policy([row[0] for row in membership_rows])
-        can_access_events = bool(is_club_owner or any(bool(value) for value in event_policy["events"].values()))
+        can_access_events = bool(is_club_owner or is_pda_superadmin or any(bool(value) for value in event_policy["events"].values()))
+        is_club_owner = bool(is_club_owner or is_pda_superadmin)
     else:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid community token")
 
