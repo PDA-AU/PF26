@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import ParsedDescription from '@/components/common/ParsedDescription';
 import LoadingState from '@/components/common/LoadingState';
@@ -15,9 +16,9 @@ import { persohubAdminApi } from '@/pages/persohub/admin/api';
 import PersohubAdminLayout from '@/pages/persohub/admin/PersohubAdminLayout';
 import { compressImageToWebp } from '@/utils/imageCompression';
 import {
-    filterPosterAssetsByRatio,
     parsePosterAssets,
     pickPosterAssetByRatio,
+    POSTER_ASPECT_RATIOS,
     resolvePosterUrl,
     serializePosterAssets,
 } from '@/utils/posterAssets';
@@ -40,25 +41,23 @@ const initialForm = {
     round_count: 1,
     team_min_size: '',
     team_max_size: '',
+    registration_fee_enabled: false,
+    registration_fee_mit: '0',
+    registration_fee_other: '0',
+    seat_availability_enabled: false,
+    seat_capacity: '100',
     sympo_id: 'none',
 };
 
 const makePosterAssetId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
-const toPosterAssetRows = (rawPosterUrl) => {
-    const preferred = pickPosterAssetByRatio(
-        filterPosterAssetsByRatio(parsePosterAssets(rawPosterUrl), ['4:5']),
-        ['4:5'],
-    );
-    if (!preferred?.url) return [];
-    return [{
-        id: makePosterAssetId(),
-        aspect_ratio: '4:5',
-        url: preferred.url,
-        file: null,
-        preview_url: '',
-    }];
-};
+const toPosterAssetRows = (rawPosterUrl) => parsePosterAssets(rawPosterUrl).map((asset) => ({
+    id: makePosterAssetId(),
+    aspect_ratio: asset.aspect_ratio || '4:5',
+    url: asset.url,
+    file: null,
+    preview_url: '',
+}));
 
 const releasePosterPreviewUrls = (rows) => {
     (rows || []).forEach((row) => {
@@ -82,6 +81,12 @@ const toTimeInputValue = (value) => {
     return raw.slice(0, 5);
 };
 
+const parseSeatCapacity = (value) => {
+    const parsed = Number.parseInt(String(value || '').trim(), 10);
+    if (!Number.isFinite(parsed) || parsed < 1) return 100;
+    return parsed;
+};
+
 const toEventForm = (eventRow = {}) => ({
     title: eventRow.title || '',
     description: eventRow.description || '',
@@ -100,6 +105,11 @@ const toEventForm = (eventRow = {}) => ({
     round_count: Number(eventRow.round_count || 1),
     team_min_size: eventRow.team_min_size ?? '',
     team_max_size: eventRow.team_max_size ?? '',
+    registration_fee_enabled: Boolean(eventRow.registration_fee?.enabled),
+    registration_fee_mit: String(eventRow.registration_fee?.amounts?.MIT ?? 0),
+    registration_fee_other: String(eventRow.registration_fee?.amounts?.Other ?? 0),
+    seat_availability_enabled: Boolean(eventRow.seat_availability_enabled),
+    seat_capacity: String(eventRow.seat_capacity ?? 100),
     sympo_id: eventRow.sympo_id ? String(eventRow.sympo_id) : 'none',
 });
 
@@ -135,11 +145,25 @@ const buildEventPayload = (formState, posterUrl) => ({
     round_count: Number(formState.round_count || 1),
     team_min_size: formState.participant_mode === 'team' ? Number(formState.team_min_size || 1) : null,
     team_max_size: formState.participant_mode === 'team' ? Number(formState.team_max_size || 1) : null,
+    registration_fee: formState.registration_fee_enabled ? {
+        enabled: true,
+        currency: 'INR',
+        amounts: {
+            MIT: Math.max(0, Number(formState.registration_fee_mit || 0)),
+            Other: Math.max(0, Number(formState.registration_fee_other || 0)),
+        },
+    } : null,
+    seat_availability_enabled: Boolean(formState.seat_availability_enabled),
+    seat_capacity: Boolean(formState.seat_availability_enabled)
+        ? parseSeatCapacity(formState.seat_capacity)
+        : (Number.isFinite(Number(formState.seat_capacity)) && Number(formState.seat_capacity) > 0
+            ? Number(formState.seat_capacity)
+            : null),
 });
 
 const getCardPosterSrc = (rawPosterUrl) => {
-    const assets = filterPosterAssetsByRatio(parsePosterAssets(rawPosterUrl), ['4:5']);
-    const preferred = pickPosterAssetByRatio(assets, ['4:5']);
+    const assets = parsePosterAssets(rawPosterUrl);
+    const preferred = pickPosterAssetByRatio(assets, ['4:5', '5:4', '1:1', '2:1']);
     return resolvePosterUrl(preferred?.url);
 };
 
@@ -149,6 +173,8 @@ function EventFormFields({
     posterInputId,
     posterAssets,
     setPosterAssets,
+    posterUploadRatio,
+    setPosterUploadRatio,
     sympoOptions,
 }) {
     return (
@@ -206,32 +232,41 @@ function EventFormFields({
                 </Select>
             </div>
             <div className="md:col-span-2">
-                <Label htmlFor={posterInputId}>Poster Upload (4:5 only, single)</Label>
-                <div className="mt-2">
+                <Label htmlFor={posterInputId}>Poster Uploads (Multiple Ratios)</Label>
+                <div className="mt-2 grid gap-2 sm:grid-cols-[160px_1fr]">
+                    <select
+                        value={posterUploadRatio}
+                        onChange={(e) => setPosterUploadRatio(e.target.value)}
+                        className="h-10 w-full rounded-md border border-black/10 bg-white px-3 text-sm"
+                    >
+                        {POSTER_ASPECT_RATIOS.map((ratio) => (
+                            <option key={ratio} value={ratio}>{ratio}</option>
+                        ))}
+                    </select>
                     <Input
                         id={posterInputId}
                         type="file"
+                        multiple
                         accept="image/png,image/jpeg,image/webp"
                         onChange={(e) => {
                             const files = Array.from(e.target.files || []);
                             if (!files.length) return;
-                            const file = files[0];
-                            setPosterAssets((prev) => {
-                                releasePosterPreviewUrls(prev);
-                                return [{
+                            setPosterAssets((prev) => ([
+                                ...prev,
+                                ...files.map((file) => ({
                                     id: makePosterAssetId(),
-                                    aspect_ratio: '4:5',
+                                    aspect_ratio: posterUploadRatio,
                                     url: '',
                                     file,
                                     preview_url: URL.createObjectURL(file),
-                                }];
-                            });
+                                })),
+                            ]));
                             e.target.value = '';
                         }}
                     />
                 </div>
                 <p className="mt-2 text-xs text-slate-500">
-                    Only one 4:5 poster is supported temporarily.
+                    Select an aspect ratio, then upload one or more images for that ratio.
                 </p>
                 {posterAssets.length ? (
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -369,6 +404,72 @@ function EventFormFields({
                     </div>
                 </>
             ) : null}
+            <div className="md:col-span-2 rounded-xl border border-black/10 bg-[#fffdf7] p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <Label className="text-sm font-semibold">Registration Fee</Label>
+                        <p className="mt-1 text-xs text-slate-600">Enable paid registration with fixed slabs for MIT and Other.</p>
+                    </div>
+                    <Switch
+                        checked={Boolean(form.registration_fee_enabled)}
+                        onCheckedChange={(checked) => setForm((prev) => ({ ...prev, registration_fee_enabled: Boolean(checked) }))}
+                    />
+                </div>
+                {form.registration_fee_enabled ? (
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                        <div>
+                            <Label>MIT Amount (INR)</Label>
+                            <Input
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                value={form.registration_fee_mit}
+                                onChange={(e) => setForm((prev) => ({ ...prev, registration_fee_mit: e.target.value }))}
+                            />
+                        </div>
+                        <div>
+                            <Label>Other Amount (INR)</Label>
+                            <Input
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                value={form.registration_fee_other}
+                                onChange={(e) => setForm((prev) => ({ ...prev, registration_fee_other: e.target.value }))}
+                            />
+                        </div>
+                    </div>
+                ) : null}
+            </div>
+            <div className="md:col-span-2 rounded-xl border border-black/10 bg-[#fffdf7] p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <Label className="text-sm font-semibold">Seats Availability</Label>
+                        <p className="mt-1 text-xs text-slate-600">Enable seat tracking for this event.</p>
+                    </div>
+                    <Switch
+                        checked={Boolean(form.seat_availability_enabled)}
+                        onCheckedChange={(checked) => setForm((prev) => ({
+                            ...prev,
+                            seat_availability_enabled: Boolean(checked),
+                            seat_capacity: Boolean(checked)
+                                ? (String(prev.seat_capacity || '').trim() || '100')
+                                : prev.seat_capacity,
+                        }))}
+                    />
+                </div>
+                {form.seat_availability_enabled ? (
+                    <div className="mt-4">
+                        <Label>No. of Seats</Label>
+                        <Input
+                            type="number"
+                            min={1}
+                            value={form.seat_capacity}
+                            onChange={(e) => setForm((prev) => ({ ...prev, seat_capacity: e.target.value }))}
+                            placeholder="100"
+                        />
+                    </div>
+                ) : null}
+            </div>
         </>
     );
 }
@@ -398,6 +499,8 @@ export default function PersohubAdminEventsPage() {
     const [editTarget, setEditTarget] = useState(null);
     const [posterAssets, setPosterAssets] = useState([]);
     const [editPosterAssets, setEditPosterAssets] = useState([]);
+    const [posterUploadRatio, setPosterUploadRatio] = useState('4:5');
+    const [editPosterUploadRatio, setEditPosterUploadRatio] = useState('4:5');
     const [uploadingPoster, setUploadingPoster] = useState(false);
     const [uploadingEditPoster, setUploadingEditPoster] = useState(false);
     const [parityEnabled, setParityEnabled] = useState(false);
@@ -487,23 +590,53 @@ export default function PersohubAdminEventsPage() {
         return true;
     };
 
+    const validateRegistrationFee = (formState) => {
+        if (!formState.registration_fee_enabled) return true;
+        const mit = Number(formState.registration_fee_mit);
+        const other = Number(formState.registration_fee_other);
+        if (!Number.isFinite(mit) || mit < 0 || !Number.isFinite(other) || other < 0) {
+            toast.error('Registration fee amounts must be valid non-negative numbers');
+            return false;
+        }
+        return true;
+    };
+
+    const validateSeatAvailability = (formState) => {
+        if (!formState.seat_availability_enabled) return true;
+        const seatCapacity = Number.parseInt(String(formState.seat_capacity || '').trim(), 10);
+        if (!Number.isFinite(seatCapacity) || seatCapacity < 1) {
+            toast.error('No. of Seats must be a valid number greater than 0');
+            return false;
+        }
+        return true;
+    };
+
     const onSubmit = async (e) => {
         e.preventDefault();
         if (!canMutate) return;
         if (!validateDateRange(form)) return;
+        if (!validateRegistrationFee(form)) return;
+        if (!validateSeatAvailability(form)) return;
         setSaving(true);
         try {
-            let posterUrl = null;
-            const currentAsset = posterAssets[0];
-            if (currentAsset?.file) {
+            let nextAssets = posterAssets.filter((asset) => asset.url && !asset.file).map((asset) => ({
+                url: asset.url,
+                aspect_ratio: asset.aspect_ratio,
+            }));
+            const pendingAssets = posterAssets.filter((asset) => asset.file);
+            if (pendingAssets.length) {
                 setUploadingPoster(true);
-                const processedPoster = await compressImageToWebp(currentAsset.file);
-                const uploadedUrl = await persohubAdminApi.uploadEventPoster(processedPoster);
-                posterUrl = serializePosterAssets([{ url: uploadedUrl, aspect_ratio: '4:5' }]);
+                for (const asset of pendingAssets) {
+                    const processedPoster = await compressImageToWebp(asset.file);
+                    const uploadedUrl = await persohubAdminApi.uploadEventPoster(processedPoster);
+                    nextAssets.push({
+                        url: uploadedUrl,
+                        aspect_ratio: asset.aspect_ratio,
+                    });
+                }
                 setUploadingPoster(false);
-            } else if (currentAsset?.url) {
-                posterUrl = serializePosterAssets([{ url: currentAsset.url, aspect_ratio: '4:5' }]);
             }
+            const posterUrl = serializePosterAssets(nextAssets);
             const payload = buildEventPayload(form, posterUrl);
             const createdEvent = await persohubAdminApi.createPersohubEvent(payload);
             if (form.sympo_id && form.sympo_id !== 'none') {
@@ -513,6 +646,7 @@ export default function PersohubAdminEventsPage() {
             setForm(initialForm);
             releasePosterPreviewUrls(posterAssets);
             setPosterAssets([]);
+            setPosterUploadRatio('4:5');
             fetchEvents();
         } catch (error) {
             setUploadingPoster(false);
@@ -529,6 +663,7 @@ export default function PersohubAdminEventsPage() {
         setEditForm(toEventForm(eventRow));
         releasePosterPreviewUrls(editPosterAssets);
         setEditPosterAssets(toPosterAssetRows(eventRow.poster_url));
+        setEditPosterUploadRatio('4:5');
         setEditDialogOpen(true);
     };
 
@@ -539,25 +674,35 @@ export default function PersohubAdminEventsPage() {
         setEditForm(initialForm);
         releasePosterPreviewUrls(editPosterAssets);
         setEditPosterAssets([]);
+        setEditPosterUploadRatio('4:5');
     };
 
     const updateEvent = async (e) => {
         e.preventDefault();
         if (!canMutate || !editTarget) return;
         if (!validateDateRange(editForm)) return;
+        if (!validateRegistrationFee(editForm)) return;
+        if (!validateSeatAvailability(editForm)) return;
         setSavingEdit(true);
         try {
-            let posterUrl = null;
-            const currentAsset = editPosterAssets[0];
-            if (currentAsset?.file) {
+            let nextAssets = editPosterAssets.filter((asset) => asset.url && !asset.file).map((asset) => ({
+                url: asset.url,
+                aspect_ratio: asset.aspect_ratio,
+            }));
+            const pendingAssets = editPosterAssets.filter((asset) => asset.file);
+            if (pendingAssets.length) {
                 setUploadingEditPoster(true);
-                const processedPoster = await compressImageToWebp(currentAsset.file);
-                const uploadedUrl = await persohubAdminApi.uploadEventPoster(processedPoster);
-                posterUrl = serializePosterAssets([{ url: uploadedUrl, aspect_ratio: '4:5' }]);
+                for (const asset of pendingAssets) {
+                    const processedPoster = await compressImageToWebp(asset.file);
+                    const uploadedUrl = await persohubAdminApi.uploadEventPoster(processedPoster);
+                    nextAssets.push({
+                        url: uploadedUrl,
+                        aspect_ratio: asset.aspect_ratio,
+                    });
+                }
                 setUploadingEditPoster(false);
-            } else if (currentAsset?.url) {
-                posterUrl = serializePosterAssets([{ url: currentAsset.url, aspect_ratio: '4:5' }]);
             }
+            const posterUrl = serializePosterAssets(nextAssets);
             const payload = buildEventPayload(editForm, posterUrl);
             await persohubAdminApi.updatePersohubEvent(editTarget.slug, payload);
             await persohubAdminApi.assignPersohubEventSympo(editTarget.slug, {
@@ -565,6 +710,7 @@ export default function PersohubAdminEventsPage() {
             });
             toast.success('Event updated');
             closeEditDialog(true);
+            setEditPosterUploadRatio('4:5');
             fetchEvents();
         } catch (error) {
             setUploadingEditPoster(false);
@@ -676,6 +822,8 @@ export default function PersohubAdminEventsPage() {
                             posterInputId="persohub-event-poster-upload"
                             posterAssets={posterAssets}
                             setPosterAssets={setPosterAssets}
+                            posterUploadRatio={posterUploadRatio}
+                            setPosterUploadRatio={setPosterUploadRatio}
                             sympoOptions={sympoOptions}
                         />
                         <div className="md:col-span-2 flex justify-end">
@@ -759,6 +907,11 @@ export default function PersohubAdminEventsPage() {
                                         <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.participant_mode}</span>
                                         <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.open_for || 'MIT'}</span>
                                         <span className="rounded-md border border-black/10 bg-white px-2 py-1">{eventRow.template_option}</span>
+                                        {eventRow.registration_fee?.enabled ? (
+                                            <span className="rounded-md border border-black/10 bg-[#fff3c4] px-2 py-1">
+                                                Fee: MIT {Number(eventRow.registration_fee?.amounts?.MIT || 0)} / Other {Number(eventRow.registration_fee?.amounts?.Other || 0)} INR
+                                            </span>
+                                        ) : null}
                                     </div>
                                     <div className="mt-4 rounded-xl border border-black/10 bg-white p-3">
                                         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Add to symp</p>
@@ -860,6 +1013,8 @@ export default function PersohubAdminEventsPage() {
                             posterInputId="persohub-event-poster-upload-edit"
                             posterAssets={editPosterAssets}
                             setPosterAssets={setEditPosterAssets}
+                            posterUploadRatio={editPosterUploadRatio}
+                            setPosterUploadRatio={setEditPosterUploadRatio}
                             sympoOptions={sympoOptions}
                         />
                         <div className="md:col-span-2 flex justify-end gap-2">

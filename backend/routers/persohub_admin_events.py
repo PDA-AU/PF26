@@ -1,14 +1,19 @@
 import re
-from typing import List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from auth import verify_password
 from database import get_db
+from emailer import send_email_async
 from models import (
     PdaEventFormat,
+    PdaEventEntityType,
     PdaEventParticipantMode,
+    PdaEventRegistrationStatus,
     PdaEventRoundMode,
     PdaEventRoundState,
     PdaEventStatus,
@@ -32,10 +37,14 @@ from models import (
     PersohubEventScore,
     PersohubEventTeam,
     PersohubEventTeamMember,
+    PersohubPayment,
     PersohubSympo,
     PersohubSympoEvent,
 )
 from persohub_schemas import (
+    PersohubAdminPaymentConfirmRequest,
+    PersohubAdminPaymentDeclineRequest,
+    PersohubAdminPaymentReviewListItem,
     PersohubAdminEventCreateRequest,
     PersohubAdminEventResponse,
     PersohubAdminEventSympoAssignRequest,
@@ -145,6 +154,10 @@ def _ensure_events_policy_shape(policy: Optional[dict]) -> dict:
 
 
 def _serialize_event(event: PersohubEvent, sympo: Optional[PersohubSympo] = None) -> PersohubAdminEventResponse:
+    seat_availability_enabled = bool(getattr(event, "seat_availability_enabled", False))
+    seat_capacity = int(event.seat_capacity) if event.seat_capacity is not None else None
+    if seat_availability_enabled and (seat_capacity is None or seat_capacity < 1):
+        seat_capacity = 100
     return PersohubAdminEventResponse(
         id=event.id,
         slug=event.slug,
@@ -167,6 +180,9 @@ def _serialize_event(event: PersohubEvent, sympo: Optional[PersohubSympo] = None
         round_count=int(event.round_count or 1),
         team_min_size=event.team_min_size,
         team_max_size=event.team_max_size,
+        registration_fee=event.registration_fee,
+        seat_availability_enabled=seat_availability_enabled,
+        seat_capacity=seat_capacity,
         is_visible=bool(event.is_visible),
         open_for=_to_event_open_for(event.open_for),
         status=_enum_value(event.status),
@@ -257,6 +273,159 @@ def _assert_can_access_events(request: Request) -> None:
         return
     if not can_access_persohub_events(request):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin policy does not allow event access")
+
+
+def _payment_content_dict(payment: PersohubPayment) -> Dict[str, Any]:
+    raw = payment.content if isinstance(payment.content, dict) else {}
+    return dict(raw or {})
+
+
+def _payment_status(payment: Optional[PersohubPayment]) -> str:
+    if not payment:
+        return "none"
+    content = _payment_content_dict(payment)
+    raw = str(content.get("status") or "").strip().lower()
+    if raw in {"pending", "approved", "declined"}:
+        return raw
+    return "pending"
+
+
+def _optional_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _build_payment_list_item(
+    payment: PersohubPayment,
+    event: PersohubEvent,
+    participant: Optional[PdaUser],
+    club: Optional[PersohubClub],
+) -> PersohubAdminPaymentReviewListItem:
+    content = _payment_content_dict(payment)
+    return PersohubAdminPaymentReviewListItem(
+        id=int(payment.id),
+        event_id=int(event.id),
+        event_slug=str(event.slug or ""),
+        event_title=str(event.title or ""),
+        club_id=int(event.club_id or 0),
+        club_name=(str(club.name or "") if club else None) or None,
+        user_id=int(payment.user_id or 0),
+        participant_name=(str(participant.name or "") if participant else "") or f"User {payment.user_id}",
+        participant_regno=(str(participant.regno or "") if participant else None) or None,
+        participant_email=(str(participant.email or "") if participant else None) or None,
+        participant_phno=(str(participant.phno or "") if participant else None) or None,
+        participant_college=(str(participant.college or "") if participant else None) or None,
+        participant_dept=(str(participant.dept or "") if participant else None) or None,
+        payment_info_url=str(payment.payment_info_url or ""),
+        status=_payment_status(payment),
+        fee_key=(str(content.get("fee_key") or "") or None),
+        amount=_optional_float(content.get("amount")),
+        currency=(str(content.get("currency") or "") or None),
+        comment=(str(content.get("comment") or "") or None),
+        entity_type=(str(content.get("entity_type") or "") or None),
+        entity_id=(int(content.get("entity_id")) if content.get("entity_id") is not None else None),
+        team_id=(int(content.get("team_id")) if content.get("team_id") is not None else None),
+        attempt=int(content.get("attempt") or 1),
+        review=(content.get("review") if isinstance(content.get("review"), dict) else None),
+        created_at=payment.created_at,
+        updated_at=payment.updated_at,
+    )
+
+
+def _resolve_payment_registration(db: Session, payment: PersohubPayment) -> Optional[PersohubEventRegistration]:
+    content = _payment_content_dict(payment)
+    entity_type = str(content.get("entity_type") or "").strip().lower()
+    team_id = content.get("team_id")
+    if entity_type == "team" and team_id is not None:
+        return db.query(PersohubEventRegistration).filter(
+            PersohubEventRegistration.event_id == payment.event_id,
+            PersohubEventRegistration.team_id == int(team_id),
+            PersohubEventRegistration.entity_type == PdaEventEntityType.TEAM,
+        ).first()
+    return db.query(PersohubEventRegistration).filter(
+        PersohubEventRegistration.event_id == payment.event_id,
+        PersohubEventRegistration.user_id == payment.user_id,
+        PersohubEventRegistration.entity_type == PdaEventEntityType.USER,
+    ).first()
+
+
+def _ensure_payment_registration_row(db: Session, payment: PersohubPayment) -> PersohubEventRegistration:
+    existing = _resolve_payment_registration(db, payment)
+    if existing:
+        return existing
+    content = _payment_content_dict(payment)
+    entity_type = str(content.get("entity_type") or "").strip().lower()
+    team_id = content.get("team_id")
+    if entity_type == "team" and team_id is not None:
+        row = PersohubEventRegistration(
+            event_id=payment.event_id,
+            user_id=None,
+            team_id=int(team_id),
+            entity_type=PdaEventEntityType.TEAM,
+            status=PdaEventRegistrationStatus.PENDING,
+        )
+    else:
+        row = PersohubEventRegistration(
+            event_id=payment.event_id,
+            user_id=payment.user_id,
+            team_id=None,
+            entity_type=PdaEventEntityType.USER,
+            status=PdaEventRegistrationStatus.PENDING,
+        )
+    db.add(row)
+    db.flush()
+    return row
+
+
+def _send_payment_status_email(
+    participant: Optional[PdaUser],
+    event: PersohubEvent,
+    *,
+    state: str,
+    reason: Optional[str] = None,
+) -> None:
+    if not participant or not participant.email:
+        return
+    safe_name = str(participant.name or "Participant")
+    event_title = str(event.title or "event")
+    whatsapp_url = str(getattr(event, "whatsapp_url", "") or "").strip()
+    whatsapp_text = f"\nJoin updates: {whatsapp_url}\n" if whatsapp_url else ""
+    if state == "submitted":
+        subject = f"Payment received for review - {event_title}"
+        text = (
+            f"Hello {safe_name},\n\n"
+            f"We received your payment proof for {event_title}.\n"
+            "Your registration is now pending confirmation.\n"
+            f"{whatsapp_text}\n"
+            "Regards,\nPersohub Team"
+        )
+    elif state == "approved":
+        subject = f"Registration confirmed - {event_title}"
+        text = (
+            f"Hello {safe_name},\n\n"
+            f"Your payment has been approved and your registration for {event_title} is confirmed.\n"
+            f"{whatsapp_text}\n"
+            "Regards,\nPersohub Team"
+        )
+    else:
+        subject = f"Payment review update - {event_title}"
+        reason_text = f"\nReason: {reason}\n" if reason else "\n"
+        text = (
+            f"Hello {safe_name},\n\n"
+            f"Your payment submission for {event_title} was declined."
+            f"{reason_text}"
+            "You can resubmit payment proof from the event dashboard.\n\n"
+            "Regards,\nPersohub Team"
+        )
+    html = "<html><body>" + "".join(f"<p>{line}</p>" for line in text.split("\n") if line) + "</body></html>"
+    try:
+        send_email_async(participant.email, subject, html, text)
+    except Exception:
+        pass
 
 
 def _upsert_policy_slug_for_club_admin_rows(db: Session, club_id: int, slug: str) -> None:
@@ -387,6 +556,10 @@ def create_admin_event(
     if participant_mode != PdaEventParticipantMode.TEAM:
         team_min_size = None
         team_max_size = None
+    seat_availability_enabled = bool(payload.seat_availability_enabled)
+    seat_capacity = int(payload.seat_capacity or 100) if seat_availability_enabled else (
+        int(payload.seat_capacity) if payload.seat_capacity is not None else None
+    )
 
     event = PersohubEvent(
         slug=_next_slug(db, payload.title),
@@ -409,6 +582,9 @@ def create_admin_event(
         round_count=round_count,
         team_min_size=team_min_size,
         team_max_size=team_max_size,
+        registration_fee=(payload.registration_fee.model_dump() if payload.registration_fee else None),
+        seat_availability_enabled=seat_availability_enabled,
+        seat_capacity=seat_capacity,
         is_visible=True,
         open_for=_to_event_open_for(payload.open_for),
         status=PdaEventStatus.CLOSED,
@@ -476,6 +652,12 @@ def update_admin_event(
         updates["open_for"] = _to_event_open_for(payload.open_for)
     if "external_url_name" in updates:
         updates["external_url_name"] = str(updates.get("external_url_name") or "").strip() or _DEFAULT_EVENT_ACTION
+    if "registration_fee" in updates:
+        updates["registration_fee"] = dict(updates["registration_fee"] or {}) if updates["registration_fee"] else None
+    if "seat_availability_enabled" in updates:
+        updates["seat_availability_enabled"] = bool(updates["seat_availability_enabled"])
+    if "seat_capacity" in updates:
+        updates["seat_capacity"] = int(updates["seat_capacity"]) if updates["seat_capacity"] is not None else None
 
     next_start_date = updates.get("start_date", event.start_date)
     next_end_date = updates.get("end_date", event.end_date)
@@ -494,6 +676,18 @@ def update_admin_event(
         updates["team_min_size"] = None
         updates["team_max_size"] = None
 
+    next_seat_availability_enabled = bool(
+        updates["seat_availability_enabled"]
+        if "seat_availability_enabled" in updates
+        else getattr(event, "seat_availability_enabled", False)
+    )
+    if next_seat_availability_enabled:
+        current_capacity = int(event.seat_capacity) if event.seat_capacity is not None else None
+        resolved_capacity = updates["seat_capacity"] if "seat_capacity" in updates else current_capacity
+        if resolved_capacity is None or int(resolved_capacity) < 1:
+            resolved_capacity = 100
+        updates["seat_capacity"] = int(resolved_capacity)
+
     for field, value in updates.items():
         setattr(event, field, value)
 
@@ -511,6 +705,167 @@ def update_admin_event(
     db.commit()
     db.refresh(event)
     return _serialize_event(event)
+
+
+@router.get("/persohub/admin/payments", response_model=List[PersohubAdminPaymentReviewListItem])
+def list_owner_payments(
+    request: Request,
+    response: Response,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    community: PersohubCommunity = Depends(require_persohub_community),
+    db: Session = Depends(get_db),
+):
+    _assert_persohub_admin_token(request)
+    _assert_owner(request)
+    club_id = _resolve_actor_club_id(request, community)
+    rows = (
+        db.query(PersohubPayment, PersohubEvent, PdaUser, PersohubClub)
+        .join(PersohubEvent, PersohubEvent.id == PersohubPayment.event_id)
+        .join(PdaUser, PdaUser.id == PersohubPayment.user_id)
+        .outerjoin(PersohubClub, PersohubClub.id == PersohubEvent.club_id)
+        .filter(PersohubEvent.club_id == club_id)
+        .order_by(PersohubPayment.created_at.desc(), PersohubPayment.id.desc())
+        .all()
+    )
+    items = [_build_payment_list_item(payment, event, participant, club) for payment, event, participant, club in rows]
+    items.sort(
+        key=lambda row: (
+            0 if str(row.status or "").strip().lower() == "pending" else 1,
+            -(row.created_at.timestamp() if row.created_at else 0.0),
+            -int(row.id),
+        )
+    )
+
+    total_count = len(items)
+    start = (page - 1) * page_size
+    end = start + page_size
+    paged_items = items[start:end]
+
+    response.headers["X-Total-Count"] = str(total_count)
+    response.headers["X-Page"] = str(page)
+    response.headers["X-Page-Size"] = str(page_size)
+    return paged_items
+
+
+@router.post("/persohub/admin/payments/{payment_id}/confirm", response_model=PersohubAdminPaymentReviewListItem)
+def confirm_owner_payment(
+    payment_id: int,
+    payload: PersohubAdminPaymentConfirmRequest,
+    request: Request,
+    community: PersohubCommunity = Depends(require_persohub_community),
+    db: Session = Depends(get_db),
+):
+    _assert_persohub_admin_token(request)
+    _assert_owner(request)
+    club_id = _resolve_actor_club_id(request, community)
+    row = (
+        db.query(PersohubPayment, PersohubEvent, PdaUser, PersohubClub)
+        .join(PersohubEvent, PersohubEvent.id == PersohubPayment.event_id)
+        .join(PdaUser, PdaUser.id == PersohubPayment.user_id)
+        .outerjoin(PersohubClub, PersohubClub.id == PersohubEvent.club_id)
+        .filter(PersohubPayment.id == payment_id, PersohubEvent.club_id == club_id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
+    payment, event, participant, club = row
+    current_status = _payment_status(payment)
+    if current_status != "pending":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Payment is already {current_status}")
+
+    actor_user_id = int(get_persohub_actor_user_id(request) or 0)
+    actor = db.query(PdaUser).filter(PdaUser.id == actor_user_id).first() if actor_user_id > 0 else None
+    if not actor or not actor.hashed_password:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Approver account unavailable")
+    if not verify_password(payload.password, actor.hashed_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid password")
+
+    content = _payment_content_dict(payment)
+    content["status"] = "approved"
+    content["review"] = {
+        "by_user_id": int(actor.id),
+        "by_name": str(actor.name or ""),
+        "at": datetime.now(timezone.utc).isoformat(),
+        "reason": None,
+    }
+    payment.content = content
+
+    registration = _ensure_payment_registration_row(db, payment)
+    registration.status = PdaEventRegistrationStatus.ACTIVE
+
+    _log_persohub_event_action(
+        db,
+        community,
+        action="confirm_persohub_payment",
+        method=request.method,
+        path=request.url.path,
+        event=event,
+        meta={"payment_id": int(payment.id), "status": "approved"},
+        actor_user_id=get_persohub_actor_user_id(request),
+    )
+    _send_payment_status_email(participant, event, state="approved")
+    db.commit()
+    db.refresh(payment)
+    return _build_payment_list_item(payment, event, participant, club)
+
+
+@router.post("/persohub/admin/payments/{payment_id}/decline", response_model=PersohubAdminPaymentReviewListItem)
+def decline_owner_payment(
+    payment_id: int,
+    payload: PersohubAdminPaymentDeclineRequest,
+    request: Request,
+    community: PersohubCommunity = Depends(require_persohub_community),
+    db: Session = Depends(get_db),
+):
+    _assert_persohub_admin_token(request)
+    _assert_owner(request)
+    club_id = _resolve_actor_club_id(request, community)
+    row = (
+        db.query(PersohubPayment, PersohubEvent, PdaUser, PersohubClub)
+        .join(PersohubEvent, PersohubEvent.id == PersohubPayment.event_id)
+        .join(PdaUser, PdaUser.id == PersohubPayment.user_id)
+        .outerjoin(PersohubClub, PersohubClub.id == PersohubEvent.club_id)
+        .filter(PersohubPayment.id == payment_id, PersohubEvent.club_id == club_id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
+    payment, event, participant, club = row
+    current_status = _payment_status(payment)
+    if current_status != "pending":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Payment is already {current_status}")
+
+    actor_user_id = int(get_persohub_actor_user_id(request) or 0)
+    actor = db.query(PdaUser).filter(PdaUser.id == actor_user_id).first() if actor_user_id > 0 else None
+
+    content = _payment_content_dict(payment)
+    content["status"] = "declined"
+    content["review"] = {
+        "by_user_id": int(actor.id) if actor else None,
+        "by_name": str(actor.name or "") if actor else None,
+        "at": datetime.now(timezone.utc).isoformat(),
+        "reason": payload.reason,
+    }
+    payment.content = content
+
+    registration = _ensure_payment_registration_row(db, payment)
+    registration.status = PdaEventRegistrationStatus.PENDING
+
+    _log_persohub_event_action(
+        db,
+        community,
+        action="decline_persohub_payment",
+        method=request.method,
+        path=request.url.path,
+        event=event,
+        meta={"payment_id": int(payment.id), "status": "declined", "reason": payload.reason},
+        actor_user_id=get_persohub_actor_user_id(request),
+    )
+    _send_payment_status_email(participant, event, state="declined", reason=payload.reason)
+    db.commit()
+    db.refresh(payment)
+    return _build_payment_list_item(payment, event, participant, club)
 
 
 @router.put("/persohub/admin/persohub-events/{slug}/sympo", response_model=PersohubAdminEventSympoAssignResponse)

@@ -10,7 +10,7 @@ from sqlalchemy import func, text, or_
 
 from auth import create_access_token
 from database import get_db
-from emailer import send_email
+from emailer import send_email_async
 from models import (
     PdaUser,
     PdaEvent,
@@ -294,7 +294,7 @@ def _send_registration_email(user: PdaUser, event: PdaEvent, details: str) -> No
         "</body></html>"
     )
     try:
-        send_email(user.email, subject, html, text)
+        send_email_async(user.email, subject, html, text)
     except Exception:
         pass
 

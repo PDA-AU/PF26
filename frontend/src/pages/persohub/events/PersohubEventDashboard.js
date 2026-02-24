@@ -28,9 +28,10 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Textarea } from '@/components/ui/textarea';
 import ParsedDescription from '@/components/common/ParsedDescription';
 import PosterCarousel from '@/components/common/PosterCarousel';
-import { filterPosterAssetsByRatio, parsePosterAssets, resolvePosterUrl } from '@/utils/posterAssets';
+import { parsePosterAssets, resolvePosterUrl } from '@/utils/posterAssets';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -178,6 +179,29 @@ const formatDateTimeIst = (value) => {
     })} IST`;
 };
 
+const formatMoney = (amount, currency = 'INR') => {
+    const parsed = Number(amount || 0);
+    if (!Number.isFinite(parsed)) return `0 ${currency}`;
+    return `${parsed} ${currency}`;
+};
+
+const parseSeatCapacityValue = (value) => {
+    const parsed = Number.parseInt(String(value || '').trim(), 10);
+    if (!Number.isFinite(parsed) || parsed < 1) return 100;
+    return parsed;
+};
+
+const EVENT_POSTER_RATIO_PRIORITY = ['4:5', '5:4', '1:1', '2:1'];
+
+const sortPosterAssetsByPriority = (assets = []) => {
+    const rank = new Map(EVENT_POSTER_RATIO_PRIORITY.map((ratio, index) => [ratio, index]));
+    return [...assets].sort((left, right) => {
+        const leftRank = rank.has(left?.aspect_ratio) ? rank.get(left.aspect_ratio) : 999;
+        const rightRank = rank.has(right?.aspect_ratio) ? rank.get(right.aspect_ratio) : 999;
+        return leftRank - rightRank;
+    });
+};
+
 export default function EventDashboard() {
     const { eventSlug, profileName } = useParams();
     const navigate = useNavigate();
@@ -218,6 +242,11 @@ export default function EventDashboard() {
         confirmPassword: ''
     });
     const [registrationCtaModalOpen, setRegistrationCtaModalOpen] = useState(false);
+    const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+    const [paymentScreenshot, setPaymentScreenshot] = useState(null);
+    const [paymentComment, setPaymentComment] = useState('');
+    const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+    const [paymentUploadProgress, setPaymentUploadProgress] = useState(null);
 
     const [teamName, setTeamName] = useState('');
     const [teamCode, setTeamCode] = useState('');
@@ -265,20 +294,45 @@ export default function EventDashboard() {
 
     const isTeamEvent = eventInfo?.participant_mode === 'team';
     const isRegistered = Boolean(dashboard?.is_registered);
+    const hasTeam = Boolean(dashboard?.team_code);
     const registrationOpen = Boolean(eventInfo?.registration_open);
     const confirmationMatches = registerConfirmed;
+    const registrationStatus = String(dashboard?.registration_status || (isRegistered ? 'active' : 'not_registered')).toLowerCase();
+    const paymentStatus = String(dashboard?.payment_status || 'none').toLowerCase();
+    const paymentRequired = Boolean(dashboard?.payment_required);
+    const payableAmount = Number(dashboard?.payable_amount || 0);
+    const feeKey = dashboard?.fee_key || null;
+    const feeCurrency = String(eventInfo?.registration_fee?.currency || 'INR');
+    const paymentConfig = dashboard?.payment_config || {};
+    const paymentQrImage = String(paymentConfig?.payment_url_image || '').trim();
+    const paymentId = String(paymentConfig?.payment_id || '').trim();
+    const clubOwnerMobile = String(paymentConfig?.club_owner_mobile || '').trim();
+    const isPendingRegistration = registrationStatus === 'pending';
+    const isActiveRegistration = registrationStatus === 'active' || registrationStatus === 'eliminated';
 
     const isLeader = useMemo(() => {
         if (!user?.id) return false;
         const members = dashboard?.team_members || [];
         return members.some((member) => member.user_id === user.id && String(member.role).toLowerCase() === 'leader');
     }, [dashboard?.team_members, user?.id]);
+    const canSubmitPayment = (
+        Boolean(isLoggedIn)
+        && Boolean(paymentRequired)
+        && payableAmount > 0
+        && Boolean(registrationOpen)
+        && (!isTeamEvent || isLeader)
+    );
+    const registrationCtaLabel = isPendingRegistration
+        ? 'Pending Confirmation'
+        : (isRegistered ? 'Registered' : 'Register Now');
 
     const effectiveStatus = useMemo(() => {
         if (!isRegistered) return 'Not Registered';
+        if (registrationStatus === 'pending') return 'Pending Confirmation';
+        if (registrationStatus === 'eliminated') return 'Eliminated';
         return eventProfile?.status || 'Active';
-    }, [eventProfile?.status, isRegistered]);
-    const canViewRoundSubmission = isLoggedIn && isRegistered;
+    }, [eventProfile?.status, isRegistered, registrationStatus]);
+    const canViewRoundSubmission = isLoggedIn && isActiveRegistration;
     const canEditRoundSubmission = canViewRoundSubmission && (!isTeamEvent || isLeader);
     const participantRoundStatuses = useMemo(() => {
         if (!Array.isArray(roundStatuses) || roundStatuses.length === 0) return [];
@@ -308,14 +362,13 @@ export default function EventDashboard() {
         });
         return { byNo, byName };
     }, [publishedRounds]);
-
     const eventDateLabel = useMemo(
         () => getEventDateLabel(eventInfo?.start_date, eventInfo?.end_date),
         [eventInfo?.start_date, eventInfo?.end_date]
     );
     const showParticipantDashboardTab = Boolean(participantPath);
     const eventPosterAssets = useMemo(
-        () => filterPosterAssetsByRatio(parsePosterAssets(eventInfo?.poster_url), ['4:5', '5:4']),
+        () => sortPosterAssetsByPriority(parsePosterAssets(eventInfo?.poster_url)),
         [eventInfo?.poster_url]
     );
     const whatsappUrl = useMemo(() => {
@@ -343,6 +396,20 @@ export default function EventDashboard() {
         [selectedRound?.description]
     );
     const showRoundDescriptionToggle = selectedRoundDescription.length > 340;
+    const seatAvailabilityEnabled = Boolean(eventInfo?.seat_availability_enabled);
+    const seatCapacity = seatAvailabilityEnabled
+        ? parseSeatCapacityValue(eventInfo?.seat_capacity)
+        : 0;
+    const seatsOccupied = seatAvailabilityEnabled
+        ? Math.max(0, Number.parseInt(String(eventInfo?.seats_occupied || 0), 10) || 0)
+        : 0;
+    const seatsLeft = seatAvailabilityEnabled ? Math.max(seatCapacity - seatsOccupied, 0) : 0;
+    const occupiedRatio = seatAvailabilityEnabled && seatCapacity > 0
+        ? Math.min(seatsOccupied / seatCapacity, 1)
+        : 0;
+    const seatProgressPercent = seatAvailabilityEnabled
+        ? Math.min(100, 50 + (occupiedRatio * 50))
+        : 0;
 
     const fetchData = useCallback(async (options = {}) => {
         const authHeaderOverride = options.authHeaderOverride;
@@ -450,6 +517,14 @@ export default function EventDashboard() {
         setRegisterConfirmed(false);
         setTeamName('');
         setTeamCode('');
+    };
+
+    const closePaymentModal = (force = false) => {
+        if (!force && paymentSubmitting) return;
+        setPaymentModalOpen(false);
+        setPaymentScreenshot(null);
+        setPaymentComment('');
+        setPaymentUploadProgress(null);
     };
 
     const openAuthDialog = (tab = 'login') => {
@@ -583,6 +658,11 @@ export default function EventDashboard() {
 
     const registerIndividual = async () => {
         if (!confirmationMatches || !eventInfo || !registrationOpen) return;
+        if (paymentRequired && payableAmount > 0) {
+            closeRegistrationDialog(true);
+            setPaymentModalOpen(true);
+            return;
+        }
         setRegistering(true);
         try {
             await axios.post(`${API}/persohub/persohub-events/${eventSlug}/register`, {}, { headers: getAuthHeader() });
@@ -605,12 +685,20 @@ export default function EventDashboard() {
         setCreatingTeam(true);
         try {
             await axios.post(`${API}/persohub/persohub-events/${eventSlug}/teams/create`, { team_name: teamName }, { headers: getAuthHeader() });
-            toast.success('Team created');
             closeRegistrationDialog(true);
-            if (whatsappUrl) {
+            const result = await fetchData();
+            const nextRequiresPayment = Boolean(result?.dashboard?.payment_required) && Number(result?.dashboard?.payable_amount || 0) > 0;
+            if (nextRequiresPayment) {
+                toast.success('Team created. Submit payment proof to continue registration.');
+            } else {
+                toast.success('Team created');
+            }
+            if (!nextRequiresPayment && whatsappUrl) {
                 setRegistrationCtaModalOpen(true);
             }
-            await fetchData();
+            if (nextRequiresPayment) {
+                setPaymentModalOpen(true);
+            }
         } catch (error) {
             toast.error(error?.response?.data?.detail || 'Failed to create team');
         } finally {
@@ -624,16 +712,77 @@ export default function EventDashboard() {
         setJoiningTeam(true);
         try {
             await axios.post(`${API}/persohub/persohub-events/${eventSlug}/teams/join`, { team_code: teamCode }, { headers: getAuthHeader() });
-            toast.success('Joined team');
             closeRegistrationDialog(true);
-            if (whatsappUrl) {
+            const result = await fetchData();
+            const nextRequiresPayment = Boolean(result?.dashboard?.payment_required) && Number(result?.dashboard?.payable_amount || 0) > 0;
+            if (nextRequiresPayment) {
+                toast.success('Joined team. Team leader must submit payment proof.');
+            } else {
+                toast.success('Joined team');
+            }
+            if (!nextRequiresPayment && whatsappUrl) {
                 setRegistrationCtaModalOpen(true);
             }
-            await fetchData();
         } catch (error) {
             toast.error(error?.response?.data?.detail || 'Failed to join team');
         } finally {
             setJoiningTeam(false);
+        }
+    };
+
+    const submitPaymentProof = async () => {
+        if (!canSubmitPayment) return;
+        if (!paymentScreenshot) {
+            toast.error('Upload payment screenshot');
+            return;
+        }
+        if (!paymentQrImage || !paymentId) {
+            toast.error('Payment details are not configured for this club');
+            return;
+        }
+        setPaymentSubmitting(true);
+        setPaymentUploadProgress(null);
+        try {
+            const contentType = paymentScreenshot.type || 'application/octet-stream';
+            const presignRes = await axios.post(
+                `${API}/persohub/persohub-events/${eventSlug}/payments/presign`,
+                {
+                    filename: paymentScreenshot.name,
+                    content_type: contentType,
+                    file_size_bytes: paymentScreenshot.size,
+                },
+                { headers: getAuthHeader() }
+            );
+            const { upload_url, public_url, content_type } = presignRes.data || {};
+            setPaymentUploadProgress(0);
+            await axios.put(upload_url, paymentScreenshot, {
+                headers: { 'Content-Type': content_type || contentType },
+                onUploadProgress: (progressEvent) => {
+                    const totalBytes = Number(progressEvent?.total || 0);
+                    const loadedBytes = Number(progressEvent?.loaded || 0);
+                    if (totalBytes > 0) {
+                        const percent = Math.min(100, Math.max(0, Math.round((loadedBytes / totalBytes) * 100)));
+                        setPaymentUploadProgress(percent);
+                    }
+                },
+            });
+            setPaymentUploadProgress(100);
+            await axios.post(
+                `${API}/persohub/persohub-events/${eventSlug}/payments/submit`,
+                {
+                    payment_info_url: public_url,
+                    comment: paymentComment.trim() || null,
+                },
+                { headers: getAuthHeader() }
+            );
+            toast.success('Payment submitted. Pending confirmation.');
+            closePaymentModal(true);
+            await fetchData();
+        } catch (error) {
+            toast.error(error?.response?.data?.detail || 'Failed to submit payment proof');
+        } finally {
+            setPaymentSubmitting(false);
+            setPaymentUploadProgress(null);
         }
     };
 
@@ -940,14 +1089,38 @@ export default function EventDashboard() {
                                     {registrationOpen ? (
                                         <Button
                                             data-testid="event-overview-register-button"
-                                            onClick={() => (isRegistered ? null : (isLoggedIn ? setRegistrationDialogOpen(true) : openAuthDialog('login')))}
-                                            className={`border-2 border-black shadow-neo ${isRegistered ? 'bg-slate-200 text-slate-600 cursor-not-allowed' : 'bg-[#8B5CF6] text-white hover:bg-[#7C3AED]'}`}
+                                            onClick={() => {
+                                                if (isRegistered) return;
+                                                if (!isLoggedIn) {
+                                                    openAuthDialog('login');
+                                                    return;
+                                                }
+                                                if (isTeamEvent && hasTeam && paymentRequired && payableAmount > 0 && isLeader) {
+                                                    setPaymentModalOpen(true);
+                                                    return;
+                                                }
+                                                setRegistrationDialogOpen(true);
+                                            }}
+                                            className={`border-2 border-black shadow-neo ${
+                                                isPendingRegistration
+                                                    ? 'bg-amber-200 text-amber-900 cursor-not-allowed'
+                                                    : (isRegistered
+                                                        ? 'bg-slate-200 text-slate-600 cursor-not-allowed'
+                                                        : 'bg-[#8B5CF6] text-white hover:bg-[#7C3AED]')
+                                            }`}
                                             disabled={isRegistered}
                                         >
-                                            {isRegistered ? 'Registered' : 'Register Now'}
+                                            {registrationCtaLabel}
                                         </Button>
                                     ) : null}
                                 </div>
+                                {eventInfo?.registration_fee?.enabled ? (
+                                    <div className="mt-3">
+                                        <span className="inline-flex rounded-md border-2 border-black bg-[#ffe4b5] px-3 py-1 text-xs font-black uppercase tracking-[0.14em] text-[#7c2d12] shadow-neo">
+                                            REGISTRATION FEE: MIT Student ₹{Number(eventInfo?.registration_fee?.amounts?.MIT || 0)} / Non MIT Students ₹{Number(eventInfo?.registration_fee?.amounts?.Other || 0)}
+                                        </span>
+                                    </div>
+                                ) : null}
                                 <div className="mt-3 max-w-2xl space-y-2 text-sm font-medium text-slate-700 sm:text-base">
                                     <ParsedDescription
                                         description={eventInfo?.description || ''}
@@ -972,6 +1145,24 @@ export default function EventDashboard() {
                                     <Calendar className="h-4 w-4 text-[#8B5CF6]" />
                                     <span>{eventDateLabel}</span>
                                 </div>
+                                {seatAvailabilityEnabled ? (
+                                    <div className="mt-4 max-w-xl rounded-md border-2 border-black bg-white p-3 shadow-neo">
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <p className="text-xs font-black uppercase tracking-[0.12em] text-slate-700">
+                                                Seats Availability
+                                            </p>
+                                            <span className="rounded-md border border-black bg-[#FDE047] px-2 py-1 text-[11px] font-black uppercase tracking-[0.08em] text-black">
+                                                {seatsLeft} seats left
+                                            </span>
+                                        </div>
+                                        <div className="mt-3 h-3 w-full overflow-hidden rounded-full border border-black bg-[#f8fafc]">
+                                            <div
+                                                className="h-full bg-[#8B5CF6] transition-[width] duration-300"
+                                                style={{ width: `${seatProgressPercent}%` }}
+                                            />
+                                        </div>
+                                    </div>
+                                ) : null}
                                 {whatsappUrl ? (
                                     <div className="mt-3">
                                         <a href={whatsappUrl} target="_blank" rel="noreferrer">
@@ -1023,6 +1214,7 @@ export default function EventDashboard() {
                                 {publishedRounds.map((round) => {
                                     const roundPosterAssets = parsePosterAssets(round?.round_poster);
                                     const roundDateLabel = formatEventDate(round?.date);
+                                    const roundDeadlineLabel = formatDateTimeIst(round?.submission_deadline);
                                     return (
                                         <button
                                             type="button"
@@ -1030,9 +1222,23 @@ export default function EventDashboard() {
                                             className="flex h-[34rem] w-full flex-col overflow-hidden rounded-md border-4 border-black bg-[#fffdf9] p-5 text-left shadow-[6px_6px_0px_0px_#000000] transition-transform duration-150 hover:-translate-y-[2px]"
                                             onClick={() => setSelectedRound(round)}
                                         >
-                                            <h3 className="inline-flex w-fit rounded-md border-2 border-black bg-[#FDE047] px-3 py-1 font-heading text-lg font-black uppercase tracking-tight text-black">
-                                                {round.name}
-                                            </h3>
+                                            <div className="mb-2">
+                                                <span className="inline-flex rounded-md border-2 border-black bg-[#8B5CF6] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-white">
+                                                    {`Round ${round.round_no || '-'}`}
+                                                </span>
+                                            </div>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <h3 className="inline-flex w-fit rounded-md border-2 border-black bg-[#FDE047] px-3 py-1 font-heading text-lg font-black uppercase tracking-tight text-black">
+                                                    {round.name}
+                                                </h3>
+                                            </div>
+                                            {roundDeadlineLabel ? (
+                                                <div className="mt-2">
+                                                    <span className="inline-flex rounded-md border-2 border-black bg-[#fee2e2] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-red-700">
+                                                        Deadline: {roundDeadlineLabel}
+                                                    </span>
+                                                </div>
+                                            ) : null}
                                             {roundPosterAssets.length ? (
                                                 <div className="mt-3 overflow-hidden rounded-md border-2 border-black bg-[#11131a]">
                                                     <PosterCarousel
@@ -1149,37 +1355,88 @@ export default function EventDashboard() {
                                         <h2 className="mt-1 font-heading text-3xl font-black uppercase tracking-tight">You are not registered yet</h2>
                                         <p className="mt-2 text-sm font-medium text-slate-700">
                                             {isTeamEvent
-                                                ? 'This is a team event. Register to create or join a team after confirmation.'
-                                                : 'Confirm registration to unlock your participant dashboard and round status.'}
+                                                ? (hasTeam
+                                                    ? 'Your team is ready. Team leader must complete payment (if applicable) to activate registration.'
+                                                    : 'This is a team event. Register to create or join a team after confirmation.')
+                                                : (paymentRequired && payableAmount > 0
+                                                    ? `This is a paid registration (${formatMoney(payableAmount, feeCurrency)} - ${feeKey || 'Fee Slab'}).`
+                                                    : 'Confirm registration to unlock your participant dashboard and round status.')}
                                         </p>
+                                        {paymentRequired && payableAmount > 0 ? (
+                                            <p className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+                                                Payment required: {formatMoney(payableAmount, feeCurrency)} ({feeKey || 'Fee'}).
+                                            </p>
+                                        ) : null}
+                                        {isTeamEvent && hasTeam && paymentRequired && payableAmount > 0 && !isLeader ? (
+                                            <p className="mt-2 text-xs font-semibold text-slate-600">
+                                                Waiting for team leader to submit payment proof.
+                                            </p>
+                                        ) : null}
                                     </div>
-                                        <Button
-                                            data-testid="event-public-open-register-modal-button"
-                                            className="border-2 border-black bg-[#FDE047] text-black shadow-neo"
-                                            onClick={() => setRegistrationDialogOpen(true)}
-                                            disabled={!registrationOpen}
-                                        >
-                                            <UserPlus className="mr-2 h-4 w-4" />
-                                        {registrationOpen ? 'Register for Event' : 'Registration Closed'}
-                                        </Button>
-                                    </div>
-                                </section>
+                                    <Button
+                                        data-testid="event-public-open-register-modal-button"
+                                        className="border-2 border-black bg-[#FDE047] text-black shadow-neo"
+                                        onClick={() => {
+                                            if (isTeamEvent && hasTeam && paymentRequired && payableAmount > 0 && isLeader) {
+                                                setPaymentModalOpen(true);
+                                                return;
+                                            }
+                                            setRegistrationDialogOpen(true);
+                                        }}
+                                        disabled={!registrationOpen || (isTeamEvent && hasTeam && paymentRequired && payableAmount > 0 && !isLeader)}
+                                    >
+                                        <UserPlus className="mr-2 h-4 w-4" />
+                                        {!registrationOpen
+                                            ? 'Registration Closed'
+                                            : (isTeamEvent && hasTeam && paymentRequired && payableAmount > 0
+                                                ? (isLeader ? 'Submit Payment Proof' : 'Waiting for Leader')
+                                                : 'Register for Event')}
+                                    </Button>
+                                </div>
+                            </section>
                         ) : null}
 
                         {isRegistered ? (
                             <>
-                                <section className={`mt-7 rounded-md border-4 border-black p-6 shadow-[8px_8px_0px_0px_#000000] ${String(effectiveStatus).toLowerCase() === 'eliminated' ? 'bg-red-50' : 'bg-green-50'}`}>
+                                <section className={`mt-7 rounded-md border-4 border-black p-6 shadow-[8px_8px_0px_0px_#000000] ${
+                                    isPendingRegistration
+                                        ? (paymentStatus === 'declined' ? 'bg-red-50' : 'bg-amber-50')
+                                        : (String(effectiveStatus).toLowerCase() === 'eliminated' ? 'bg-red-50' : 'bg-green-50')
+                                }`}>
                                     <div className="flex items-center gap-3">
                                         {statusIcon(effectiveStatus)}
                                         <div>
                                             <h2 className="font-heading text-2xl font-black uppercase tracking-tight">Status: {effectiveStatus}</h2>
                                             <p className="text-sm font-medium text-slate-700">
-                                                {String(effectiveStatus).toLowerCase() === 'eliminated'
-                                                    ? 'You are currently eliminated in this event.'
-                                                    : 'You are currently active in this event.'}
+                                                {isPendingRegistration
+                                                    ? (paymentStatus === 'declined'
+                                                        ? 'Payment was declined. Resubmit payment proof to continue.'
+                                                        : 'Your registration is pending payment review.')
+                                                    : (String(effectiveStatus).toLowerCase() === 'eliminated'
+                                                        ? 'You are currently eliminated in this event.'
+                                                        : 'You are currently active in this event.')}
                                             </p>
                                         </div>
                                     </div>
+                                    {isPendingRegistration && paymentRequired && payableAmount > 0 ? (
+                                        <div className="mt-4 flex flex-wrap items-center gap-2">
+                                            <span className="rounded-md border-2 border-black bg-white px-3 py-1 text-xs font-bold uppercase tracking-[0.12em] shadow-neo">
+                                                Payment: {paymentStatus}
+                                            </span>
+                                            <span className="rounded-md border-2 border-black bg-white px-3 py-1 text-xs font-bold uppercase tracking-[0.12em] shadow-neo">
+                                                Amount: {formatMoney(payableAmount, feeCurrency)}
+                                            </span>
+                                            {(paymentStatus === 'declined' || paymentStatus === 'none') && canSubmitPayment ? (
+                                                <Button
+                                                    type="button"
+                                                    className="border-2 border-black bg-[#FDE047] text-black shadow-neo"
+                                                    onClick={() => setPaymentModalOpen(true)}
+                                                >
+                                                    {paymentStatus === 'declined' ? 'Resubmit Payment' : 'Submit Payment'}
+                                                </Button>
+                                            ) : null}
+                                        </div>
+                                    ) : null}
                                 </section>
 
                                 <section className="mt-7 grid gap-6 lg:grid-cols-3">
@@ -1287,10 +1544,12 @@ export default function EventDashboard() {
                                                     data-testid="event-dashboard-view-qr-button"
                                                     className="w-full border-2 border-black bg-[#8B5CF6] text-white shadow-neo"
                                                     onClick={loadQr}
-                                                    disabled={qrLoading}
+                                                    disabled={qrLoading || !isActiveRegistration}
                                                 >
                                                     <QrCode className="mr-2 h-4 w-4" />
-                                                    {qrLoading ? 'Generating QR...' : 'View Attendance QR'}
+                                                    {!isActiveRegistration
+                                                        ? 'QR Available After Confirmation'
+                                                        : (qrLoading ? 'Generating QR...' : 'View Attendance QR')}
                                                 </Button>
                                                 {whatsappUrl ? (
                                                     <a href={whatsappUrl} target="_blank" rel="noreferrer" className="block">
@@ -1338,14 +1597,40 @@ export default function EventDashboard() {
                                                                 ? formatDateTimeIst(linkedRound?.submission_deadline)
                                                                 : ''
                                                         );
+                                                        const fallbackRound = {
+                                                            id: round?.round_id ?? null,
+                                                            round_no: round?.round_no,
+                                                            name: round?.round_name,
+                                                            description: round?.round_description || '',
+                                                            mode: round?.round_mode || 'round',
+                                                            state: round?.round_state || round?.displayStatus || 'published',
+                                                            date: round?.round_date || null,
+                                                            requires_submission: Boolean(round?.requires_submission),
+                                                            allow_late_submission: Boolean(round?.allow_late_submission),
+                                                            submission_mode: round?.submission_mode || null,
+                                                            submission_deadline: round?.submission_deadline || null,
+                                                            external_url: round?.external_url || '',
+                                                            external_url_name: round?.external_url_name || '',
+                                                            round_poster: round?.round_poster || null,
+                                                        };
+                                                        const roundForDetails = linkedRound || fallbackRound;
                                                         return (
-                                                            <div key={`${round.round_no}-${round.round_name}`} className="flex flex-wrap items-center justify-between gap-3 rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
-                                                                <div className="flex items-center gap-3">
+                                                            <div key={`${round.round_no}-${round.round_name}`} className="flex flex-wrap items-start justify-between gap-3 rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
+                                                                <div className="flex w-full items-start gap-3 sm:w-auto">
                                                                     <div className="inline-flex h-11 w-11 items-center justify-center rounded-md border-2 border-black bg-[#8B5CF6] font-heading text-sm font-black text-white shadow-neo">
                                                                         {String(round.round_no || '').slice(-2)}
                                                                     </div>
-                                                                    <div>
-                                                                        <p className="font-heading text-lg font-black uppercase tracking-tight">{round.round_name}</p>
+                                                                    <div className="min-w-0 flex-1">
+                                                                        <div className="flex flex-wrap items-start gap-2">
+                                                                            <p className="font-heading text-lg font-black uppercase tracking-tight">{round.round_name}</p>
+                                                                        </div>
+                                                                        {submissionDeadlineLabel ? (
+                                                                            <div className="mt-1">
+                                                                                <span className="inline-flex max-w-full break-words rounded-md border-2 border-black bg-[#fee2e2] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] leading-tight text-red-700">
+                                                                                    Deadline: {submissionDeadlineLabel}
+                                                                                </span>
+                                                                            </div>
+                                                                        ) : null}
                                                                         <p className="text-xs font-medium uppercase tracking-[0.1em] text-slate-600">{round.round_no}</p>
                                                                         {panelNo !== null ? (
                                                                             <p className="mt-1 text-xs font-semibold uppercase tracking-[0.08em] text-slate-700">
@@ -1373,11 +1658,6 @@ export default function EventDashboard() {
                                                                                 Panel Link
                                                                             </a>
                                                                         ) : null}
-                                                                        {linkedRound?.requires_submission ? (
-                                                                            <p className="mt-1 text-xs font-semibold uppercase tracking-[0.08em] text-slate-700">
-                                                                                Submission Deadline (IST): {submissionDeadlineLabel || 'Not Set'}
-                                                                            </p>
-                                                                        ) : null}
                                                                     </div>
                                                                 </div>
                                                                 <div className="flex flex-wrap items-center justify-end gap-2">
@@ -1391,7 +1671,7 @@ export default function EventDashboard() {
                                                                             <span className="text-xs font-bold uppercase tracking-[0.12em]">{attendance.label}</span>
                                                                         </div>
                                                                     ) : null}
-                                                                    {linkedRound ? (
+                                                                    {roundForDetails ? (
                                                                         <Button
                                                                             type="button"
                                                                             variant="outline"
@@ -1400,10 +1680,10 @@ export default function EventDashboard() {
                                                                                     ? 'bg-[#22C55E] hover:bg-[#16A34A]'
                                                                                     : 'bg-[#FDE047]'
                                                                             }`}
-                                                                            onClick={() => setSelectedRound(linkedRound)}
+                                                                            onClick={() => setSelectedRound(roundForDetails)}
                                                                             data-testid={`event-dashboard-round-action-${round.round_no}`}
                                                                         >
-                                                                            {linkedRound?.requires_submission
+                                                                            {roundForDetails?.requires_submission
                                                                                 ? (hasRoundSubmission ? 'View Work' : 'Submit Work')
                                                                                 : 'View Round'}
                                                                         </Button>
@@ -1743,7 +2023,9 @@ export default function EventDashboard() {
                     </DialogHeader>
                     <div className="space-y-4">
                         <p className="text-sm font-medium text-slate-700">
-                            Confirm you want to register for this event to proceed.
+                            {paymentRequired && payableAmount > 0
+                                ? `This event requires payment (${formatMoney(payableAmount, feeCurrency)} - ${feeKey || 'Fee'}). Confirm to proceed.`
+                                : 'Confirm you want to register for this event to proceed.'}
                         </p>
                         <label className="flex items-start gap-3 rounded-md border-2 border-black bg-[#fffdf0] p-3 text-sm font-medium text-slate-700 shadow-neo">
                             <input
@@ -1766,7 +2048,9 @@ export default function EventDashboard() {
                                     onClick={registerIndividual}
                                     disabled={!confirmationMatches || registering || !registrationOpen}
                                 >
-                                    {registering ? 'Registering...' : 'Confirm Registration'}
+                                    {paymentRequired && payableAmount > 0
+                                        ? 'Proceed to Payment'
+                                        : (registering ? 'Registering...' : 'Confirm Registration')}
                                 </Button>
                             </div>
                         ) : (
@@ -1833,6 +2117,113 @@ export default function EventDashboard() {
                 </DialogContent>
             </Dialog>
 
+            <Dialog open={paymentModalOpen} onOpenChange={(open) => (open ? setPaymentModalOpen(true) : closePaymentModal())}>
+                <DialogContent className="max-h-[calc(100vh-2rem)] overflow-x-hidden overflow-y-auto border-4 border-black bg-white">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading text-2xl font-black uppercase tracking-tight">
+                            Submit Payment Proof
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <div className="rounded-md border-2 border-black bg-[#fef3c7] px-4 py-3 shadow-neo">
+                            <p className="text-[11px] font-black uppercase tracking-[0.14em] text-amber-800">Amount to Pay</p>
+                            <p className="mt-1 text-lg font-black uppercase tracking-[0.06em] text-black">
+                                {formatMoney(payableAmount, feeCurrency)}
+                            </p>
+                            {feeKey ? (
+                                <p className="mt-1 text-xs font-semibold uppercase tracking-[0.08em] text-slate-700">
+                                    Fee Slab: {feeKey}
+                                </p>
+                            ) : null}
+                        </div>
+                        {!paymentQrImage || !paymentId ? (
+                            <p className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+                                Payment details are not configured for this club yet.
+                            </p>
+                        ) : (
+                            <div className="space-y-4">
+                                <div className="rounded-md border-2 border-black bg-[#fffdf0] p-3">
+                                    <p className="text-xs font-bold uppercase tracking-[0.1em] text-slate-600">Payment QR</p>
+                                    <div className="mt-2 overflow-hidden rounded-md border-2 border-black bg-white p-2">
+                                        <div className="aspect-[5/4] w-full">
+                                            <img src={paymentQrImage} alt="Club payment QR" className="h-full w-full object-contain" />
+                                        </div>
+                                    </div>
+                                    <div className="mt-3">
+                                        <p className="text-xs font-bold uppercase tracking-[0.1em] text-slate-600">UPI ID / Payment ID</p>
+                                        <p className="mt-2 rounded-md border-2 border-black bg-white px-3 py-2 text-sm font-semibold text-slate-800">
+                                            {paymentId}
+                                        </p>
+                                    </div>
+                                    {clubOwnerMobile ? (
+                                        <div className="mt-3">
+                                            <p className="text-xs font-bold uppercase tracking-[0.1em] text-slate-600">Club Owner Mobile</p>
+                                            <p className="mt-2 rounded-md border-2 border-black bg-white px-3 py-2 text-sm font-semibold text-slate-800">
+                                                {clubOwnerMobile}
+                                            </p>
+                                        </div>
+                                    ) : null}
+                                </div>
+                            </div>
+                        )}
+                        <div className="space-y-2">
+                            <Label htmlFor="payment-screenshot" className="text-xs font-bold uppercase tracking-[0.1em]">Payment Screenshot</Label>
+                            <Input
+                                id="payment-screenshot"
+                                type="file"
+                                accept="image/png,image/jpeg,image/jpg,image/webp"
+                                className="neo-input"
+                                disabled={!canSubmitPayment || paymentSubmitting}
+                                onChange={(event) => setPaymentScreenshot(event.target.files?.[0] || null)}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="payment-comment" className="text-xs font-bold uppercase tracking-[0.1em]">Comment (optional)</Label>
+                            <Textarea
+                                id="payment-comment"
+                                rows={3}
+                                value={paymentComment}
+                                onChange={(event) => setPaymentComment(event.target.value)}
+                                disabled={!canSubmitPayment || paymentSubmitting}
+                            />
+                        </div>
+                        {paymentSubmitting && paymentUploadProgress !== null ? (
+                            <div className="space-y-1">
+                                <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
+                                    <span>Uploading screenshot...</span>
+                                    <span>{paymentUploadProgress}%</span>
+                                </div>
+                                <div className="h-2 w-full overflow-hidden rounded border border-black bg-white">
+                                    <div
+                                        className="h-full bg-[#8B5CF6] transition-all duration-200"
+                                        style={{ width: `${paymentUploadProgress}%` }}
+                                    />
+                                </div>
+                            </div>
+                        ) : null}
+                        <div className="flex justify-end gap-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="border-2 border-black shadow-neo"
+                                onClick={closePaymentModal}
+                                disabled={paymentSubmitting}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                type="button"
+                                className="border-2 border-black bg-[#FDE047] text-black shadow-neo"
+                                onClick={submitPaymentProof}
+                                disabled={!canSubmitPayment || !paymentQrImage || !paymentId || paymentSubmitting}
+                            >
+                                {paymentSubmitting ? 'Submitting...' : 'Submit Payment'}
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
             <Dialog open={Boolean(selectedRound)} onOpenChange={(open) => (!open ? setSelectedRound(null) : null)}>
                 <DialogContent className="max-h-[calc(100vh-2rem)] max-w-5xl overflow-x-hidden overflow-y-auto border-4 border-black bg-white p-6 sm:p-7">
                     {selectedRound ? (
@@ -1843,9 +2234,18 @@ export default function EventDashboard() {
                                 </DialogTitle>
                             </DialogHeader>
                             <div className="space-y-5">
-                                <h3 className="inline-flex w-fit rounded-md border-2 border-black bg-[#FDE047] px-3 py-1 font-heading text-xl font-black uppercase tracking-tight text-black">
-                                    {selectedRound.name}
-                                </h3>
+                                <div className="space-y-2">
+                                    <h3 className="inline-flex w-fit rounded-md border-2 border-black bg-[#FDE047] px-3 py-1 font-heading text-xl font-black uppercase tracking-tight text-black">
+                                        {selectedRound.name}
+                                    </h3>
+                                    {selectedRoundDeadlineLabel ? (
+                                        <div>
+                                            <span className="inline-flex items-center rounded-md border-2 border-black bg-[#fee2e2] px-3 py-1 text-xs font-bold uppercase tracking-[0.08em] text-red-700">
+                                                Deadline: {selectedRoundDeadlineLabel}
+                                            </span>
+                                        </div>
+                                    ) : null}
+                                </div>
                                 <div className={`${selectedRoundPosterAssets.length ? 'grid gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:items-start' : 'space-y-4'}`}>
                                     {selectedRoundPosterAssets.length ? (
                                         <div className="space-y-3">
@@ -1916,35 +2316,130 @@ export default function EventDashboard() {
                                         {selectedRound?.requires_submission ? (
                                             <div className="rounded-md border-2 border-black bg-[#fffdf0] p-4">
                                                 <h4 className="font-heading text-base font-black uppercase tracking-tight">Submission</h4>
-                                                <p className="mt-1 text-xs font-medium text-slate-700">
-                                                    Mode: {selectedRound?.submission_mode || 'file_or_link'}
-                                                    {selectedRoundDeadlineLabel ? ` | Deadline (IST): ${selectedRoundDeadlineLabel}` : ' | Deadline (IST): Not Set'}
-                                                </p>
-                                                {normalizeSubmissionLockReason(roundSubmission?.lock_reason) === 'Round is closed for submission' ? (
-                                                    <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
-                                                        Round is closed for submission
-                                                    </p>
-                                                ) : selectedRound?.allow_late_submission ? (
-                                                    <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
-                                                        Late submissions are allowed. Submissions after deadline will be marked as late.
-                                                    </p>
-                                                ) : null}
-                                                {!isLoggedIn ? (
+                                                {!isParticipantRoute ? (
                                                     <p className="mt-3 text-sm font-medium text-slate-700">
+                                                        Head to Participant Dashboard to submit work.
+                                                    </p>
+                                                ) : !isLoggedIn ? (
+                                                    <>
+                                                        <p className="mt-1 text-xs font-medium text-slate-700">
+                                                            Mode: {selectedRound?.submission_mode || 'file_or_link'}
+                                                        </p>
+                                                        <p className="mt-1 text-xs font-medium text-slate-700">
+                                                            Deadline (IST): {selectedRoundDeadlineLabel || 'Not Set'}
+                                                        </p>
+                                                        {normalizeSubmissionLockReason(roundSubmission?.lock_reason) === 'Round is closed for submission' ? (
+                                                            <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                                Round is closed for submission
+                                                            </p>
+                                                        ) : selectedRound?.allow_late_submission ? (
+                                                            <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                                Late submissions are allowed. Submissions after deadline will be marked as late.
+                                                            </p>
+                                                        ) : null}
+                                                        <p className="mt-3 text-sm font-medium text-slate-700">
                                                         Login to submit work for this round.
-                                                    </p>
+                                                        </p>
+                                                    </>
                                                 ) : !isRegistered ? (
-                                                    <p className="mt-3 text-sm font-medium text-slate-700">
+                                                    <>
+                                                        <p className="mt-1 text-xs font-medium text-slate-700">
+                                                            Mode: {selectedRound?.submission_mode || 'file_or_link'}
+                                                        </p>
+                                                        <p className="mt-1 text-xs font-medium text-slate-700">
+                                                            Deadline (IST): {selectedRoundDeadlineLabel || 'Not Set'}
+                                                        </p>
+                                                        {normalizeSubmissionLockReason(roundSubmission?.lock_reason) === 'Round is closed for submission' ? (
+                                                            <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                                Round is closed for submission
+                                                            </p>
+                                                        ) : selectedRound?.allow_late_submission ? (
+                                                            <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                                Late submissions are allowed. Submissions after deadline will be marked as late.
+                                                            </p>
+                                                        ) : null}
+                                                        <p className="mt-3 text-sm font-medium text-slate-700">
                                                         Register for this event to submit work.
-                                                    </p>
+                                                        </p>
+                                                    </>
+                                                ) : isPendingRegistration ? (
+                                                    <>
+                                                        <p className="mt-1 text-xs font-medium text-slate-700">
+                                                            Mode: {selectedRound?.submission_mode || 'file_or_link'}
+                                                        </p>
+                                                        <p className="mt-1 text-xs font-medium text-slate-700">
+                                                            Deadline (IST): {selectedRoundDeadlineLabel || 'Not Set'}
+                                                        </p>
+                                                        {normalizeSubmissionLockReason(roundSubmission?.lock_reason) === 'Round is closed for submission' ? (
+                                                            <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                                Round is closed for submission
+                                                            </p>
+                                                        ) : selectedRound?.allow_late_submission ? (
+                                                            <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                                Late submissions are allowed. Submissions after deadline will be marked as late.
+                                                            </p>
+                                                        ) : null}
+                                                        <p className="mt-3 text-sm font-medium text-slate-700">
+                                                        Registration is pending confirmation. Submissions unlock after approval.
+                                                        </p>
+                                                    </>
                                                 ) : !canEditRoundSubmission ? (
-                                                    <p className="mt-3 text-sm font-medium text-slate-700">
+                                                    <>
+                                                        <p className="mt-1 text-xs font-medium text-slate-700">
+                                                            Mode: {selectedRound?.submission_mode || 'file_or_link'}
+                                                        </p>
+                                                        <p className="mt-1 text-xs font-medium text-slate-700">
+                                                            Deadline (IST): {selectedRoundDeadlineLabel || 'Not Set'}
+                                                        </p>
+                                                        {normalizeSubmissionLockReason(roundSubmission?.lock_reason) === 'Round is closed for submission' ? (
+                                                            <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                                Round is closed for submission
+                                                            </p>
+                                                        ) : selectedRound?.allow_late_submission ? (
+                                                            <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                                Late submissions are allowed. Submissions after deadline will be marked as late.
+                                                            </p>
+                                                        ) : null}
+                                                        <p className="mt-3 text-sm font-medium text-slate-700">
                                                         Only team leaders can submit work for this round.
-                                                    </p>
+                                                        </p>
+                                                    </>
                                                 ) : loadingSubmission ? (
-                                                    <p className="mt-3 text-sm font-medium text-slate-700">Loading submission...</p>
+                                                    <>
+                                                        <p className="mt-1 text-xs font-medium text-slate-700">
+                                                            Mode: {selectedRound?.submission_mode || 'file_or_link'}
+                                                        </p>
+                                                        <p className="mt-1 text-xs font-medium text-slate-700">
+                                                            Deadline (IST): {selectedRoundDeadlineLabel || 'Not Set'}
+                                                        </p>
+                                                        {normalizeSubmissionLockReason(roundSubmission?.lock_reason) === 'Round is closed for submission' ? (
+                                                            <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                                Round is closed for submission
+                                                            </p>
+                                                        ) : selectedRound?.allow_late_submission ? (
+                                                            <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                                Late submissions are allowed. Submissions after deadline will be marked as late.
+                                                            </p>
+                                                        ) : null}
+                                                        <p className="mt-3 text-sm font-medium text-slate-700">Loading submission...</p>
+                                                    </>
                                                 ) : (
                                                     <div className="mt-3 space-y-3">
+                                                        <p className="text-xs font-medium text-slate-700">
+                                                            Mode: {selectedRound?.submission_mode || 'file_or_link'}
+                                                        </p>
+                                                        <p className="text-xs font-medium text-slate-700">
+                                                            Deadline (IST): {selectedRoundDeadlineLabel || 'Not Set'}
+                                                        </p>
+                                                        {normalizeSubmissionLockReason(roundSubmission?.lock_reason) === 'Round is closed for submission' ? (
+                                                            <p className="rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                                Round is closed for submission
+                                                            </p>
+                                                        ) : selectedRound?.allow_late_submission ? (
+                                                            <p className="rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                                Late submissions are allowed. Submissions after deadline will be marked as late.
+                                                            </p>
+                                                        ) : null}
                                                         {roundSubmission?.id ? (
                                                             <div className="rounded-md border-2 border-black bg-white p-3 text-xs font-medium text-slate-700">
                                                                 <p>Version: {roundSubmission?.version || 1}</p>

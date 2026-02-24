@@ -17,6 +17,8 @@ const emptyClubForm = {
     club_tagline: '',
     club_description: '',
     club_url: '',
+    payment_url_image: '',
+    payment_id: '',
 };
 
 export default function PersohubAdminProfilePage() {
@@ -61,6 +63,8 @@ export default function PersohubAdminProfilePage() {
             club_tagline: profile.club.club_tagline || '',
             club_description: profile.club.club_description || '',
             club_url: profile.club.club_url || '',
+            payment_url_image: profile.club.payment_url_image || '',
+            payment_id: profile.club.payment_id || '',
         });
         setClubModalOpen(true);
     };
@@ -74,6 +78,8 @@ export default function PersohubAdminProfilePage() {
                 club_tagline: clubForm.club_tagline || null,
                 club_description: clubForm.club_description || null,
                 club_url: clubForm.club_url || null,
+                payment_url_image: clubForm.payment_url_image || null,
+                payment_id: clubForm.payment_id || null,
             });
             setProfile(response);
             setClubModalOpen(false);
@@ -92,6 +98,9 @@ export default function PersohubAdminProfilePage() {
             { label: 'Logo URL', value: profile.club.club_logo_url },
             { label: 'Tagline', value: profile.club.club_tagline },
             { label: 'Website', value: profile.club.club_url },
+            { label: 'Payment QR URL', value: profile.club.payment_url_image },
+            { label: 'Payment ID / UPI', value: profile.club.payment_id },
+            { label: 'Owner', value: profile.club.owner_name },
             { label: 'Description', value: profile.club.club_description, fullWidth: true },
             { label: 'Linked Communities', value: String(profile.club.linked_community_count || 0) },
         ];
@@ -173,6 +182,26 @@ export default function PersohubAdminProfilePage() {
                         value={clubForm.club_url}
                         onChange={(event) => setClubForm((prev) => ({ ...prev, club_url: event.target.value }))}
                         placeholder="https://..."
+                    />
+                </div>
+
+                <LogoUploadField
+                    id="club-payment-url-image"
+                    label="Payment QR/Image"
+                    value={clubForm.payment_url_image}
+                    onChange={(value) => setClubForm((prev) => ({ ...prev, payment_url_image: value }))}
+                    onUploadFile={(file) => persohubAdminApi.uploadProfileImage(file)}
+                    parseApiError={persohubAdminApi.parseApiError}
+                    allowManualEntry={false}
+                />
+
+                <div className="space-y-2">
+                    <Label htmlFor="club-payment-id">Payment ID / UPI ID</Label>
+                    <Input
+                        id="club-payment-id"
+                        value={clubForm.payment_id}
+                        onChange={(event) => setClubForm((prev) => ({ ...prev, payment_id: event.target.value }))}
+                        placeholder="name@bank"
                     />
                 </div>
 

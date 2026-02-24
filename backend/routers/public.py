@@ -158,6 +158,9 @@ def list_routes():
             {"method": "GET", "path": "/persohub/admin/persohub-events"},
             {"method": "GET", "path": "/persohub/admin/persohub-events/parity-enabled"},
             {"method": "GET", "path": "/persohub/admin/persohub-sympo-options"},
+            {"method": "GET", "path": "/persohub/admin/payments"},
+            {"method": "POST", "path": "/persohub/admin/payments/{payment_id}/confirm"},
+            {"method": "POST", "path": "/persohub/admin/payments/{payment_id}/decline"},
             {"method": "POST", "path": "/persohub/admin/persohub-events"},
             {"method": "PUT", "path": "/persohub/admin/persohub-events/{slug}"},
             {"method": "PUT", "path": "/persohub/admin/persohub-events/{slug}/sympo"},
@@ -176,8 +179,13 @@ def list_routes():
             {"method": "GET", "path": "/persohub/persohub-events/{slug}"},
             {"method": "GET", "path": "/persohub/persohub-events/{slug}/rounds"},
             {"method": "POST", "path": "/persohub/persohub-events/{slug}/register"},
+            {"method": "POST", "path": "/persohub/persohub-events/{slug}/payments/presign"},
+            {"method": "POST", "path": "/persohub/persohub-events/{slug}/payments/submit"},
             {"method": "GET", "path": "/persohub/me/persohub-events"},
             {"method": "GET", "path": "/persohub/me/persohub-achievements"},
-            {"method": "GET", "path": "/persohub/me/persohub-certificates/{event_slug}"}
+            {"method": "GET", "path": "/persohub/me/persohub-certificates/{event_slug}"},
+            {"method": "GET", "path": "/pda-admin/cc/payments"},
+            {"method": "POST", "path": "/pda-admin/cc/payments/{payment_id}/confirm"},
+            {"method": "POST", "path": "/pda-admin/cc/payments/{payment_id}/decline"}
         ]
     }

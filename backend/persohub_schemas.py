@@ -1,7 +1,7 @@
 import json
 from datetime import date, datetime, time
 from enum import Enum
-from typing import List, Optional, Literal
+from typing import Any, Dict, List, Optional, Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -177,6 +177,9 @@ class PersohubAdminClubProfile(BaseModel):
     club_tagline: Optional[str] = None
     club_description: Optional[str] = None
     club_url: Optional[str] = None
+    payment_url_image: Optional[str] = None
+    payment_id: Optional[str] = None
+    owner_name: Optional[str] = None
     linked_community_count: int = 0
     can_edit: bool = True
 
@@ -228,6 +231,38 @@ class PersohubAdminEventOpenForEnum(str, Enum):
     ALL = "ALL"
 
 
+class PersohubRegistrationFeeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    currency: Optional[str] = "INR"
+    amounts: Optional[Dict[str, float]] = None
+
+    @field_validator("currency", mode="before")
+    @classmethod
+    def _normalize_currency(cls, value):
+        normalized = str(value or "INR").strip().upper()
+        return normalized or "INR"
+
+    @model_validator(mode="after")
+    def _validate_amounts(self):
+        if not self.enabled:
+            return self
+        amount_map = self.amounts if isinstance(self.amounts, dict) else {}
+        mit_amount = amount_map.get("MIT")
+        other_amount = amount_map.get("Other")
+        if mit_amount is None or other_amount is None:
+            raise ValueError("registration_fee.amounts requires MIT and Other")
+        if float(mit_amount) < 0 or float(other_amount) < 0:
+            raise ValueError("registration_fee amounts must be >= 0")
+        self.amounts = {
+            "MIT": float(mit_amount),
+            "Other": float(other_amount),
+        }
+        self.currency = str(self.currency or "INR").strip().upper() or "INR"
+        return self
+
+
 class PersohubAdminEventCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -248,6 +283,9 @@ class PersohubAdminEventCreateRequest(BaseModel):
     round_count: int = Field(1, ge=1, le=20)
     team_min_size: Optional[int] = Field(None, ge=1, le=100)
     team_max_size: Optional[int] = Field(None, ge=1, le=100)
+    registration_fee: Optional[PersohubRegistrationFeeConfig] = None
+    seat_availability_enabled: bool = False
+    seat_capacity: Optional[int] = None
 
     @field_validator("title", mode="before")
     @classmethod
@@ -281,6 +319,19 @@ class PersohubAdminEventCreateRequest(BaseModel):
         normalized = str(value or "").strip()
         return normalized or "Join whatsapp channel"
 
+    @model_validator(mode="after")
+    def _normalize_seat_capacity(self):
+        if self.seat_capacity is not None:
+            self.seat_capacity = int(self.seat_capacity)
+            if self.seat_capacity < 1:
+                if self.seat_availability_enabled:
+                    self.seat_capacity = 100
+                else:
+                    raise ValueError("seat_capacity must be >= 1")
+        if self.seat_availability_enabled and self.seat_capacity is None:
+            self.seat_capacity = 100
+        return self
+
 
 class PersohubAdminEventUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -302,6 +353,9 @@ class PersohubAdminEventUpdateRequest(BaseModel):
     round_count: Optional[int] = Field(default=None, ge=1, le=20)
     team_min_size: Optional[int] = Field(default=None, ge=1, le=100)
     team_max_size: Optional[int] = Field(default=None, ge=1, le=100)
+    registration_fee: Optional[PersohubRegistrationFeeConfig] = None
+    seat_availability_enabled: Optional[bool] = None
+    seat_capacity: Optional[int] = None
     is_visible: Optional[bool] = None
     status: Optional[PersohubAdminEventStatusEnum] = None
 
@@ -341,6 +395,19 @@ class PersohubAdminEventUpdateRequest(BaseModel):
         normalized = str(value).strip()
         return normalized or "Join whatsapp channel"
 
+    @model_validator(mode="after")
+    def _normalize_seat_capacity(self):
+        if self.seat_capacity is not None:
+            self.seat_capacity = int(self.seat_capacity)
+            if self.seat_capacity < 1:
+                if self.seat_availability_enabled is True:
+                    self.seat_capacity = 100
+                else:
+                    raise ValueError("seat_capacity must be >= 1")
+        if self.seat_availability_enabled is True and self.seat_capacity is None:
+            self.seat_capacity = 100
+        return self
+
 
 class PersohubAdminEventResponse(BaseModel):
     id: int
@@ -364,6 +431,9 @@ class PersohubAdminEventResponse(BaseModel):
     round_count: int
     team_min_size: Optional[int] = None
     team_max_size: Optional[int] = None
+    registration_fee: Optional[PersohubRegistrationFeeConfig] = None
+    seat_availability_enabled: bool = False
+    seat_capacity: Optional[int] = None
     is_visible: bool = True
     open_for: PersohubAdminEventOpenForEnum = PersohubAdminEventOpenForEnum.MIT
     status: PersohubAdminEventStatusEnum
@@ -424,6 +494,8 @@ class PersohubAdminClubUpdateRequest(BaseModel):
     club_tagline: Optional[str] = Field(default=None, max_length=255)
     club_description: Optional[str] = None
     club_url: Optional[str] = Field(default=None, max_length=500)
+    payment_url_image: Optional[str] = Field(default=None, max_length=800)
+    payment_id: Optional[str] = Field(default=None, max_length=120)
 
     @field_validator("name", mode="before")
     @classmethod
@@ -452,6 +524,64 @@ class PersohubAdminClubUpdateRequest(BaseModel):
     @classmethod
     def _normalize_club_url(cls, value):
         return _normalize_optional_http_url(value, "club_url")
+
+    @field_validator("payment_url_image", mode="before")
+    @classmethod
+    def _normalize_payment_url_image(cls, value):
+        return _normalize_optional_http_url(value, "payment_url_image", max_length=800)
+
+    @field_validator("payment_id", mode="before")
+    @classmethod
+    def _normalize_payment_id(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+
+class PersohubAdminPaymentReviewListItem(BaseModel):
+    id: int
+    event_id: int
+    event_slug: str
+    event_title: str
+    club_id: int
+    club_name: Optional[str] = None
+    user_id: int
+    participant_name: str
+    participant_regno: Optional[str] = None
+    participant_email: Optional[str] = None
+    participant_phno: Optional[str] = None
+    participant_college: Optional[str] = None
+    participant_dept: Optional[str] = None
+    payment_info_url: str
+    status: str
+    fee_key: Optional[str] = None
+    amount: Optional[float] = None
+    currency: Optional[str] = None
+    comment: Optional[str] = None
+    entity_type: Optional[str] = None
+    entity_id: Optional[int] = None
+    team_id: Optional[int] = None
+    attempt: int = 1
+    review: Optional[Dict[str, Any]] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+
+class PersohubAdminPaymentConfirmRequest(BaseModel):
+    password: str = Field(..., min_length=6)
+
+
+class PersohubAdminPaymentDeclineRequest(BaseModel):
+    reason: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def _normalize_reason(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
 
 
 class PersohubAdminUserOption(BaseModel):

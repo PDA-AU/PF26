@@ -2,11 +2,32 @@ import os
 import smtplib
 import ssl
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from email.message import EmailMessage
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+_ASYNC_WORKERS_DEFAULT = 4
+_SMTP_TIMEOUT_DEFAULT = 20
+
+
+def _int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+_EMAIL_EXECUTOR = ThreadPoolExecutor(
+    max_workers=_int_env("EMAIL_ASYNC_WORKERS", _ASYNC_WORKERS_DEFAULT),
+    thread_name_prefix="smtp-email",
+)
 
 
 @dataclass
@@ -50,6 +71,7 @@ def _load_smtp(prefix: str) -> Optional[SMTPConfig]:
 
 
 def _send_via_config(config: SMTPConfig, to_email: str, subject: str, html: str, text: str) -> None:
+    smtp_timeout_seconds = _int_env("SMTP_TIMEOUT_SECONDS", _SMTP_TIMEOUT_DEFAULT)
     message = EmailMessage()
     message["From"] = config.sender
     message["To"] = to_email
@@ -59,13 +81,13 @@ def _send_via_config(config: SMTPConfig, to_email: str, subject: str, html: str,
 
     if config.use_ssl:
         context = ssl.create_default_context()
-        with smtplib.SMTP_SSL(config.host, config.port, context=context, timeout=20) as server:
+        with smtplib.SMTP_SSL(config.host, config.port, context=context, timeout=smtp_timeout_seconds) as server:
             if config.user and config.password:
                 server.login(config.user, config.password)
             server.send_message(message)
         return
 
-    with smtplib.SMTP(config.host, config.port, timeout=20) as server:
+    with smtplib.SMTP(config.host, config.port, timeout=smtp_timeout_seconds) as server:
         server.ehlo()
         if config.use_tls:
             context = ssl.create_default_context()
@@ -105,3 +127,16 @@ def send_bulk_email(to_email: str, subject: str, html: str, text: str) -> None:
     except Exception as exc:
         logger.warning("Bulk SMTP failed, falling back to primary/secondary: %s", exc)
         send_email(to_email, subject, html, text)
+
+
+def send_email_async(to_email: str, subject: str, html: str, text: str) -> None:
+    def _send_safe() -> None:
+        try:
+            send_email(to_email, subject, html, text)
+        except Exception as exc:
+            logger.warning("Async email failed for %s: %s", to_email, exc)
+
+    try:
+        _EMAIL_EXECUTOR.submit(_send_safe)
+    except Exception as exc:
+        logger.warning("Failed to queue async email for %s: %s", to_email, exc)

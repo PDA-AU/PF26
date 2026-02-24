@@ -3,7 +3,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import PersohubClub, PersohubCommunity
+from models import PdaUser, PersohubClub, PersohubCommunity
 from persohub_schemas import (
     PersohubAdminClubProfile,
     PersohubAdminClubUpdateRequest,
@@ -39,6 +39,7 @@ def _build_club_profile(
         .scalar()
         or 0
     )
+    owner = db.query(PdaUser).filter(PdaUser.id == int(club.owner_user_id or 0)).first() if club.owner_user_id else None
     return PersohubAdminClubProfile(
         id=club.id,
         name=club.name,
@@ -46,6 +47,9 @@ def _build_club_profile(
         club_tagline=club.club_tagline,
         club_description=club.club_description,
         club_url=club.club_url,
+        payment_url_image=club.payment_url_image,
+        payment_id=club.payment_id,
+        owner_name=(str(owner.name or "") if owner else None) or None,
         linked_community_count=linked_count,
         can_edit=bool(can_edit),
     )
@@ -136,6 +140,10 @@ def update_persohub_admin_club_profile(
         club.club_description = updates["club_description"]
     if "club_url" in updates:
         club.club_url = updates["club_url"]
+    if "payment_url_image" in updates:
+        club.payment_url_image = updates["payment_url_image"]
+    if "payment_id" in updates:
+        club.payment_id = updates["payment_id"]
 
     db.commit()
     db.refresh(community)

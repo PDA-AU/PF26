@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Menu, Plus, X } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useAuth } from '@/context/AuthContext';
@@ -434,36 +434,6 @@ export default function PersohubFeedPage() {
             <PdaHeader />
             <div className="ph-layer ph-shell">
                 <div className="ph-grid ph-grid-sections">
-                    <header className="ph-header ph-section ph-span-all">
-                        <div className="ph-header-left-control">
-                            <button
-                                type="button"
-                                className="ph-action-btn ph-header-toggle-btn"
-                                onClick={() => setCommunityAuthExpanded((prev) => !prev)}
-                                data-testid="ph-mobile-community-toggle"
-                                aria-label={communityAuthExpanded ? 'Close community auth panel' : 'Open community auth panel'}
-                            >
-                                <Menu size={14} />
-                            </button>
-                        </div>
-                        <div className="ph-title-band">
-                            <h1 className="ph-title">PERSOHUB FEED</h1>
-                        </div>
-                        <p className="ph-sub">Discover. Discuss. Build your public voice.</p>
-                    </header>
-
-                    <section className="ph-search-wrap ph-span-all">
-                        <input
-                            type="text"
-                            className="ph-search"
-                            placeholder="Search profile, community, hashtag"
-                            value={search}
-                            onChange={(event) => setSearch(event.target.value)}
-                            data-testid="ph-search-input"
-                        />
-                        <SearchSuggestionList open={searchOpen} items={searchItems} onSelect={handleSelectSuggestion} />
-                    </section>
-
                     {communityAuthExpanded ? (
                         <section className="ph-span-all ph-mobile-auth-panel" data-testid="ph-mobile-auth-panel">
                             {communityAccount ? (
@@ -495,6 +465,18 @@ export default function PersohubFeedPage() {
                     </aside>
 
                     <main className="ph-col ph-col-main">
+                        <section className="ph-search-wrap ph-search-wrap-plain">
+                            <input
+                                type="text"
+                                className="ph-search"
+                                placeholder="Search profile, community, hashtag"
+                                value={search}
+                                onChange={(event) => setSearch(event.target.value)}
+                                data-testid="ph-search-input"
+                            />
+                            <SearchSuggestionList open={searchOpen} items={searchItems} onSelect={handleSelectSuggestion} />
+                        </section>
+
                         {loading ? (
                             <EmptyState title="Loading feed" subtitle="Fetching community posts..." />
                         ) : null}

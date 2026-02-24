@@ -481,7 +481,11 @@ def _registration_status_label(value) -> str:
     if hasattr(value, "value"):
         return str(value.value)
     raw = str(value or "").strip().upper()
-    return "Eliminated" if "ELIMINATED" in raw else "Active"
+    if "ELIMINATED" in raw:
+        return "Eliminated"
+    if "PENDING" in raw:
+        return "Pending"
+    return "Active"
 
 
 def _status_is_active(value) -> bool:

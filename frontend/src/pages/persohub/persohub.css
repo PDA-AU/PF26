@@ -655,6 +655,15 @@
     background: #fffdf0;
 }
 
+.ph-feed-page .ph-search-wrap.ph-search-wrap-plain {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 0;
+    background: transparent;
+    margin-bottom: 0.7rem;
+}
+
 .ph-feed-page .ph-mobile-auth-panel {
     background: #fff;
 }
@@ -789,6 +798,12 @@
         padding: 0.55rem;
         border-radius: 0.45rem;
         box-shadow: 1px 1px 0 0 #000;
+    }
+
+    .ph-feed-page .ph-search-wrap.ph-search-wrap-plain {
+        padding: 0;
+        border-radius: 0;
+        box-shadow: none;
     }
 
     .ph-feed-page .ph-side-card,

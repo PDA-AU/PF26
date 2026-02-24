@@ -1907,6 +1907,9 @@ def ensure_persohub_event_tables(engine):
                     is_visible BOOLEAN NOT NULL DEFAULT TRUE,
                     registration_open BOOLEAN NOT NULL DEFAULT TRUE,
                     open_for VARCHAR(8) NOT NULL DEFAULT 'MIT',
+                    registration_fee JSONB,
+                    seat_availability_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                    seat_capacity INTEGER,
                     status VARCHAR(20) NOT NULL DEFAULT 'closed',
                     created_at TIMESTAMPTZ DEFAULT now(),
                     updated_at TIMESTAMPTZ
@@ -1936,6 +1939,9 @@ def ensure_persohub_event_tables(engine):
         conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS is_visible BOOLEAN NOT NULL DEFAULT TRUE"))
         conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS registration_open BOOLEAN NOT NULL DEFAULT TRUE"))
         conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS open_for VARCHAR(8) NOT NULL DEFAULT 'MIT'"))
+        conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS registration_fee JSONB"))
+        conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS seat_availability_enabled BOOLEAN NOT NULL DEFAULT FALSE"))
+        conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS seat_capacity INTEGER"))
         conn.execute(
             text(
                 """
@@ -1944,6 +1950,16 @@ def ensure_persohub_event_tables(engine):
                     WHEN upper(btrim(COALESCE(open_for, ''))) = 'ALL' THEN 'ALL'
                     ELSE 'MIT'
                 END
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                UPDATE persohub_events
+                SET seat_capacity = 100
+                WHERE COALESCE(seat_availability_enabled, FALSE) = TRUE
+                  AND (seat_capacity IS NULL OR seat_capacity < 1)
                 """
             )
         )
@@ -2104,6 +2120,23 @@ def ensure_persohub_event_tables(engine):
                     registered_at TIMESTAMPTZ DEFAULT now(),
                     CONSTRAINT uq_persohub_event_registration_event_user UNIQUE (event_id, user_id),
                     CONSTRAINT uq_persohub_event_registration_event_team UNIQUE (event_id, team_id)
+                )
+                """
+            )
+        )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS persohub_payments (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    event_id INTEGER NOT NULL REFERENCES persohub_events(id) ON DELETE CASCADE,
+                    payment_info_url VARCHAR(800) NOT NULL,
+                    content JSONB,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ,
+                    CONSTRAINT uq_persohub_payment_event_user UNIQUE (event_id, user_id)
                 )
                 """
             )
@@ -2285,6 +2318,9 @@ def ensure_persohub_event_tables(engine):
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_event_badges_event ON persohub_event_badges(event_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_sympos_organising_club ON persohub_sympos(organising_club_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_sympo_events_event ON persohub_sympo_events(event_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_payments_event_id ON persohub_payments(event_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_payments_user_id ON persohub_payments(user_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_payments_created_at ON persohub_payments(created_at DESC)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_event_logs_event_created ON persohub_event_logs(event_id, created_at DESC)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_event_logs_slug_created ON persohub_event_logs(event_slug, created_at DESC)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_event_logs_admin_created ON persohub_event_logs(admin_id, created_at DESC)"))
@@ -2473,6 +2509,80 @@ def ensure_persohub_event_open_columns(engine):
                 )
             )
         _update_persohub_event_parity_status_marker(conn)
+
+
+def ensure_event_registration_pending_status(engine):
+    with engine.begin() as conn:
+        if conn.dialect.name != "postgresql":
+            return
+        conn.execute(
+            text(
+                """
+                DO $$
+                DECLARE
+                    has_upper_style BOOLEAN := FALSE;
+                    has_title_style BOOLEAN := FALSE;
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1
+                        FROM pg_type
+                        WHERE typname = 'pdaeventregistrationstatus'
+                    ) THEN
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM pg_enum e
+                            JOIN pg_type t ON t.oid = e.enumtypid
+                            WHERE t.typname = 'pdaeventregistrationstatus'
+                              AND e.enumlabel = 'ACTIVE'
+                        )
+                        INTO has_upper_style;
+
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM pg_enum e
+                            JOIN pg_type t ON t.oid = e.enumtypid
+                            WHERE t.typname = 'pdaeventregistrationstatus'
+                              AND e.enumlabel = 'Active'
+                        )
+                        INTO has_title_style;
+
+                        IF has_upper_style THEN
+                            IF NOT EXISTS (
+                                SELECT 1
+                                FROM pg_enum e
+                                JOIN pg_type t ON t.oid = e.enumtypid
+                                WHERE t.typname = 'pdaeventregistrationstatus'
+                                  AND e.enumlabel = 'PENDING'
+                            ) THEN
+                                ALTER TYPE pdaeventregistrationstatus ADD VALUE 'PENDING';
+                            END IF;
+                        ELSIF has_title_style THEN
+                            IF NOT EXISTS (
+                                SELECT 1
+                                FROM pg_enum e
+                                JOIN pg_type t ON t.oid = e.enumtypid
+                                WHERE t.typname = 'pdaeventregistrationstatus'
+                                  AND e.enumlabel = 'Pending'
+                            ) THEN
+                                ALTER TYPE pdaeventregistrationstatus ADD VALUE 'Pending';
+                            END IF;
+                        ELSE
+                            IF NOT EXISTS (
+                                SELECT 1
+                                FROM pg_enum e
+                                JOIN pg_type t ON t.oid = e.enumtypid
+                                WHERE t.typname = 'pdaeventregistrationstatus'
+                                  AND e.enumlabel = 'PENDING'
+                            ) THEN
+                                ALTER TYPE pdaeventregistrationstatus ADD VALUE 'PENDING';
+                            END IF;
+                        END IF;
+                    END IF;
+                END
+                $$;
+                """
+            )
+        )
 
 
 def ensure_persohub_event_round_submission_tables(engine):
@@ -2897,6 +3007,8 @@ def ensure_persohub_tables(engine):
                     club_logo_url VARCHAR(500),
                     club_tagline VARCHAR(255),
                     club_description TEXT,
+                    payment_url_image VARCHAR(800),
+                    payment_id VARCHAR(120),
                     created_at TIMESTAMPTZ DEFAULT now(),
                     updated_at TIMESTAMPTZ
                 )
@@ -2907,6 +3019,8 @@ def ensure_persohub_tables(engine):
         conn.execute(text("ALTER TABLE persohub_clubs ADD COLUMN IF NOT EXISTS owner_user_id INTEGER"))
         conn.execute(text("ALTER TABLE persohub_clubs ADD COLUMN IF NOT EXISTS club_tagline VARCHAR(255)"))
         conn.execute(text("ALTER TABLE persohub_clubs ADD COLUMN IF NOT EXISTS club_description TEXT"))
+        conn.execute(text("ALTER TABLE persohub_clubs ADD COLUMN IF NOT EXISTS payment_url_image VARCHAR(800)"))
+        conn.execute(text("ALTER TABLE persohub_clubs ADD COLUMN IF NOT EXISTS payment_id VARCHAR(120)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_clubs_owner_user_id ON persohub_clubs(owner_user_id)"))
 
         conn.execute(

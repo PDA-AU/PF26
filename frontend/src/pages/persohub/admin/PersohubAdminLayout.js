@@ -228,6 +228,7 @@ export default function PersohubAdminLayout({ children, title = 'Persohub Admin'
     const navItems = [
         ...(isOwner ? [{ id: 'profile', label: 'Profile', path: '/persohub/admin/profile' }] : []),
         ...(isOwner ? [{ id: 'communities', label: 'Communities', path: '/persohub/admin/communities' }] : []),
+        ...(isOwner ? [{ id: 'payments', label: 'Payments', path: '/persohub/admin/payments' }] : []),
         ...(canAccessEvents ? [{ id: 'events', label: 'Events', path: '/persohub/admin/persohub-events' }] : []),
         ...(isOwner ? [{ id: 'policies', label: 'Policies', path: '/persohub/admin/policies' }] : []),
     ];

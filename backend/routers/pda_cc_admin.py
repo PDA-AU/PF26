@@ -1,14 +1,20 @@
-from typing import Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from auth import get_password_hash
+from auth import get_password_hash, verify_password
 from database import get_db
+from emailer import send_email_async
 from models import (
     PersohubEvent,
+    PersohubEventEntityType,
+    PersohubEventRegistration,
+    PersohubEventRegistrationStatus,
+    PersohubPayment,
     PersohubSympo,
     PersohubSympoEvent,
     PdaUser,
@@ -27,6 +33,9 @@ from schemas import (
     CcPersohubEventOption,
     CcPersohubEventSympoAssignRequest,
     CcPersohubEventSympoAssignResponse,
+    CcPersohubPaymentConfirmRequest,
+    CcPersohubPaymentDeclineRequest,
+    CcPersohubPaymentReviewListItem,
     CcCommunityResetPasswordRequest,
     CcCommunityResponse,
     CcCommunityUpdateRequest,
@@ -60,6 +69,8 @@ def _build_club_response(db: Session, club: PersohubClub) -> CcClubResponse:
         club_logo_url=club.club_logo_url,
         club_tagline=club.club_tagline,
         club_description=club.club_description,
+        payment_url_image=club.payment_url_image,
+        payment_id=club.payment_id,
         owner_user_id=(int(club.owner_user_id) if club.owner_user_id else None),
         owner_name=(str(owner.name or "") or None) if owner else None,
         owner_regno=(str(owner.regno or "") or None) if owner else None,
@@ -296,6 +307,150 @@ def _check_event_conflicts(
         status_code=status.HTTP_409_CONFLICT,
         detail={"message": "Some events are already mapped to another sympo", "event_ids": conflict_event_ids},
     )
+
+
+def _payment_content_dict(payment: PersohubPayment) -> Dict[str, Any]:
+    raw = payment.content if isinstance(payment.content, dict) else {}
+    return dict(raw or {})
+
+
+def _payment_status(payment: Optional[PersohubPayment]) -> str:
+    if not payment:
+        return "none"
+    content = _payment_content_dict(payment)
+    raw = str(content.get("status") or "").strip().lower()
+    if raw in {"pending", "approved", "declined"}:
+        return raw
+    return "pending"
+
+
+def _optional_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _resolve_payment_registration(db: Session, payment: PersohubPayment) -> Optional[PersohubEventRegistration]:
+    content = _payment_content_dict(payment)
+    entity_type = str(content.get("entity_type") or "").strip().lower()
+    team_id = content.get("team_id")
+    if entity_type == "team" and team_id is not None:
+        return db.query(PersohubEventRegistration).filter(
+            PersohubEventRegistration.event_id == payment.event_id,
+            PersohubEventRegistration.team_id == int(team_id),
+            PersohubEventRegistration.entity_type == PersohubEventEntityType.TEAM,
+        ).first()
+    return db.query(PersohubEventRegistration).filter(
+        PersohubEventRegistration.event_id == payment.event_id,
+        PersohubEventRegistration.user_id == payment.user_id,
+        PersohubEventRegistration.entity_type == PersohubEventEntityType.USER,
+    ).first()
+
+
+def _ensure_payment_registration_row(db: Session, payment: PersohubPayment) -> PersohubEventRegistration:
+    existing = _resolve_payment_registration(db, payment)
+    if existing:
+        return existing
+    content = _payment_content_dict(payment)
+    entity_type = str(content.get("entity_type") or "").strip().lower()
+    team_id = content.get("team_id")
+    if entity_type == "team" and team_id is not None:
+        row = PersohubEventRegistration(
+            event_id=payment.event_id,
+            user_id=None,
+            team_id=int(team_id),
+            entity_type=PersohubEventEntityType.TEAM,
+            status=PersohubEventRegistrationStatus.PENDING,
+        )
+    else:
+        row = PersohubEventRegistration(
+            event_id=payment.event_id,
+            user_id=payment.user_id,
+            team_id=None,
+            entity_type=PersohubEventEntityType.USER,
+            status=PersohubEventRegistrationStatus.PENDING,
+        )
+    db.add(row)
+    db.flush()
+    return row
+
+
+def _build_payment_list_item(
+    payment: PersohubPayment,
+    event: PersohubEvent,
+    participant: Optional[PdaUser],
+    club: Optional[PersohubClub],
+) -> CcPersohubPaymentReviewListItem:
+    content = _payment_content_dict(payment)
+    return CcPersohubPaymentReviewListItem(
+        id=int(payment.id),
+        event_id=int(event.id),
+        event_slug=str(event.slug or ""),
+        event_title=str(event.title or ""),
+        club_id=int(event.club_id or 0),
+        club_name=(str(club.name or "") if club else None) or None,
+        user_id=int(payment.user_id or 0),
+        participant_name=(str(participant.name or "") if participant else "") or f"User {payment.user_id}",
+        participant_regno=(str(participant.regno or "") if participant else None) or None,
+        participant_email=(str(participant.email or "") if participant else None) or None,
+        participant_phno=(str(participant.phno or "") if participant else None) or None,
+        participant_college=(str(participant.college or "") if participant else None) or None,
+        participant_dept=(str(participant.dept or "") if participant else None) or None,
+        payment_info_url=str(payment.payment_info_url or ""),
+        status=_payment_status(payment),
+        fee_key=(str(content.get("fee_key") or "") or None),
+        amount=_optional_float(content.get("amount")),
+        currency=(str(content.get("currency") or "") or None),
+        comment=(str(content.get("comment") or "") or None),
+        entity_type=(str(content.get("entity_type") or "") or None),
+        entity_id=(int(content.get("entity_id")) if content.get("entity_id") is not None else None),
+        team_id=(int(content.get("team_id")) if content.get("team_id") is not None else None),
+        attempt=int(content.get("attempt") or 1),
+        review=(content.get("review") if isinstance(content.get("review"), dict) else None),
+        created_at=payment.created_at,
+        updated_at=payment.updated_at,
+    )
+
+
+def _send_payment_status_email(
+    participant: Optional[PdaUser],
+    event: PersohubEvent,
+    *,
+    state: str,
+    reason: Optional[str] = None,
+) -> None:
+    if not participant or not participant.email:
+        return
+    safe_name = str(participant.name or "Participant")
+    event_title = str(event.title or "event")
+    whatsapp_url = str(getattr(event, "whatsapp_url", "") or "").strip()
+    whatsapp_text = f"\nJoin updates: {whatsapp_url}\n" if whatsapp_url else ""
+    if state == "approved":
+        subject = f"Registration confirmed - {event_title}"
+        text = (
+            f"Hello {safe_name},\n\n"
+            f"Your payment has been approved and your registration for {event_title} is confirmed.\n"
+            f"{whatsapp_text}\n"
+            "Regards,\nPersohub Team"
+        )
+    else:
+        subject = f"Payment review update - {event_title}"
+        reason_text = f"\nReason: {reason}\n" if reason else "\n"
+        text = (
+            f"Hello {safe_name},\n\n"
+            f"Your payment submission for {event_title} was declined."
+            f"{reason_text}"
+            "You can resubmit payment proof from the event dashboard.\n\n"
+            "Regards,\nPersohub Team"
+        )
+    html = "<html><body>" + "".join(f"<p>{line}</p>" for line in text.split("\n") if line) + "</body></html>"
+    try:
+        send_email_async(participant.email, subject, html, text)
+    except Exception:
+        pass
 
 
 @router.get("/pda-admin/cc/clubs", response_model=List[CcClubResponse])
@@ -945,6 +1100,145 @@ def assign_cc_event_sympo(
         sympo_name=(next_sympo.name if next_sympo else None),
         message=("Event unassigned from sympo" if next_sympo is None else "Event mapped to sympo"),
     )
+
+
+@router.get("/pda-admin/cc/payments", response_model=List[CcPersohubPaymentReviewListItem])
+def list_cc_payments(
+    response: Response,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    _: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+):
+    rows = (
+        db.query(PersohubPayment, PersohubEvent, PdaUser, PersohubClub)
+        .join(PersohubEvent, PersohubEvent.id == PersohubPayment.event_id)
+        .join(PdaUser, PdaUser.id == PersohubPayment.user_id)
+        .outerjoin(PersohubClub, PersohubClub.id == PersohubEvent.club_id)
+        .order_by(PersohubPayment.created_at.desc(), PersohubPayment.id.desc())
+        .all()
+    )
+    items = [_build_payment_list_item(payment, event, participant, club) for payment, event, participant, club in rows]
+    items.sort(
+        key=lambda row: (
+            0 if str(row.status or "").strip().lower() == "pending" else 1,
+            -(row.created_at.timestamp() if row.created_at else 0.0),
+            -int(row.id),
+        )
+    )
+
+    total_count = len(items)
+    start = (page - 1) * page_size
+    end = start + page_size
+    paged_items = items[start:end]
+
+    response.headers["X-Total-Count"] = str(total_count)
+    response.headers["X-Page"] = str(page)
+    response.headers["X-Page-Size"] = str(page_size)
+    return paged_items
+
+
+@router.post("/pda-admin/cc/payments/{payment_id}/confirm", response_model=CcPersohubPaymentReviewListItem)
+def confirm_cc_payment(
+    payment_id: int,
+    payload: CcPersohubPaymentConfirmRequest,
+    admin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    row = (
+        db.query(PersohubPayment, PersohubEvent, PdaUser, PersohubClub)
+        .join(PersohubEvent, PersohubEvent.id == PersohubPayment.event_id)
+        .join(PdaUser, PdaUser.id == PersohubPayment.user_id)
+        .outerjoin(PersohubClub, PersohubClub.id == PersohubEvent.club_id)
+        .filter(PersohubPayment.id == payment_id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
+    payment, event, participant, club = row
+    current_status = _payment_status(payment)
+    if current_status != "pending":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Payment is already {current_status}")
+
+    if not admin.hashed_password or not verify_password(payload.password, admin.hashed_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid password")
+
+    content = _payment_content_dict(payment)
+    content["status"] = "approved"
+    content["review"] = {
+        "by_user_id": int(admin.id),
+        "by_name": str(admin.name or ""),
+        "at": datetime.now(timezone.utc).isoformat(),
+        "reason": None,
+    }
+    payment.content = content
+
+    registration = _ensure_payment_registration_row(db, payment)
+    registration.status = PersohubEventRegistrationStatus.ACTIVE
+
+    _send_payment_status_email(participant, event, state="approved")
+    db.commit()
+    db.refresh(payment)
+    log_admin_action(
+        db,
+        admin,
+        "Confirm Persohub payment",
+        request.method if request else None,
+        request.url.path if request else None,
+        {"payment_id": payment_id, "event_id": event.id},
+    )
+    return _build_payment_list_item(payment, event, participant, club)
+
+
+@router.post("/pda-admin/cc/payments/{payment_id}/decline", response_model=CcPersohubPaymentReviewListItem)
+def decline_cc_payment(
+    payment_id: int,
+    payload: CcPersohubPaymentDeclineRequest,
+    admin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    row = (
+        db.query(PersohubPayment, PersohubEvent, PdaUser, PersohubClub)
+        .join(PersohubEvent, PersohubEvent.id == PersohubPayment.event_id)
+        .join(PdaUser, PdaUser.id == PersohubPayment.user_id)
+        .outerjoin(PersohubClub, PersohubClub.id == PersohubEvent.club_id)
+        .filter(PersohubPayment.id == payment_id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
+    payment, event, participant, club = row
+    current_status = _payment_status(payment)
+    if current_status != "pending":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Payment is already {current_status}")
+
+    content = _payment_content_dict(payment)
+    content["status"] = "declined"
+    content["review"] = {
+        "by_user_id": int(admin.id),
+        "by_name": str(admin.name or ""),
+        "at": datetime.now(timezone.utc).isoformat(),
+        "reason": payload.reason,
+    }
+    payment.content = content
+
+    registration = _ensure_payment_registration_row(db, payment)
+    registration.status = PersohubEventRegistrationStatus.PENDING
+
+    _send_payment_status_email(participant, event, state="declined", reason=payload.reason)
+    db.commit()
+    db.refresh(payment)
+    log_admin_action(
+        db,
+        admin,
+        "Decline Persohub payment",
+        request.method if request else None,
+        request.url.path if request else None,
+        {"payment_id": payment_id, "event_id": event.id},
+    )
+    return _build_payment_list_item(payment, event, participant, club)
 
 
 @router.get("/pda-admin/cc/options/admin-users", response_model=List[CcAdminUserOption])

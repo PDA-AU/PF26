@@ -228,6 +228,7 @@ class PdaEventStatus(enum.Enum):
 class PdaEventRegistrationStatus(enum.Enum):
     ACTIVE = "Active"
     ELIMINATED = "Eliminated"
+    PENDING = "Pending"
 
 
 class PdaEventEntityType(enum.Enum):
@@ -574,6 +575,9 @@ class PersohubEvent(Base):
     is_visible = Column(Boolean, nullable=False, default=True)
     registration_open = Column(Boolean, nullable=False, default=True)
     open_for = Column(String(8), nullable=False, default="MIT", server_default="MIT")
+    registration_fee = Column(JSON, nullable=True)
+    seat_availability_enabled = Column(Boolean, nullable=False, default=False)
+    seat_capacity = Column(Integer, nullable=True)
     status = Column(SQLEnum(PdaEventStatus), nullable=False, default=PdaEventStatus.CLOSED)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -623,6 +627,21 @@ class PersohubEventRegistration(Base):
     referred_by = Column(String(16), nullable=True)
     referral_count = Column(Integer, nullable=False, default=0)
     registered_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PersohubPayment(Base):
+    __tablename__ = "persohub_payments"
+    __table_args__ = (
+        UniqueConstraint("event_id", "user_id", name="uq_persohub_payment_event_user"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    event_id = Column(Integer, ForeignKey("persohub_events.id"), nullable=False, index=True)
+    payment_info_url = Column(String(800), nullable=False)
+    content = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
 class PersohubEventTeam(Base):
@@ -881,6 +900,8 @@ class PersohubClub(Base):
     club_logo_url = Column(String(500), nullable=True)
     club_tagline = Column(String(255), nullable=True)
     club_description = Column(Text, nullable=True)
+    payment_url_image = Column(String(800), nullable=True)
+    payment_id = Column(String(120), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

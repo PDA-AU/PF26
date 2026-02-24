@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 import os
 import random
 import string
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -10,15 +10,17 @@ from sqlalchemy import func, text, or_
 
 from auth import create_access_token
 from database import get_db
-from emailer import send_email
+from emailer import send_email_async
 from models import (
     PdaUser,
     PersohubEvent,
+    PersohubClub,
     PersohubEventStatus,
     PersohubEventParticipantMode,
     PersohubEventEntityType,
     PersohubEventRegistrationStatus,
     PersohubEventRegistration,
+    PersohubPayment,
     PersohubEventTeam,
     PersohubEventTeamMember,
     PersohubEventInvite,
@@ -36,6 +38,9 @@ from schemas import (
     PersohubManagedAchievement,
     PersohubManagedCertificateResponse,
     PersohubManagedEventDashboard,
+    PersohubManagedEntityTypeEnum,
+    PersohubEventPaymentPresignRequest,
+    PersohubEventPaymentSubmitRequest,
     PersohubEventPublicRoundResponse,
     PersohubManagedEventResponse,
     PersohubManagedMyEvent,
@@ -49,12 +54,14 @@ from schemas import (
     PersohubManagedTeamJoin,
     PersohubManagedTeamMemberResponse,
     PersohubManagedTeamResponse,
-    PersohubManagedEntityTypeEnum,
 )
 from security import require_pda_user, require_persohub_events_parity_enabled
 from utils import _generate_presigned_put_url
 
 router = APIRouter(dependencies=[Depends(require_persohub_events_parity_enabled)])
+
+_ALLOWED_PAYMENT_SCREENSHOT_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/webp"]
+_PAYMENT_SCREENSHOT_MAX_BYTES = 10 * 1024 * 1024
 
 
 def _get_event_or_404(db: Session, slug: str) -> PersohubEvent:
@@ -169,6 +176,7 @@ def _resolve_submission_entity(
 
     if not registration:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration not found")
+    _ensure_registration_is_active(registration)
     if enforce_team_leader and event.participant_mode == PersohubEventParticipantMode.TEAM and not is_team_leader:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only team leader can submit for this round")
     return registration, entity_type, entity_user_id, entity_team_id, team, is_team_leader
@@ -261,6 +269,128 @@ def _ensure_user_eligible_for_event(event: PersohubEvent, user: PdaUser) -> None
         )
 
 
+def _to_non_negative_float(value: Any, default: float = 0.0) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    return parsed if parsed >= 0 else float(default)
+
+
+def _normalized_registration_fee(event: PersohubEvent) -> Dict[str, Any]:
+    raw = event.registration_fee if isinstance(event.registration_fee, dict) else {}
+    enabled = bool(raw.get("enabled"))
+    raw_currency = str(raw.get("currency") or "INR").strip().upper() or "INR"
+    raw_amounts = raw.get("amounts") if isinstance(raw.get("amounts"), dict) else {}
+    mit_amount = _to_non_negative_float(raw_amounts.get("MIT"), 0.0)
+    other_amount = _to_non_negative_float(raw_amounts.get("Other"), 0.0)
+    return {
+        "enabled": enabled,
+        "currency": raw_currency,
+        "amounts": {
+            "MIT": mit_amount,
+            "Other": other_amount,
+        },
+    }
+
+
+def _fee_key_for_user(user: Optional[PdaUser]) -> str:
+    return "MIT" if user and _is_mit_user(user) else "Other"
+
+
+def _resolve_event_payer_user(
+    db: Session,
+    event: PersohubEvent,
+    user: PdaUser,
+    team: Optional[PersohubEventTeam] = None,
+) -> Optional[PdaUser]:
+    if event.participant_mode != PersohubEventParticipantMode.TEAM:
+        return user
+    if team and int(team.team_lead_user_id or 0) > 0:
+        leader = db.query(PdaUser).filter(PdaUser.id == int(team.team_lead_user_id)).first()
+        if leader:
+            return leader
+    return user
+
+
+def _registration_fee_meta(
+    event: PersohubEvent,
+    payer_user: Optional[PdaUser],
+) -> Tuple[bool, Optional[str], float, str]:
+    config = _normalized_registration_fee(event)
+    if not bool(config.get("enabled")):
+        return False, None, 0.0, str(config.get("currency") or "INR")
+    fee_key = _fee_key_for_user(payer_user)
+    amount = _to_non_negative_float(config.get("amounts", {}).get(fee_key), 0.0)
+    currency = str(config.get("currency") or "INR")
+    return amount > 0, fee_key, amount, currency
+
+
+def _club_payment_config(db: Session, event: PersohubEvent) -> Dict[str, Optional[str]]:
+    club = db.query(PersohubClub).filter(PersohubClub.id == event.club_id).first() if event.club_id else None
+    owner = db.query(PdaUser).filter(PdaUser.id == int(club.owner_user_id)).first() if club and club.owner_user_id else None
+    return {
+        "payment_url_image": (str(club.payment_url_image or "") if club else "") or None,
+        "payment_id": (str(club.payment_id or "") if club else "") or None,
+        "club_owner_mobile": (str(owner.phno or "") if owner else "") or None,
+    }
+
+
+def _payment_status_from_row(payment: Optional[PersohubPayment], payment_required: bool) -> str:
+    if not payment_required:
+        return "none"
+    if not payment:
+        return "none"
+    content = payment.content if isinstance(payment.content, dict) else {}
+    raw = str(content.get("status") or "").strip().lower()
+    if raw in {"pending", "declined", "approved"}:
+        return raw
+    return "pending"
+
+
+def _registration_status_for_dashboard(registration: Optional[PersohubEventRegistration]) -> str:
+    if not registration:
+        return "not_registered"
+    raw = str(registration.status.value if hasattr(registration.status, "value") else registration.status or "").strip().lower()
+    if raw == "eliminated":
+        return "eliminated"
+    if raw == "pending":
+        return "pending"
+    return "active"
+
+
+def _ensure_registration_is_active(registration: Optional[PersohubEventRegistration]) -> None:
+    if not registration:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration not found")
+    raw = str(registration.status.value if hasattr(registration.status, "value") else registration.status or "").strip().lower()
+    if raw == "pending":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Registration is pending confirmation")
+
+
+def _send_payment_review_email(user: PdaUser, event: PersohubEvent) -> None:
+    if not user.email:
+        return
+    subject = f"Payment received for review - {event.title}"
+    text = (
+        f"Hello {user.name},\n\n"
+        f"We received your payment proof for {event.title} ({event.event_code}).\n"
+        "Your registration is pending confirmation.\n\n"
+        "Regards,\nPersohub Team"
+    )
+    html = (
+        "<html><body>"
+        f"<p>Hello {user.name},</p>"
+        f"<p>We received your payment proof for <strong>{event.title}</strong> ({event.event_code}).</p>"
+        "<p>Your registration is pending confirmation.</p>"
+        "<p>Regards,<br/><strong>Persohub Team</strong></p>"
+        "</body></html>"
+    )
+    try:
+        send_email_async(user.email, subject, html, text)
+    except Exception:
+        pass
+
+
 def _send_registration_email(user: PdaUser, event: PersohubEvent, details: str) -> None:
     if not user.email:
         return
@@ -294,7 +424,7 @@ def _send_registration_email(user: PdaUser, event: PersohubEvent, details: str) 
         "</body></html>"
     )
     try:
-        send_email(user.email, subject, html, text)
+        send_email_async(user.email, subject, html, text)
     except Exception:
         pass
 
@@ -320,7 +450,36 @@ def list_all_managed_events(db: Session = Depends(get_db)):
 def get_event(slug: str, db: Session = Depends(get_db)):
     event = _get_event_or_404(db, slug)
     _ensure_event_visible_for_public_access(event)
-    return PersohubManagedEventResponse.model_validate(event)
+    payload = PersohubManagedEventResponse.model_validate(event)
+    seat_availability_enabled = bool(getattr(event, "seat_availability_enabled", False))
+    if not seat_availability_enabled:
+        return payload.model_copy(
+            update={
+                "seat_availability_enabled": False,
+                "seat_capacity": None,
+                "seats_occupied": None,
+                "seats_left": None,
+            }
+        )
+
+    seat_capacity = int(event.seat_capacity or 100)
+    if seat_capacity < 1:
+        seat_capacity = 100
+    seats_occupied = int(
+        db.query(func.count(PersohubEventRegistration.id))
+        .filter(PersohubEventRegistration.event_id == event.id)
+        .scalar()
+        or 0
+    )
+    seats_left = max(seat_capacity - seats_occupied, 0)
+    return payload.model_copy(
+        update={
+            "seat_availability_enabled": True,
+            "seat_capacity": seat_capacity,
+            "seats_occupied": seats_occupied,
+            "seats_left": seats_left,
+        }
+    )
 
 
 @router.get("/persohub/persohub-events/{slug}/rounds", response_model=List[PersohubEventPublicRoundResponse])
@@ -609,9 +768,29 @@ def get_event_dashboard(
         entity_type = PersohubManagedEntityTypeEnum.TEAM if registration.team_id else PersohubManagedEntityTypeEnum.USER
         entity_id = registration.team_id if registration.team_id else registration.user_id
 
+    payer_user = _resolve_event_payer_user(db, event, user, team=team)
+    payment_required, fee_key, payable_amount, _currency = _registration_fee_meta(event, payer_user)
+    payer_user_id = int(payer_user.id) if payer_user else int(user.id)
+    payment_row = (
+        db.query(PersohubPayment)
+        .filter(PersohubPayment.event_id == event.id, PersohubPayment.user_id == payer_user_id)
+        .first()
+        if payment_required
+        else None
+    )
+    registration_status = _registration_status_for_dashboard(registration)
+    payment_status = _payment_status_from_row(payment_row, payment_required)
+    payment_config = _club_payment_config(db, event)
+
     return PersohubManagedEventDashboard(
         event=PersohubManagedEventResponse.model_validate(event),
         is_registered=bool(registration),
+        registration_status=registration_status,
+        payment_status=payment_status,
+        payable_amount=float(payable_amount),
+        fee_key=fee_key,
+        payment_required=bool(payment_required),
+        payment_config=payment_config,
         entity_type=entity_type,
         entity_id=entity_id,
         team_code=team.team_code if team else None,
@@ -635,6 +814,13 @@ def register_individual_event(
     _ensure_user_eligible_for_event(event, user)
     if event.participant_mode != PersohubEventParticipantMode.INDIVIDUAL:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Use team registration for this event")
+
+    payment_required, _fee_key, payable_amount, _currency = _registration_fee_meta(event, user)
+    if payment_required:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This event requires payment proof. Use payment submit flow to continue.",
+        )
 
     existing = db.query(PersohubEventRegistration).filter(
         PersohubEventRegistration.event_id == event.id,
@@ -664,6 +850,151 @@ def register_individual_event(
             referrer.referral_count = int(referrer.referral_count or 0) + 1
     db.commit()
     _send_registration_email(user, event, "Participant mode: Individual")
+    return get_event_dashboard(slug=slug, user=user, db=db)
+
+
+@router.post("/persohub/persohub-events/{slug}/payments/presign", response_model=PresignResponse)
+def presign_payment_proof_upload(
+    slug: str,
+    payload: PersohubEventPaymentPresignRequest,
+    user: PdaUser = Depends(require_pda_user),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    _ensure_event_visible_for_public_access(event)
+    _ensure_registration_open_for_registration_actions(event)
+    _ensure_user_eligible_for_event(event, user)
+
+    team = None
+    payer_user = user
+    if event.participant_mode == PersohubEventParticipantMode.TEAM:
+        team = _get_user_team_for_event(db, event.id, user.id)
+        if not team:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Create or join a team first")
+        if int(team.team_lead_user_id or 0) != int(user.id):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only team leader can submit payment")
+        payer_user = _resolve_event_payer_user(db, event, user, team=team) or user
+
+    payment_required, _fee_key, _payable_amount, _currency = _registration_fee_meta(event, payer_user)
+    if not payment_required:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payment proof is not required for this event")
+
+    payment_config = _club_payment_config(db, event)
+    if not payment_config.get("payment_url_image") or not payment_config.get("payment_id"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Club payment configuration is incomplete")
+
+    if int(payload.file_size_bytes) > _PAYMENT_SCREENSHOT_MAX_BYTES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Screenshot exceeds 10 MB limit")
+    content_type = str(payload.content_type or "").strip().lower()
+    if content_type not in _ALLOWED_PAYMENT_SCREENSHOT_TYPES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payment screenshot type")
+
+    presign = _generate_presigned_put_url(
+        key_prefix=f"payments/persohub_events/{event.slug}",
+        filename=payload.filename,
+        content_type=content_type,
+        allowed_types=_ALLOWED_PAYMENT_SCREENSHOT_TYPES,
+    )
+    return PresignResponse(**presign)
+
+
+@router.post("/persohub/persohub-events/{slug}/payments/submit", response_model=PersohubManagedEventDashboard)
+def submit_event_payment(
+    slug: str,
+    payload: PersohubEventPaymentSubmitRequest,
+    user: PdaUser = Depends(require_pda_user),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    _ensure_event_visible_for_public_access(event)
+    _ensure_registration_open_for_registration_actions(event)
+    _ensure_user_eligible_for_event(event, user)
+
+    team = None
+    entity_type = PersohubEventEntityType.USER
+    entity_user_id: Optional[int] = int(user.id)
+    entity_team_id: Optional[int] = None
+    payer_user = user
+
+    if event.participant_mode == PersohubEventParticipantMode.TEAM:
+        team = _get_user_team_for_event(db, event.id, user.id)
+        if not team:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Create or join a team first")
+        if int(team.team_lead_user_id or 0) != int(user.id):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only team leader can submit payment")
+        payer_user = _resolve_event_payer_user(db, event, user, team=team) or user
+        entity_type = PersohubEventEntityType.TEAM
+        entity_user_id = None
+        entity_team_id = int(team.id)
+
+    payment_required, fee_key, payable_amount, currency = _registration_fee_meta(event, payer_user)
+    if not payment_required:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payment proof is not required for this event")
+
+    payment_config = _club_payment_config(db, event)
+    if not payment_config.get("payment_url_image") or not payment_config.get("payment_id"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Club payment configuration is incomplete")
+
+    registration = db.query(PersohubEventRegistration).filter(
+        PersohubEventRegistration.event_id == event.id,
+        PersohubEventRegistration.entity_type == entity_type,
+        PersohubEventRegistration.user_id == entity_user_id,
+        PersohubEventRegistration.team_id == entity_team_id,
+    ).first()
+    if registration:
+        registration.status = PersohubEventRegistrationStatus.PENDING
+    else:
+        registration = PersohubEventRegistration(
+            event_id=event.id,
+            user_id=entity_user_id,
+            team_id=entity_team_id,
+            entity_type=entity_type,
+            status=PersohubEventRegistrationStatus.PENDING,
+            referral_code=(_next_event_referral_code(db, event.id) if entity_type == PersohubEventEntityType.USER else None),
+            referred_by=None,
+            referral_count=0,
+        )
+        db.add(registration)
+        db.flush()
+
+    payment_row = db.query(PersohubPayment).filter(
+        PersohubPayment.event_id == event.id,
+        PersohubPayment.user_id == payer_user.id,
+    ).first()
+    old_content = payment_row.content if payment_row and isinstance(payment_row.content, dict) else {}
+    attempt = int(old_content.get("attempt") or 0) + 1
+    content = {
+        "status": "pending",
+        "comment": payload.comment,
+        "fee_key": fee_key,
+        "amount": float(payable_amount),
+        "currency": currency,
+        "entity_type": ("team" if entity_type == PersohubEventEntityType.TEAM else "user"),
+        "entity_id": (entity_team_id if entity_type == PersohubEventEntityType.TEAM else entity_user_id),
+        "team_id": entity_team_id,
+        "attempt": attempt,
+        "review": {
+            "by_user_id": None,
+            "by_name": None,
+            "at": None,
+            "reason": None,
+        },
+    }
+    if payment_row:
+        payment_row.payment_info_url = payload.payment_info_url
+        payment_row.content = content
+    else:
+        db.add(
+            PersohubPayment(
+                user_id=payer_user.id,
+                event_id=event.id,
+                payment_info_url=payload.payment_info_url,
+                content=content,
+            )
+        )
+
+    _send_payment_review_email(payer_user, event)
+    db.commit()
     return get_event_dashboard(slug=slug, user=user, db=db)
 
 
@@ -700,18 +1031,22 @@ def create_team(
 
     member = PersohubEventTeamMember(team_id=team.id, user_id=user.id, role="leader")
     db.add(member)
-
-    registration = PersohubEventRegistration(
-        event_id=event.id,
-        user_id=None,
-        team_id=team.id,
-        entity_type=PersohubEventEntityType.TEAM,
-    )
-    db.add(registration)
+    leader_user = _resolve_event_payer_user(db, event, user, team=team)
+    payment_required, _fee_key, _payable_amount, _currency = _registration_fee_meta(event, leader_user)
+    if not payment_required:
+        registration = PersohubEventRegistration(
+            event_id=event.id,
+            user_id=None,
+            team_id=team.id,
+            entity_type=PersohubEventEntityType.TEAM,
+            status=PersohubEventRegistrationStatus.ACTIVE,
+        )
+        db.add(registration)
     db.commit()
     db.refresh(team)
 
-    _send_registration_email(user, event, f"Participant mode: Team\nTeam code: {team.team_code}")
+    if not payment_required:
+        _send_registration_email(user, event, f"Participant mode: Team\nTeam code: {team.team_code}")
     return _build_team_response(db, team)
 
 
@@ -744,17 +1079,20 @@ def join_team(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Team is full")
 
     db.add(PersohubEventTeamMember(team_id=team.id, user_id=user.id, role="member"))
+    leader_user = db.query(PdaUser).filter(PdaUser.id == int(team.team_lead_user_id)).first()
+    payment_required, _fee_key, _payable_amount, _currency = _registration_fee_meta(event, leader_user or user)
     registration = db.query(PersohubEventRegistration).filter(
         PersohubEventRegistration.event_id == event.id,
         PersohubEventRegistration.team_id == team.id,
     ).first()
-    if not registration:
+    if not registration and not payment_required:
         db.add(
             PersohubEventRegistration(
                 event_id=event.id,
                 user_id=None,
                 team_id=team.id,
                 entity_type=PersohubEventEntityType.TEAM,
+                status=PersohubEventRegistrationStatus.ACTIVE,
             )
         )
     db.commit()
@@ -862,19 +1200,26 @@ def get_event_qr_token(
     _ensure_event_visible_for_public_access(event)
     entity_type = PersohubManagedEntityTypeEnum.USER
     entity_id = user.id
+    registration = None
     if event.participant_mode == PersohubEventParticipantMode.TEAM:
         team = _get_user_team_for_event(db, event.id, user.id)
         if not team:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+        registration = db.query(PersohubEventRegistration).filter(
+            PersohubEventRegistration.event_id == event.id,
+            PersohubEventRegistration.team_id == team.id,
+            PersohubEventRegistration.entity_type == PersohubEventEntityType.TEAM,
+        ).first()
+        _ensure_registration_is_active(registration)
         entity_type = PersohubManagedEntityTypeEnum.TEAM
         entity_id = team.id
     else:
-        exists = db.query(PersohubEventRegistration).filter(
+        registration = db.query(PersohubEventRegistration).filter(
             PersohubEventRegistration.event_id == event.id,
             PersohubEventRegistration.user_id == user.id,
+            PersohubEventRegistration.entity_type == PersohubEventEntityType.USER,
         ).first()
-        if not exists:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration not found")
+        _ensure_registration_is_active(registration)
 
     token = create_access_token(
         {
@@ -1069,6 +1414,9 @@ def my_round_status(
         if row.round_id is not None
     }
     statuses = []
+    registration_status_text = str(
+        registration.status.value if hasattr(registration.status, "value") else registration.status or ""
+    ).strip().lower()
     for round_row in rounds:
         score_row = db.query(PersohubEventScore).filter(
             PersohubEventScore.event_id == event.id,
@@ -1079,7 +1427,10 @@ def my_round_status(
         ).first()
         state_value = round_row.state.value if hasattr(round_row.state, "value") else str(round_row.state)
         is_revealed = str(state_value or "").strip().lower() == "reveal"
-        if not is_revealed:
+        if registration_status_text == "pending":
+            status_label = "Pending"
+            is_present = None
+        elif not is_revealed:
             status_label = "Pending"
             is_present = None
         elif registration.status == PersohubEventRegistrationStatus.ELIMINATED:
@@ -1167,7 +1518,8 @@ def get_certificate(
     else:
         attendance_query = attendance_query.filter(PersohubEventAttendance.team_id == registration.team_id)
     attended = attendance_query.first() is not None
-    eligible = bool(event.status == PersohubEventStatus.CLOSED and attended)
+    reg_status = str(registration.status.value if hasattr(registration.status, "value") else registration.status or "").strip().lower()
+    eligible = bool(event.status == PersohubEventStatus.CLOSED and attended and reg_status == "active")
     text = None
     if eligible:
         text = f"This certifies that {user.name} actively participated in {event.title} ({event.event_code})."

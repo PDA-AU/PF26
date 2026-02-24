@@ -205,6 +205,39 @@ export const persohubAdminApi = {
         });
     },
 
+    async listPersohubPayments(params = {}) {
+        return withAdminAuthRetry(async () => {
+            const response = await axios.get(`${API}/persohub/admin/payments`, {
+                params,
+                headers: { ...getAdminAuthHeader() },
+            });
+            return {
+                items: response.data || [],
+                totalCount: Number(response.headers?.['x-total-count'] || 0),
+                page: Number(response.headers?.['x-page'] || params.page || 1),
+                pageSize: Number(response.headers?.['x-page-size'] || params.page_size || 20),
+            };
+        });
+    },
+
+    async confirmPersohubPayment(paymentId, payload) {
+        return withAdminAuthRetry(async () => {
+            const response = await axios.post(`${API}/persohub/admin/payments/${paymentId}/confirm`, payload, {
+                headers: { ...getAdminAuthHeader() },
+            });
+            return response.data;
+        });
+    },
+
+    async declinePersohubPayment(paymentId, payload) {
+        return withAdminAuthRetry(async () => {
+            const response = await axios.post(`${API}/persohub/admin/payments/${paymentId}/decline`, payload, {
+                headers: { ...getAdminAuthHeader() },
+            });
+            return response.data;
+        });
+    },
+
     async listOwnerCommunities() {
         return withAdminAuthRetry(async () => {
             const response = await axios.get(`${API}/persohub/admin/communities`, {

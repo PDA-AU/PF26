@@ -12,6 +12,7 @@ export default function LogoUploadField({
     onChange,
     onUploadFile,
     parseApiError,
+    allowManualEntry = true,
 }) {
     const inputRef = useRef(null);
     const [uploading, setUploading] = useState(false);
@@ -51,8 +52,12 @@ export default function LogoUploadField({
                 <Input
                     id={id}
                     value={value || ''}
-                    onChange={(event) => onChange(event.target.value)}
+                    onChange={(event) => {
+                        if (!allowManualEntry) return;
+                        onChange(event.target.value);
+                    }}
                     placeholder="https://..."
+                    readOnly={!allowManualEntry}
                 />
                 <Button
                     type="button"

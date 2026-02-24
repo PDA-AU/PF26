@@ -626,6 +626,8 @@ class CcClubCreateRequest(BaseModel):
     club_logo_url: Optional[str] = Field(default=None, max_length=500)
     club_tagline: Optional[str] = Field(default=None, max_length=255)
     club_description: Optional[str] = None
+    payment_url_image: Optional[str] = Field(default=None, max_length=800)
+    payment_id: Optional[str] = Field(default=None, max_length=120)
     owner_user_id: int = Field(..., ge=1)
 
     @field_validator("name", mode="before")
@@ -662,6 +664,19 @@ class CcClubCreateRequest(BaseModel):
         normalized = str(value).strip()
         return normalized or None
 
+    @field_validator("payment_url_image", mode="before")
+    @classmethod
+    def normalize_payment_url_image(cls, value):
+        return _normalize_optional_http_url(value, "payment_url_image", max_length=800)
+
+    @field_validator("payment_id", mode="before")
+    @classmethod
+    def normalize_payment_id(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
 
 class CcClubUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -672,6 +687,8 @@ class CcClubUpdateRequest(BaseModel):
     club_logo_url: Optional[str] = Field(default=None, max_length=500)
     club_tagline: Optional[str] = Field(default=None, max_length=255)
     club_description: Optional[str] = None
+    payment_url_image: Optional[str] = Field(default=None, max_length=800)
+    payment_id: Optional[str] = Field(default=None, max_length=120)
     owner_user_id: Optional[int] = Field(default=None, ge=1)
 
     @field_validator("name", mode="before")
@@ -712,6 +729,19 @@ class CcClubUpdateRequest(BaseModel):
         normalized = str(value).strip()
         return normalized or None
 
+    @field_validator("payment_url_image", mode="before")
+    @classmethod
+    def normalize_payment_url_image(cls, value):
+        return _normalize_optional_http_url(value, "payment_url_image", max_length=800)
+
+    @field_validator("payment_id", mode="before")
+    @classmethod
+    def normalize_payment_id(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
 
 class CcClubResponse(BaseModel):
     id: int
@@ -721,6 +751,8 @@ class CcClubResponse(BaseModel):
     club_logo_url: Optional[str] = None
     club_tagline: Optional[str] = None
     club_description: Optional[str] = None
+    payment_url_image: Optional[str] = None
+    payment_id: Optional[str] = None
     owner_user_id: Optional[int] = None
     owner_name: Optional[str] = None
     owner_regno: Optional[str] = None
@@ -981,6 +1013,51 @@ class CcPersohubEventSympoAssignResponse(BaseModel):
     sympo_id: Optional[int] = None
     sympo_name: Optional[str] = None
     message: str
+
+
+class CcPersohubPaymentReviewListItem(BaseModel):
+    id: int
+    event_id: int
+    event_slug: str
+    event_title: str
+    club_id: int
+    club_name: Optional[str] = None
+    user_id: int
+    participant_name: str
+    participant_regno: Optional[str] = None
+    participant_email: Optional[str] = None
+    participant_phno: Optional[str] = None
+    participant_college: Optional[str] = None
+    participant_dept: Optional[str] = None
+    payment_info_url: str
+    status: str
+    fee_key: Optional[str] = None
+    amount: Optional[float] = None
+    currency: Optional[str] = None
+    comment: Optional[str] = None
+    entity_type: Optional[str] = None
+    entity_id: Optional[int] = None
+    team_id: Optional[int] = None
+    attempt: int = 1
+    review: Optional[Dict[str, Any]] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+
+class CcPersohubPaymentConfirmRequest(BaseModel):
+    password: str = Field(..., min_length=6)
+
+
+class CcPersohubPaymentDeclineRequest(BaseModel):
+    reason: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def normalize_reason(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
 
 
 # Dashboard Stats
@@ -2130,6 +2207,56 @@ PersohubManagedBadgePlaceEnum = PdaManagedBadgePlaceEnum
 PersohubManagedPanelTeamDistributionModeEnum = PdaManagedPanelTeamDistributionModeEnum
 
 
+class PersohubRegistrationFeeConfig(BaseModel):
+    enabled: bool = False
+    currency: Optional[str] = "INR"
+    amounts: Optional[Dict[str, float]] = None
+
+    @field_validator("currency", mode="before")
+    @classmethod
+    def validate_currency(cls, value):
+        normalized = str(value or "INR").strip().upper()
+        return normalized or "INR"
+
+    @model_validator(mode="after")
+    def validate_amounts(self):
+        if not self.enabled:
+            return self
+        amount_map = self.amounts if isinstance(self.amounts, dict) else {}
+        mit_amount = amount_map.get("MIT")
+        other_amount = amount_map.get("Other")
+        if mit_amount is None or other_amount is None:
+            raise ValueError("registration_fee.amounts requires MIT and Other")
+        if float(mit_amount) < 0 or float(other_amount) < 0:
+            raise ValueError("registration_fee amounts must be >= 0")
+        self.amounts = {
+            "MIT": float(mit_amount),
+            "Other": float(other_amount),
+        }
+        self.currency = str(self.currency or "INR").strip().upper() or "INR"
+        return self
+
+
+class PersohubDashboardRegistrationStatusEnum(str, Enum):
+    NOT_REGISTERED = "not_registered"
+    PENDING = "pending"
+    ACTIVE = "active"
+    ELIMINATED = "eliminated"
+
+
+class PersohubPaymentStatusEnum(str, Enum):
+    NONE = "none"
+    PENDING = "pending"
+    DECLINED = "declined"
+    APPROVED = "approved"
+
+
+class PersohubClubPaymentConfig(BaseModel):
+    payment_url_image: Optional[str] = None
+    payment_id: Optional[str] = None
+    club_owner_mobile: Optional[str] = None
+
+
 class PersohubManagedEventCreate(BaseModel):
     title: str = Field(..., min_length=2)
     description: Optional[str] = None
@@ -2150,6 +2277,7 @@ class PersohubManagedEventCreate(BaseModel):
     club_id: Optional[int] = Field(default=None, ge=1)
     community_id: Optional[int] = Field(default=None, ge=1)
     open_for: PersohubManagedEventOpenForEnum = PersohubManagedEventOpenForEnum.MIT
+    registration_fee: Optional[PersohubRegistrationFeeConfig] = None
 
     @field_validator("whatsapp_url", mode="before")
     @classmethod
@@ -2176,6 +2304,7 @@ class PersohubManagedEventUpdate(BaseModel):
     is_visible: Optional[bool] = None
     status: Optional[PersohubManagedEventStatusEnum] = None
     open_for: Optional[PersohubManagedEventOpenForEnum] = None
+    registration_fee: Optional[PersohubRegistrationFeeConfig] = None
 
     @field_validator("whatsapp_url", mode="before")
     @classmethod
@@ -2219,6 +2348,11 @@ class PersohubManagedEventResponse(BaseModel):
     is_visible: bool = True
     registration_open: bool = True
     open_for: PersohubManagedEventOpenForEnum = PersohubManagedEventOpenForEnum.MIT
+    registration_fee: Optional[PersohubRegistrationFeeConfig] = None
+    seat_availability_enabled: bool = False
+    seat_capacity: Optional[int] = None
+    seats_occupied: Optional[int] = None
+    seats_left: Optional[int] = None
     status: PersohubManagedEventStatusEnum
     created_at: datetime
 
@@ -2229,6 +2363,12 @@ class PersohubManagedEventResponse(BaseModel):
 class PersohubManagedEventDashboard(BaseModel):
     event: PersohubManagedEventResponse
     is_registered: bool = False
+    registration_status: PersohubDashboardRegistrationStatusEnum = PersohubDashboardRegistrationStatusEnum.NOT_REGISTERED
+    payment_status: PersohubPaymentStatusEnum = PersohubPaymentStatusEnum.NONE
+    payable_amount: float = 0
+    fee_key: Optional[Literal["MIT", "Other"]] = None
+    payment_required: bool = False
+    payment_config: Optional[PersohubClubPaymentConfig] = None
     entity_type: Optional[PersohubManagedEntityTypeEnum] = None
     entity_id: Optional[int] = None
     team_code: Optional[str] = None
@@ -2236,6 +2376,30 @@ class PersohubManagedEventDashboard(BaseModel):
     team_members: List[Dict[str, Any]] = Field(default_factory=list)
     rounds_count: int = 0
     badges_count: int = 0
+
+
+class PersohubEventPaymentPresignRequest(BaseModel):
+    filename: str = Field(..., min_length=1)
+    content_type: str = Field(..., min_length=1)
+    file_size_bytes: int = Field(..., gt=0)
+
+
+class PersohubEventPaymentSubmitRequest(BaseModel):
+    payment_info_url: str = Field(..., min_length=5)
+    comment: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("payment_info_url", mode="before")
+    @classmethod
+    def validate_payment_info_url(cls, value):
+        return _normalize_optional_http_url(value, "payment_info_url", max_length=800)
+
+    @field_validator("comment", mode="before")
+    @classmethod
+    def validate_comment(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
 
 
 class PersohubEventPublicRoundResponse(PdaEventPublicRoundResponse):

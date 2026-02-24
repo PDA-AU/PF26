@@ -17,6 +17,7 @@ import LogsAdmin from "@/pages/HomeAdmin/LogsAdmin";
 import RecruitmentsAdmin from "@/pages/HomeAdmin/RecruitmentsAdmin";
 import EmailAdmin from "@/pages/HomeAdmin/EmailAdmin";
 import CCAdmin from "@/pages/HomeAdmin/CCAdmin";
+import PersohubPaymentsAdminPage from "@/pages/HomeAdmin/PersohubPaymentsAdminPage";
 import AdminEvents from "@/pages/events/AdminEvents";
 import EventDashboard from "@/pages/events/EventDashboard";
 import EventAdminDashboardPage from "@/pages/events/admin/EventAdminDashboardPage";
@@ -44,6 +45,7 @@ import PersohubAdminProfilePage from "@/pages/persohub/admin/PersohubAdminProfil
 import PersohubAdminCommunitiesPage from "@/pages/persohub/admin/PersohubAdminCommunitiesPage";
 import PersohubAdminEventsPage from "@/pages/persohub/admin/PersohubAdminEventsPage";
 import PersohubAdminPoliciesPage from "@/pages/persohub/admin/PersohubAdminPoliciesPage";
+import PersohubAdminPaymentsPage from "@/pages/persohub/admin/PersohubAdminPaymentsPage";
 import PersohubEventDashboard from "@/pages/persohub/events/PersohubEventDashboard";
 import PersohubEventAdminDashboardPage from "@/pages/persohub/events/admin/EventAdminDashboardPage";
 import PersohubEventAdminAttendancePage from "@/pages/persohub/events/admin/EventAdminAttendancePage";
@@ -169,6 +171,11 @@ function AppRoutes() {
                     <CCAdmin />
                 </ProtectedPdaRoute>
             } />
+            <Route path="/admin/payments" element={
+                <ProtectedPdaRoute requireSuperAdmin>
+                    <PersohubPaymentsAdminPage />
+                </ProtectedPdaRoute>
+            } />
             <Route path="/admin/events" element={
                 <ProtectedPdaRoute requireEvents>
                     <AdminEvents />
@@ -253,6 +260,11 @@ function AppRoutes() {
             <Route path="/persohub/admin/policies" element={
                 <ProtectedPersohubOwnerRoute>
                     <PersohubAdminPoliciesPage />
+                </ProtectedPersohubOwnerRoute>
+            } />
+            <Route path="/persohub/admin/payments" element={
+                <ProtectedPersohubOwnerRoute>
+                    <PersohubAdminPaymentsPage />
                 </ProtectedPersohubOwnerRoute>
             } />
             <Route path="/persohub/admin/persohub-events" element={

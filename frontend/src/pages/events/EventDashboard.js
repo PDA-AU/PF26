@@ -313,15 +313,6 @@ export default function EventDashboard() {
         });
         return { byNo, byName };
     }, [publishedRounds]);
-    const eventActiveRoundIds = useMemo(
-        () => new Set(
-            (publishedRounds || [])
-                .filter((round) => normalizeText(round?.state) === 'active')
-                .map((round) => String(round?.id))
-        ),
-        [publishedRounds]
-    );
-
     const eventDateLabel = useMemo(
         () => getEventDateLabel(eventInfo?.start_date, eventInfo?.end_date),
         [eventInfo?.start_date, eventInfo?.end_date]
@@ -981,31 +972,6 @@ export default function EventDashboard() {
                                         {eventInfo.round_count} rounds
                                     </span>
                                 </div>
-                                {publishedRounds.length ? (
-                                    <div className="mt-3">
-                                        <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-600">Rounds</p>
-                                        <div className="mt-2 flex flex-wrap gap-2">
-                                            {publishedRounds.map((round) => {
-                                                const isActiveRound = eventActiveRoundIds.has(String(round?.id));
-                                                return (
-                                                    <button
-                                                        key={round.id}
-                                                        type="button"
-                                                        className={`rounded-md border-2 border-black px-2 py-1 text-xs font-bold uppercase tracking-[0.1em] shadow-neo ${
-                                                            isActiveRound
-                                                                ? 'bg-[#22C55E] text-black'
-                                                                : 'bg-white text-slate-700'
-                                                        }`}
-                                                        onClick={() => setSelectedRound(round)}
-                                                    >
-                                                        {round?.round_no || 'Round'}: {round?.name || 'Untitled'}
-                                                        {isActiveRound ? ' (Active)' : ''}
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                ) : null}
                                 <div className="mt-3 inline-flex items-center gap-2 rounded-md border-2 border-black bg-white px-3 py-2 text-xs font-bold uppercase tracking-[0.1em] text-slate-700 shadow-neo">
                                     <Calendar className="h-4 w-4 text-[#8B5CF6]" />
                                     <span>{eventDateLabel}</span>
