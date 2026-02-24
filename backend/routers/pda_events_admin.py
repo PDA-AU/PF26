@@ -285,6 +285,8 @@ def _recompute_round_normalized_scores(
 def _round_submission_deadline_has_passed(round_row: PdaEventRound) -> bool:
     if not round_row.submission_deadline:
         return False
+    if bool(getattr(round_row, "allow_late_submission", False)):
+        return False
     now = datetime.now(timezone.utc)
     deadline = round_row.submission_deadline
     if deadline.tzinfo is None:
@@ -2152,6 +2154,7 @@ def create_round(
         requires_submission=bool(payload.requires_submission),
         submission_mode=(payload.submission_mode.value if hasattr(payload.submission_mode, "value") else str(payload.submission_mode or "file_or_link")),
         submission_deadline=payload.submission_deadline,
+        allow_late_submission=bool(payload.requires_submission and payload.allow_late_submission),
         allowed_mime_types=list(payload.allowed_mime_types or _default_round_allowed_mime_types()),
         max_file_size_mb=int(payload.max_file_size_mb or 25),
         panel_mode_enabled=bool(payload.panel_mode_enabled),
@@ -2219,6 +2222,10 @@ def update_round(
             if hasattr(payload.panel_team_distribution_mode, "value")
             else payload.panel_team_distribution_mode
         )
+    if "requires_submission" in updates and not bool(updates.get("requires_submission")):
+        updates["allow_late_submission"] = False
+    if "allow_late_submission" in updates and round_row.is_frozen and bool(updates.get("allow_late_submission")):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot enable late submission for a frozen round")
 
     if requested_round_no is not None:
         next_round_no = int(requested_round_no)
@@ -3333,6 +3340,7 @@ def round_participants(
             "submission_type": submission_row.submission_type if submission_row else None,
             "submission_file_url": submission_row.file_url if submission_row else None,
             "submission_link_url": submission_row.link_url if submission_row else None,
+            "submission_submitted_at": submission_row.submitted_at if submission_row else None,
             "submission_notes": submission_row.notes if submission_row else None,
             "submission_is_locked": bool(submission_row.is_locked) if submission_row else False,
             "panel_id": panel_id,

@@ -1393,6 +1393,7 @@ def ensure_pda_event_round_submission_tables(engine):
             conn.execute(text("ALTER TABLE pda_event_rounds ADD COLUMN IF NOT EXISTS requires_submission BOOLEAN NOT NULL DEFAULT FALSE"))
             conn.execute(text("ALTER TABLE pda_event_rounds ADD COLUMN IF NOT EXISTS submission_mode VARCHAR(32) NOT NULL DEFAULT 'file_or_link'"))
             conn.execute(text("ALTER TABLE pda_event_rounds ADD COLUMN IF NOT EXISTS submission_deadline TIMESTAMPTZ"))
+            conn.execute(text("ALTER TABLE pda_event_rounds ADD COLUMN IF NOT EXISTS allow_late_submission BOOLEAN NOT NULL DEFAULT FALSE"))
             conn.execute(text("ALTER TABLE pda_event_rounds ADD COLUMN IF NOT EXISTS allowed_mime_types JSONB"))
             conn.execute(text("ALTER TABLE pda_event_rounds ADD COLUMN IF NOT EXISTS max_file_size_mb INTEGER NOT NULL DEFAULT 25"))
             conn.execute(
@@ -2017,6 +2018,7 @@ def ensure_persohub_event_tables(engine):
                     requires_submission BOOLEAN NOT NULL DEFAULT FALSE,
                     submission_mode VARCHAR(32) NOT NULL DEFAULT 'file_or_link',
                     submission_deadline TIMESTAMPTZ,
+                    allow_late_submission BOOLEAN NOT NULL DEFAULT FALSE,
                     allowed_mime_types JSONB,
                     max_file_size_mb INTEGER NOT NULL DEFAULT 25,
                     panel_mode_enabled BOOLEAN NOT NULL DEFAULT FALSE,
@@ -2041,6 +2043,7 @@ def ensure_persohub_event_tables(engine):
             conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS requires_submission BOOLEAN NOT NULL DEFAULT FALSE"))
             conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS submission_mode VARCHAR(32) NOT NULL DEFAULT 'file_or_link'"))
             conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS submission_deadline TIMESTAMPTZ"))
+            conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS allow_late_submission BOOLEAN NOT NULL DEFAULT FALSE"))
             conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS allowed_mime_types JSONB"))
             conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS max_file_size_mb INTEGER NOT NULL DEFAULT 25"))
             conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS panel_mode_enabled BOOLEAN NOT NULL DEFAULT FALSE"))
@@ -2483,6 +2486,7 @@ def ensure_persohub_event_round_submission_tables(engine):
             conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS requires_submission BOOLEAN NOT NULL DEFAULT FALSE"))
             conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS submission_mode VARCHAR(32) NOT NULL DEFAULT 'file_or_link'"))
             conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS submission_deadline TIMESTAMPTZ"))
+            conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS allow_late_submission BOOLEAN NOT NULL DEFAULT FALSE"))
             conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS allowed_mime_types JSONB"))
             conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS max_file_size_mb INTEGER NOT NULL DEFAULT 25"))
             conn.execute(

@@ -183,7 +183,8 @@ def _round_submission_lock_reason(round_row: PersohubEventRound, submission: Opt
     deadline = round_row.submission_deadline
     if deadline and deadline.tzinfo is None:
         deadline = deadline.replace(tzinfo=timezone.utc)
-    if deadline and now >= deadline:
+    allow_late = bool(getattr(round_row, "allow_late_submission", False))
+    if deadline and now >= deadline and not allow_late:
         return "Submission deadline has passed"
     if submission and bool(submission.is_locked):
         return "Submission is locked by admin"

@@ -175,6 +175,36 @@ const normalizeIsoOrNull = (value) => {
     return parsed.toISOString();
 };
 
+const formatSubmissionTime = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return 'Not submitted yet.';
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return raw;
+    return parsed.toLocaleString(undefined, {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZoneName: 'short',
+    });
+};
+
+const parseInstantOrNull = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed;
+};
+
+const getSubmissionTimingStatus = (submissionValue, deadlineValue) => {
+    const submittedAt = parseInstantOrNull(submissionValue);
+    const deadlineAt = parseInstantOrNull(deadlineValue);
+    if (!submittedAt || !deadlineAt) return null;
+    return submittedAt.getTime() <= deadlineAt.getTime() ? 'on_time' : 'late';
+};
+
 const normalizePanelMemberIds = (values) => (
     Array.from(new Set((Array.isArray(values) ? values : []).map((value) => Number(value))))
         .filter(Number.isFinite)
@@ -593,6 +623,10 @@ function ScoringContent() {
             (row) => row._entityType === scoreModalEntity.entityType && row._entityId === scoreModalEntity.entityId
         ) || null;
     }, [rows, scoreModalEntity]);
+    const submissionTimingStatus = useMemo(
+        () => getSubmissionTimingStatus(scoreModalRow?.submission_submitted_at, round?.submission_deadline),
+        [scoreModalRow?.submission_submitted_at, round?.submission_deadline]
+    );
 
     const displayedRows = useMemo(() => {
         const needle = search.trim().toLowerCase();
@@ -2626,6 +2660,26 @@ function ScoringContent() {
                                 {String(scoreModalRow?.submission_notes || '').trim() || 'No participant notes provided.'}
                             </p>
                         </div>
+                        {isSubmissionRound ? (
+                            <div className={`rounded-md border p-3 ${
+                                submissionTimingStatus === 'late'
+                                    ? 'border-red-300 bg-red-50'
+                                    : submissionTimingStatus === 'on_time'
+                                        ? 'border-green-300 bg-green-50'
+                                        : 'border-slate-300 bg-white'
+                            }`}>
+                                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Submission Time</p>
+                                <p className="mt-1 text-sm text-slate-800">
+                                    {formatSubmissionTime(scoreModalRow?.submission_submitted_at)}
+                                </p>
+                                {submissionTimingStatus === 'late' ? (
+                                    <p className="mt-1 text-xs font-semibold text-red-700">Submitted after deadline</p>
+                                ) : null}
+                                {submissionTimingStatus === 'on_time' ? (
+                                    <p className="mt-1 text-xs font-semibold text-green-700">Submitted before deadline</p>
+                                ) : null}
+                            </div>
+                        ) : null}
                         <div className="space-y-3">
                             {criteria.map((criterion, index) => (
                                 <div key={`${criterion.name}-${index}`} className="space-y-2 rounded-md border border-slate-300 p-3">

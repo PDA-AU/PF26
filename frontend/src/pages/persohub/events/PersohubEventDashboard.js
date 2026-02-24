@@ -122,6 +122,12 @@ const parseRoundNoValue = (value) => {
 const normalizeSubmissionType = (value) => (
     String(value || '').trim().toLowerCase() === 'link' ? 'link' : 'file'
 );
+const normalizeSubmissionLockReason = (reason) => {
+    const raw = String(reason || '').trim();
+    if (!raw) return '';
+    if (raw.toLowerCase() === 'round is frozen') return 'Round is closed for submission';
+    return raw;
+};
 
 const formatEventDate = (value) => {
     if (!value) return '';
@@ -734,7 +740,7 @@ export default function EventDashboard() {
             return;
         }
         if (!roundSubmission?.is_editable) {
-            toast.error(roundSubmission?.lock_reason || 'Submission is currently locked');
+            toast.error(normalizeSubmissionLockReason(roundSubmission?.lock_reason) || 'Submission is currently locked');
             return;
         }
         setSubmittingRoundWork(true);
@@ -833,7 +839,7 @@ export default function EventDashboard() {
             return;
         }
         if (!roundSubmission?.is_editable) {
-            toast.error(roundSubmission?.lock_reason || 'Submission is currently locked');
+            toast.error(normalizeSubmissionLockReason(roundSubmission?.lock_reason) || 'Submission is currently locked');
             return;
         }
         setRemovingRoundWork(true);
@@ -1914,6 +1920,15 @@ export default function EventDashboard() {
                                                     Mode: {selectedRound?.submission_mode || 'file_or_link'}
                                                     {selectedRoundDeadlineLabel ? ` | Deadline (IST): ${selectedRoundDeadlineLabel}` : ' | Deadline (IST): Not Set'}
                                                 </p>
+                                                {normalizeSubmissionLockReason(roundSubmission?.lock_reason) === 'Round is closed for submission' ? (
+                                                    <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                        Round is closed for submission
+                                                    </p>
+                                                ) : selectedRound?.allow_late_submission ? (
+                                                    <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                        Late submissions are allowed. Submissions after deadline will be marked as late.
+                                                    </p>
+                                                ) : null}
                                                 {!isLoggedIn ? (
                                                     <p className="mt-3 text-sm font-medium text-slate-700">
                                                         Login to submit work for this round.
@@ -1952,9 +1967,11 @@ export default function EventDashboard() {
                                                         ) : (
                                                             <p className="text-sm font-medium text-slate-700">No submission yet.</p>
                                                         )}
-                                                        {roundSubmission?.lock_reason ? (
-                                                            <p className="text-xs font-bold text-red-600">{roundSubmission.lock_reason}</p>
-                                                        ) : null}
+                                                        {(() => {
+                                                            const lockReasonText = normalizeSubmissionLockReason(roundSubmission?.lock_reason);
+                                                            if (!lockReasonText || lockReasonText === 'Round is closed for submission') return null;
+                                                            return <p className="text-xs font-bold text-red-600">{lockReasonText}</p>;
+                                                        })()}
                                                         <div>
                                                             <Label className="text-xs font-bold uppercase tracking-[0.1em]">Submission Type</Label>
                                                             <Select

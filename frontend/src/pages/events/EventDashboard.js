@@ -122,6 +122,12 @@ const parseRoundNoValue = (value) => {
 const normalizeSubmissionType = (value) => (
     String(value || '').trim().toLowerCase() === 'link' ? 'link' : 'file'
 );
+const normalizeSubmissionLockReason = (reason) => {
+    const raw = String(reason || '').trim();
+    if (!raw) return '';
+    if (raw.toLowerCase() === 'round is frozen') return 'Round is closed for submission';
+    return raw;
+};
 
 const formatEventDate = (value) => {
     if (!value) return '';
@@ -747,7 +753,7 @@ export default function EventDashboard() {
             return;
         }
         if (!roundSubmission?.is_editable) {
-            toast.error(roundSubmission?.lock_reason || 'Submission is currently locked');
+            toast.error(normalizeSubmissionLockReason(roundSubmission?.lock_reason) || 'Submission is currently locked');
             return;
         }
         setSubmittingRoundWork(true);
@@ -846,7 +852,7 @@ export default function EventDashboard() {
             return;
         }
         if (!roundSubmission?.is_editable) {
-            toast.error(roundSubmission?.lock_reason || 'Submission is currently locked');
+            toast.error(normalizeSubmissionLockReason(roundSubmission?.lock_reason) || 'Submission is currently locked');
             return;
         }
         setRemovingRoundWork(true);
@@ -1063,16 +1069,23 @@ export default function EventDashboard() {
                                             className="flex h-[34rem] w-full flex-col overflow-hidden rounded-md border-4 border-black bg-[#fffdf9] p-5 text-left shadow-[6px_6px_0px_0px_#000000] transition-transform duration-150 hover:-translate-y-[2px]"
                                             onClick={() => setSelectedRound(round)}
                                         >
+                                            <div className="mb-2">
+                                                <span className="inline-flex rounded-md border-2 border-black bg-[#8B5CF6] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-white">
+                                                    {`Round ${round.round_no || '-'}`}
+                                                </span>
+                                            </div>
                                             <div className="flex flex-wrap items-center gap-2">
                                                 <h3 className="inline-flex w-fit rounded-md border-2 border-black bg-[#FDE047] px-3 py-1 font-heading text-lg font-black uppercase tracking-tight text-black">
                                                     {round.name}
                                                 </h3>
-                                                {roundDeadlineLabel ? (
-                                                    <span className="rounded-md border-2 border-black bg-[#fee2e2] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-red-700 shadow-neo">
+                                            </div>
+                                            {roundDeadlineLabel ? (
+                                                <div className="mt-2">
+                                                    <span className="inline-flex rounded-md border-2 border-black bg-[#fee2e2] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-red-700">
                                                         Deadline: {roundDeadlineLabel}
                                                     </span>
-                                                ) : null}
-                                            </div>
+                                                </div>
+                                            ) : null}
                                             {roundPosterAssets.length ? (
                                                 <div className="mt-3 overflow-hidden rounded-md border-2 border-black bg-[#11131a]">
                                                     <PosterCarousel
@@ -1387,6 +1400,7 @@ export default function EventDashboard() {
                                                             state: round?.round_state || round?.displayStatus || 'published',
                                                             date: round?.round_date || null,
                                                             requires_submission: Boolean(round?.requires_submission),
+                                                            allow_late_submission: Boolean(round?.allow_late_submission),
                                                             submission_mode: round?.submission_mode || null,
                                                             submission_deadline: round?.submission_deadline || null,
                                                             external_url: round?.external_url || '',
@@ -1395,20 +1409,22 @@ export default function EventDashboard() {
                                                         };
                                                         const roundForDetails = linkedRound || fallbackRound;
                                                         return (
-                                                            <div key={`${round.round_no}-${round.round_name}`} className="flex flex-wrap items-center justify-between gap-3 rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
-                                                                <div className="flex items-center gap-3">
+                                                            <div key={`${round.round_no}-${round.round_name}`} className="flex flex-wrap items-start justify-between gap-3 rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
+                                                                <div className="flex w-full items-start gap-3 sm:w-auto">
                                                                     <div className="inline-flex h-11 w-11 items-center justify-center rounded-md border-2 border-black bg-[#8B5CF6] font-heading text-sm font-black text-white shadow-neo">
                                                                         {String(round.round_no || '').slice(-2)}
                                                                     </div>
-                                                                    <div>
-                                                                        <div className="flex flex-wrap items-center gap-2">
+                                                                    <div className="min-w-0 flex-1">
+                                                                        <div className="flex flex-wrap items-start gap-2">
                                                                             <p className="font-heading text-lg font-black uppercase tracking-tight">{round.round_name}</p>
-                                                                            {submissionDeadlineLabel ? (
-                                                                                <span className="rounded-md border-2 border-black bg-[#fee2e2] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-red-700 shadow-neo">
+                                                                        </div>
+                                                                        {submissionDeadlineLabel ? (
+                                                                            <div className="mt-1">
+                                                                                <span className="inline-flex max-w-full break-words rounded-md border-2 border-black bg-[#fee2e2] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] leading-tight text-red-700">
                                                                                     Deadline: {submissionDeadlineLabel}
                                                                                 </span>
-                                                                            ) : null}
-                                                                        </div>
+                                                                            </div>
+                                                                        ) : null}
                                                                         <p className="text-xs font-medium uppercase tracking-[0.1em] text-slate-600">{round.round_no}</p>
                                                                         {panelNo !== null ? (
                                                                             <p className="mt-1 text-xs font-semibold uppercase tracking-[0.08em] text-slate-700">
@@ -1435,11 +1451,6 @@ export default function EventDashboard() {
                                                                                 <ExternalLink className="h-3.5 w-3.5" />
                                                                                 Panel Link
                                                                             </a>
-                                                                        ) : null}
-                                                                        {linkedRound?.requires_submission ? (
-                                                                            <p className="mt-1 text-xs font-semibold uppercase tracking-[0.08em] text-slate-700">
-                                                                                Submission Deadline (IST): {submissionDeadlineLabel || 'Not Set'}
-                                                                            </p>
                                                                         ) : null}
                                                                     </div>
                                                                 </div>
@@ -1906,14 +1917,18 @@ export default function EventDashboard() {
                                 </DialogTitle>
                             </DialogHeader>
                             <div className="space-y-5">
-                                <h3 className="inline-flex w-fit rounded-md border-2 border-black bg-[#FDE047] px-3 py-1 font-heading text-xl font-black uppercase tracking-tight text-black">
-                                    {selectedRound.name}
-                                </h3>
-                                {selectedRoundDeadlineLabel ? (
-                                    <div className="inline-flex items-center rounded-md border-2 border-black bg-[#fee2e2] px-3 py-1 text-xs font-bold uppercase tracking-[0.08em] text-red-700 shadow-neo">
-                                        Deadline: {selectedRoundDeadlineLabel}
-                                    </div>
-                                ) : null}
+                                <div className="space-y-2">
+                                    <h3 className="inline-flex w-fit rounded-md border-2 border-black bg-[#FDE047] px-3 py-1 font-heading text-xl font-black uppercase tracking-tight text-black">
+                                        {selectedRound.name}
+                                    </h3>
+                                    {selectedRoundDeadlineLabel ? (
+                                        <div>
+                                            <span className="inline-flex items-center rounded-md border-2 border-black bg-[#fee2e2] px-3 py-1 text-xs font-bold uppercase tracking-[0.08em] text-red-700">
+                                                Deadline: {selectedRoundDeadlineLabel}
+                                            </span>
+                                        </div>
+                                    ) : null}
+                                </div>
                                 <div className={`${selectedRoundPosterAssets.length ? 'grid gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:items-start' : 'space-y-4'}`}>
                                     {selectedRoundPosterAssets.length ? (
                                         <div className="space-y-3">
@@ -1986,8 +2001,19 @@ export default function EventDashboard() {
                                                 <h4 className="font-heading text-base font-black uppercase tracking-tight">Submission</h4>
                                                 <p className="mt-1 text-xs font-medium text-slate-700">
                                                     Mode: {selectedRound?.submission_mode || 'file_or_link'}
-                                                    {selectedRoundDeadlineLabel ? ` | Deadline (IST): ${selectedRoundDeadlineLabel}` : ' | Deadline (IST): Not Set'}
                                                 </p>
+                                                <p className="mt-1 text-xs font-medium text-slate-700">
+                                                    Deadline (IST): {selectedRoundDeadlineLabel || 'Not Set'}
+                                                </p>
+                                                {normalizeSubmissionLockReason(roundSubmission?.lock_reason) === 'Round is closed for submission' ? (
+                                                    <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                        Round is closed for submission
+                                                    </p>
+                                                ) : selectedRound?.allow_late_submission ? (
+                                                    <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                        Late submissions are allowed. Submissions after deadline will be marked as late.
+                                                    </p>
+                                                ) : null}
                                                 {!isParticipantRoute ? (
                                                     <p className="mt-3 text-sm font-medium text-slate-700">
                                                         Submission is available only in Participant Dashboard. Open your participant dashboard to submit work.
@@ -2030,9 +2056,11 @@ export default function EventDashboard() {
                                                         ) : (
                                                             <p className="text-sm font-medium text-slate-700">No submission yet.</p>
                                                         )}
-                                                        {roundSubmission?.lock_reason ? (
-                                                            <p className="text-xs font-bold text-red-600">{roundSubmission.lock_reason}</p>
-                                                        ) : null}
+                                                        {(() => {
+                                                            const lockReasonText = normalizeSubmissionLockReason(roundSubmission?.lock_reason);
+                                                            if (!lockReasonText || lockReasonText === 'Round is closed for submission') return null;
+                                                            return <p className="text-xs font-bold text-red-600">{lockReasonText}</p>;
+                                                        })()}
                                                         <div>
                                                             <Label className="text-xs font-bold uppercase tracking-[0.1em]">Submission Type</Label>
                                                             <Select

@@ -1655,6 +1655,7 @@ class PdaManagedRoundCreate(BaseModel):
     requires_submission: bool = False
     submission_mode: PdaManagedRoundSubmissionModeEnum = PdaManagedRoundSubmissionModeEnum.FILE_OR_LINK
     submission_deadline: Optional[datetime] = None
+    allow_late_submission: bool = False
     allowed_mime_types: List[str] = Field(
         default_factory=lambda: [
             "application/pdf",
@@ -1711,6 +1712,7 @@ class PdaManagedRoundUpdate(BaseModel):
     requires_submission: Optional[bool] = None
     submission_mode: Optional[PdaManagedRoundSubmissionModeEnum] = None
     submission_deadline: Optional[datetime] = None
+    allow_late_submission: Optional[bool] = None
     allowed_mime_types: Optional[List[str]] = None
     max_file_size_mb: Optional[int] = Field(default=None, ge=1, le=500)
     panel_mode_enabled: Optional[bool] = None
@@ -1755,6 +1757,7 @@ class PdaManagedRoundResponse(BaseModel):
     requires_submission: bool = False
     submission_mode: PdaManagedRoundSubmissionModeEnum = PdaManagedRoundSubmissionModeEnum.FILE_OR_LINK
     submission_deadline: Optional[datetime] = None
+    allow_late_submission: bool = False
     allowed_mime_types: Optional[List[str]] = Field(default_factory=list)
     max_file_size_mb: int = 25
     panel_mode_enabled: bool = False
@@ -1782,6 +1785,7 @@ class PdaEventPublicRoundResponse(BaseModel):
     requires_submission: bool = False
     submission_mode: PdaManagedRoundSubmissionModeEnum = PdaManagedRoundSubmissionModeEnum.FILE_OR_LINK
     submission_deadline: Optional[datetime] = None
+    allow_late_submission: bool = False
     allowed_mime_types: Optional[List[str]] = Field(default_factory=list)
     max_file_size_mb: int = 25
 

@@ -175,6 +175,7 @@ function RoundsContent() {
     const [date, setDate] = useState('');
     const [mode, setMode] = useState('Offline');
     const [requiresSubmission, setRequiresSubmission] = useState(false);
+    const [allowLateSubmission, setAllowLateSubmission] = useState(false);
     const [submissionMode, setSubmissionMode] = useState('file_or_link');
     const [submissionDeadlineDate, setSubmissionDeadlineDate] = useState('');
     const [submissionDeadlineTime, setSubmissionDeadlineTime] = useState('');
@@ -281,6 +282,7 @@ function RoundsContent() {
         setDate('');
         setMode('Offline');
         setRequiresSubmission(false);
+        setAllowLateSubmission(false);
         setSubmissionMode('file_or_link');
         setSubmissionDeadlineDate('');
         setSubmissionDeadlineTime('');
@@ -367,6 +369,7 @@ function RoundsContent() {
                 mode,
                 evaluation_criteria: cleanedCriteria.length > 0 ? cleanedCriteria : [{ name: 'Score', max_marks: 100 }],
                 requires_submission: Boolean(requiresSubmission),
+                allow_late_submission: Boolean(requiresSubmission && allowLateSubmission),
                 submission_mode: submissionMode || 'file_or_link',
                 submission_deadline: requiresSubmission ? submissionDeadlineIso : null,
                 allowed_mime_types: parsedMimeTypes.length ? parsedMimeTypes : DEFAULT_ALLOWED_MIME_TYPES,
@@ -386,6 +389,7 @@ function RoundsContent() {
                         ? editingRound.evaluation_criteria
                         : [{ name: 'Score', max_marks: 100 }],
                     requires_submission: Boolean(editingRound.requires_submission),
+                    allow_late_submission: Boolean(editingRound.allow_late_submission),
                     submission_mode: String(editingRound.submission_mode || 'file_or_link'),
                     submission_deadline: editingRound.submission_deadline || null,
                     allowed_mime_types: Array.isArray(editingRound.allowed_mime_types) && editingRound.allowed_mime_types.length
@@ -441,6 +445,7 @@ function RoundsContent() {
         setDate(round.date ? new Date(round.date).toISOString().split('T')[0] : '');
         setMode(round.mode || 'Offline');
         setRequiresSubmission(Boolean(round.requires_submission));
+        setAllowLateSubmission(Boolean(round.allow_late_submission));
         setSubmissionMode(String(round.submission_mode || 'file_or_link'));
         const deadlineInIst = splitIsoToIstDateTime(round.submission_deadline);
         setSubmissionDeadlineDate(deadlineInIst.date);
@@ -770,6 +775,24 @@ function RoundsContent() {
                                                 </SelectContent>
                                             </Select>
                                         </div>
+                                        <div className="flex items-center justify-between rounded-md border border-slate-300 bg-slate-50 px-3 py-2">
+                                            <Label className="font-bold">Allow Late Submission</Label>
+                                            <Switch
+                                                checked={Boolean(allowLateSubmission)}
+                                                onCheckedChange={(checked) => {
+                                                    const previous = allowLateSubmission;
+                                                    const next = checked === true;
+                                                    setAllowLateSubmission(next);
+                                                    registerRoundFormUndo('Undo late submission toggle', () => setAllowLateSubmission(previous));
+                                                }}
+                                                disabled={Boolean(editingRound?.is_frozen)}
+                                            />
+                                        </div>
+                                        {Boolean(editingRound?.is_frozen) ? (
+                                            <p className="text-xs font-semibold text-slate-600">
+                                                Round is frozen. Late submission cannot be enabled.
+                                            </p>
+                                        ) : null}
                                         <div className="grid grid-cols-2 gap-4">
                                             <div>
                                                 <Label className="font-bold">Submission Deadline Date (IST)</Label>
