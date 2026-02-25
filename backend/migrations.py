@@ -3012,6 +3012,159 @@ def resolve_user_identifier_collisions_once(engine):
         )
 
 
+def enforce_pda_event_entity_uniqueness_once(engine):
+    marker_key = "migration_enforce_pda_event_entity_uniqueness_v1"
+    with engine.begin() as conn:
+        if not _table_exists(conn, "system_config"):
+            return
+
+        marker_exists = bool(
+            conn.execute(
+                text("SELECT 1 FROM system_config WHERE key = :key"),
+                {"key": marker_key},
+            ).fetchone()
+        )
+        if marker_exists:
+            return
+
+        if _table_exists(conn, "pda_event_scores"):
+            # Keep latest row by id per logical entity key.
+            conn.execute(
+                text(
+                    """
+                    WITH ranked AS (
+                        SELECT
+                            id,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY event_id, round_id, entity_type, user_id
+                                ORDER BY id DESC
+                            ) AS rn
+                        FROM pda_event_scores
+                        WHERE entity_type = 'USER' AND user_id IS NOT NULL
+                    )
+                    DELETE FROM pda_event_scores s
+                    USING ranked r
+                    WHERE s.id = r.id
+                      AND r.rn > 1
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    WITH ranked AS (
+                        SELECT
+                            id,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY event_id, round_id, entity_type, team_id
+                                ORDER BY id DESC
+                            ) AS rn
+                        FROM pda_event_scores
+                        WHERE entity_type = 'TEAM' AND team_id IS NOT NULL
+                    )
+                    DELETE FROM pda_event_scores s
+                    USING ranked r
+                    WHERE s.id = r.id
+                      AND r.rn > 1
+                    """
+                )
+            )
+            if _constraint_exists(conn, "pda_event_scores", "uq_pda_event_score_entity"):
+                conn.execute(text("ALTER TABLE pda_event_scores DROP CONSTRAINT uq_pda_event_score_entity"))
+            conn.execute(
+                text(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_pda_event_score_entity_user
+                    ON pda_event_scores(event_id, round_id, user_id)
+                    WHERE entity_type = 'USER' AND user_id IS NOT NULL
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_pda_event_score_entity_team
+                    ON pda_event_scores(event_id, round_id, team_id)
+                    WHERE entity_type = 'TEAM' AND team_id IS NOT NULL
+                    """
+                )
+            )
+
+        if _table_exists(conn, "pda_event_attendance"):
+            # Keep latest row by id per logical entity key.
+            conn.execute(
+                text(
+                    """
+                    WITH ranked AS (
+                        SELECT
+                            id,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY event_id, round_id, entity_type, user_id
+                                ORDER BY id DESC
+                            ) AS rn
+                        FROM pda_event_attendance
+                        WHERE entity_type = 'USER' AND user_id IS NOT NULL
+                    )
+                    DELETE FROM pda_event_attendance a
+                    USING ranked r
+                    WHERE a.id = r.id
+                      AND r.rn > 1
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    WITH ranked AS (
+                        SELECT
+                            id,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY event_id, round_id, entity_type, team_id
+                                ORDER BY id DESC
+                            ) AS rn
+                        FROM pda_event_attendance
+                        WHERE entity_type = 'TEAM' AND team_id IS NOT NULL
+                    )
+                    DELETE FROM pda_event_attendance a
+                    USING ranked r
+                    WHERE a.id = r.id
+                      AND r.rn > 1
+                    """
+                )
+            )
+            if _constraint_exists(conn, "pda_event_attendance", "uq_pda_event_attendance_entity"):
+                conn.execute(text("ALTER TABLE pda_event_attendance DROP CONSTRAINT uq_pda_event_attendance_entity"))
+            conn.execute(
+                text(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_pda_event_attendance_entity_user
+                    ON pda_event_attendance(event_id, round_id, user_id)
+                    WHERE entity_type = 'USER' AND user_id IS NOT NULL
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_pda_event_attendance_entity_team
+                    ON pda_event_attendance(event_id, round_id, team_id)
+                    WHERE entity_type = 'TEAM' AND team_id IS NOT NULL
+                    """
+                )
+            )
+
+        conn.execute(
+            text(
+                """
+                INSERT INTO system_config (key, value)
+                VALUES (:key, 'done')
+                ON CONFLICT (key) DO UPDATE SET value = 'done'
+                """
+            ),
+            {"key": marker_key},
+        )
+
+
 def ensure_persohub_tables(engine):
     with engine.begin() as conn:
         conn.execute(

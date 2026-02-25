@@ -2263,17 +2263,38 @@ def update_round(
     if panel_mode_toggled:
         _recompute_round_normalized_scores(db, event, round_row)
 
+    shortlist_requested = (
+        "elimination_type" in updates
+        or "elimination_value" in updates
+        or eliminate_absent
+    )
     should_apply_shortlisting = (
         round_row.is_frozen
         and round_row.elimination_type
         and round_row.elimination_value is not None
-        and (
-            "elimination_type" in updates
-            or "elimination_value" in updates
-            or eliminate_absent
-        )
+        and shortlist_requested
     )
+    bulk_completed_round_ids: List[int] = []
+    bulk_completed_round_nos: List[int] = []
     if should_apply_shortlisting:
+        latest_shortlist_round = (
+            db.query(PdaEventRound.id, PdaEventRound.round_no)
+            .filter(
+                PdaEventRound.event_id == event.id,
+                PdaEventRound.is_frozen == True,  # noqa: E712
+                PdaEventRound.state.notin_([PdaEventRoundState.COMPLETED, PdaEventRoundState.REVEAL]),
+            )
+            .order_by(PdaEventRound.round_no.desc(), PdaEventRound.id.desc())
+            .first()
+        )
+        if not latest_shortlist_round:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No frozen round available for shortlisting")
+        if int(latest_shortlist_round.id) != int(round_row.id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Shortlisting is allowed only on the latest frozen round.",
+            )
+
         entity_type = PdaEventEntityType.USER if event.participant_mode == PdaEventParticipantMode.INDIVIDUAL else PdaEventEntityType.TEAM
         active_regs = (
             db.query(PdaEventRegistration)
@@ -2309,6 +2330,20 @@ def update_round(
                 continue
             shortlist_regs.append(reg)
 
+        eligible_round_ids = [
+            int(row.id)
+            for row in (
+                db.query(PdaEventRound.id)
+                .filter(
+                    PdaEventRound.event_id == event.id,
+                    (
+                        (PdaEventRound.is_frozen == True)  # noqa: E712
+                        | (PdaEventRound.state == PdaEventRoundState.COMPLETED)
+                    ),
+                )
+                .all()
+            )
+        ]
         totals = []
         for reg in shortlist_regs:
             entity_id = int(reg.user_id) if entity_type == PdaEventEntityType.USER else int(reg.team_id)
@@ -2318,10 +2353,13 @@ def update_round(
                         """
                         SELECT COALESCE(SUM(normalized_score), 0)
                         FROM pda_event_scores
-                        WHERE event_id = :event_id AND entity_type = 'USER' AND user_id = :entity_id
+                        WHERE event_id = :event_id
+                          AND entity_type = 'USER'
+                          AND user_id = :entity_id
+                          AND round_id = ANY(:round_ids)
                         """
                     ),
-                    {"event_id": event.id, "entity_id": entity_id},
+                    {"event_id": event.id, "entity_id": entity_id, "round_ids": eligible_round_ids},
                 ).scalar() or 0.0
             else:
                 total = db.execute(
@@ -2332,9 +2370,10 @@ def update_round(
                         WHERE event_id = :event_id
                           AND entity_type = 'TEAM'
                           AND team_id = :entity_id
+                          AND round_id = ANY(:round_ids)
                         """
                     ),
-                    {"event_id": event.id, "entity_id": entity_id},
+                    {"event_id": event.id, "entity_id": entity_id, "round_ids": eligible_round_ids},
                 ).scalar() or 0.0
             totals.append((reg, float(total), entity_id))
 
@@ -2351,7 +2390,22 @@ def update_round(
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid elimination type")
 
-        round_row.state = PdaEventRoundState.COMPLETED
+        rounds_to_complete = (
+            db.query(PdaEventRound)
+            .filter(
+                PdaEventRound.event_id == event.id,
+                PdaEventRound.is_frozen == True,  # noqa: E712
+                PdaEventRound.round_no <= int(round_row.round_no),
+                PdaEventRound.state.notin_([PdaEventRoundState.COMPLETED, PdaEventRoundState.REVEAL]),
+            )
+            .order_by(PdaEventRound.round_no.asc(), PdaEventRound.id.asc())
+            .all()
+        )
+        for row in rounds_to_complete:
+            row.state = PdaEventRoundState.COMPLETED
+            bulk_completed_round_ids.append(int(row.id))
+            bulk_completed_round_nos.append(int(row.round_no))
+
     db.commit()
     db.refresh(round_row)
     shortlist_audit_meta = {}
@@ -2367,6 +2421,9 @@ def update_round(
                 "shortlist_elimination_type": str(round_row.elimination_type or ""),
                 "shortlist_elimination_value": float(round_row.elimination_value or 0.0),
                 "shortlist_eliminate_absent": bool(eliminate_absent),
+                "bulk_completed_round_ids": bulk_completed_round_ids,
+                "bulk_completed_round_nos": bulk_completed_round_nos,
+                "bulk_completed_round_count": len(bulk_completed_round_ids),
             },
         )
     _log_event_admin_action(
@@ -5163,6 +5220,41 @@ def export_leaderboard(
     _: PdaUser = Depends(require_pda_event_admin),
     db: Session = Depends(get_db),
 ):
+    event = _get_event_or_404(db, slug)
+    round_rows_scope = (
+        db.query(PdaEventRound.id, PdaEventRound.state, PdaEventRound.is_frozen, PdaEventRound.round_no)
+        .filter(PdaEventRound.event_id == event.id)
+        .all()
+    )
+    event_round_ids = {int(row.id) for row in round_rows_scope}
+    eligible_round_ids = {
+        int(row.id)
+        for row in round_rows_scope
+        if bool(row.is_frozen) or row.state == PdaEventRoundState.COMPLETED
+    }
+    requested_round_ids: List[int] = []
+    if round_ids:
+        seen = set()
+        for value in round_ids:
+            rid = int(value)
+            if rid not in seen:
+                requested_round_ids.append(rid)
+                seen.add(rid)
+    if requested_round_ids:
+        invalid_rounds = sorted([rid for rid in requested_round_ids if rid not in event_round_ids])
+        if invalid_rounds:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid round_ids for this event: {invalid_rounds}",
+            )
+        ineligible_rounds = sorted([rid for rid in requested_round_ids if rid not in eligible_round_ids])
+        if ineligible_rounds:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Only completed or frozen rounds are allowed in round_ids: {ineligible_rounds}",
+            )
+    effective_round_ids = requested_round_ids if requested_round_ids else sorted(eligible_round_ids)
+
     leaderboard = event_leaderboard(
         slug=slug,
         department=department,
@@ -5170,7 +5262,7 @@ def export_leaderboard(
         batch=batch,
         status_filter=status_filter,
         search=search,
-        round_ids=round_ids,
+        round_ids=effective_round_ids,
         sort=sort,
         page=1,
         page_size=10000,
@@ -5178,40 +5270,141 @@ def export_leaderboard(
         _=None,
         db=db,
     )
-    event = _get_event_or_404(db, slug)
+    round_meta = (
+        db.query(PdaEventRound.id, PdaEventRound.round_no)
+        .filter(
+            PdaEventRound.event_id == event.id,
+            PdaEventRound.id.in_(effective_round_ids) if effective_round_ids else text("1=0"),
+        )
+        .order_by(PdaEventRound.round_no.asc(), PdaEventRound.id.asc())
+        .all()
+    )
+    ordered_rounds = [(int(row.id), int(row.round_no)) for row in round_meta]
+    dynamic_headers: List[str] = []
+    for _, round_no in ordered_rounds:
+        dynamic_headers.extend([f"R{round_no} Score", f"R{round_no} Rank"])
+
     if event.participant_mode == PdaEventParticipantMode.INDIVIDUAL:
-        headers = ["Rank", "Register Number", "Name", "Department", "Gender", "Batch", "Status", "Rounds", "Attendance", "Score", "Referral Count"]
-        rows = [
-            [
-                row.get("rank"),
-                row.get("register_number"),
-                row.get("name"),
-                row.get("department"),
-                row.get("gender"),
-                row.get("batch"),
-                row.get("status"),
-                row.get("rounds_participated", 0),
-                row.get("attendance_count", 0),
-                row.get("cumulative_score", 0),
-                row.get("referral_count", 0),
-            ]
-            for row in leaderboard
-        ]
+        headers = ["Si.No", "Register Number", "Name", "Department", "Gender", "Batch", "Status", "Rounds", "Attendance", "Referral Count"] + dynamic_headers + ["Overall Score", "Overall Rank"]
+        entity_ids = [int(row.get("entity_id")) for row in leaderboard if row.get("entity_id") is not None]
+        score_map: Dict[Tuple[int, int], float] = {}
+        if entity_ids and effective_round_ids:
+            score_rows = (
+                db.query(PdaEventScore.user_id, PdaEventScore.round_id, PdaEventScore.normalized_score)
+                .filter(
+                    PdaEventScore.event_id == event.id,
+                    PdaEventScore.entity_type == PdaEventEntityType.USER,
+                    PdaEventScore.user_id.in_(entity_ids),
+                    PdaEventScore.round_id.in_(effective_round_ids),
+                )
+                .all()
+            )
+            for user_id, round_id, normalized_score in score_rows:
+                if user_id is None or round_id is None:
+                    continue
+                score_map[(int(user_id), int(round_id))] = float(normalized_score or 0.0)
+        round_rank_map: Dict[Tuple[int, int], int] = {}
+        if entity_ids and ordered_rounds:
+            for round_id, _round_no in ordered_rounds:
+                ranked_pairs = sorted(
+                    ((entity_id, score_map.get((entity_id, round_id), 0.0)) for entity_id in entity_ids),
+                    key=lambda item: (-float(item[1]), int(item[0])),
+                )
+                prev_score: Optional[float] = None
+                prev_rank = 0
+                for index, (entity_id, score_value) in enumerate(ranked_pairs, start=1):
+                    if prev_score is None or float(score_value) != float(prev_score):
+                        prev_rank = index
+                        prev_score = float(score_value)
+                    round_rank_map[(entity_id, round_id)] = prev_rank
+
+        rows = []
+        for index, row in enumerate(leaderboard, start=1):
+            entity_id = int(row.get("entity_id") or 0)
+            round_columns: List[object] = []
+            for round_id, _round_no in ordered_rounds:
+                round_columns.extend(
+                    [
+                        score_map.get((entity_id, round_id), 0.0),
+                        round_rank_map.get((entity_id, round_id), "—"),
+                    ]
+                )
+            rows.append(
+                [
+                    index,
+                    row.get("register_number"),
+                    row.get("name"),
+                    row.get("department"),
+                    row.get("gender"),
+                    row.get("batch"),
+                    row.get("status"),
+                    row.get("rounds_participated", 0),
+                    row.get("attendance_count", 0),
+                    row.get("referral_count", 0),
+                    *round_columns,
+                    row.get("cumulative_score", 0),
+                    row.get("rank") if row.get("rank") is not None else "—",
+                ]
+            )
     else:
-        headers = ["Rank", "Entity Type", "Name", "Register/Team Code", "Status", "Rounds", "Attendance", "Score"]
-        rows = [
-            [
-                row["rank"],
-                row["entity_type"],
-                row["name"],
-                row["regno_or_code"],
-                row.get("status"),
-                row.get("rounds_participated", 0),
-                row["attendance_count"],
-                row["cumulative_score"],
-            ]
-            for row in leaderboard
-        ]
+        headers = ["Si.No", "Entity Type", "Name", "Register/Team Code", "Status", "Rounds", "Attendance"] + dynamic_headers + ["Overall Score", "Overall Rank"]
+        entity_ids = [int(row.get("entity_id")) for row in leaderboard if row.get("entity_id") is not None]
+        score_map: Dict[Tuple[int, int], float] = {}
+        if entity_ids and effective_round_ids:
+            score_rows = (
+                db.query(PdaEventScore.team_id, PdaEventScore.round_id, PdaEventScore.total_score)
+                .filter(
+                    PdaEventScore.event_id == event.id,
+                    PdaEventScore.entity_type == PdaEventEntityType.TEAM,
+                    PdaEventScore.team_id.in_(entity_ids),
+                    PdaEventScore.round_id.in_(effective_round_ids),
+                )
+                .all()
+            )
+            for team_id, round_id, total_score in score_rows:
+                if team_id is None or round_id is None:
+                    continue
+                score_map[(int(team_id), int(round_id))] = float(total_score or 0.0)
+        round_rank_map: Dict[Tuple[int, int], int] = {}
+        if entity_ids and ordered_rounds:
+            for round_id, _round_no in ordered_rounds:
+                ranked_pairs = sorted(
+                    ((entity_id, score_map.get((entity_id, round_id), 0.0)) for entity_id in entity_ids),
+                    key=lambda item: (-float(item[1]), int(item[0])),
+                )
+                prev_score: Optional[float] = None
+                prev_rank = 0
+                for index, (entity_id, score_value) in enumerate(ranked_pairs, start=1):
+                    if prev_score is None or float(score_value) != float(prev_score):
+                        prev_rank = index
+                        prev_score = float(score_value)
+                    round_rank_map[(entity_id, round_id)] = prev_rank
+
+        rows = []
+        for index, row in enumerate(leaderboard, start=1):
+            entity_id = int(row.get("entity_id") or 0)
+            round_columns: List[object] = []
+            for round_id, _round_no in ordered_rounds:
+                round_columns.extend(
+                    [
+                        score_map.get((entity_id, round_id), 0.0),
+                        round_rank_map.get((entity_id, round_id), "—"),
+                    ]
+                )
+            rows.append(
+                [
+                    index,
+                    row["entity_type"],
+                    row["name"],
+                    row["regno_or_code"],
+                    row.get("status"),
+                    row.get("rounds_participated", 0),
+                    row["attendance_count"],
+                    *round_columns,
+                    row["cumulative_score"],
+                    row.get("rank") if row.get("rank") is not None else "—",
+                ]
+            )
     if format == "pdf":
         content = _export_leaderboard_to_pdf(db=db, event=event, leaderboard=leaderboard)
         media_type = "application/pdf"
@@ -5236,18 +5429,41 @@ def export_round(
     db: Session = Depends(get_db),
 ):
     result = round_participants(slug=slug, round_id=round_id, admin=admin, db=db)
-    headers = ["Entity Type", "Name", "Register/Team Code", "Total Score", "Normalized Score", "Present"]
-    rows = [
-        [
-            row["entity_type"],
-            row["name"],
-            row["regno_or_code"],
-            row["total_score"],
-            row["normalized_score"],
-            row["is_present"],
-        ]
-        for row in result
-    ]
+    headers = ["Si.No", "Name", "Register/Team Code", "Total Score", "Normalized Score", "Round Rank", "Present"]
+    ranked_rows = sorted(
+        [row for row in result if bool(row.get("is_present"))],
+        key=lambda row: (
+            -float(row.get("normalized_score") or 0.0),
+            str(row.get("name") or "").lower(),
+            str(row.get("regno_or_code") or "").lower(),
+        ),
+    )
+    round_rank_map: Dict[Tuple[str, int], int] = {}
+    prev_score: Optional[float] = None
+    prev_rank = 0
+    for index, row in enumerate(ranked_rows, start=1):
+        score = float(row.get("normalized_score") or 0.0)
+        if prev_score is None or score != prev_score:
+            prev_rank = index
+            prev_score = score
+        entity_id = int(row.get("entity_id") or 0)
+        entity_type = str(row.get("entity_type") or "")
+        round_rank_map[(entity_type, entity_id)] = prev_rank
+
+    rows = []
+    for index, row in enumerate(result, start=1):
+        entity_key = (str(row.get("entity_type") or ""), int(row.get("entity_id") or 0))
+        rows.append(
+            [
+                index,
+                row.get("name"),
+                row.get("regno_or_code"),
+                row.get("total_score"),
+                row.get("normalized_score"),
+                round_rank_map.get(entity_key, "—"),
+                row.get("is_present"),
+            ]
+        )
     event = _get_event_or_404(db, slug)
     if format == "xlsx":
         content = _export_to_xlsx(headers, rows)
@@ -5276,15 +5492,36 @@ def export_round_panel_wise(
     round_row = _get_event_round_or_404(db, event.id, round_id)
     result = round_participants(slug=slug, round_id=round_id, search=None, admin=admin, db=db)
 
-    headers = ["Entity Type", "Name", "Register/Team Code", "Total Score", "Normalized Score", "Present"]
+    headers = ["Si.No", "Name", "Register/Team Code", "Total Score", "Normalized Score", "Round Rank", "Present"]
+    ranked_rows = sorted(
+        [row for row in result if bool(row.get("is_present"))],
+        key=lambda row: (
+            -float(row.get("normalized_score") or 0.0),
+            str(row.get("name") or "").lower(),
+            str(row.get("regno_or_code") or "").lower(),
+        ),
+    )
+    round_rank_map: Dict[Tuple[str, int], int] = {}
+    prev_score: Optional[float] = None
+    prev_rank = 0
+    for index, row in enumerate(ranked_rows, start=1):
+        score = float(row.get("normalized_score") or 0.0)
+        if prev_score is None or score != prev_score:
+            prev_rank = index
+            prev_score = score
+        entity_id = int(row.get("entity_id") or 0)
+        entity_type = str(row.get("entity_type") or "")
+        round_rank_map[(entity_type, entity_id)] = prev_rank
 
-    def _to_export_row(row: dict) -> List[object]:
+    def _to_export_row(row: dict, serial_no: int) -> List[object]:
+        entity_key = (str(row.get("entity_type") or ""), int(row.get("entity_id") or 0))
         return [
-            row.get("entity_type"),
+            serial_no,
             row.get("name"),
             row.get("regno_or_code"),
             row.get("total_score"),
             row.get("normalized_score"),
+            round_rank_map.get(entity_key, "—"),
             row.get("is_present"),
         ]
 
@@ -5299,20 +5536,19 @@ def export_round_panel_wise(
             .order_by(PdaEventRoundPanel.panel_no.asc(), PdaEventRoundPanel.id.asc())
             .all()
         )
-        rows_by_panel_id: Dict[int, List[List[object]]] = {}
-        unassigned_rows: List[List[object]] = []
+        rows_by_panel_id: Dict[int, List[dict]] = {}
+        unassigned_rows: List[dict] = []
         for participant in result:
             panel_id = participant.get("panel_id")
-            export_row = _to_export_row(participant)
             if panel_id is None:
-                unassigned_rows.append(export_row)
+                unassigned_rows.append(participant)
                 continue
             try:
                 safe_panel_id = int(panel_id)
             except Exception:
-                unassigned_rows.append(export_row)
+                unassigned_rows.append(participant)
                 continue
-            rows_by_panel_id.setdefault(safe_panel_id, []).append(export_row)
+            rows_by_panel_id.setdefault(safe_panel_id, []).append(participant)
 
         known_panel_ids: Set[int] = set()
         for panel in panel_rows:
@@ -5323,21 +5559,37 @@ def export_round_panel_wise(
             label = f"Panel {panel_no}"
             if panel_name:
                 label = f"{label} - {panel_name}"
-            sheets.append((label, rows_by_panel_id.get(panel_id, [])))
+            panel_participants = rows_by_panel_id.get(panel_id, [])
+            sheets.append((label, [_to_export_row(row, index) for index, row in enumerate(panel_participants, start=1)]))
 
         orphan_panel_ids = sorted([panel_id for panel_id in rows_by_panel_id.keys() if panel_id not in known_panel_ids])
         for panel_id in orphan_panel_ids:
-            sheets.append((f"Panel {panel_id}", rows_by_panel_id.get(panel_id, [])))
+            panel_participants = rows_by_panel_id.get(panel_id, [])
+            sheets.append((f"Panel {panel_id}", [_to_export_row(row, index) for index, row in enumerate(panel_participants, start=1)]))
 
         if unassigned_rows or not sheets:
-            sheets.append(("Unassigned", unassigned_rows))
+            sheets.append(("Unassigned", [_to_export_row(row, index) for index, row in enumerate(unassigned_rows, start=1)]))
     else:
-        sheets.append(("All Participants", [_to_export_row(row) for row in result]))
+        sheets.append(("All Participants", [_to_export_row(row, index) for index, row in enumerate(result, start=1)]))
 
     content = _export_to_multi_sheet_xlsx(headers, sheets)
     media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     filename = f"{event.event_code}_round_{round_row.round_no}_panel_wise.xlsx"
     return StreamingResponse(io.BytesIO(content), media_type=media_type, headers={"Content-Disposition": f"attachment; filename={filename}"})
+
+
+def _normalize_badge_place_value(value: Optional[object]) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "SpecialMention"
+    normalized = raw.replace(" ", "").replace("-", "").replace("_", "").lower()
+    if normalized == "winner":
+        return "Winner"
+    if normalized == "runner":
+        return "Runner"
+    if normalized == "specialmention":
+        return "SpecialMention"
+    return "SpecialMention"
 
 
 @router.post("/pda-admin/events/{slug}/badges", response_model=PdaManagedBadgeResponse)
@@ -5387,7 +5639,7 @@ def create_badge(
         title=str(created_badge.badge_name),
         image_url=created_badge.image_url,
         reveal_video_url=created_badge.reveal_video_url,
-        place=str(meta.get("place") or "SpecialMention"),
+        place=_normalize_badge_place_value(meta.get("place")),
         score=meta.get("score"),
         user_id=created_assignment.user_id,
         team_id=created_assignment.pda_team_id,
@@ -5447,7 +5699,7 @@ def list_badges(
                 title=str(badge.badge_name),
                 image_url=badge.image_url,
                 reveal_video_url=badge.reveal_video_url,
-                place=str(meta.get("place") or "SpecialMention"),
+                place=_normalize_badge_place_value(meta.get("place")),
                 score=meta.get("score"),
                 user_id=assignment.user_id,
                 team_id=assignment.pda_team_id,

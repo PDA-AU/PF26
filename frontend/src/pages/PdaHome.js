@@ -93,6 +93,24 @@ const extractEventSlug = (item) => {
     return match?.[1] ? String(match[1]).trim().toLowerCase() : '';
 };
 
+const resolveCardAction = (item, type) => {
+    const heroUrl = String(item?.hero_url || '').trim();
+    if (heroUrl.startsWith('/')) {
+        return {
+            href: heroUrl,
+            label: heroUrl.toLowerCase().startsWith('/events/') ? 'Open Event' : 'Open Program',
+        };
+    }
+    const eventSlug = extractEventSlug(item);
+    if (eventSlug) {
+        return { href: `/events/${eventSlug}`, label: 'Open Event' };
+    }
+    return {
+        href: '',
+        label: type === 'event' ? 'Open Event' : 'Open Program',
+    };
+};
+
 const shortDept = (value) => {
     const key = String(value || '').trim();
     return DEPT_SHORT[key] || key || '';
@@ -390,7 +408,7 @@ export default function PdaHome() {
         const meta = buildCardMeta(item);
         const cardKey = `${type}-${item.id || item.title}`;
         const description = item.description || '';
-        const eventSlug = extractEventSlug(item);
+        const action = resolveCardAction(item, type);
         const cardAssets = filterPosterAssetsByRatio(getItemPosterAssets(item), ['4:5', '5:4']);
         const preferredAsset = pickPosterAssetByRatio(cardAssets, ['4:5', '5:4']);
         const preferredSrc = resolvePosterUrl(preferredAsset?.url);
@@ -405,7 +423,8 @@ export default function PdaHome() {
                         title: item.title,
                         meta,
                         description,
-                        eventSlug
+                        actionHref: action.href,
+                        actionLabel: action.label,
                     })
                 }
                 className={`flex h-full min-h-[360px] w-full flex-col rounded-2xl border border-black/10 bg-white p-5 text-left transition hover:-translate-y-1 hover:border-black/25 hover:shadow-md ${
@@ -439,7 +458,7 @@ export default function PdaHome() {
                 <h3 className="mt-4 text-xl font-heading font-bold line-clamp-2">{item.title}</h3>
                 <div className="mt-2 min-h-[96px] pr-2 text-sm text-slate-700">
                     {description ? (
-                        <div className="max-h-24 space-y-1 overflow-y-auto">
+                        <div className="space-y-1 break-words [overflow-wrap:anywhere]">
                             <ParsedDescription description={description} />
                         </div>
                     ) : (
@@ -587,7 +606,8 @@ export default function PdaHome() {
                                                 activeFeaturedItem?.format ? ` · ${activeFeaturedItem?.format}` : ''
                                             }`,
                                             description: activeFeaturedItem?.description || '',
-                                            eventSlug: extractEventSlug(activeFeaturedItem)
+                                            actionHref: resolveCardAction(activeFeaturedItem, activeFeaturedItem?.__type || 'program').href,
+                                            actionLabel: resolveCardAction(activeFeaturedItem, activeFeaturedItem?.__type || 'program').label,
                                         })
                                     }
                                 />
@@ -1130,11 +1150,11 @@ export default function PdaHome() {
                                     emptyText="No description available."
                                 />
                             </div>
-                            {selectedPoster?.eventSlug ? (
+                            {selectedPoster?.actionHref ? (
                                 <div className="mt-4">
-                                    <Link to={`/events/${selectedPoster.eventSlug}`}>
+                                    <Link to={selectedPoster.actionHref}>
                                         <Button className="bg-[#11131a] text-white hover:bg-[#1f2330]">
-                                            Open Event
+                                            {selectedPoster.actionLabel || 'Open Event'}
                                         </Button>
                                     </Link>
                                 </div>

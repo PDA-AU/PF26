@@ -52,6 +52,7 @@ from migrations import (
     ensure_persohub_event_panel_tables,
     drop_legacy_persohub_sympo_table,
     backfill_pda_event_round_count_once,
+    enforce_pda_event_entity_uniqueness_once,
     resolve_user_identifier_collisions_once,
     remove_legacy_persofest_once,
     clear_legacy_poster_urls_once,
@@ -189,6 +190,7 @@ async def startup_event():
     ensure_badge_catalog_refactor(engine)
     ensure_pda_recruitment_tables(engine)
     ensure_system_config_recruit_url_column(engine)
+    enforce_pda_event_entity_uniqueness_once(engine)
     resolve_user_identifier_collisions_once(engine)
 
     migrate_legacy_recruitment_json_once(engine)

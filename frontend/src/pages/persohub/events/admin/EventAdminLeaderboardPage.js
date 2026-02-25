@@ -472,7 +472,10 @@ function LeaderboardContent() {
 
     const targetShortlistRound = useMemo(
         () => frozenNotCompletedRounds.reduce((latest, round) => {
-            if (!latest || round.id > latest.id) return round;
+            const currentRoundNo = Number(round?.round_no || 0);
+            const latestRoundNo = Number(latest?.round_no || 0);
+            if (!latest || currentRoundNo > latestRoundNo) return round;
+            if (currentRoundNo === latestRoundNo && Number(round?.id || 0) > Number(latest?.id || 0)) return round;
             return latest;
         }, null),
         [frozenNotCompletedRounds]
@@ -570,7 +573,8 @@ function LeaderboardContent() {
             fetchRows();
             fetchRounds();
         } catch (error) {
-            toast.error(getErrorMessage(error, 'Shortlist failed'));
+            const detail = error?.response?.data?.detail;
+            toast.error(typeof detail === 'string' && detail.trim() ? detail : getErrorMessage(error, 'Shortlist failed'));
         } finally {
             setShortlisting(false);
         }
@@ -687,7 +691,7 @@ function LeaderboardContent() {
                         <div>
                             <h2 className="font-heading font-bold text-xl">Shortlist participants</h2>
                             <p className="text-gray-700 text-sm">
-                                Frozen round {targetShortlistRound.round_no} is ready for shortlisting. This uses cumulative
+                                Shortlist runs once on latest frozen round {targetShortlistRound.round_no}. This uses cumulative
                                 scores from completed + frozen rounds.
                             </p>
                         </div>
@@ -702,7 +706,7 @@ function LeaderboardContent() {
                                 <div className="space-y-4">
                                     <p className="text-gray-600">
                                         This will eliminate {isTeamMode ? 'teams' : 'participants'} based on cumulative scores.
-                                        Round {targetShortlistRound.round_no} will be marked as completed.
+                                        All frozen rounds up to round {targetShortlistRound.round_no} will be marked as completed.
                                     </p>
                                     <div className="space-y-2">
                                         <div className="font-bold">Elimination Rule</div>
@@ -1063,7 +1067,7 @@ function LeaderboardContent() {
                     <table className="neo-table">
                         <thead>
                             <tr>
-                                <th>Rank</th>
+                                <th>Si.No</th>
                                 <th>{isTeamMode ? 'Team Code' : 'Register No'}</th>
                                 <th>{isTeamMode ? 'Team Name' : 'Name'}</th>
                                 {!isTeamMode ? <th>Department</th> : null}
@@ -1071,19 +1075,18 @@ function LeaderboardContent() {
                                 <th>Rounds</th>
                                 <th>Score</th>
                                 <th>Status</th>
+                                <th>Rank</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {pagedRows.map((entry) => (
+                            {pagedRows.map((entry, index) => (
                                 <tr
                                     key={`${entry.entity_type}-${entry.entity_id}`}
                                     className="cursor-pointer hover:bg-secondary"
                                     onClick={() => openEntityModal(entry)}
                                 >
                                     <td>
-                                        <span className={`w-8 h-8 inline-flex items-center justify-center border-2 border-black font-bold ${getRankBadge(entry.rank)}`}>
-                                            {entry.rank ?? '—'}
-                                        </span>
+                                        {(currentPage - 1) * pageSize + index + 1}
                                     </td>
                                     <td className="font-mono font-bold">{entry.regno_or_code || entry.register_number}</td>
                                     <td className="font-medium">{entry.name}</td>
@@ -1102,6 +1105,11 @@ function LeaderboardContent() {
                                     <td>
                                         <span className={`tag border-2 ${entry.status === 'Active' ? 'bg-green-100 text-green-800 border-green-500' : 'bg-red-100 text-red-800 border-red-500'}`}>
                                             {entry.status}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span className={`w-8 h-8 inline-flex items-center justify-center border-2 border-black font-bold ${getRankBadge(entry.rank)}`}>
+                                            {entry.rank ?? '—'}
                                         </span>
                                     </td>
                                 </tr>

@@ -121,6 +121,14 @@
     background-color: #F9FAFB;
 }
 
+.neo-table tr.row-dirty {
+    background-color: rgba(253, 186, 116, 0.6) !important;
+}
+
+.neo-table tr.row-dirty:hover {
+    background-color: rgba(251, 146, 60, 0.7) !important;
+}
+
 .neo-table tr:hover {
     background-color: #C4B5FD;
 }

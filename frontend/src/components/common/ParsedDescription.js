@@ -52,7 +52,7 @@ const renderMentionHashtagText = (
                 <a
                     key={`${keyPrefix}-m-${index}`}
                     href={`/persohub/${mentionValue}`}
-                    className="font-semibold text-teal-700 underline underline-offset-2 hover:text-teal-800"
+                    className="font-semibold text-teal-700 underline underline-offset-2 break-all hover:text-teal-800"
                 >
                     {token}
                 </a>
@@ -65,7 +65,7 @@ const renderMentionHashtagText = (
                     <button
                         key={`${keyPrefix}-h-${index}`}
                         type="button"
-                        className="cursor-pointer border-0 bg-transparent p-0 font-semibold text-orange-700 underline underline-offset-2 hover:text-orange-800"
+                        className="cursor-pointer border-0 bg-transparent p-0 font-semibold text-orange-700 underline underline-offset-2 break-all hover:text-orange-800"
                         onClick={() => onHashtagClick(hashtagValue)}
                     >
                         {token}
@@ -76,7 +76,7 @@ const renderMentionHashtagText = (
                 <a
                     key={`${keyPrefix}-h-${index}`}
                     href={`/persohub?hashtag=${encodeURIComponent(hashtagValue)}`}
-                    className="font-semibold text-orange-700 underline underline-offset-2 hover:text-orange-800"
+                    className="font-semibold text-orange-700 underline underline-offset-2 break-all hover:text-orange-800"
                 >
                     {token}
                 </a>

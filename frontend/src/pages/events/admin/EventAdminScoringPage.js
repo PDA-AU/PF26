@@ -354,7 +354,9 @@ function ScoringContent() {
     const [importPreview, setImportPreview] = useState(null);
     const [pendingImportFile, setPendingImportFile] = useState(null);
     const [confirmingImport, setConfirmingImport] = useState(false);
+    const [exportDialogOpen, setExportDialogOpen] = useState(false);
     const [exportingRound, setExportingRound] = useState(false);
+    const [exportingRoundCsv, setExportingRoundCsv] = useState(false);
     const [exportingPanelWise, setExportingPanelWise] = useState(false);
     const [panelConfig, setPanelConfig] = useState({
         panel_mode_enabled: false,
@@ -1488,7 +1490,7 @@ function ScoringContent() {
     };
 
     const exportRoundEvaluation = async () => {
-        if (exportingRound || exportingPanelWise) return;
+        if (exportingRound || exportingRoundCsv || exportingPanelWise) return;
         setExportingRound(true);
         try {
             const response = await axios.get(`${API}/pda-admin/events/${eventSlug}/export/round/${roundId}?format=xlsx`, {
@@ -1503,6 +1505,7 @@ function ScoringContent() {
             link.click();
             link.remove();
             window.URL.revokeObjectURL(url);
+            setExportDialogOpen(false);
             toast.success('Round evaluation exported');
         } catch (error) {
             toast.error(getErrorMessage(error, 'Failed to export round evaluation'));
@@ -1511,8 +1514,33 @@ function ScoringContent() {
         }
     };
 
+    const exportRoundEvaluationCsv = async () => {
+        if (exportingRound || exportingRoundCsv || exportingPanelWise) return;
+        setExportingRoundCsv(true);
+        try {
+            const response = await axios.get(`${API}/pda-admin/events/${eventSlug}/export/round/${roundId}?format=csv`, {
+                headers: getAuthHeader(),
+                responseType: 'blob',
+            });
+            const url = window.URL.createObjectURL(new Blob([response.data]));
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `${round?.round_no || 'round'}_evaluation.csv`);
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(url);
+            setExportDialogOpen(false);
+            toast.success('Round evaluation exported');
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to export round evaluation'));
+        } finally {
+            setExportingRoundCsv(false);
+        }
+    };
+
     const exportRoundEvaluationPanelWise = async () => {
-        if (exportingRound || exportingPanelWise) return;
+        if (exportingRound || exportingRoundCsv || exportingPanelWise) return;
         setExportingPanelWise(true);
         try {
             const response = await axios.get(`${API}/pda-admin/events/${eventSlug}/export/round/${roundId}/panel-wise?format=xlsx`, {
@@ -1527,6 +1555,7 @@ function ScoringContent() {
             link.click();
             link.remove();
             window.URL.revokeObjectURL(url);
+            setExportDialogOpen(false);
             toast.success('Panel-wise evaluation exported');
         } catch (error) {
             toast.error(getErrorMessage(error, 'Failed to export panel-wise evaluation'));
@@ -1731,16 +1760,14 @@ function ScoringContent() {
                             <Button onClick={saveAllChanges} disabled={saving || panelSaving || panelAssignmentSaving || !totalDirtyCount} className="bg-primary text-white border-2 border-black shadow-neo">
                                 <Save className="w-4 h-4 mr-2" /> {(saving || panelSaving || panelAssignmentSaving) ? 'Saving...' : `Save${totalDirtyCount ? ` (${totalDirtyCount})` : ''}`}
                             </Button>
-                            {panelModeEnabled ? (
-                                <>
-                                    <Button onClick={exportRoundEvaluation} disabled={exportingRound || exportingPanelWise} variant="outline" className="border-2 border-black shadow-neo">
-                                        <Download className="w-4 h-4 mr-2" /> {exportingRound ? 'Exporting...' : 'Export Excel'}
-                                    </Button>
-                                    <Button onClick={exportRoundEvaluationPanelWise} disabled={exportingRound || exportingPanelWise} variant="outline" className="border-2 border-black shadow-neo">
-                                        <Download className="w-4 h-4 mr-2" /> {exportingPanelWise ? 'Exporting...' : 'Export Panel-wise'}
-                                    </Button>
-                                </>
-                            ) : null}
+                            <Button
+                                onClick={() => setExportDialogOpen(true)}
+                                disabled={exportingRound || exportingRoundCsv || exportingPanelWise}
+                                variant="outline"
+                                className="border-2 border-black shadow-neo"
+                            >
+                                <Download className="w-4 h-4 mr-2" /> Export Round Data
+                            </Button>
                             <Dialog open={freezeDialogOpen} onOpenChange={setFreezeDialogOpen}>
                                 <DialogTrigger asChild>
                                     <Button className="bg-orange-500 text-white border-2 border-black shadow-neo">
@@ -1769,14 +1796,14 @@ function ScoringContent() {
                         </div>
                     ) : (
                         <div className="flex flex-wrap gap-2">
-                            <Button onClick={exportRoundEvaluation} disabled={exportingRound || exportingPanelWise} variant="outline" className="border-2 border-black shadow-neo">
-                                <Download className="w-4 h-4 mr-2" /> {exportingRound ? 'Exporting...' : 'Export Excel'}
+                            <Button
+                                onClick={() => setExportDialogOpen(true)}
+                                disabled={exportingRound || exportingRoundCsv || exportingPanelWise}
+                                variant="outline"
+                                className="border-2 border-black shadow-neo"
+                            >
+                                <Download className="w-4 h-4 mr-2" /> Export Round Data
                             </Button>
-                            {panelModeEnabled ? (
-                                <Button onClick={exportRoundEvaluationPanelWise} disabled={exportingRound || exportingPanelWise} variant="outline" className="border-2 border-black shadow-neo">
-                                    <Download className="w-4 h-4 mr-2" /> {exportingPanelWise ? 'Exporting...' : 'Export Panel-wise'}
-                                </Button>
-                            ) : null}
                             <Button onClick={unfreezeRound} className="bg-orange-500 text-white border-2 border-black shadow-neo">
                                 <Lock className="w-4 h-4 mr-2" /> Unfreeze
                             </Button>
@@ -1784,6 +1811,43 @@ function ScoringContent() {
                     )}
                 </div>
             </div>
+
+            <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
+                <DialogContent className="border-4 border-black w-[calc(100vw-2rem)] sm:w-full max-h-[85vh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading font-bold text-xl">Export Round Data</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                        <Button
+                            onClick={exportRoundEvaluation}
+                            disabled={exportingRound || exportingRoundCsv || exportingPanelWise}
+                            variant="outline"
+                            className="w-full justify-start border-2 border-black shadow-neo"
+                        >
+                            <Download className="w-4 h-4 mr-2" /> {exportingRound ? 'Exporting...' : 'Export Excel'}
+                        </Button>
+                        <Button
+                            onClick={exportRoundEvaluationCsv}
+                            disabled={exportingRound || exportingRoundCsv || exportingPanelWise}
+                            variant="outline"
+                            className="w-full justify-start border-2 border-black shadow-neo"
+                        >
+                            <Download className="w-4 h-4 mr-2" /> {exportingRoundCsv ? 'Exporting...' : 'Export CSV'}
+                        </Button>
+                        <Button
+                            onClick={exportRoundEvaluationPanelWise}
+                            disabled={!panelModeEnabled || exportingRound || exportingRoundCsv || exportingPanelWise}
+                            variant="outline"
+                            className="w-full justify-start border-2 border-black shadow-neo"
+                        >
+                            <Download className="w-4 h-4 mr-2" /> {exportingPanelWise ? 'Exporting...' : 'Export Panel-wise'}
+                        </Button>
+                        {!panelModeEnabled ? (
+                            <p className="text-xs text-slate-600">Panel-wise export is available only when panel mode is enabled.</p>
+                        ) : null}
+                    </div>
+                </DialogContent>
+            </Dialog>
 
             <Dialog
                 open={criteriaDialogOpen}
@@ -2509,6 +2573,7 @@ function ScoringContent() {
                     <table className="neo-table">
                         <thead>
                             <tr>
+                                <th>Si.No</th>
                                 <th>{entityMode === 'team' ? 'Team Code' : 'Register No'}</th>
                                 <th>{entityMode === 'team' ? 'Team Name' : 'Name'}</th>
                                 <th>Round Status</th>
@@ -2522,7 +2587,7 @@ function ScoringContent() {
                             </tr>
                         </thead>
                         <tbody>
-                            {pagedRows.map((row) => {
+                            {pagedRows.map((row, index) => {
                                 const totalScore = getTotalScore(row);
                                 const maxScore = criteria.reduce((sum, criterion) => sum + Number(criterion.max_marks || 0), 0);
                                 const nonPanelNormalized = maxScore > 0 ? (totalScore / maxScore * 100).toFixed(2) : '0.00';
@@ -2549,8 +2614,9 @@ function ScoringContent() {
                                 return (
                                     <tr
                                         key={`${row._entityType}-${row._entityId}`}
-                                        className={rowHasUnsavedChanges ? 'bg-orange-100/60' : ''}
+                                        className={rowHasUnsavedChanges ? 'row-dirty' : ''}
                                     >
+                                        <td>{(currentPage - 1) * pageSize + index + 1}</td>
                                         <td className="font-mono font-bold">{row._code || '—'}</td>
                                         <td className="font-medium">{row._name || '—'}</td>
                                         <td>
@@ -2602,11 +2668,10 @@ function ScoringContent() {
                                             </td>
                                         ) : null}
                                         <td>
-                                            <Checkbox
+                                            <Switch
                                                 checked={Boolean(row.is_present)}
                                                 onCheckedChange={(checked) => handlePresenceChange(row._entityType, row._entityId, checked)}
                                                 disabled={!isRoundActive || !rowEditable}
-                                                className="border-2 border-black data-[state=checked]:bg-primary"
                                             />
                                         </td>
                                         <td>

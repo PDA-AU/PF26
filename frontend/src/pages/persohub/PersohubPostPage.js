@@ -71,12 +71,6 @@ export default function PersohubPostPage() {
         <div className="persohub-page">
             <PdaHeader />
             <div className="ph-layer ph-shell">
-                <header className="ph-header ph-section ph-span-all">
-                    <div className="ph-title-band">
-                        <h1 className="ph-title">POST VIEW</h1>
-                    </div>
-                    <p className="ph-sub">Focused conversation thread</p>
-                </header>
                 <div className="ph-card ph-side-card" style={{ marginBottom: '0.9rem' }}>
                     <Link to="/persohub" className="ph-action-btn" style={{ textDecoration: 'none', width: 'fit-content' }}>
                         <ArrowLeft size={14} /> Back to feed
