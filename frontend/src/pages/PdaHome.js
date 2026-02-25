@@ -147,7 +147,6 @@ export default function PdaHome() {
     const [birthdayUsers, setBirthdayUsers] = useState([]);
     const [galleryItems, setGalleryItems] = useState([]);
     const [teamFilter, setTeamFilter] = useState('Executive');
-    const [managedEvents, setManagedEvents] = useState([]);
 
     useEffect(() => {
         const elements = document.querySelectorAll('[data-reveal]');
@@ -184,12 +183,11 @@ export default function PdaHome() {
     useEffect(() => {
         const fetchPdaContent = async () => {
             try {
-                const [programsRes, eventsRes, teamRes, galleryRes, managedRes, birthdaysRes] = await Promise.all([
+                const [programsRes, eventsRes, teamRes, galleryRes, birthdaysRes] = await Promise.all([
                     axios.get(`${API}/pda/programs`, { params: { limit: PROGRAMS_FETCH_LIMIT } }),
                     axios.get(`${API}/pda/events`, { params: { limit: EVENTS_FETCH_LIMIT } }),
                     axios.get(`${API}/pda/team`),
                     axios.get(`${API}/pda/gallery`, { params: { limit: GALLERY_FETCH_LIMIT } }),
-                    axios.get(`${API}/pda/events/ongoing`),
                     axios.get(`${API}/pda/birthdays/today`)
                 ]);
                 const programData = programsRes.data || [];
@@ -207,7 +205,6 @@ export default function PdaHome() {
                 setTeamMembers(teamRes.data || []);
                 setBirthdayUsers(birthdaysRes.data || []);
                 setGalleryItems(galleryRes.data || []);
-                setManagedEvents(managedRes.data || []);
             } catch (error) {
                 console.error('Failed to load PDA content:', error);
             }
@@ -236,11 +233,6 @@ export default function PdaHome() {
             seenKeys.add(key);
             combined.push(item);
         };
-
-        managedEvents.forEach((item) => {
-            const key = item.slug ? `slug:${item.slug}` : `ongoing:${item.id || item.title}`;
-            addUnique({ ...item, __type: 'ongoing-event' }, key);
-        });
 
         featuredItems.forEach((item) => {
             const key = item.slug ? `slug:${item.slug}` : `${item.__type || 'featured'}:${item.id || item.title}`;
@@ -406,7 +398,7 @@ export default function PdaHome() {
                         actionLabel: action.label,
                     })
                 }
-                className="flex h-full min-h-[500px] w-full flex-col rounded-2xl border border-black/10 bg-white p-5 text-left transition hover:-translate-y-1 hover:border-black/25 hover:shadow-md"
+                className="flex h-[450px] w-full flex-col rounded-2xl border border-black/10 bg-white p-5 text-left transition hover:-translate-y-1 hover:border-black/25 hover:shadow-md"
             >
                 <div className="mb-4 aspect-[4/5] w-full overflow-hidden rounded-xl border border-black/10 bg-[#fff7dc]">
                     {preferredSrc ? (
@@ -433,7 +425,7 @@ export default function PdaHome() {
                     )}
                 </div>
                 <h3 className="mt-4 text-xl font-heading font-bold line-clamp-2">{item.title}</h3>
-                <div className="mt-2 flex-1 min-h-0 overflow-y-auto pr-2 text-sm text-slate-700">
+                <div className="mt-2 h-24 overflow-y-auto pr-2 text-sm text-slate-700">
                     {description ? (
                         <div className="space-y-1 break-words [overflow-wrap:anywhere]">
                             <ParsedDescription description={description} />
@@ -556,7 +548,7 @@ export default function PdaHome() {
                             }}
                         >
                             <div className={`transition-opacity duration-700 ease-in-out ${isFeaturedFading ? 'opacity-0' : 'opacity-100'} flex flex-col min-h-[220px]`}>
-                                <p className="text-xs uppercase tracking-[0.4em] text-[#8b6a00]">Featured & Ongoing</p>
+                                <p className="text-xs uppercase tracking-[0.4em] text-[#8b6a00]">Featured</p>
                                 <h2 className="mt-3 text-3xl font-heading font-black text-[#0f1115]">
                                     {activeFeaturedItem?.title}
                                 </h2>
