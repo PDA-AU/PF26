@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 import {
     parsePosterAssets,
     POSTER_ASPECT_RATIOS,
+    resolvePosterUrl,
     serializePosterAssets
 } from '@/utils/posterAssets';
 
@@ -240,6 +241,10 @@ export default function ItemsAdmin() {
     );
     const featuredPrograms = programs.filter((program) => program.is_featured);
     const featuredEvents = events.filter((event) => event.is_featured);
+    const getPreviewPosterSrc = (item) => {
+        const firstAsset = parsePosterAssets(item?.poster_url).find((asset) => String(asset?.url || '').trim());
+        return firstAsset ? resolvePosterUrl(firstAsset.url) : '';
+    };
     const formatDateRange = (item) => {
         if (!item?.start_date) return 'TBA';
         return `${item.start_date}${item.end_date ? ` → ${item.end_date}` : ''}`;
@@ -685,6 +690,16 @@ export default function ItemsAdmin() {
                             {previewItem?.__type === 'event' ? 'Event' : 'Program'}
                             {previewItem?.is_featured ? ' · Featured' : ''}
                         </p>
+                        {getPreviewPosterSrc(previewItem) ? (
+                            <div className="rounded-xl border border-black/10 bg-[#fffdf7] p-3">
+                                <p className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">Poster</p>
+                                <img
+                                    src={getPreviewPosterSrc(previewItem)}
+                                    alt={`${previewItem?.title || 'Item'} poster`}
+                                    className="max-h-80 w-full rounded-lg border border-black/10 bg-white object-contain"
+                                />
+                            </div>
+                        ) : null}
                         <p className="text-slate-600">
                             <span className="font-semibold text-slate-700">Dates:</span> {formatDateRange(previewItem)}
                         </p>

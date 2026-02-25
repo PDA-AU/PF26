@@ -3,7 +3,7 @@ import axios from 'axios';
 import QRCode from 'qrcode';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
-import { Award, Download, ExternalLink, QrCode, X } from 'lucide-react';
+import { Award, Copy, Download, ExternalLink, QrCode, X } from 'lucide-react';
 
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -634,6 +634,31 @@ export default function PdaProfile() {
             toast.error('Failed to generate profile QR');
         } finally {
             setProfileQrLoading(false);
+        }
+    };
+
+    const handleDownloadProfileQr = () => {
+        if (!profileQrImageUrl) return;
+        const profileSlug = String(user?.profile_name || 'profile').trim() || 'profile';
+        const anchor = document.createElement('a');
+        anchor.href = profileQrImageUrl;
+        anchor.download = `${profileSlug}_profile_qr.png`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+    };
+
+    const handleCopyProfileLink = async () => {
+        const targetProfileName = String(user?.profile_name || '').trim();
+        if (!targetProfileName) {
+            toast.error('Set your profile name first to copy profile link');
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(`${window.location.origin}/persohub/${encodeURIComponent(targetProfileName)}`);
+            toast.success('Profile link copied');
+        } catch {
+            toast.error('Failed to copy profile link');
         }
     };
 
@@ -1310,7 +1335,18 @@ export default function PdaProfile() {
                             <p className="text-sm font-medium text-slate-600">Unable to render QR.</p>
                         )}
                     </div>
-                    <div className="flex justify-end">
+                    <p className="text-[11px] font-medium text-slate-500 break-all">
+                        {`${window.location.origin}/persohub/${encodeURIComponent(String(user?.profile_name || '').trim())}`}
+                    </p>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                        <Button type="button" variant="outline" onClick={handleCopyProfileLink} className={neutralButtonClass}>
+                            <Copy className="mr-2 h-4 w-4" />
+                            Copy Link
+                        </Button>
+                        <Button type="button" onClick={handleDownloadProfileQr} disabled={!profileQrImageUrl} className={primaryButtonClass}>
+                            <Download className="mr-2 h-4 w-4" />
+                            Download QR
+                        </Button>
                         <Button type="button" onClick={() => setProfileQrOpen(false)} className={accentButtonClass}>
                             Close
                         </Button>

@@ -129,6 +129,8 @@ export default function PdaHome() {
     const eventScrollRef = useRef(null);
     const galleryScrollRef = useRef(null);
     const teamScrollRef = useRef(null);
+    const featuredTouchStartXRef = useRef(null);
+    const featuredTouchDeltaXRef = useRef(0);
     const [posterDialogOpen, setPosterDialogOpen] = useState(false);
     const [selectedPoster, setSelectedPoster] = useState(null);
     const [galleryDialogOpen, setGalleryDialogOpen] = useState(false);
@@ -363,7 +365,6 @@ export default function PdaHome() {
     }, [todayBirthdayWishes]);
 
     const openPoster = (poster) => {
-        if (!poster?.assets?.length) return;
         setSelectedPoster({
             ...poster,
             activeIndex: Number(poster.activeIndex || 0)
@@ -387,36 +388,27 @@ export default function PdaHome() {
         const cardKey = `${type}-${item.id || item.title}`;
         const description = item.description || '';
         const action = resolveCardAction(item, type);
-        const rawHeroUrl = String(item?.hero_url || '').trim();
-        const showProgramAction = type === 'program' && Boolean(rawHeroUrl) && Boolean(action.href);
-        const isInternalAction = action.href.startsWith('/');
         const cardAssets = filterPosterAssetsByRatio(getItemPosterAssets(item), ['4:5', '5:4']);
         const preferredAsset = pickPosterAssetByRatio(cardAssets, ['4:5', '5:4']);
         const preferredSrc = resolvePosterUrl(preferredAsset?.url);
-        const canOpenPoster = cardAssets.length > 0;
         return (
-            <article
+            <button
                 key={cardKey}
-                className="flex h-full min-h-[360px] w-full flex-col rounded-2xl border border-black/10 bg-white p-5 text-left transition hover:-translate-y-1 hover:border-black/25 hover:shadow-md"
+                type="button"
+                onClick={() =>
+                    openPoster({
+                        assets: cardAssets,
+                        activeIndex: preferredAsset ? cardAssets.findIndex((asset) => asset.url === preferredAsset.url) : 0,
+                        title: item.title,
+                        meta,
+                        description,
+                        actionHref: action.href,
+                        actionLabel: action.label,
+                    })
+                }
+                className="flex h-full min-h-[500px] w-full flex-col rounded-2xl border border-black/10 bg-white p-5 text-left transition hover:-translate-y-1 hover:border-black/25 hover:shadow-md"
             >
-                <button
-                    type="button"
-                    onClick={() =>
-                        openPoster({
-                            assets: cardAssets,
-                            activeIndex: preferredAsset ? cardAssets.findIndex((asset) => asset.url === preferredAsset.url) : 0,
-                            title: item.title,
-                            meta,
-                            description,
-                            actionHref: action.href,
-                            actionLabel: action.label,
-                        })
-                    }
-                    disabled={!canOpenPoster}
-                    className={`mb-4 aspect-[4/5] w-full overflow-hidden rounded-xl border border-black/10 bg-[#fff7dc] ${
-                        canOpenPoster ? 'cursor-pointer' : 'cursor-default'
-                    }`}
-                >
+                <div className="mb-4 aspect-[4/5] w-full overflow-hidden rounded-xl border border-black/10 bg-[#fff7dc]">
                     {preferredSrc ? (
                         <img
                             src={preferredSrc}
@@ -429,7 +421,7 @@ export default function PdaHome() {
                             No Poster
                         </div>
                     )}
-                </button>
+                </div>
                 <div className="min-h-[20px] text-xs uppercase tracking-[0.2em] text-slate-600">
                     {meta ? (
                         <span className="flex items-center gap-2">
@@ -441,7 +433,7 @@ export default function PdaHome() {
                     )}
                 </div>
                 <h3 className="mt-4 text-xl font-heading font-bold line-clamp-2">{item.title}</h3>
-                <div className="mt-2 h-28 overflow-y-auto pr-2 text-sm text-slate-700 sm:h-32">
+                <div className="mt-2 flex-1 min-h-0 overflow-y-auto pr-2 text-sm text-slate-700">
                     {description ? (
                         <div className="space-y-1 break-words [overflow-wrap:anywhere]">
                             <ParsedDescription description={description} />
@@ -450,32 +442,7 @@ export default function PdaHome() {
                         <p className="text-slate-400">No description provided.</p>
                     )}
                 </div>
-                <div className="mt-4 flex min-h-9 items-end">
-                    {showProgramAction ? (
-                        isInternalAction ? (
-                            <Link to={action.href}>
-                                <Button
-                                    type="button"
-                                    size="sm"
-                                    className="bg-[#f6c347] text-black hover:bg-[#ffd16b]"
-                                >
-                                    Open Program <ArrowRight className="ml-1 h-4 w-4" />
-                                </Button>
-                            </Link>
-                        ) : (
-                            <a href={action.href} target="_blank" rel="noreferrer">
-                                <Button
-                                    type="button"
-                                    size="sm"
-                                    className="bg-[#f6c347] text-black hover:bg-[#ffd16b]"
-                                >
-                                    Open Program <ArrowRight className="ml-1 h-4 w-4" />
-                                </Button>
-                            </a>
-                        )
-                    ) : null}
-                </div>
-            </article>
+            </button>
         );
     };
 
@@ -556,7 +523,38 @@ export default function PdaHome() {
 
                 {combinedFeaturedItems.length > 0 ? (
                     <section className="mx-auto w-full max-w-6xl px-5 pb-8">
-                        <div className="featured-glow-card grid gap-6 rounded-3xl border border-black/10 bg-gradient-to-r from-[#fff1c7] via-[#fff8e8] to-white p-6 md:grid-cols-2 md:min-h-[320px] lg:grid-cols-[1.2fr_0.8fr]" data-reveal>
+                        <div
+                            className="featured-glow-card grid gap-6 rounded-3xl border border-black/10 bg-gradient-to-r from-[#fff1c7] via-[#fff8e8] to-white p-6 md:grid-cols-2 md:min-h-[320px] lg:grid-cols-[1.2fr_0.8fr]"
+                            data-reveal
+                            onTouchStart={(event) => {
+                                if (combinedFeaturedItems.length <= 1) return;
+                                featuredTouchStartXRef.current = event.touches?.[0]?.clientX ?? null;
+                                featuredTouchDeltaXRef.current = 0;
+                            }}
+                            onTouchMove={(event) => {
+                                if (featuredTouchStartXRef.current === null) return;
+                                const currentX = event.touches?.[0]?.clientX ?? featuredTouchStartXRef.current;
+                                featuredTouchDeltaXRef.current = currentX - featuredTouchStartXRef.current;
+                            }}
+                            onTouchEnd={() => {
+                                if (combinedFeaturedItems.length <= 1) return;
+                                const delta = featuredTouchDeltaXRef.current;
+                                if (Math.abs(delta) < 50) {
+                                    featuredTouchStartXRef.current = null;
+                                    featuredTouchDeltaXRef.current = 0;
+                                    return;
+                                }
+                                if (delta < 0) {
+                                    setActiveFeaturedIndex((prev) => (prev + 1) % combinedFeaturedItems.length);
+                                } else {
+                                    setActiveFeaturedIndex((prev) => (
+                                        (prev - 1 + combinedFeaturedItems.length) % combinedFeaturedItems.length
+                                    ));
+                                }
+                                featuredTouchStartXRef.current = null;
+                                featuredTouchDeltaXRef.current = 0;
+                            }}
+                        >
                             <div className={`transition-opacity duration-700 ease-in-out ${isFeaturedFading ? 'opacity-0' : 'opacity-100'} flex flex-col min-h-[220px]`}>
                                 <p className="text-xs uppercase tracking-[0.4em] text-[#8b6a00]">Featured & Ongoing</p>
                                 <h2 className="mt-3 text-3xl font-heading font-black text-[#0f1115]">
@@ -1161,11 +1159,19 @@ export default function PdaHome() {
                             </div>
                             {selectedPoster?.actionHref ? (
                                 <div className="mt-4">
-                                    <Link to={selectedPoster.actionHref}>
-                                        <Button className="bg-[#11131a] text-white hover:bg-[#1f2330]">
-                                            {selectedPoster.actionLabel || 'Open Event'}
-                                        </Button>
-                                    </Link>
+                                    {String(selectedPoster.actionHref).startsWith('/') ? (
+                                        <Link to={selectedPoster.actionHref}>
+                                            <Button className="bg-[#11131a] text-white hover:bg-[#1f2330]">
+                                                {selectedPoster.actionLabel || 'Open Event'}
+                                            </Button>
+                                        </Link>
+                                    ) : (
+                                        <a href={selectedPoster.actionHref} target="_blank" rel="noreferrer">
+                                            <Button className="bg-[#11131a] text-white hover:bg-[#1f2330]">
+                                                {selectedPoster.actionLabel || 'Open Event'}
+                                            </Button>
+                                        </a>
+                                    )}
                                 </div>
                             ) : null}
                         </div>

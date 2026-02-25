@@ -8,6 +8,7 @@ import {
     CheckCircle2,
     Clock3,
     Copy,
+    Download,
     Eye,
     EyeOff,
     ExternalLink,
@@ -230,6 +231,9 @@ export default function EventDashboard() {
     const [qrDialogOpen, setQrDialogOpen] = useState(false);
     const [qrImageUrl, setQrImageUrl] = useState('');
     const [qrLoading, setQrLoading] = useState(false);
+    const [slugQrDialogOpen, setSlugQrDialogOpen] = useState(false);
+    const [slugQrImageUrl, setSlugQrImageUrl] = useState('');
+    const [slugQrLoading, setSlugQrLoading] = useState(false);
     const [selectedRound, setSelectedRound] = useState(null);
     const [roundSubmission, setRoundSubmission] = useState(null);
     const [loadingSubmission, setLoadingSubmission] = useState(false);
@@ -330,6 +334,18 @@ export default function EventDashboard() {
         const value = String(eventInfo?.external_url_name || '').trim();
         return value || 'Join whatsapp channel';
     }, [eventInfo?.external_url_name]);
+    const eventQrWhatsappShareUrl = useMemo(() => {
+        const eventUrl = `${window.location.origin}${infoPath}`;
+        const title = String(eventInfo?.title || 'PDA Event').trim();
+        const descriptionRaw = String(eventInfo?.description || '').replace(/\s+/g, ' ').trim();
+        const description = descriptionRaw.length > 500 ? `${descriptionRaw.slice(0, 497)}...` : descriptionRaw;
+        const messageLines = [
+            `*${title}*`,
+            `Description: ${description || 'Not provided'}`,
+            `Link: ${eventUrl}`,
+        ];
+        return `https://wa.me/?text=${encodeURIComponent(messageLines.join('\n\n'))}`;
+    }, [eventInfo?.description, eventInfo?.title, infoPath]);
     const selectedRoundPosterAssets = useMemo(
         () => parsePosterAssets(selectedRound?.round_poster),
         [selectedRound?.round_poster]
@@ -683,6 +699,38 @@ export default function EventDashboard() {
         }
     };
 
+    const downloadQrImage = (dataUrl, filename) => {
+        if (!dataUrl) return;
+        const anchor = document.createElement('a');
+        anchor.href = dataUrl;
+        anchor.download = filename;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+    };
+
+    const loadEventQr = async () => {
+        if (!eventSlug) return;
+        setSlugQrLoading(true);
+        try {
+            const eventUrl = `${window.location.origin}${infoPath}`;
+            const dataUrl = await QRCode.toDataURL(eventUrl, {
+                width: 360,
+                margin: 1,
+                color: {
+                    dark: '#000000',
+                    light: '#FFFFFF',
+                },
+            });
+            setSlugQrImageUrl(dataUrl);
+            setSlugQrDialogOpen(true);
+        } catch {
+            toast.error('Failed to generate event QR');
+        } finally {
+            setSlugQrLoading(false);
+        }
+    };
+
     const copyReferralCode = () => {
         if (!eventProfile?.referral_code) return;
         navigator.clipboard.writeText(eventProfile.referral_code);
@@ -989,6 +1037,17 @@ export default function EventDashboard() {
                                         </a>
                                     </div>
                                 ) : null}
+                                <div className="mt-3">
+                                    <Button
+                                        data-testid="event-overview-view-event-slug-qr-button"
+                                        className="border-2 border-black bg-[#11131a] text-white shadow-neo hover:bg-[#1f2330]"
+                                        onClick={loadEventQr}
+                                        disabled={slugQrLoading}
+                                    >
+                                        <QrCode className="mr-2 h-4 w-4" />
+                                        {slugQrLoading ? 'Generating QR...' : 'View Event QR'}
+                                    </Button>
+                                </div>
                             </div>
                             <div className="border-t-4 border-black bg-[#11131a] lg:self-start lg:border-l-4 lg:border-t-0">
                                 <div className="relative aspect-[4/5] w-full">
@@ -2148,6 +2207,71 @@ export default function EventDashboard() {
                                 className="border-2 border-black shadow-neo"
                                 onClick={() => {
                                     setQrDialogOpen(false);
+                                }}
+                            >
+                                Close
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={!isParticipantRoute && slugQrDialogOpen} onOpenChange={setSlugQrDialogOpen}>
+                <DialogContent className="max-h-[calc(100vh-2rem)] overflow-x-hidden overflow-y-auto border-4 border-black bg-white">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading text-2xl font-black uppercase tracking-tight">Event QR</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                        <p className="text-sm font-medium text-slate-700">Share this QR to open this event page directly.</p>
+                        <div className="flex justify-center rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
+                            {slugQrImageUrl ? (
+                                <img src={slugQrImageUrl} alt="Event QR" className="h-72 w-72 max-w-full" />
+                            ) : (
+                                <p className="text-sm font-medium text-slate-600">Unable to render QR.</p>
+                            )}
+                        </div>
+                        <p className="text-[11px] font-medium text-slate-500 break-all">{`${window.location.origin}${infoPath}`}</p>
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                            <a href={eventQrWhatsappShareUrl} target="_blank" rel="noreferrer">
+                                <Button
+                                    type="button"
+                                    className="border-2 border-black bg-[#22c55e] text-black shadow-neo hover:bg-[#16a34a]"
+                                >
+                                    <ExternalLink className="mr-2 h-4 w-4" />
+                                    Share to WhatsApp
+                                </Button>
+                            </a>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="border-2 border-black shadow-neo"
+                                onClick={async () => {
+                                    try {
+                                        await navigator.clipboard.writeText(`${window.location.origin}${infoPath}`);
+                                        toast.success('Event link copied');
+                                    } catch {
+                                        toast.error('Failed to copy event link');
+                                    }
+                                }}
+                            >
+                                <Copy className="mr-2 h-4 w-4" />
+                                Copy Link
+                            </Button>
+                            <Button
+                                type="button"
+                                className="border-2 border-black bg-[#8B5CF6] text-white shadow-neo"
+                                onClick={() => downloadQrImage(slugQrImageUrl, `${eventSlug || 'event'}_qr.png`)}
+                                disabled={!slugQrImageUrl}
+                            >
+                                <Download className="mr-2 h-4 w-4" />
+                                Download QR
+                            </Button>
+                            <Button
+                                data-testid="event-dashboard-close-event-slug-qr-button"
+                                variant="outline"
+                                className="border-2 border-black shadow-neo"
+                                onClick={() => {
+                                    setSlugQrDialogOpen(false);
                                 }}
                             >
                                 Close
