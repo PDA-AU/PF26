@@ -424,10 +424,10 @@ export default function PdaHome() {
                         <span className="opacity-0">Meta</span>
                     )}
                 </div>
-                <h3 className="mt-4 text-xl font-heading font-bold line-clamp-2">{item.title}</h3>
-                <div className="mt-2 h-24 overflow-y-auto pr-2 text-sm text-slate-700">
+                <h3 className="mt-4 shrink-0 text-xl font-heading font-bold leading-tight line-clamp-2">{item.title}</h3>
+                <div className="relative mt-2 h-44 shrink-0 overflow-y-auto pr-2 text-sm leading-5 text-slate-700">
                     {description ? (
-                        <div className="space-y-1 break-words [overflow-wrap:anywhere]">
+                        <div className="break-words [overflow-wrap:anywhere] [&>p]:m-0 [&>p+p]:mt-1.5 [&>ul]:m-0 [&>ul]:space-y-1 [&>ul]:pl-5">
                             <ParsedDescription description={description} />
                         </div>
                     ) : (
