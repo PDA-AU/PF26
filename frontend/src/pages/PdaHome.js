@@ -101,6 +101,12 @@ const resolveCardAction = (item, type) => {
             label: heroUrl.toLowerCase().startsWith('/events/') ? 'Open Event' : 'Open Program',
         };
     }
+    if (/^https?:\/\//i.test(heroUrl)) {
+        return {
+            href: heroUrl,
+            label: heroUrl.toLowerCase().includes('/events/') ? 'Open Event' : 'Open Program',
+        };
+    }
     const eventSlug = extractEventSlug(item);
     if (eventSlug) {
         return { href: `/events/${eventSlug}`, label: 'Open Event' };
@@ -176,46 +182,18 @@ export default function PdaHome() {
     useEffect(() => {
         const fetchPdaContent = async () => {
             try {
-                const [programsRes, eventsRes, teamRes, galleryRes, managedRes, allManagedRes, birthdaysRes] = await Promise.all([
+                const [programsRes, eventsRes, teamRes, galleryRes, managedRes, birthdaysRes] = await Promise.all([
                     axios.get(`${API}/pda/programs`, { params: { limit: PROGRAMS_FETCH_LIMIT } }),
                     axios.get(`${API}/pda/events`, { params: { limit: EVENTS_FETCH_LIMIT } }),
                     axios.get(`${API}/pda/team`),
                     axios.get(`${API}/pda/gallery`, { params: { limit: GALLERY_FETCH_LIMIT } }),
                     axios.get(`${API}/pda/events/ongoing`),
-                    axios.get(`${API}/pda/events/all`),
                     axios.get(`${API}/pda/birthdays/today`)
                 ]);
                 const programData = programsRes.data || [];
                 const eventData = eventsRes.data || [];
-                const managedAllData = allManagedRes.data || [];
-                const managedHomeCards = managedAllData.map((event) => ({
-                    id: `managed-${event.slug || event.id}`,
-                    type: 'event',
-                    title: event.title,
-                    description: event.description,
-                    poster_url: event.poster_url,
-                    start_date: event.start_date,
-                    end_date: event.end_date,
-                    format: event.format,
-                    hero_url: `/events/${event.slug}`,
-                    featured_poster_url: null,
-                    is_featured: false,
-                    created_at: event.created_at,
-                    slug: event.slug
-                }));
-                const mergedEventsMap = new Map();
-                [...eventData, ...managedHomeCards].forEach((event) => {
-                    const slug = extractEventSlug(event);
-                    const key = slug
-                        ? `slug:${slug}`
-                        : `${String(event.title || '').toLowerCase()}|${event.start_date || ''}|${event.end_date || ''}`;
-                    if (!mergedEventsMap.has(key)) {
-                        mergedEventsMap.set(key, event);
-                    }
-                });
-                const mergedEvents = Array.from(mergedEventsMap.values());
                 const sortedPrograms = sortByDateDesc(programData);
-                const sortedEvents = sortByDateDesc(mergedEvents);
+                const sortedEvents = sortByDateDesc(eventData);
                 setPrograms(sortedPrograms);
                 setEvents(sortedEvents);
                 const featuredList = [
@@ -409,29 +387,36 @@ export default function PdaHome() {
         const cardKey = `${type}-${item.id || item.title}`;
         const description = item.description || '';
         const action = resolveCardAction(item, type);
+        const rawHeroUrl = String(item?.hero_url || '').trim();
+        const showProgramAction = type === 'program' && Boolean(rawHeroUrl) && Boolean(action.href);
+        const isInternalAction = action.href.startsWith('/');
         const cardAssets = filterPosterAssetsByRatio(getItemPosterAssets(item), ['4:5', '5:4']);
         const preferredAsset = pickPosterAssetByRatio(cardAssets, ['4:5', '5:4']);
         const preferredSrc = resolvePosterUrl(preferredAsset?.url);
+        const canOpenPoster = cardAssets.length > 0;
         return (
-            <button
+            <article
                 key={cardKey}
-                type="button"
-                onClick={() =>
-                    openPoster({
-                        assets: cardAssets,
-                        activeIndex: preferredAsset ? cardAssets.findIndex((asset) => asset.url === preferredAsset.url) : 0,
-                        title: item.title,
-                        meta,
-                        description,
-                        actionHref: action.href,
-                        actionLabel: action.label,
-                    })
-                }
-                className={`flex h-full min-h-[360px] w-full flex-col rounded-2xl border border-black/10 bg-white p-5 text-left transition hover:-translate-y-1 hover:border-black/25 hover:shadow-md ${
-                    cardAssets.length ? 'cursor-pointer' : 'cursor-default'
-                }`}
+                className="flex h-full min-h-[360px] w-full flex-col rounded-2xl border border-black/10 bg-white p-5 text-left transition hover:-translate-y-1 hover:border-black/25 hover:shadow-md"
             >
-                <div className="mb-4 aspect-[4/5] w-full overflow-hidden rounded-xl border border-black/10 bg-[#fff7dc]">
+                <button
+                    type="button"
+                    onClick={() =>
+                        openPoster({
+                            assets: cardAssets,
+                            activeIndex: preferredAsset ? cardAssets.findIndex((asset) => asset.url === preferredAsset.url) : 0,
+                            title: item.title,
+                            meta,
+                            description,
+                            actionHref: action.href,
+                            actionLabel: action.label,
+                        })
+                    }
+                    disabled={!canOpenPoster}
+                    className={`mb-4 aspect-[4/5] w-full overflow-hidden rounded-xl border border-black/10 bg-[#fff7dc] ${
+                        canOpenPoster ? 'cursor-pointer' : 'cursor-default'
+                    }`}
+                >
                     {preferredSrc ? (
                         <img
                             src={preferredSrc}
@@ -444,7 +429,7 @@ export default function PdaHome() {
                             No Poster
                         </div>
                     )}
-                </div>
+                </button>
                 <div className="min-h-[20px] text-xs uppercase tracking-[0.2em] text-slate-600">
                     {meta ? (
                         <span className="flex items-center gap-2">
@@ -456,7 +441,7 @@ export default function PdaHome() {
                     )}
                 </div>
                 <h3 className="mt-4 text-xl font-heading font-bold line-clamp-2">{item.title}</h3>
-                <div className="mt-2 min-h-[96px] pr-2 text-sm text-slate-700">
+                <div className="mt-2 h-28 overflow-y-auto pr-2 text-sm text-slate-700 sm:h-32">
                     {description ? (
                         <div className="space-y-1 break-words [overflow-wrap:anywhere]">
                             <ParsedDescription description={description} />
@@ -465,8 +450,32 @@ export default function PdaHome() {
                         <p className="text-slate-400">No description provided.</p>
                     )}
                 </div>
-                <span className="mt-auto" />
-            </button>
+                <div className="mt-4 flex min-h-9 items-end">
+                    {showProgramAction ? (
+                        isInternalAction ? (
+                            <Link to={action.href}>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    className="bg-[#f6c347] text-black hover:bg-[#ffd16b]"
+                                >
+                                    Open Program <ArrowRight className="ml-1 h-4 w-4" />
+                                </Button>
+                            </Link>
+                        ) : (
+                            <a href={action.href} target="_blank" rel="noreferrer">
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    className="bg-[#f6c347] text-black hover:bg-[#ffd16b]"
+                                >
+                                    Open Program <ArrowRight className="ml-1 h-4 w-4" />
+                                </Button>
+                            </a>
+                        )
+                    ) : null}
+                </div>
+            </article>
         );
     };
 

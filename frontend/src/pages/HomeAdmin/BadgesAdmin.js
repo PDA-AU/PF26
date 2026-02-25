@@ -53,6 +53,8 @@ export default function BadgesAdmin() {
     const [assignmentSubmitting, setAssignmentSubmitting] = useState(false);
     const [badgeImageFile, setBadgeImageFile] = useState(null);
     const [badgeRevealVideoFile, setBadgeRevealVideoFile] = useState(null);
+    const [badgeImagePreviewUrl, setBadgeImagePreviewUrl] = useState('');
+    const [badgeRevealVideoPreviewUrl, setBadgeRevealVideoPreviewUrl] = useState('');
     const [assignConfirmOpen, setAssignConfirmOpen] = useState(false);
     const [assignPreview, setAssignPreview] = useState(null);
 
@@ -181,6 +183,26 @@ export default function BadgesAdmin() {
     useEffect(() => {
         setUsersPage(1);
     }, [userFilters]);
+
+    useEffect(() => {
+        if (!badgeImageFile) {
+            setBadgeImagePreviewUrl('');
+            return undefined;
+        }
+        const objectUrl = URL.createObjectURL(badgeImageFile);
+        setBadgeImagePreviewUrl(objectUrl);
+        return () => URL.revokeObjectURL(objectUrl);
+    }, [badgeImageFile]);
+
+    useEffect(() => {
+        if (!badgeRevealVideoFile) {
+            setBadgeRevealVideoPreviewUrl('');
+            return undefined;
+        }
+        const objectUrl = URL.createObjectURL(badgeRevealVideoFile);
+        setBadgeRevealVideoPreviewUrl(objectUrl);
+        return () => URL.revokeObjectURL(objectUrl);
+    }, [badgeRevealVideoFile]);
 
     const openBadgeModal = (badge = null) => {
         setBadgeEditing(badge);
@@ -691,6 +713,16 @@ export default function BadgesAdmin() {
                             <Label>Badge Image Upload</Label>
                             <Input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => setBadgeImageFile(event.target.files?.[0] || null)} />
                             <p className="text-xs text-slate-500">Uses S3 presigned upload. {badgeForm.image_url ? 'Current image is kept if no new file is selected.' : ''}</p>
+                            {(badgeImagePreviewUrl || badgeForm.image_url) ? (
+                                <div className="rounded-lg border border-black/10 bg-slate-50 p-2">
+                                    <p className="mb-2 text-xs font-semibold text-slate-600">Badge Image Preview</p>
+                                    <img
+                                        src={badgeImagePreviewUrl || badgeForm.image_url}
+                                        alt="Badge preview"
+                                        className="h-40 w-full rounded-md border border-black/10 bg-white object-contain"
+                                    />
+                                </div>
+                            ) : null}
                             {badgeForm.image_url ? (
                                 <a href={badgeForm.image_url} target="_blank" rel="noreferrer" className="text-xs text-blue-600 underline break-all">
                                     {badgeForm.image_url}
@@ -701,6 +733,17 @@ export default function BadgesAdmin() {
                             <Label>Badge Reveal Video Upload (optional)</Label>
                             <Input type="file" accept="video/mp4,video/webm,video/quicktime" onChange={(event) => setBadgeRevealVideoFile(event.target.files?.[0] || null)} />
                             <p className="text-xs text-slate-500">If empty, frontend falls back to default reveal animation.</p>
+                            {(badgeRevealVideoPreviewUrl || badgeForm.reveal_video_url) ? (
+                                <div className="rounded-lg border border-black/10 bg-slate-50 p-2">
+                                    <p className="mb-2 text-xs font-semibold text-slate-600">Reveal Video Preview</p>
+                                    <video
+                                        src={badgeRevealVideoPreviewUrl || badgeForm.reveal_video_url}
+                                        controls
+                                        preload="metadata"
+                                        className="h-44 w-full rounded-md border border-black/10 bg-black object-contain"
+                                    />
+                                </div>
+                            ) : null}
                             {badgeForm.reveal_video_url ? (
                                 <a href={badgeForm.reveal_video_url} target="_blank" rel="noreferrer" className="text-xs text-blue-600 underline break-all">
                                     {badgeForm.reveal_video_url}

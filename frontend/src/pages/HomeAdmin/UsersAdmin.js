@@ -789,7 +789,7 @@ export default function UsersAdmin() {
                                         ) : 'N/A'}
                                     </p>
                                     <p><span className="font-semibold text-slate-600">Team:</span> {selectedMember.team || 'Unassigned'}</p>
-                                    <p><span className="font-semibold text-slate-600">Designation:</span> {selectedMember.designation || 'Member'}</p>
+                                    <p><span className="font-semibold text-slate-600">Designation:</span> {selectedMember.designation || 'N/A'}</p>
                                     <p><span className="font-semibold text-slate-600">LinkedIn:</span> {selectedMember.linkedin_url || 'N/A'}</p>
                                     <p><span className="font-semibold text-slate-600">GitHub:</span> {selectedMember.github_url || 'N/A'}</p>
                                 </div>

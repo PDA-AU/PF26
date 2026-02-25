@@ -5,18 +5,16 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useAuth } from '@/context/AuthContext';
 import AdminLayout from '@/pages/HomeAdmin/AdminLayout';
 import { API, uploadPoster } from '@/pages/HomeAdmin/adminApi';
 import { compressImageToWebp } from '@/utils/imageCompression';
-import ParsedDescription, { parseDescriptionBlocks } from '@/components/common/ParsedDescription';
+import ParsedDescription from '@/components/common/ParsedDescription';
 import { toast } from 'sonner';
 import {
-    filterPosterAssetsByRatio,
     parsePosterAssets,
-    pickPosterAssetByRatio,
     POSTER_ASPECT_RATIOS,
-    resolvePosterUrl,
     serializePosterAssets
 } from '@/utils/posterAssets';
 
@@ -50,12 +48,6 @@ const releasePosterPreviewUrls = (rows) => {
     });
 };
 
-const getCardPosterSrc = (rawPosterUrl) => {
-    const assets = filterPosterAssetsByRatio(parsePosterAssets(rawPosterUrl), ['4:5', '5:4']);
-    const preferred = pickPosterAssetByRatio(assets, ['4:5', '5:4']);
-    return resolvePosterUrl(preferred?.url);
-};
-
 export default function ItemsAdmin() {
     const { canAccessHome, getAuthHeader } = useAuth();
     const [programs, setPrograms] = useState([]);
@@ -69,36 +61,8 @@ export default function ItemsAdmin() {
     const [savingEvent, setSavingEvent] = useState(false);
     const [programSearch, setProgramSearch] = useState('');
     const [eventSearch, setEventSearch] = useState('');
-    const [expandedDescriptions, setExpandedDescriptions] = useState({});
+    const [previewItem, setPreviewItem] = useState(null);
     const formRef = useRef(null);
-
-    const toggleDescription = (key) => {
-        setExpandedDescriptions((prev) => ({ ...prev, [key]: !prev[key] }));
-    };
-
-    const DescriptionPreview = ({ description, itemKey }) => {
-        const normalized = String(description || '').trim();
-        if (!normalized) return null;
-        const blocks = parseDescriptionBlocks(normalized);
-        const shouldShowToggle = blocks.length > 2 || normalized.length > 180;
-        const isExpanded = Boolean(expandedDescriptions[itemKey]);
-        return (
-            <div className="mt-2 text-sm text-slate-600">
-                <div className={isExpanded ? 'space-y-2' : 'max-h-[5.5rem] overflow-hidden space-y-2'}>
-                    <ParsedDescription description={normalized} />
-                </div>
-                {shouldShowToggle ? (
-                    <button
-                        type="button"
-                        onClick={() => toggleDescription(itemKey)}
-                        className="mt-1 text-xs font-semibold text-[#b48900] hover:underline"
-                    >
-                        {isExpanded ? 'Read less' : 'Read more'}
-                    </button>
-                ) : null}
-            </div>
-        );
-    };
 
     const fetchData = async () => {
         try {
@@ -274,6 +238,12 @@ export default function ItemsAdmin() {
             .filter(Boolean)
             .some((value) => value.toLowerCase().includes(eventSearch.toLowerCase()))
     );
+    const featuredPrograms = programs.filter((program) => program.is_featured);
+    const featuredEvents = events.filter((event) => event.is_featured);
+    const formatDateRange = (item) => {
+        if (!item?.start_date) return 'TBA';
+        return `${item.start_date}${item.end_date ? ` → ${item.end_date}` : ''}`;
+    };
 
     return (
         <AdminLayout title="Manage PDA Items" subtitle="Programs and events showcased on the PDA home page.">
@@ -498,40 +468,65 @@ export default function ItemsAdmin() {
                         className="w-full md:max-w-sm"
                     />
                 </div>
-                <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div className="mt-6 space-y-3">
                     {filteredPrograms.length ? filteredPrograms.map((program) => (
-                        <div key={program.id} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-3 min-w-0">
-                            {getCardPosterSrc(program.poster_url) ? (
-                                <img
-                                    src={getCardPosterSrc(program.poster_url)}
-                                    alt={`${program.title} poster`}
-                                    className="mb-2 aspect-[4/5] w-full rounded-xl border border-black/10 object-cover bg-white"
-                                />
-                            ) : null}
+                        <div
+                            key={program.id}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => setPreviewItem({ ...program, __type: 'program' })}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    setPreviewItem({ ...program, __type: 'program' });
+                                }
+                            }}
+                            className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4 min-w-0 cursor-pointer transition hover:border-black/20 hover:bg-[#fff9e8]"
+                        >
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                 <div className="min-w-0">
                                     <h3 className="text-base font-heading font-bold break-words">{program.title}</h3>
+                                    <p className="mt-1 text-xs uppercase tracking-[0.3em] text-slate-500">
+                                        {formatDateRange(program)}{program.format ? ` · ${program.format}` : ''}
+                                    </p>
                                     {program.tag ? (
-                                        <p className="text-xs uppercase tracking-[0.3em] text-[#b48900] break-words">{program.tag}</p>
+                                        <p className="mt-1 text-xs uppercase tracking-[0.3em] text-[#b48900] break-words">{program.tag}</p>
                                     ) : null}
                                     {program.is_featured ? (
-                                        <p className="mt-1 text-xs font-semibold uppercase tracking-[0.3em] text-[#b48900]">
-                                            Featured
-                                        </p>
+                                        <p className="mt-1 text-xs font-semibold uppercase tracking-[0.3em] text-[#b48900]">Featured</p>
                                     ) : null}
                                 </div>
                                 <div className="flex flex-wrap gap-2 sm:justify-end">
-                                    <Button variant="outline" onClick={() => editProgram(program)} className="border-black/10 text-xs" aria-label="Edit program">
+                                    <Button
+                                        variant="outline"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            editProgram(program);
+                                        }}
+                                        className="border-black/10 text-xs"
+                                        aria-label="Edit program"
+                                    >
                                         <Pencil className="h-4 w-4 sm:mr-1" />
                                         <span className="hidden sm:inline">Edit</span>
                                     </Button>
-                                    <Button variant="outline" onClick={() => deleteProgram(program.id)} className="border-black/10 text-xs" aria-label="Delete program">
+                                    <Button
+                                        variant="outline"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            deleteProgram(program.id);
+                                        }}
+                                        className="border-black/10 text-xs"
+                                        aria-label="Delete program"
+                                    >
                                         <Trash2 className="h-4 w-4 sm:mr-1" />
                                         <span className="hidden sm:inline">Delete</span>
                                     </Button>
                                     <Button
                                         variant="outline"
-                                        onClick={() => toggleProgramFeatured(program.id, !program.is_featured)}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            toggleProgramFeatured(program.id, !program.is_featured);
+                                        }}
                                         className={`border-black/10 text-xs ${program.is_featured ? 'text-[#b8890b]' : ''}`}
                                         aria-label={program.is_featured ? 'Unfeature program' : 'Feature program'}
                                     >
@@ -540,7 +535,6 @@ export default function ItemsAdmin() {
                                     </Button>
                                 </div>
                             </div>
-                            <DescriptionPreview description={program.description} itemKey={`program-${program.id}`} />
                         </div>
                     )) : (
                         <div className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4 text-sm text-slate-500">
@@ -551,20 +545,17 @@ export default function ItemsAdmin() {
 
                 <div className="mt-8 rounded-2xl border border-dashed border-black/10 bg-white/70 p-4">
                     <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Featured Programs</p>
-                    {programs.filter(program => program.is_featured).length ? (
-                        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                            {programs.filter(program => program.is_featured).map((program) => (
-                                <div key={`featured-${program.id}`} className="rounded-2xl border border-black/10 bg-white p-3">
-                                    {getCardPosterSrc(program.poster_url) ? (
-                                        <img
-                                            src={getCardPosterSrc(program.poster_url)}
-                                            alt={`${program.title} poster`}
-                                            className="mb-2 aspect-[4/5] w-full rounded-xl border border-black/10 object-cover bg-white"
-                                        />
-                                    ) : null}
-                                    <h3 className="text-base font-heading font-bold line-clamp-2 break-words">{program.title}</h3>
-                                    <DescriptionPreview description={program.description} itemKey={`featured-program-${program.id}`} />
-                                </div>
+                    {featuredPrograms.length ? (
+                        <div className="mt-4 space-y-2">
+                            {featuredPrograms.map((program) => (
+                                <button
+                                    key={`featured-${program.id}`}
+                                    type="button"
+                                    onClick={() => setPreviewItem({ ...program, __type: 'program' })}
+                                    className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-left text-sm hover:border-black/20"
+                                >
+                                    {program.title}
+                                </button>
                             ))}
                         </div>
                     ) : (
@@ -590,40 +581,62 @@ export default function ItemsAdmin() {
                         className="w-full md:max-w-sm"
                     />
                 </div>
-                <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div className="mt-6 space-y-3">
                     {filteredEvents.length ? filteredEvents.map((event) => (
-                        <div key={event.id} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-3 min-w-0">
-                            {getCardPosterSrc(event.poster_url) ? (
-                                <img
-                                    src={getCardPosterSrc(event.poster_url)}
-                                    alt={`${event.title} poster`}
-                                    className="mb-2 aspect-[4/5] w-full rounded-xl border border-black/10 object-cover bg-white"
-                                />
-                            ) : null}
+                        <div
+                            key={event.id}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => setPreviewItem({ ...event, __type: 'event' })}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    setPreviewItem({ ...event, __type: 'event' });
+                                }
+                            }}
+                            className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4 min-w-0 cursor-pointer transition hover:border-black/20 hover:bg-[#fff9e8]"
+                        >
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                 <div className="min-w-0">
                                     <h3 className="text-base font-heading font-bold break-words">{event.title}</h3>
-                                    <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
-                                        {event.start_date || 'TBA'}{event.end_date ? ` → ${event.end_date}` : ''}
+                                    <p className="mt-1 text-xs uppercase tracking-[0.3em] text-slate-500">
+                                        {formatDateRange(event)}{event.format ? ` · ${event.format}` : ''}
                                     </p>
                                     {event.is_featured ? (
-                                        <p className="mt-1 text-xs font-semibold uppercase tracking-[0.3em] text-[#b48900]">
-                                            Featured
-                                        </p>
+                                        <p className="mt-1 text-xs font-semibold uppercase tracking-[0.3em] text-[#b48900]">Featured</p>
                                     ) : null}
                                 </div>
                                 <div className="flex flex-wrap gap-2 sm:justify-end">
-                                    <Button variant="outline" onClick={() => editEvent(event)} className="border-black/10 text-xs" aria-label="Edit event">
+                                    <Button
+                                        variant="outline"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            editEvent(event);
+                                        }}
+                                        className="border-black/10 text-xs"
+                                        aria-label="Edit event"
+                                    >
                                         <Pencil className="h-4 w-4 sm:mr-1" />
                                         <span className="hidden sm:inline">Edit</span>
                                     </Button>
-                                    <Button variant="outline" onClick={() => deleteEvent(event.id)} className="border-black/10 text-xs" aria-label="Delete event">
+                                    <Button
+                                        variant="outline"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            deleteEvent(event.id);
+                                        }}
+                                        className="border-black/10 text-xs"
+                                        aria-label="Delete event"
+                                    >
                                         <Trash2 className="h-4 w-4 sm:mr-1" />
                                         <span className="hidden sm:inline">Delete</span>
                                     </Button>
                                     <Button
                                         variant="outline"
-                                        onClick={() => toggleEventFeatured(event.id, !event.is_featured)}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            toggleEventFeatured(event.id, !event.is_featured);
+                                        }}
                                         className={`border-black/10 text-xs ${event.is_featured ? 'text-[#b8890b]' : ''}`}
                                         aria-label={event.is_featured ? 'Unfeature event' : 'Feature event'}
                                     >
@@ -632,7 +645,6 @@ export default function ItemsAdmin() {
                                     </Button>
                                 </div>
                             </div>
-                            <DescriptionPreview description={event.description} itemKey={`event-${event.id}`} />
                         </div>
                     )) : (
                         <div className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4 text-sm text-slate-500">
@@ -643,23 +655,17 @@ export default function ItemsAdmin() {
 
                 <div className="mt-8 rounded-2xl border border-dashed border-black/10 bg-white/70 p-4">
                     <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Featured Events</p>
-                    {events.filter(event => event.is_featured).length ? (
-                        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                            {events.filter(event => event.is_featured).map((event) => (
-                                <div key={`featured-${event.id}`} className="rounded-2xl border border-black/10 bg-white p-3">
-                                    {getCardPosterSrc(event.poster_url) ? (
-                                        <img
-                                            src={getCardPosterSrc(event.poster_url)}
-                                            alt={`${event.title} poster`}
-                                            className="mb-2 aspect-[4/5] w-full rounded-xl border border-black/10 object-cover bg-white"
-                                        />
-                                    ) : null}
-                                    <h3 className="text-base font-heading font-bold line-clamp-2 break-words">{event.title}</h3>
-                                    <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
-                                        {event.start_date || 'TBA'}{event.end_date ? ` → ${event.end_date}` : ''}
-                                    </p>
-                                    <DescriptionPreview description={event.description} itemKey={`featured-event-${event.id}`} />
-                                </div>
+                    {featuredEvents.length ? (
+                        <div className="mt-4 space-y-2">
+                            {featuredEvents.map((event) => (
+                                <button
+                                    key={`featured-${event.id}`}
+                                    type="button"
+                                    onClick={() => setPreviewItem({ ...event, __type: 'event' })}
+                                    className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-left text-sm hover:border-black/20"
+                                >
+                                    {event.title}
+                                </button>
                             ))}
                         </div>
                     ) : (
@@ -667,6 +673,49 @@ export default function ItemsAdmin() {
                     )}
                 </div>
             </section>
+            <Dialog open={Boolean(previewItem)} onOpenChange={(open) => { if (!open) setPreviewItem(null); }}>
+                <DialogContent className="w-[calc(100vw-1rem)] max-w-2xl max-h-[calc(100vh-2rem)] overflow-x-hidden overflow-y-auto bg-white p-4 sm:p-6">
+                    <DialogHeader>
+                        <DialogTitle className="text-lg font-heading font-black">
+                            {previewItem?.title || 'Item Preview'}
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-3 text-sm">
+                        <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
+                            {previewItem?.__type === 'event' ? 'Event' : 'Program'}
+                            {previewItem?.is_featured ? ' · Featured' : ''}
+                        </p>
+                        <p className="text-slate-600">
+                            <span className="font-semibold text-slate-700">Dates:</span> {formatDateRange(previewItem)}
+                        </p>
+                        {previewItem?.format ? (
+                            <p className="text-slate-600">
+                                <span className="font-semibold text-slate-700">Format:</span> {previewItem.format}
+                            </p>
+                        ) : null}
+                        {previewItem?.tag ? (
+                            <p className="text-slate-600">
+                                <span className="font-semibold text-slate-700">Tag:</span> {previewItem.tag}
+                            </p>
+                        ) : null}
+                        {previewItem?.hero_url ? (
+                            <p className="break-all text-slate-600">
+                                <span className="font-semibold text-slate-700">Hero URL:</span> {previewItem.hero_url}
+                            </p>
+                        ) : null}
+                        <div className="rounded-xl border border-black/10 bg-[#fffdf7] p-3">
+                            <p className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-500">Description</p>
+                            {String(previewItem?.description || '').trim() ? (
+                                <div className="space-y-2 text-slate-700">
+                                    <ParsedDescription description={previewItem.description} />
+                                </div>
+                            ) : (
+                                <p className="text-slate-400">No description provided.</p>
+                            )}
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
             {loading ? (
                 <div className="rounded-3xl border border-black/10 bg-white p-8 text-center shadow-lg">
                     <p className="text-lg font-heading font-black">Loading PDA items...</p>

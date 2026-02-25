@@ -18,6 +18,20 @@ const statusBadgeClass = (status) => {
     return 'border-black/10 bg-white text-slate-700';
 };
 
+const formatDateTime = (value) => {
+    if (!value) return '-';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '-';
+    return parsed.toLocaleString('en-IN', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+    });
+};
+
 export default function PersohubAdminPaymentsPage() {
     const [loading, setLoading] = useState(true);
     const [rows, setRows] = useState([]);
@@ -130,6 +144,7 @@ export default function PersohubAdminPaymentsPage() {
                             const normalizedStatus = String(row.status || '').toLowerCase();
                             const isPending = normalizedStatus === 'pending';
                             const reviewReason = String(row?.review?.reason || '').trim();
+                            const reviewedAt = row?.review?.at || null;
                             return (
                                 <article key={row.id} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
                                     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -155,6 +170,8 @@ export default function PersohubAdminPaymentsPage() {
                                         <p><span className="font-semibold">Recipient Phone:</span> {row.participant_phno || '-'}</p>
                                         <p><span className="font-semibold">Recipient College:</span> {row.participant_college || '-'}</p>
                                         <p><span className="font-semibold">Recipient Dept:</span> {row.participant_dept || '-'}</p>
+                                        <p><span className="font-semibold">Submitted At:</span> {formatDateTime(row.created_at)}</p>
+                                        <p><span className="font-semibold">Reviewed At:</span> {formatDateTime(reviewedAt)}</p>
                                         {row.comment ? (
                                             <p className="sm:col-span-2"><span className="font-semibold">Payment Note:</span> {row.comment}</p>
                                         ) : null}
