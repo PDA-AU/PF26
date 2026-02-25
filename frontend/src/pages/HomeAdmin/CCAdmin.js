@@ -30,7 +30,6 @@ const EMPTY_COMMUNITY = {
     profile_id: '',
     club_id: 'none',
     admins: [{ row_id: 'admin-0', user_id: '', is_active: true }],
-    password: '',
     logo_url: '',
     description: '',
     is_active: true,
@@ -86,7 +85,6 @@ const normalizeCommunityPayload = (form, isCreate) => {
     };
     if (isCreate) {
         payload.profile_id = form.profile_id.trim().toLowerCase();
-        payload.password = form.password;
     }
     return payload;
 };
@@ -133,12 +131,8 @@ export default function CCAdmin() {
     const [eventMapTarget, setEventMapTarget] = useState(null);
     const [eventMapIds, setEventMapIds] = useState([]);
 
-    const [passwordModalOpen, setPasswordModalOpen] = useState(false);
-    const [passwordTarget, setPasswordTarget] = useState(null);
-    const [newPassword, setNewPassword] = useState('');
-
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-    const [deleteState, setDeleteState] = useState({ label: '', onConfirm: null, estimate: '' });
+    const [deleteState, setDeleteState] = useState({ label: '', onConfirm: null, estimate: '', expectedText: 'DELETE', warning: '' });
     const [deleteConfirmText, setDeleteConfirmText] = useState('');
 
     const headers = useMemo(() => getAuthHeader(), [getAuthHeader]);
@@ -363,7 +357,6 @@ export default function CCAdmin() {
                 user_id: item.user_id ? String(item.user_id) : '',
                 is_active: item.is_active !== false,
             })),
-            password: '',
             logo_url: community.logo_url || '',
             description: community.description || '',
             is_active: Boolean(community.is_active),
@@ -392,27 +385,6 @@ export default function CCAdmin() {
             await refreshData();
         } catch (error) {
             toast.error(parseApiError(error, 'Failed to save community'));
-        } finally {
-            setSubmitting(false);
-        }
-    };
-
-    const openResetPassword = (community) => {
-        setPasswordTarget(community);
-        setNewPassword('');
-        setPasswordModalOpen(true);
-    };
-
-    const submitResetPassword = async (e) => {
-        e.preventDefault();
-        if (!passwordTarget || submitting) return;
-        setSubmitting(true);
-        try {
-            await ccAdminApi.resetCommunityPassword(passwordTarget.id, { new_password: newPassword }, headers);
-            toast.success('Community password reset');
-            setPasswordModalOpen(false);
-        } catch (error) {
-            toast.error(parseApiError(error, 'Failed to reset password'));
         } finally {
             setSubmitting(false);
         }
@@ -517,14 +489,14 @@ export default function CCAdmin() {
         }
     };
 
-    const openDeleteDialog = ({ label, estimate = '', onConfirm }) => {
-        setDeleteState({ label, estimate, onConfirm });
+    const openDeleteDialog = ({ label, estimate = '', onConfirm, expectedText = 'DELETE', warning = '' }) => {
+        setDeleteState({ label, estimate, onConfirm, expectedText, warning });
         setDeleteConfirmText('');
         setDeleteModalOpen(true);
     };
 
     const confirmDelete = async () => {
-        if (deleteConfirmText.trim() !== 'DELETE' || !deleteState.onConfirm) return;
+        if (deleteConfirmText.trim() !== String(deleteState.expectedText || 'DELETE') || !deleteState.onConfirm) return;
         setSubmitting(true);
         try {
             const res = await deleteState.onConfirm();
@@ -647,6 +619,8 @@ export default function CCAdmin() {
                                                     onClick={() => openDeleteDialog({
                                                         label: `Delete club ${club.name}`,
                                                         estimate: `Estimated linked communities: ${club.linked_community_count}`,
+                                                        warning: 'This permanently deletes the club and related communities/sympos data.',
+                                                        expectedText: club.name,
                                                         onConfirm: () => ccAdminApi.deleteClub(club.id, headers),
                                                     })}
                                                 >
@@ -670,6 +644,8 @@ export default function CCAdmin() {
                                         <Button variant="destructive" size="sm" onClick={() => openDeleteDialog({
                                             label: `Delete club ${club.name}`,
                                             estimate: `Estimated linked communities: ${club.linked_community_count}`,
+                                            warning: 'This permanently deletes the club and related communities/sympos data.',
+                                            expectedText: club.name,
                                             onConfirm: () => ccAdminApi.deleteClub(club.id, headers),
                                         })}>Delete</Button>
                                     </div>
@@ -704,7 +680,6 @@ export default function CCAdmin() {
                                     </div>
                                     <div className="flex flex-wrap gap-2">
                                         <Button variant="outline" size="sm" onClick={() => openCommunityModal(community)}>Edit</Button>
-                                        <Button variant="outline" size="sm" onClick={() => openResetPassword(community)}>Reset Password</Button>
                                         <Button
                                             variant="destructive"
                                             size="sm"
@@ -955,18 +930,6 @@ export default function CCAdmin() {
                                 disabled={Boolean(communityEditing)}
                             />
                         </div>
-                        {!communityEditing ? (
-                            <div className="grid gap-2">
-                                <Label>Password</Label>
-                                <Input
-                                    type="password"
-                                    value={communityForm.password}
-                                    onChange={(e) => setCommunityForm((p) => ({ ...p, password: e.target.value }))}
-                                    required
-                                    minLength={8}
-                                />
-                            </div>
-                        ) : null}
                         <div className="grid gap-2">
                             <Label>Club</Label>
                             <Select value={communityForm.club_id} onValueChange={(v) => setCommunityForm((p) => ({ ...p, club_id: v }))}>
@@ -1162,24 +1125,6 @@ export default function CCAdmin() {
                 </DialogContent>
             </Dialog>
 
-            <Dialog open={passwordModalOpen} onOpenChange={setPasswordModalOpen}>
-                <DialogContent className="sm:max-w-md">
-                    <DialogHeader>
-                        <DialogTitle>Reset Password: {passwordTarget?.name || ''}</DialogTitle>
-                    </DialogHeader>
-                    <form className="space-y-4" onSubmit={submitResetPassword}>
-                        <div className="grid gap-2">
-                            <Label>New Password</Label>
-                            <Input type="password" minLength={8} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required />
-                        </div>
-                        <div className="flex justify-end gap-2">
-                            <Button type="button" variant="outline" onClick={() => setPasswordModalOpen(false)}>Cancel</Button>
-                            <Button type="submit" disabled={submitting}>{submitting ? 'Resetting...' : 'Reset Password'}</Button>
-                        </div>
-                    </form>
-                </DialogContent>
-            </Dialog>
-
             <Dialog open={deleteModalOpen} onOpenChange={setDeleteModalOpen}>
                 <DialogContent className="sm:max-w-md">
                     <DialogHeader>
@@ -1187,15 +1132,16 @@ export default function CCAdmin() {
                     </DialogHeader>
                     <div className="space-y-3 text-sm">
                         <p className="text-slate-700">This is a hard delete and will cascade to dependent data.</p>
+                        {deleteState.warning ? <p className="font-semibold text-red-600">{deleteState.warning}</p> : null}
                         {deleteState.estimate ? <p className="text-slate-500">{deleteState.estimate}</p> : null}
                         <div className="grid gap-2">
-                            <Label>Type `DELETE` to confirm</Label>
+                            <Label>Type `{deleteState.expectedText || 'DELETE'}` to confirm</Label>
                             <Input value={deleteConfirmText} onChange={(e) => setDeleteConfirmText(e.target.value)} />
                         </div>
                     </div>
                     <div className="flex justify-end gap-2">
                         <Button type="button" variant="outline" onClick={() => setDeleteModalOpen(false)}>Cancel</Button>
-                        <Button type="button" variant="destructive" onClick={confirmDelete} disabled={deleteConfirmText.trim() !== 'DELETE' || submitting}>
+                        <Button type="button" variant="destructive" onClick={confirmDelete} disabled={deleteConfirmText.trim() !== String(deleteState.expectedText || 'DELETE') || submitting}>
                             {submitting ? 'Deleting...' : 'Delete'}
                         </Button>
                     </div>

@@ -31,6 +31,7 @@ from migrations import (
     ensure_email_auth_columns,
     normalize_pda_admins_schema,
     drop_admin_logs_fk,
+    ensure_log_column_sizes,
     normalize_pda_team_schema,
     migrate_pda_team_social_handles_to_users,
     normalize_pda_team,
@@ -56,6 +57,7 @@ from migrations import (
     clear_legacy_poster_urls_once,
     ensure_persohub_tables,
     ensure_persohub_admins_table,
+    ensure_persohub_club_admins_table,
     ensure_persohub_owner_policy_refactor,
     ensure_badge_catalog_refactor,
     ensure_persohub_defaults,
@@ -164,6 +166,7 @@ async def startup_event():
     ensure_pda_team_constraints(engine)
     ensure_pda_gallery_tag_column(engine)
     drop_admin_logs_fk(engine)
+    ensure_log_column_sizes(engine)
     ensure_pda_admins_table(engine)
     ensure_email_auth_columns(engine)
     ensure_pda_event_tables(engine)
@@ -181,6 +184,7 @@ async def startup_event():
     backfill_pda_event_round_count_once(engine)
     ensure_persohub_tables(engine)
     ensure_persohub_admins_table(engine)
+    ensure_persohub_club_admins_table(engine)
     ensure_persohub_owner_policy_refactor(engine)
     ensure_badge_catalog_refactor(engine)
     ensure_pda_recruitment_tables(engine)

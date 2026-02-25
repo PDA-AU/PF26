@@ -8,8 +8,14 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 export const AuthProvider = ({ children }) => {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [accessToken, setAccessToken] = useState(localStorage.getItem('pdaAccessToken'));
-    const [refreshToken, setRefreshToken] = useState(localStorage.getItem('pdaRefreshToken'));
+    const initialAccessToken = localStorage.getItem('pdaAccessToken');
+    const initialRefreshToken = localStorage.getItem('pdaRefreshToken');
+    const hasInconsistentSession = Boolean(initialAccessToken && !initialRefreshToken);
+    if (hasInconsistentSession) {
+        localStorage.removeItem('pdaAccessToken');
+    }
+    const [accessToken, setAccessToken] = useState(hasInconsistentSession ? null : initialAccessToken);
+    const [refreshToken, setRefreshToken] = useState(initialRefreshToken);
 
     const logout = useCallback(() => {
         setUser(null);
@@ -17,6 +23,12 @@ export const AuthProvider = ({ children }) => {
         setRefreshToken(null);
         localStorage.removeItem('pdaAccessToken');
         localStorage.removeItem('pdaRefreshToken');
+        localStorage.removeItem('persohubActorMode');
+        localStorage.removeItem('persohubActorCommunityId');
+        localStorage.removeItem('persohubAdminAccessToken');
+        localStorage.removeItem('persohubAdminRefreshToken');
+        localStorage.removeItem('persohubCommunityAccessToken');
+        localStorage.removeItem('persohubCommunityRefreshToken');
     }, []);
 
     const tryRefreshToken = useCallback(async () => {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useAuth } from '@/context/AuthContext';
 import { usePersohubAdminAuth } from '@/context/PersohubAdminAuthContext';
 import { persohubAdminApi } from '@/pages/persohub/admin/api';
 import PdaLogo from '@/assets/pda-logo.png';
@@ -14,29 +15,58 @@ import PdaLogo from '@/assets/pda-logo.png';
 export default function PersohubAdminLayout({ children, title = 'Persohub Admin', subtitle = '', activeTab = 'profile' }) {
     const navigate = useNavigate();
     const location = useLocation();
+    const { user, loading: userLoading, login: pdaLogin, logout: pdaLogout } = useAuth();
     const {
         community,
         loading,
-        login,
-        logout,
-        selectClub,
-        pendingSelectionToken,
-        availableClubs,
-        clearSelection,
+        mode,
+        setMode,
+        switchableCommunities,
+        activeCommunityId,
+        setActiveCommunityId,
+        canUseCommunityMode,
+        reloadSession,
     } = usePersohubAdminAuth();
+
     const [loginLoading, setLoginLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
     const [loginForm, setLoginForm] = useState({ identifier: '', password: '' });
     const [selectedClubId, setSelectedClubId] = useState('');
+    const clubOptions = useMemo(() => {
+        const map = new Map();
+        for (const item of switchableCommunities || []) {
+            const clubId = Number(item.club_id || 0);
+            if (!Number.isFinite(clubId) || clubId <= 0 || map.has(clubId)) continue;
+            map.set(clubId, {
+                club_id: clubId,
+                club_name: item.club_name || `Club ${clubId}`,
+                community_id: Number(item.id),
+                profile_id: item.profile_id,
+            });
+        }
+        return Array.from(map.values());
+    }, [switchableCommunities]);
 
     useEffect(() => {
-        if (!availableClubs.length) {
+        if (!clubOptions.length) {
             setSelectedClubId('');
             return;
         }
         if (selectedClubId) return;
-        setSelectedClubId(String(availableClubs[0].club_id));
-    }, [availableClubs, selectedClubId]);
+        if (activeCommunityId && switchableCommunities.length) {
+            const activeRow = switchableCommunities.find((item) => Number(item.id) === Number(activeCommunityId));
+            if (activeRow?.club_id) {
+                setSelectedClubId(String(activeRow.club_id));
+                return;
+            }
+        }
+        setSelectedClubId(String(clubOptions[0].club_id));
+    }, [activeCommunityId, clubOptions, selectedClubId, switchableCommunities]);
+
+    const selectedClub = useMemo(
+        () => clubOptions.find((item) => String(item.club_id) === String(selectedClubId)) || null,
+        [clubOptions, selectedClubId],
+    );
 
     const handleLoginChange = (event) => {
         const { name, value } = event.target;
@@ -47,13 +77,9 @@ export default function PersohubAdminLayout({ children, title = 'Persohub Admin'
         event.preventDefault();
         setLoginLoading(true);
         try {
-            const response = await login(loginForm.identifier, loginForm.password);
-            const options = response?.clubs || response?.communities || [];
-            if (options.length > 0) {
-                toast.success('Select a club to continue');
-                return;
-            }
-            toast.error('No Persohub admin access found for this account');
+            await pdaLogin(loginForm.identifier.trim(), loginForm.password);
+            await reloadSession();
+            toast.success('Login successful');
         } catch (error) {
             toast.error(persohubAdminApi.parseApiError(error, 'Persohub admin login failed'));
         } finally {
@@ -61,40 +87,34 @@ export default function PersohubAdminLayout({ children, title = 'Persohub Admin'
         }
     };
 
-    const handleClubSelectionSubmit = async (event) => {
+    const handleCommunitySelectionSubmit = async (event) => {
         event.preventDefault();
-        if (!selectedClubId) {
+        if (!selectedClubId || !selectedClub) {
             toast.error('Select a club');
             return;
         }
         setLoginLoading(true);
         try {
-            await selectClub(Number(selectedClubId));
+            setActiveCommunityId(Number(selectedClub.community_id));
+            setMode('community');
             toast.success('Club selected');
-            const me = await persohubAdminApi.me();
-            if (me?.is_club_owner) {
-                navigate('/persohub/admin/profile', { replace: true });
-            } else {
-                navigate('/persohub/admin/persohub-events', { replace: true });
-            }
-        } catch (error) {
-            toast.error(persohubAdminApi.parseApiError(error, 'Failed to select club'));
+            navigate('/persohub/admin/profile', { replace: true });
         } finally {
             setLoginLoading(false);
         }
     };
 
-    if (loading) {
+    if (userLoading || loading) {
         return (
             <div className="min-h-screen bg-[#f7f5f0] flex items-center justify-center">
                 <div className="rounded-3xl border border-black/10 bg-white p-8 text-center shadow-lg">
-                    <p className="text-lg font-heading font-black">Checking community admin access...</p>
+                    <p className="text-lg font-heading font-black">Checking club admin access...</p>
                 </div>
             </div>
         );
     }
 
-    if (!community) {
+    if (!user || mode !== 'community' || !community) {
         return (
             <div className="min-h-screen bg-white flex">
                 <div className="hidden lg:flex lg:w-1/2 bg-primary relative overflow-hidden">
@@ -106,7 +126,7 @@ export default function PersohubAdminLayout({ children, title = 'Persohub Admin'
                             PERSOHUB ADMIN
                         </h1>
                         <p className="text-xl text-center max-w-md opacity-90">
-                            Sign in with your user account, then choose a club to manage Persohub communities and events.
+                            Sign in with your user account, then choose a club to manage Persohub.
                         </p>
                     </div>
                 </div>
@@ -132,89 +152,109 @@ export default function PersohubAdminLayout({ children, title = 'Persohub Admin'
                             Step 1: login with your user credentials
                         </p>
 
-                        <form onSubmit={handleLoginSubmit} className="space-y-6">
-                            <div className="space-y-2">
-                                <Label htmlFor="identifier" className="font-bold">
-                                    Identifier
-                                </Label>
-                                <Input
-                                    id="identifier"
-                                    name="identifier"
-                                    type="text"
-                                    placeholder="Reg no, profile name, or email"
-                                    value={loginForm.identifier}
-                                    onChange={handleLoginChange}
-                                    required
-                                    className="neo-input"
-                                />
-                            </div>
-
-                            <div className="space-y-2">
-                                <Label htmlFor="password" className="font-bold">
-                                    Password
-                                </Label>
-                                <div className="relative">
+                        {!user ? (
+                            <form onSubmit={handleLoginSubmit} className="space-y-6">
+                                <div className="space-y-2">
+                                    <Label htmlFor="identifier" className="font-bold">Identifier</Label>
                                     <Input
-                                        id="password"
-                                        name="password"
-                                        type={showPassword ? 'text' : 'password'}
-                                        placeholder="Enter your password"
-                                        value={loginForm.password}
+                                        id="identifier"
+                                        name="identifier"
+                                        type="text"
+                                        placeholder="Reg no"
+                                        value={loginForm.identifier}
                                         onChange={handleLoginChange}
                                         required
-                                        minLength={6}
-                                        className="neo-input pr-12"
+                                        className="neo-input"
                                     />
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowPassword((prev) => !prev)}
-                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-black"
-                                    >
-                                        {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                                    </button>
                                 </div>
-                            </div>
 
-                            <Button
-                                type="submit"
-                                disabled={loginLoading}
-                                className="w-full bg-primary text-white border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all py-6 text-lg font-bold"
-                            >
-                                {loginLoading ? 'Logging in...' : 'Continue'}
-                            </Button>
-                        </form>
-
-                        {pendingSelectionToken && availableClubs.length > 0 ? (
-                            <form onSubmit={handleClubSelectionSubmit} className="mt-8 space-y-4 border-t border-black/10 pt-6">
-                                <p className="text-gray-700 font-semibold">Step 2: select your club</p>
                                 <div className="space-y-2">
-                                    <Label htmlFor="club-select">Club</Label>
-                                    <Select value={selectedClubId} onValueChange={setSelectedClubId}>
-                                        <SelectTrigger id="club-select" className="neo-input">
-                                            <SelectValue placeholder="Select a club" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {availableClubs.map((option) => (
-                                                <SelectItem key={option.club_id} value={String(option.club_id)}>
-                                                    {option.club_name || `Club ${option.club_id}`} ({option.role})
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
+                                    <Label htmlFor="password" className="font-bold">Password</Label>
+                                    <div className="relative">
+                                        <Input
+                                            id="password"
+                                            name="password"
+                                            type={showPassword ? 'text' : 'password'}
+                                            placeholder="Enter your password"
+                                            value={loginForm.password}
+                                            onChange={handleLoginChange}
+                                            required
+                                            minLength={6}
+                                            className="neo-input pr-12"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowPassword((prev) => !prev)}
+                                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-black"
+                                        >
+                                            {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                                        </button>
+                                    </div>
                                 </div>
-                                <div className="flex gap-2">
-                                    <Button type="submit" disabled={loginLoading} className="flex-1">
-                                        {loginLoading ? 'Entering...' : 'Enter Club'}
-                                    </Button>
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        onClick={clearSelection}
-                                        disabled={loginLoading}
-                                    >
-                                        Clear
-                                    </Button>
-                                </div>
+
+                                <Button type="submit" disabled={loginLoading} className="w-full bg-primary text-white border-2 border-black shadow-neo hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all py-6 text-lg font-bold">
+                                    {loginLoading ? 'Logging in...' : 'Continue'}
+                                </Button>
+
+                                <p className="text-xs text-slate-600">
+                                    <Link to="/forgot-password" className="underline hover:text-[#c99612]">Forgot password?</Link>
+                                </p>
+                                <p className="text-xs text-slate-600">
+                                    No account? <a href="https://pdamit.in/signup" target="_blank" rel="noreferrer" className="underline hover:text-[#c99612]">Register now</a>
+                                </p>
+                            </form>
+                        ) : null}
+
+                        {user ? (
+                            <form onSubmit={handleCommunitySelectionSubmit} className="mt-8 space-y-4 border-t border-black/10 pt-6">
+                                <p className="text-gray-700 font-semibold">Step 2: select your club</p>
+                                {!canUseCommunityMode ? (
+                                    <div className="space-y-3">
+                                        <p className="text-sm text-amber-700">No club admin access found for this account.</p>
+                                        <div className="flex gap-2">
+                                            <Button type="button" variant="outline" onClick={pdaLogout} disabled={loginLoading}>
+                                                Logout
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                className="bg-[#11131a] text-white"
+                                                disabled={loginLoading}
+                                                onClick={() => {
+                                                    setLoginForm({ identifier: '', password: '' });
+                                                    pdaLogout();
+                                                }}
+                                            >
+                                                Login with access
+                                            </Button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="club-select">Club</Label>
+                                            <Select value={selectedClubId} onValueChange={setSelectedClubId}>
+                                                <SelectTrigger id="club-select" className="neo-input">
+                                                    <SelectValue placeholder="Select a club" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {clubOptions.map((option) => (
+                                                        <SelectItem key={option.club_id} value={String(option.club_id)}>
+                                                            {option.club_name}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <Button type="submit" disabled={loginLoading || !selectedClubId} className="flex-1">
+                                                {loginLoading ? 'Entering...' : 'Enter'}
+                                            </Button>
+                                            <Button type="button" variant="outline" onClick={pdaLogout} disabled={loginLoading}>
+                                                Logout
+                                            </Button>
+                                        </div>
+                                    </>
+                                )}
                             </form>
                         ) : null}
                     </div>
@@ -224,12 +264,13 @@ export default function PersohubAdminLayout({ children, title = 'Persohub Admin'
     }
 
     const isOwner = Boolean(community?.is_club_owner);
-    const canAccessEvents = Boolean(community?.can_access_events);
+    const isClubSuperadmin = Boolean(community?.is_club_superadmin);
+    const canAccessClubAdminPanel = isOwner || isClubSuperadmin;
     const navItems = [
-        ...(isOwner ? [{ id: 'profile', label: 'Profile', path: '/persohub/admin/profile' }] : []),
-        ...(isOwner ? [{ id: 'communities', label: 'Communities', path: '/persohub/admin/communities' }] : []),
-        ...(isOwner ? [{ id: 'payments', label: 'Payments', path: '/persohub/admin/payments' }] : []),
-        ...(canAccessEvents ? [{ id: 'events', label: 'Events', path: '/persohub/admin/persohub-events' }] : []),
+        ...(canAccessClubAdminPanel ? [{ id: 'profile', label: 'Profile', path: '/persohub/admin/profile' }] : []),
+        ...(canAccessClubAdminPanel ? [{ id: 'communities', label: 'Communities', path: '/persohub/admin/communities' }] : []),
+        ...(canAccessClubAdminPanel ? [{ id: 'payments', label: 'Payments', path: '/persohub/admin/payments' }] : []),
+        ...(canAccessClubAdminPanel ? [{ id: 'events', label: 'Events', path: '/persohub/admin/persohub-events' }] : []),
         ...(isOwner ? [{ id: 'policies', label: 'Policies', path: '/persohub/admin/policies' }] : []),
     ];
 
@@ -255,9 +296,7 @@ export default function PersohubAdminLayout({ children, title = 'Persohub Admin'
                             <span className="max-w-full break-all text-xs rounded-full border border-black/10 bg-slate-50 px-3 py-1 text-slate-700">
                                 @{community.club_profile_id || community.profile_id}
                             </span>
-                            <Button variant="outline" onClick={logout} className="shrink-0 border-black/10 text-sm">
-                                Logout
-                            </Button>
+                            <Button variant="outline" onClick={pdaLogout} className="shrink-0 border-black/10 text-sm">Logout</Button>
                         </div>
                     </div>
 

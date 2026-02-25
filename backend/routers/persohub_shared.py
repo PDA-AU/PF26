@@ -57,6 +57,9 @@ def build_community_card(
         club_logo_url=club.club_logo_url if club else None,
         club_id=community.club_id,
         club_name=club.name if club else None,
+        club_tagline=club.club_tagline if club else None,
+        club_description=club.club_description if club else None,
+        club_url=club.club_url if club else None,
         is_following=is_following,
     )
 
@@ -103,6 +106,9 @@ def build_community_cards_bulk(
             club_logo_url=club.club_logo_url if club else None,
             club_id=community.club_id,
             club_name=club.name if club else None,
+            club_tagline=club.club_tagline if club else None,
+            club_description=club.club_description if club else None,
+            club_url=club.club_url if club else None,
             is_following=(community.id in following_ids) if current_user_id else None,
         )
     return result
@@ -165,14 +171,6 @@ def sync_post_tags_and_mentions(
         return
 
     users = db.query(PdaUser).filter(PdaUser.profile_name.in_(normalized_mentions)).all()
-    found = {u.profile_name for u in users if u.profile_name}
-    missing = sorted(set(normalized_mentions) - found)
-    if missing:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid mention profile names: {', '.join(missing)}",
-        )
-
     target_user_ids = {u.id for u in users}
     current_mentions = db.query(PersohubPostMention).filter(PersohubPostMention.post_id == post.id).all()
     current_user_ids = {m.user_id for m in current_mentions}
@@ -301,6 +299,7 @@ def build_post_responses_bulk(
                 id=post.id,
                 slug_token=post.slug_token,
                 description=post.description,
+                is_hidden=int(post.is_hidden or 0),
                 created_at=post.created_at,
                 updated_at=post.updated_at,
                 like_count=int(post.like_count or 0),

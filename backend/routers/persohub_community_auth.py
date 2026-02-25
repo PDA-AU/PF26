@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from auth import create_access_token, create_refresh_token, decode_token, verify_password
 from database import get_db
-from models import PdaAdmin, PdaUser, PersohubAdmin, PersohubClub, PersohubCommunity
+from models import PdaAdmin, PdaUser, PersohubAdmin, PersohubClub, PersohubClubAdmin, PersohubCommunity
 from persohub_schemas import (
     PersohubAdminClubOption,
     PersohubAdminCommunitySelectRequest,
@@ -24,10 +24,12 @@ from security import (
     get_persohub_actor_role,
     get_persohub_actor_user_id,
     is_persohub_club_owner,
+    require_pda_user,
     require_persohub_community,
 )
 
 router = APIRouter()
+HARD_CUT_DETAIL = "Use PDA auth + Persohub account switch"
 
 
 def _is_pda_superadmin_user(db: Session, user_id: int) -> bool:
@@ -99,6 +101,7 @@ def _build_community_auth_response(
     actor_user_id: Optional[int],
     actor_role: Optional[str],
     is_owner: bool,
+    is_club_superadmin: bool,
     can_access_events: bool,
     event_policy: Optional[dict],
 ) -> PersohubCommunityAuthResponse:
@@ -123,6 +126,7 @@ def _build_community_auth_response(
         club_profile_id=(club.profile_id if club else None),
         club_owner_user_id=(int(club.owner_user_id) if club and club.owner_user_id else None),
         is_club_owner=bool(is_owner),
+        is_club_superadmin=bool(is_club_superadmin),
         can_access_events=bool(can_access_events),
         event_policy=_normalize_events_policy(event_policy),
         is_root=bool(community.is_root),
@@ -159,6 +163,26 @@ def _club_options_for_user(db: Session, user_id: int) -> List[PersohubAdminClubO
             "can_access_events": True,
         }
 
+    club_superadmin_rows = (
+        db.query(PersohubClubAdmin, PersohubClub)
+        .join(PersohubClub, PersohubClub.id == PersohubClubAdmin.club_id)
+        .filter(
+            PersohubClubAdmin.user_id == user_id,
+            PersohubClubAdmin.is_active == True,  # noqa: E712
+        )
+        .order_by(PersohubClub.name.asc(), PersohubClub.id.asc())
+        .all()
+    )
+    for club_admin, club in club_superadmin_rows:
+        club_id = int(club.id)
+        if club_id in options:
+            continue
+        options[club_id] = {
+            "club": club,
+            "role": "superadmin",
+            "can_access_events": True,
+        }
+
     delegated_rows = (
         db.query(PersohubAdmin, PersohubCommunity, PersohubClub)
         .join(PersohubCommunity, PersohubCommunity.id == PersohubAdmin.community_id)
@@ -186,7 +210,7 @@ def _club_options_for_user(db: Session, user_id: int) -> List[PersohubAdminClubO
     for club_id, rows in policy_rows_by_club.items():
         merged_policy = _merge_admin_policy(rows)
         has_access = any(bool(value) for value in merged_policy["events"].values())
-        if options[club_id]["role"] != "owner":
+        if options[club_id]["role"] not in {"owner", "superadmin"}:
             options[club_id]["can_access_events"] = bool(has_access)
 
     result: List[PersohubAdminClubOption] = []
@@ -198,7 +222,7 @@ def _club_options_for_user(db: Session, user_id: int) -> List[PersohubAdminClubO
                 club_id=int(club.id),
                 club_name=str(club.name or f"Club {club.id}"),
                 club_profile_id=str(club.profile_id or "") or None,
-                role=("owner" if option["role"] == "owner" else "admin"),
+                role=("owner" if option["role"] == "owner" else ("superadmin" if option["role"] == "superadmin" else "admin")),
                 can_access_events=bool(option["can_access_events"]),
             )
         )
@@ -227,6 +251,15 @@ def _resolve_club_admin_context(
 
     is_owner = int(club.owner_user_id or 0) == int(user_id)
     is_pda_superadmin = _is_pda_superadmin_user(db, int(user_id))
+    is_club_superadmin = bool(
+        db.query(PersohubClubAdmin)
+        .filter(
+            PersohubClubAdmin.club_id == int(club_id),
+            PersohubClubAdmin.user_id == int(user_id),
+            PersohubClubAdmin.is_active == True,  # noqa: E712
+        )
+        .first()
+    )
     memberships = (
         db.query(PersohubAdmin, PersohubCommunity)
         .join(PersohubCommunity, PersohubCommunity.id == PersohubAdmin.community_id)
@@ -241,7 +274,7 @@ def _resolve_club_admin_context(
     )
     membership_community_ids = {int(community.id) for _admin_row, community in memberships}
 
-    if not is_owner and not is_pda_superadmin and not memberships:
+    if not is_owner and not is_pda_superadmin and not is_club_superadmin and not memberships:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Community admin access revoked")
 
     selected_community = None
@@ -255,7 +288,7 @@ def _resolve_club_admin_context(
             )
             .first()
         )
-        if selected_community and not is_owner and not is_pda_superadmin and int(selected_community.id) not in membership_community_ids:
+        if selected_community and not is_owner and not is_pda_superadmin and not is_club_superadmin and int(selected_community.id) not in membership_community_ids:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Community admin access revoked")
 
     if not selected_community and memberships:
@@ -276,12 +309,13 @@ def _resolve_club_admin_context(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No active communities in this club")
 
     merged_policy = _merge_admin_policy([row[0] for row in memberships])
-    can_access_events = bool(is_owner or is_pda_superadmin or any(bool(value) for value in merged_policy["events"].values()))
+    can_access_events = bool(is_owner or is_pda_superadmin or is_club_superadmin or any(bool(value) for value in merged_policy["events"].values()))
 
     return {
         "club": club,
         "community": selected_community,
         "is_owner": bool(is_owner or is_pda_superadmin),
+        "is_club_superadmin": bool(is_club_superadmin and not (is_owner or is_pda_superadmin)),
         "event_policy": merged_policy,
         "can_access_events": can_access_events,
     }
@@ -297,202 +331,148 @@ def _issue_admin_tokens(user_id: int, club_id: int, community_id: int) -> tuple[
     return create_access_token(token_data), create_refresh_token(token_data)
 
 
+@router.get("/persohub/session/options")
+def persohub_session_options(
+    user: PdaUser = Depends(require_pda_user),
+    db: Session = Depends(get_db),
+):
+    user_id = int(user.id)
+    options = _club_options_for_user(db, user_id)
+    rows: List[PersohubCommunityAuthResponse] = []
+    seen_community_ids: set[int] = set()
+
+    for option in options:
+        club_id = int(option.club_id)
+        context = _resolve_club_admin_context(db, user_id=user_id, club_id=club_id)
+        is_owner = bool(context["is_owner"])
+        is_club_superadmin = bool(context["is_club_superadmin"])
+        role = "owner" if is_owner else ("superadmin" if is_club_superadmin else "admin")
+        event_policy = context["event_policy"]
+        can_access_events = bool(context["can_access_events"])
+
+        if is_owner or is_club_superadmin:
+            communities = (
+                db.query(PersohubCommunity)
+                .filter(
+                    PersohubCommunity.club_id == club_id,
+                    PersohubCommunity.is_active == True,  # noqa: E712
+                )
+                .order_by(PersohubCommunity.id.asc())
+                .all()
+            )
+        else:
+            memberships = (
+                db.query(PersohubAdmin, PersohubCommunity)
+                .join(PersohubCommunity, PersohubCommunity.id == PersohubAdmin.community_id)
+                .filter(
+                    PersohubCommunity.club_id == club_id,
+                    PersohubCommunity.is_active == True,  # noqa: E712
+                    PersohubAdmin.user_id == user_id,
+                    PersohubAdmin.is_active == True,  # noqa: E712
+                )
+                .order_by(PersohubCommunity.id.asc(), PersohubAdmin.id.asc())
+                .all()
+            )
+            communities = [item[1] for item in memberships]
+
+        for community in communities:
+            community_id = int(community.id)
+            if community_id in seen_community_ids:
+                continue
+            seen_community_ids.add(community_id)
+            rows.append(
+                _build_community_auth_response(
+                    db,
+                    community,
+                    actor_user_id=user_id,
+                    actor_role=role,
+                    is_owner=is_owner,
+                    is_club_superadmin=is_club_superadmin,
+                    can_access_events=can_access_events,
+                    event_policy=event_policy,
+                )
+            )
+
+    return {"items": rows}
+
+
+@router.get("/persohub/session/active-community/{community_id}", response_model=PersohubCommunityAuthResponse)
+def persohub_session_active_community(
+    community_id: int,
+    user: PdaUser = Depends(require_pda_user),
+    db: Session = Depends(get_db),
+):
+    if int(community_id) <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid community id")
+    community = (
+        db.query(PersohubCommunity)
+        .filter(
+            PersohubCommunity.id == int(community_id),
+            PersohubCommunity.is_active == True,  # noqa: E712
+        )
+        .first()
+    )
+    if not community:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Community account not found")
+    club_id = int(community.club_id or 0)
+    if club_id <= 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Community not linked to a club")
+
+    context = _resolve_club_admin_context(
+        db,
+        user_id=int(user.id),
+        club_id=club_id,
+        preferred_community_id=int(community.id),
+    )
+    selected = context["community"]
+    return _build_community_auth_response(
+        db,
+        selected,
+        actor_user_id=int(user.id),
+        actor_role=("owner" if context["is_owner"] else ("superadmin" if context["is_club_superadmin"] else "admin")),
+        is_owner=bool(context["is_owner"]),
+        is_club_superadmin=bool(context["is_club_superadmin"]),
+        can_access_events=bool(context["can_access_events"]),
+        event_policy=context["event_policy"],
+    )
+
+
 @router.post("/persohub/admin/auth/login", response_model=PersohubAdminLoginResponse)
 def admin_login(payload: PersohubAdminLoginRequest, db: Session = Depends(get_db)):
-    user = _find_user_by_identifier(db, payload.identifier)
-    if not user or not verify_password(payload.password, user.hashed_password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-
-    clubs = _club_options_for_user(db, user.id)
-    if not clubs:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No Persohub admin access for this user")
-
-    selection_token = create_access_token({"sub": str(user.id), "user_type": "persohub_admin_pending"})
-    return PersohubAdminLoginResponse(
-        requires_club_selection=True,
-        selection_token=selection_token,
-        clubs=clubs,
-    )
+    raise HTTPException(status_code=status.HTTP_410_GONE, detail=HARD_CUT_DETAIL)
 
 
 @router.post("/persohub/admin/auth/select-club", response_model=PersohubAdminTokenResponse)
 def admin_select_club(payload: PersohubAdminCommunitySelectRequest, db: Session = Depends(get_db)):
-    token_payload = decode_token(payload.selection_token)
-    if token_payload.get("type") != "access" or token_payload.get("user_type") != "persohub_admin_pending":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid selection token")
-
-    try:
-        user_id = int(token_payload.get("sub"))
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid selection token")
-
-    club_id = _resolve_club_id_from_select_payload(db, payload)
-    context = _resolve_club_admin_context(
-        db,
-        user_id=user_id,
-        club_id=club_id,
-        preferred_community_id=payload.community_id,
-    )
-
-    community = context["community"]
-    access_token, refresh_token = _issue_admin_tokens(user_id, club_id, int(community.id))
-    return PersohubAdminTokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        community=_build_community_auth_response(
-            db,
-            community,
-            actor_user_id=user_id,
-            actor_role=("owner" if context["is_owner"] else "admin"),
-            is_owner=bool(context["is_owner"]),
-            can_access_events=bool(context["can_access_events"]),
-            event_policy=context["event_policy"],
-        ),
-    )
+    raise HTTPException(status_code=status.HTTP_410_GONE, detail=HARD_CUT_DETAIL)
 
 
 # One-release compatibility alias.
 @router.post("/persohub/admin/auth/select-community", response_model=PersohubAdminTokenResponse)
 def admin_select_community(payload: PersohubAdminCommunitySelectRequest, db: Session = Depends(get_db)):
-    return admin_select_club(payload, db)
+    raise HTTPException(status_code=status.HTTP_410_GONE, detail=HARD_CUT_DETAIL)
 
 
 @router.post("/persohub/admin/auth/refresh", response_model=PersohubAdminTokenResponse)
 def admin_refresh(payload: PersohubRefreshRequest, db: Session = Depends(get_db)):
-    token_payload = decode_token(payload.refresh_token)
-    if token_payload.get("type") != "refresh" or token_payload.get("user_type") != "persohub_admin":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
-
-    try:
-        user_id = int(token_payload.get("sub"))
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
-
-    club_id = token_payload.get("club_id")
-    if club_id is None and token_payload.get("community_id") is not None:
-        legacy_community = db.query(PersohubCommunity).filter(PersohubCommunity.id == int(token_payload.get("community_id"))).first()
-        if legacy_community and legacy_community.club_id:
-            club_id = int(legacy_community.club_id)
-    try:
-        resolved_club_id = int(club_id)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
-
-    preferred_community_id = token_payload.get("community_id")
-    try:
-        preferred_community_id = int(preferred_community_id) if preferred_community_id is not None else None
-    except (TypeError, ValueError):
-        preferred_community_id = None
-
-    context = _resolve_club_admin_context(
-        db,
-        user_id=user_id,
-        club_id=resolved_club_id,
-        preferred_community_id=preferred_community_id,
-    )
-
-    community = context["community"]
-    access_token, refresh_token = _issue_admin_tokens(user_id, resolved_club_id, int(community.id))
-    return PersohubAdminTokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        community=_build_community_auth_response(
-            db,
-            community,
-            actor_user_id=user_id,
-            actor_role=("owner" if context["is_owner"] else "admin"),
-            is_owner=bool(context["is_owner"]),
-            can_access_events=bool(context["can_access_events"]),
-            event_policy=context["event_policy"],
-        ),
-    )
+    raise HTTPException(status_code=status.HTTP_410_GONE, detail=HARD_CUT_DETAIL)
 
 
 @router.get("/persohub/admin/auth/me", response_model=PersohubCommunityAuthResponse)
-def admin_me(
-    request: Request,
-    community: PersohubCommunity = Depends(require_persohub_community),
-    db: Session = Depends(get_db),
-):
-    return _build_community_auth_response(
-        db,
-        community,
-        actor_user_id=get_persohub_actor_user_id(request),
-        actor_role=get_persohub_actor_role(request),
-        is_owner=is_persohub_club_owner(request),
-        can_access_events=can_access_persohub_events(request),
-        event_policy=get_persohub_actor_policy(request),
-    )
+def admin_me():
+    raise HTTPException(status_code=status.HTTP_410_GONE, detail=HARD_CUT_DETAIL)
 
 
 @router.post("/persohub/community/auth/login", response_model=PersohubCommunityTokenResponse)
 def community_login(payload: PersohubCommunityLoginRequest, db: Session = Depends(get_db)):
-    profile_id = payload.profile_id.strip().lower()
-    community = db.query(PersohubCommunity).filter(PersohubCommunity.profile_id == profile_id).first()
-    if not community or not verify_password(payload.password, community.hashed_password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid community credentials")
-    if not community.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Community account is inactive")
-
-    access_token = create_access_token({"sub": community.profile_id, "user_type": "community"})
-    refresh_token = create_refresh_token({"sub": community.profile_id, "user_type": "community"})
-    return PersohubCommunityTokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        community=_build_community_auth_response(
-            db,
-            community,
-            actor_user_id=int(community.admin_id or 0) or None,
-            actor_role="community_account",
-            is_owner=False,
-            can_access_events=False,
-            event_policy={"events": {}},
-        ),
-    )
+    raise HTTPException(status_code=status.HTTP_410_GONE, detail=HARD_CUT_DETAIL)
 
 
 @router.post("/persohub/community/auth/refresh", response_model=PersohubCommunityTokenResponse)
 def community_refresh(payload: PersohubRefreshRequest, db: Session = Depends(get_db)):
-    token_payload = decode_token(payload.refresh_token)
-    if token_payload.get("type") != "refresh" or token_payload.get("user_type") != "community":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
-
-    profile_id = token_payload.get("sub")
-    community = db.query(PersohubCommunity).filter(PersohubCommunity.profile_id == profile_id).first()
-    if not community:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Community account not found")
-    if not community.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Community account is inactive")
-
-    access_token = create_access_token({"sub": community.profile_id, "user_type": "community"})
-    refresh_token = create_refresh_token({"sub": community.profile_id, "user_type": "community"})
-    return PersohubCommunityTokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        community=_build_community_auth_response(
-            db,
-            community,
-            actor_user_id=int(community.admin_id or 0) or None,
-            actor_role="community_account",
-            is_owner=False,
-            can_access_events=False,
-            event_policy={"events": {}},
-        ),
-    )
+    raise HTTPException(status_code=status.HTTP_410_GONE, detail=HARD_CUT_DETAIL)
 
 
 @router.get("/persohub/community/auth/me", response_model=PersohubCommunityAuthResponse)
-def community_me(
-    request: Request,
-    community: PersohubCommunity = Depends(require_persohub_community),
-    db: Session = Depends(get_db),
-):
-    return _build_community_auth_response(
-        db,
-        community,
-        actor_user_id=get_persohub_actor_user_id(request),
-        actor_role=get_persohub_actor_role(request),
-        is_owner=is_persohub_club_owner(request),
-        can_access_events=can_access_persohub_events(request),
-        event_policy=get_persohub_actor_policy(request),
-    )
+def community_me():
+    raise HTTPException(status_code=status.HTTP_410_GONE, detail=HARD_CUT_DETAIL)

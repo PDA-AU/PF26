@@ -58,6 +58,7 @@ from security import (
     get_persohub_actor_policy,
     get_persohub_actor_user_id,
     is_persohub_club_owner,
+    is_persohub_club_superadmin,
     require_persohub_community,
 )
 
@@ -259,7 +260,7 @@ def _resolve_actor_club_id(request: Request, community: PersohubCommunity) -> in
 
 def _assert_persohub_admin_token(request: Request) -> None:
     token_user_type = str(getattr(request.state, "persohub_token_user_type", "") or "").strip().lower()
-    if token_user_type != "persohub_admin":
+    if token_user_type not in {"persohub_admin", "pda"}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Persohub admin access required")
 
 
@@ -268,8 +269,13 @@ def _assert_owner(request: Request) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Club owner access required")
 
 
+def _assert_owner_or_superadmin(request: Request) -> None:
+    if not (is_persohub_club_owner(request) or is_persohub_club_superadmin(request)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Club superadmin access required")
+
+
 def _assert_can_access_events(request: Request) -> None:
-    if is_persohub_club_owner(request):
+    if is_persohub_club_owner(request) or is_persohub_club_superadmin(request):
         return
     if not can_access_persohub_events(request):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin policy does not allow event access")
@@ -393,7 +399,7 @@ def _send_payment_status_email(
     safe_name = str(participant.name or "Participant")
     event_title = str(event.title or "event")
     whatsapp_url = str(getattr(event, "whatsapp_url", "") or "").strip()
-    whatsapp_text = f"\nJoin updates: {whatsapp_url}\n" if whatsapp_url else ""
+    whatsapp_text = f"\nJoin our WhatsApp channel for updates: {whatsapp_url}\n" if whatsapp_url else ""
     if state == "submitted":
         subject = f"Payment received for review - {event_title}"
         text = (
@@ -419,6 +425,7 @@ def _send_payment_status_email(
             f"Your payment submission for {event_title} was declined."
             f"{reason_text}"
             "You can resubmit payment proof from the event dashboard.\n\n"
+            f"{whatsapp_text}\n"
             "Regards,\nPersohub Team"
         )
     html = "<html><body>" + "".join(f"<p>{line}</p>" for line in text.split("\n") if line) + "</body></html>"
@@ -477,7 +484,7 @@ def list_admin_events(
         .filter(PersohubEvent.club_id == club_id)
     )
 
-    if not is_persohub_club_owner(request):
+    if not (is_persohub_club_owner(request) or is_persohub_club_superadmin(request)):
         policy = get_persohub_actor_policy(request)
         events_map = policy.get("events") if isinstance(policy.get("events"), dict) else {}
         allowed_slugs = [slug for slug, allowed in events_map.items() if bool(allowed)]
@@ -516,7 +523,7 @@ def list_admin_sympo_options(
     db: Session = Depends(get_db),
 ):
     _assert_persohub_admin_token(request)
-    _assert_owner(request)
+    _assert_owner_or_superadmin(request)
     rows = (
         db.query(PersohubSympo, PersohubClub)
         .join(PersohubClub, PersohubClub.id == PersohubSympo.organising_club_id)
@@ -542,7 +549,7 @@ def create_admin_event(
     db: Session = Depends(get_db),
 ):
     _assert_persohub_admin_token(request)
-    _assert_owner(request)
+    _assert_owner_or_superadmin(request)
 
     club_id = _resolve_actor_club_id(request, community)
     _validate_event_dates(payload.start_date, payload.end_date)
@@ -630,7 +637,7 @@ def update_admin_event(
     db: Session = Depends(get_db),
 ):
     _assert_persohub_admin_token(request)
-    _assert_owner(request)
+    _assert_owner_or_superadmin(request)
 
     club_id = _resolve_actor_club_id(request, community)
     event = _get_event_or_404(db, slug, club_id)
@@ -717,7 +724,7 @@ def list_owner_payments(
     db: Session = Depends(get_db),
 ):
     _assert_persohub_admin_token(request)
-    _assert_owner(request)
+    _assert_owner_or_superadmin(request)
     club_id = _resolve_actor_club_id(request, community)
     rows = (
         db.query(PersohubPayment, PersohubEvent, PdaUser, PersohubClub)
@@ -757,7 +764,7 @@ def confirm_owner_payment(
     db: Session = Depends(get_db),
 ):
     _assert_persohub_admin_token(request)
-    _assert_owner(request)
+    _assert_owner_or_superadmin(request)
     club_id = _resolve_actor_club_id(request, community)
     row = (
         db.query(PersohubPayment, PersohubEvent, PdaUser, PersohubClub)
@@ -819,7 +826,7 @@ def decline_owner_payment(
     db: Session = Depends(get_db),
 ):
     _assert_persohub_admin_token(request)
-    _assert_owner(request)
+    _assert_owner_or_superadmin(request)
     club_id = _resolve_actor_club_id(request, community)
     row = (
         db.query(PersohubPayment, PersohubEvent, PdaUser, PersohubClub)
@@ -877,7 +884,7 @@ def assign_admin_event_sympo(
     db: Session = Depends(get_db),
 ):
     _assert_persohub_admin_token(request)
-    _assert_owner(request)
+    _assert_owner_or_superadmin(request)
 
     club_id = _resolve_actor_club_id(request, community)
     event = _get_event_or_404(db, slug, club_id)
@@ -936,7 +943,7 @@ def delete_admin_event(
     db: Session = Depends(get_db),
 ):
     _assert_persohub_admin_token(request)
-    _assert_owner(request)
+    _assert_owner_or_superadmin(request)
 
     club_id = _resolve_actor_club_id(request, community)
     event = _get_event_or_404(db, slug, club_id)

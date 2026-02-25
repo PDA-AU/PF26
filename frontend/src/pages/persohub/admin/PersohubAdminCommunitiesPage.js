@@ -16,7 +16,6 @@ const makeAdminRowId = () => `${Date.now()}-${Math.random().toString(36).slice(2
 const emptyForm = {
     name: '',
     profile_id: '',
-    password: '',
     logo_url: '',
     description: '',
     is_active: true,
@@ -45,7 +44,6 @@ const normalizePayload = (form, isCreate) => {
 
     if (isCreate) {
         payload.profile_id = String(form.profile_id || '').trim().toLowerCase();
-        payload.password = String(form.password || '');
     }
 
     return payload;
@@ -61,10 +59,6 @@ export default function PersohubAdminCommunitiesPage() {
     const [editingCommunity, setEditingCommunity] = useState(null);
     const [form, setForm] = useState(emptyForm);
     const [adminSearch, setAdminSearch] = useState('');
-
-    const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
-    const [passwordTarget, setPasswordTarget] = useState(null);
-    const [newPassword, setNewPassword] = useState('');
 
     const [deleteTarget, setDeleteTarget] = useState(null);
     const [deleteConfirmText, setDeleteConfirmText] = useState('');
@@ -106,7 +100,6 @@ export default function PersohubAdminCommunitiesPage() {
         setForm({
             name: community.name || '',
             profile_id: community.profile_id || '',
-            password: '',
             logo_url: community.logo_url || '',
             description: community.description || '',
             is_active: Boolean(community.is_active),
@@ -195,26 +188,6 @@ export default function PersohubAdminCommunitiesPage() {
         }
     };
 
-    const submitPasswordReset = async () => {
-        if (!passwordTarget) return;
-        if (!newPassword || newPassword.length < 8) {
-            toast.error('Password must be at least 8 characters');
-            return;
-        }
-        setSaving(true);
-        try {
-            await persohubAdminApi.resetOwnerCommunityPassword(passwordTarget.id, { new_password: newPassword });
-            toast.success('Community password reset');
-            setPasswordDialogOpen(false);
-            setPasswordTarget(null);
-            setNewPassword('');
-        } catch (error) {
-            toast.error(persohubAdminApi.parseApiError(error, 'Failed to reset password'));
-        } finally {
-            setSaving(false);
-        }
-    };
-
     const submitDelete = async () => {
         if (!deleteTarget) return;
         if (deleteConfirmText !== 'DELETE') {
@@ -264,17 +237,6 @@ export default function PersohubAdminCommunitiesPage() {
                                     <div className="flex flex-wrap gap-2">
                                         <Button variant="outline" className="border-black/20" onClick={() => openEditDialog(community)}>Edit</Button>
                                         <Button
-                                            variant="outline"
-                                            className="border-black/20"
-                                            onClick={() => {
-                                                setPasswordTarget(community);
-                                                setNewPassword('');
-                                                setPasswordDialogOpen(true);
-                                            }}
-                                        >
-                                            Reset Password
-                                        </Button>
-                                        <Button
                                             variant="destructive"
                                             onClick={() => {
                                                 setDeleteTarget(community);
@@ -312,18 +274,6 @@ export default function PersohubAdminCommunitiesPage() {
                                 required
                             />
                         </div>
-                        {!editingCommunity ? (
-                            <div>
-                                <Label>Password</Label>
-                                <Input
-                                    type="password"
-                                    value={form.password}
-                                    onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))}
-                                    minLength={8}
-                                    required
-                                />
-                            </div>
-                        ) : null}
                         <div>
                             <Label>Active</Label>
                             <Select
@@ -435,22 +385,6 @@ export default function PersohubAdminCommunitiesPage() {
                             </Button>
                         </div>
                     </form>
-                </DialogContent>
-            </Dialog>
-
-            <Dialog open={passwordDialogOpen} onOpenChange={(open) => !saving && setPasswordDialogOpen(open)}>
-                <DialogContent className="max-w-md">
-                    <DialogHeader>
-                        <DialogTitle className="font-heading text-2xl font-black">Reset Community Password</DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-3">
-                        <p className="text-sm text-slate-600">{passwordTarget ? `Reset password for ${passwordTarget.name}` : ''}</p>
-                        <Input type="password" minLength={8} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="New password" />
-                        <div className="flex justify-end gap-2">
-                            <Button variant="outline" className="border-black/20" disabled={saving} onClick={() => setPasswordDialogOpen(false)}>Cancel</Button>
-                            <Button className="bg-[#11131a] text-white" disabled={saving} onClick={submitPasswordReset}>{saving ? 'Saving...' : 'Reset Password'}</Button>
-                        </div>
-                    </div>
                 </DialogContent>
             </Dialog>
 

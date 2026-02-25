@@ -4,6 +4,7 @@ import { MessageCircle, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useAuth } from '@/context/AuthContext';
+import { usePersohubActor } from '@/context/PersohubActorContext';
 import PdaHeader from '@/components/layout/PdaHeader';
 import { compressImageToWebp } from '@/utils/imageCompression';
 import { copyTextToClipboard } from '@/utils/clipboard';
@@ -21,14 +22,33 @@ import '@/pages/persohub/persohub.css';
 
 const resetPostForm = {
     description: '',
-    mentions: '',
     files: [],
+};
+
+const extractInlineMentions = (description) => {
+    const matches = String(description || '').match(/@([a-z0-9_]+)/gi) || [];
+    return Array.from(
+        new Set(
+            matches
+                .map((value) => value.replace(/^@+/, '').trim().toLowerCase())
+                .filter(Boolean),
+        ),
+    );
 };
 
 export default function PersohubFeedPage() {
     const navigate = useNavigate();
     const location = useLocation();
-    const { user } = useAuth();
+    const { user, login } = useAuth();
+    const {
+        mode,
+        setMode,
+        activeCommunityId,
+        setActiveCommunityId,
+        switchableCommunities,
+        resolvedCommunity,
+        canUseCommunityMode,
+    } = usePersohubActor();
 
     const [posts, setPosts] = useState([]);
     const [feedCursor, setFeedCursor] = useState(null);
@@ -42,11 +62,9 @@ export default function PersohubFeedPage() {
     const [searchOpen, setSearchOpen] = useState(false);
 
     const [sharePost, setSharePost] = useState(null);
-
-    const [communityAccount, setCommunityAccount] = useState(null);
-    const [communityAuthExpanded, setCommunityAuthExpanded] = useState(false);
-    const [communityForm, setCommunityForm] = useState({ profileId: '', password: '' });
-    const [communityAuthLoading, setCommunityAuthLoading] = useState(false);
+    const [userLoginExpanded, setUserLoginExpanded] = useState(false);
+    const [userLoginLoading, setUserLoginLoading] = useState(false);
+    const [userLoginForm, setUserLoginForm] = useState({ regno: '', password: '' });
 
     const [postModalOpen, setPostModalOpen] = useState(false);
     const [postForm, setPostForm] = useState(resetPostForm);
@@ -55,10 +73,14 @@ export default function PersohubFeedPage() {
     const [editingPost, setEditingPost] = useState(null);
     const [editSubmitting, setEditSubmitting] = useState(false);
     const [pendingLikeSlugs, setPendingLikeSlugs] = useState(() => new Set());
+    const [pendingHideSlugs, setPendingHideSlugs] = useState(() => new Set());
     const pendingLikeSlugsRef = useRef(new Set());
+    const pendingHideSlugsRef = useRef(new Set());
     const feedLoadingMoreRef = useRef(false);
     const [deleteTargetPost, setDeleteTargetPost] = useState(null);
     const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+    const [visibilityTargetPost, setVisibilityTargetPost] = useState(null);
+    const [communityPickerOpen, setCommunityPickerOpen] = useState(false);
 
     const [activeHashtag, setActiveHashtag] = useState('');
     const feedSentinelRef = useRef(null);
@@ -91,26 +113,17 @@ export default function PersohubFeedPage() {
         }
     }, []);
 
-    const loadCommunitySession = async () => {
-        try {
-            const me = await persohubApi.communityMe();
-            setCommunityAccount(me);
-        } catch {
-            setCommunityAccount(null);
-        }
-    };
-
     useEffect(() => {
         loadInitial();
         loadCommunities();
-        loadCommunitySession();
     }, [loadInitial, loadCommunities]);
 
     useEffect(() => {
         const params = new URLSearchParams(location.search);
-        const hashtag = params.get('hashtag');
+        const hashtag = String(params.get('hashtag') || '').trim();
         if (!hashtag) return;
-        handleHashtagClick(hashtag);
+        setSearch(`#${hashtag}`);
+        handleHashtagClick(hashtag, { syncSearchInput: false });
     }, [location.search]);
 
     useEffect(() => {
@@ -118,7 +131,31 @@ export default function PersohubFeedPage() {
         if (!q) {
             setSearchItems([]);
             setSearchOpen(false);
+            if (activeHashtag) {
+                setActiveHashtag('');
+                loadInitial();
+            }
             return;
+        }
+        if (q.startsWith('#')) {
+            const hashtag = q.replace(/^#+/, '').trim();
+            setSearchItems([]);
+            setSearchOpen(false);
+            if (!hashtag) {
+                if (activeHashtag) {
+                    setActiveHashtag('');
+                    loadInitial();
+                }
+                return;
+            }
+            const timer = setTimeout(() => {
+                handleHashtagClick(hashtag, { syncSearchInput: false });
+            }, 220);
+            return () => clearTimeout(timer);
+        }
+        if (activeHashtag) {
+            setActiveHashtag('');
+            loadInitial();
         }
         const timer = setTimeout(async () => {
             try {
@@ -131,7 +168,7 @@ export default function PersohubFeedPage() {
             }
         }, 220);
         return () => clearTimeout(timer);
-    }, [search]);
+    }, [activeHashtag, loadInitial, search]);
 
     const featuredPosts = useMemo(() => {
         return [...posts].sort((a, b) => (b.like_count || 0) - (a.like_count || 0)).slice(0, 6);
@@ -144,6 +181,10 @@ export default function PersohubFeedPage() {
     const handleLike = async (slugToken) => {
         if (!isUserLoggedIn) {
             toast.error('Login as PDA user to react');
+            return;
+        }
+        if (mode !== 'user') {
+            toast.error('Switch to User mode to react');
             return;
         }
         if (pendingLikeSlugsRef.current.has(slugToken)) return;
@@ -164,27 +205,32 @@ export default function PersohubFeedPage() {
         if (!isUserLoggedIn) {
             throw new Error('Login required');
         }
+        if (mode !== 'user') {
+            throw new Error('Switch to User mode to comment');
+        }
         const created = await persohubApi.createComment(slugToken, commentText);
         const fresh = await persohubApi.fetchPost(slugToken);
         patchPost(fresh);
         return created;
     };
 
-    const handleHashtagClick = async (hashtag) => {
+    const handleHashtagClick = async (hashtag, options = {}) => {
+        const { syncSearchInput = true } = options;
+        const normalizedHashtag = String(hashtag || '').replace(/^#+/, '').trim();
+        if (!normalizedHashtag) return;
         try {
-            const response = await persohubApi.fetchHashtagPosts(hashtag);
+            const response = await persohubApi.fetchHashtagPosts(normalizedHashtag);
             setPosts(response.items || []);
             setFeedCursor(response.next_cursor || null);
             setFeedHasMore(Boolean(response.has_more));
-            setActiveHashtag(hashtag);
+            setActiveHashtag(normalizedHashtag);
+            if (syncSearchInput) {
+                setSearch(`#${normalizedHashtag}`);
+            }
+            setSearchOpen(false);
         } catch (error) {
             toast.error(persohubApi.parseApiError(error, 'Failed to load hashtag posts'));
         }
-    };
-
-    const clearHashtagFilter = async () => {
-        setActiveHashtag('');
-        await loadInitial();
     };
 
     const handleLoadMoreFeed = useCallback(async () => {
@@ -241,7 +287,8 @@ export default function PersohubFeedPage() {
         setSearchOpen(false);
         if (item.result_type === 'hashtag') {
             const value = String(item.profile_name || '').replace('#', '');
-            handleHashtagClick(value);
+            setSearch(`#${value}`);
+            handleHashtagClick(value, { syncSearchInput: false });
             return;
         }
         navigate(`/persohub/${item.profile_name}`);
@@ -250,6 +297,10 @@ export default function PersohubFeedPage() {
     const handleToggleFollow = async (profileId) => {
         if (!isUserLoggedIn) {
             toast.error('Login as PDA user to follow communities');
+            return;
+        }
+        if (mode !== 'user') {
+            toast.error('Switch to User mode to follow communities');
             return;
         }
         try {
@@ -261,58 +312,28 @@ export default function PersohubFeedPage() {
         }
     };
 
-    const handleCommunityLogin = async (event) => {
-        event.preventDefault();
-        setCommunityAuthLoading(true);
-        try {
-            const response = await persohubApi.communityLogin(communityForm.profileId, communityForm.password);
-            setCommunityAccount(response.community);
-            setCommunityAuthExpanded(false);
-            setCommunityForm({ profileId: '', password: '' });
-            toast.success(`Community login: @${response.community.profile_id}`);
-        } catch (error) {
-            toast.error(persohubApi.parseApiError(error, 'Community login failed'));
-        } finally {
-            setCommunityAuthLoading(false);
+    const handleUserModeClick = () => {
+        setMode('user');
+        if (!isUserLoggedIn) {
+            setUserLoginExpanded(true);
         }
     };
 
-    const handleCommunityLogout = () => {
-        persohubApi.clearCommunityTokens();
-        setCommunityAccount(null);
-        setCommunityAuthExpanded(false);
-        toast.success('Community session ended');
+    const handleInlineUserLogin = async (event) => {
+        event.preventDefault();
+        if (userLoginLoading) return;
+        setUserLoginLoading(true);
+        try {
+            await login(userLoginForm.regno.trim(), userLoginForm.password);
+            setUserLoginExpanded(false);
+            setUserLoginForm({ regno: '', password: '' });
+            toast.success('Logged in');
+        } catch (error) {
+            toast.error(persohubApi.parseApiError(error, 'Login failed'));
+        } finally {
+            setUserLoginLoading(false);
+        }
     };
-
-    const renderCommunityAuthForm = (idPrefix = 'default') => (
-        <form onSubmit={handleCommunityLogin}>
-            <label htmlFor={`ph-community-profile-${idPrefix}`} className="ph-muted">Community Profile ID</label>
-            <input
-                id={`ph-community-profile-${idPrefix}`}
-                className="ph-input"
-                value={communityForm.profileId}
-                onChange={(event) => setCommunityForm((prev) => ({ ...prev, profileId: event.target.value }))}
-                required
-                data-testid="ph-community-profile-input"
-            />
-            <label htmlFor={`ph-community-password-${idPrefix}`} className="ph-muted">Password</label>
-            <input
-                id={`ph-community-password-${idPrefix}`}
-                type="password"
-                className="ph-input"
-                value={communityForm.password}
-                onChange={(event) => setCommunityForm((prev) => ({ ...prev, password: event.target.value }))}
-                required
-                data-testid="ph-community-password-input"
-            />
-            <button type="submit" className="ph-btn ph-btn-primary" disabled={communityAuthLoading}>
-                {communityAuthLoading ? 'Logging in...' : 'Login'}
-            </button>
-            <p className="ph-muted" style={{ marginTop: '0.6rem', marginBottom: 0 }}>
-                Default seeded accounts use <code>profile_id@123</code> password.
-            </p>
-        </form>
-    );
 
     const handlePostFormFileChange = (event) => {
         const files = Array.from(event.target.files || []);
@@ -321,8 +342,8 @@ export default function PersohubFeedPage() {
 
     const handleCreatePost = async (event) => {
         event.preventDefault();
-        if (!communityAccount) {
-            toast.error('Community login required');
+        if (!resolvedCommunity || mode !== 'community') {
+            toast.error('Switch to Community mode to create posts');
             return;
         }
 
@@ -338,10 +359,7 @@ export default function PersohubFeedPage() {
                 uploadedAttachments.push(attachment);
             }
 
-            const mentions = postForm.mentions
-                .split(',')
-                .map((item) => item.trim().replace(/^@+/, '').toLowerCase())
-                .filter(Boolean);
+            const mentions = extractInlineMentions(postForm.description);
 
             const created = await persohubApi.createCommunityPost({
                 description: postForm.description.trim(),
@@ -360,8 +378,8 @@ export default function PersohubFeedPage() {
     };
 
     const canModeratePost = (post) => {
-        if (!communityAccount) return false;
-        return communityAccount.profile_id === post.community.profile_id;
+        if (!resolvedCommunity || mode !== 'community') return false;
+        return resolvedCommunity.profile_id === post.community.profile_id;
     };
 
     const handleDeletePost = async (post) => {
@@ -388,6 +406,36 @@ export default function PersohubFeedPage() {
         setEditPostModalOpen(true);
     };
 
+    const handleHidePost = async (post) => {
+        setVisibilityTargetPost(post || null);
+    };
+
+    const handleConfirmToggleVisibility = async () => {
+        const post = visibilityTargetPost;
+        if (!post?.slug_token) return;
+        const slugToken = post.slug_token;
+        if (pendingHideSlugsRef.current.has(slugToken)) return;
+        pendingHideSlugsRef.current.add(slugToken);
+        setPendingHideSlugs(new Set(pendingHideSlugsRef.current));
+        try {
+            const nextHidden = Number(post.is_hidden || 0) === 1 ? 0 : 1;
+            const updated = await persohubApi.updateCommunityPostVisibility(slugToken, nextHidden);
+            if (nextHidden === 0) {
+                setPosts((prev) => prev.filter((item) => item.slug_token !== slugToken));
+                toast.success('Post hidden from feed');
+            } else {
+                patchPost(updated);
+                toast.success('Post unhidden');
+            }
+            setVisibilityTargetPost(null);
+        } catch (error) {
+            toast.error(persohubApi.parseApiError(error, 'Failed to hide post'));
+        } finally {
+            pendingHideSlugsRef.current.delete(slugToken);
+            setPendingHideSlugs(new Set(pendingHideSlugsRef.current));
+        }
+    };
+
     const handleSubmitEditPost = async (payload) => {
         if (!editingPost) return;
         setEditSubmitting(true);
@@ -408,10 +456,7 @@ export default function PersohubFeedPage() {
                 mime_type: item.mime_type,
                 size_bytes: item.size_bytes,
             }));
-            const mentions = (payload.mentions || '')
-                .split(',')
-                .map((item) => item.trim().replace(/^@+/, '').toLowerCase())
-                .filter(Boolean);
+            const mentions = extractInlineMentions(payload.description);
 
             const updated = await persohubApi.updateCommunityPost(editingPost.slug_token, {
                 description: payload.description,
@@ -434,28 +479,6 @@ export default function PersohubFeedPage() {
             <PdaHeader />
             <div className="ph-layer ph-shell">
                 <div className="ph-grid ph-grid-sections">
-                    {communityAuthExpanded ? (
-                        <section className="ph-span-all ph-mobile-auth-panel" data-testid="ph-mobile-auth-panel">
-                            {communityAccount ? (
-                                <div className="ph-mobile-auth-panel-inner">
-                                    <p style={{ marginTop: 0, marginBottom: '0.45rem' }}>
-                                        Logged in as <strong>@{communityAccount.profile_id}</strong>
-                                    </p>
-                                    <button type="button" className="ph-btn ph-btn-accent" onClick={handleCommunityLogout}>
-                                        Logout
-                                    </button>
-                                </div>
-                            ) : renderCommunityAuthForm('mobile')}
-                        </section>
-                    ) : null}
-
-                    {activeHashtag ? (
-                        <div className="ph-span-all ph-hashtag-row">
-                            <span style={{ fontWeight: 800 }}>Showing posts for #{activeHashtag}</span>
-                            <button type="button" className="ph-btn" onClick={clearHashtagFilter}>Clear</button>
-                        </div>
-                    ) : null}
-
                     <aside className="ph-col ph-col-left">
                         <CommunityListPanel
                             communities={communities}
@@ -469,7 +492,7 @@ export default function PersohubFeedPage() {
                             <input
                                 type="text"
                                 className="ph-search"
-                                placeholder="Search profile, community, hashtag"
+                                placeholder="Search profile, community, hashtag (#tag)"
                                 value={search}
                                 onChange={(event) => setSearch(event.target.value)}
                                 data-testid="ph-search-input"
@@ -493,6 +516,7 @@ export default function PersohubFeedPage() {
                                         post={post}
                                         onLike={handleLike}
                                         likePending={pendingLikeSlugs.has(post.slug_token)}
+                                        hidePending={pendingHideSlugs.has(post.slug_token)}
                                         onShare={handleShare}
                                         onHashtagClick={handleHashtagClick}
                                         isUserLoggedIn={isUserLoggedIn}
@@ -501,6 +525,7 @@ export default function PersohubFeedPage() {
                                         allowModeration={canModeratePost(post)}
                                         onDelete={handleDeletePost}
                                         onEdit={handleEditPost}
+                                        onHide={handleHidePost}
                                     />
                                 ))}
                                 {!activeHashtag && feedHasMore ? <div ref={feedSentinelRef} className="ph-feed-sentinel" aria-hidden="true" /> : null}
@@ -512,25 +537,62 @@ export default function PersohubFeedPage() {
 
                     <aside className="ph-col ph-col-right">
                         <div className="ph-card ph-side-card" style={{ marginBottom: '0.8rem' }} data-testid="ph-community-auth-panel">
-                            <h3 style={{ marginTop: 0, marginBottom: '0.45rem' }}>Community Auth</h3>
-                            {communityAccount ? (
-                                <>
-                                    <p style={{ marginTop: 0, marginBottom: '0.45rem' }}>
-                                        Logged in as <strong>@{communityAccount.profile_id}</strong>
-                                    </p>
-                                    <button type="button" className="ph-btn ph-btn-accent" onClick={handleCommunityLogout}>Logout</button>
-                                </>
-                            ) : (
-                                <>
-                                    <button type="button" className="ph-btn ph-btn-primary" onClick={() => setCommunityAuthExpanded((prev) => !prev)}>
-                                        {communityAuthExpanded ? 'Hide Login' : 'Community Login'}
+                            <h3 style={{ marginTop: 0, marginBottom: '0.45rem' }}>Account Mode</h3>
+                            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                                <button type="button" className={`ph-btn ${mode === 'user' ? 'ph-btn-primary' : ''}`} onClick={handleUserModeClick}>User</button>
+                                <button type="button" className={`ph-btn ${mode === 'community' ? 'ph-btn-primary' : ''}`} onClick={() => setMode('community')} disabled={!canUseCommunityMode}>Community</button>
+                            </div>
+                            {!isUserLoggedIn && userLoginExpanded ? (
+                                <form onSubmit={handleInlineUserLogin} style={{ marginBottom: '0.55rem' }}>
+                                    <label className="ph-muted">Register Number</label>
+                                    <input
+                                        className="ph-input"
+                                        value={userLoginForm.regno}
+                                        onChange={(event) => setUserLoginForm((prev) => ({ ...prev, regno: event.target.value }))}
+                                        required
+                                    />
+                                    <label className="ph-muted">Password</label>
+                                    <input
+                                        className="ph-input"
+                                        type="password"
+                                        value={userLoginForm.password}
+                                        onChange={(event) => setUserLoginForm((prev) => ({ ...prev, password: event.target.value }))}
+                                        required
+                                    />
+                                    <button type="submit" className="ph-btn ph-btn-primary" style={{ marginTop: '0.5rem' }} disabled={userLoginLoading}>
+                                        {userLoginLoading ? 'Logging in...' : 'Login'}
                                     </button>
-                                    {communityAuthExpanded ? (
-                                        <div style={{ marginTop: '0.6rem' }}>
-                                            {renderCommunityAuthForm('desktop')}
-                                        </div>
-                                    ) : null}
-                                </>
+                                    <p className="ph-muted" style={{ marginTop: '0.45rem', marginBottom: 0 }}>
+                                        No account?{' '}
+                                        <a href="https://pdamit.in/signup" target="_blank" rel="noreferrer" className="ph-link transition-colors hover:text-[#c99612]">
+                                            Register now
+                                        </a>
+                                    </p>
+                                </form>
+                            ) : null}
+                            {mode === 'community' ? (
+                                canUseCommunityMode ? (
+                                    <>
+                                        <label className="ph-muted">Active Community</label>
+                                        <button
+                                            type="button"
+                                            className="ph-input"
+                                            style={{ textAlign: 'left', cursor: 'pointer' }}
+                                            onClick={() => setCommunityPickerOpen(true)}
+                                        >
+                                            {resolvedCommunity
+                                                ? `${resolvedCommunity.name} (@${resolvedCommunity.profile_id})`
+                                                : 'Choose active community'}
+                                        </button>
+                                        <p className="ph-muted" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
+                                            Acting as <strong>@{resolvedCommunity?.profile_id || '—'}</strong>
+                                        </p>
+                                    </>
+                                ) : (
+                                    <p className="ph-muted" style={{ marginBottom: 0 }}>No community admin access available.</p>
+                                )
+                            ) : (
+                                <p className="ph-muted" style={{ marginBottom: 0 }}>User mode: likes, comments, follows are enabled.</p>
                             )}
                         </div>
                         <FeaturedRail posts={featuredPosts} />
@@ -538,7 +600,7 @@ export default function PersohubFeedPage() {
                 </div>
             </div>
 
-            {communityAccount ? (
+            {mode === 'community' && resolvedCommunity ? (
                 <button
                     type="button"
                     className="ph-floating"
@@ -560,7 +622,7 @@ export default function PersohubFeedPage() {
                             </button>
                         </div>
                         <form onSubmit={handleCreatePost}>
-                            <label className="ph-muted" htmlFor="ph-post-description">Description</label>
+                            <label className="ph-muted" htmlFor="ph-post-description">Share your thoughts...</label>
                             <textarea
                                 id="ph-post-description"
                                 className="ph-textarea"
@@ -568,15 +630,6 @@ export default function PersohubFeedPage() {
                                 onChange={(event) => setPostForm((prev) => ({ ...prev, description: event.target.value }))}
                                 placeholder="Use #hashtags and @profile mentions"
                                 data-testid="ph-post-description-input"
-                            />
-                            <label className="ph-muted" htmlFor="ph-post-mentions">Mentions (comma separated profile names)</label>
-                            <input
-                                id="ph-post-mentions"
-                                className="ph-input"
-                                value={postForm.mentions}
-                                onChange={(event) => setPostForm((prev) => ({ ...prev, mentions: event.target.value }))}
-                                placeholder="profile_one, profile_two"
-                                data-testid="ph-post-mentions-input"
                             />
                             <label className="ph-muted" htmlFor="ph-post-files">Attachments</label>
                             <input
@@ -587,11 +640,43 @@ export default function PersohubFeedPage() {
                                 onChange={handlePostFormFileChange}
                                 data-testid="ph-post-files-input"
                             />
-                            <p className="ph-muted">Images are compressed before upload. Files above 100MB use multipart upload.</p>
                             <button type="submit" className="ph-btn ph-btn-primary" disabled={postSubmitting}>
                                 {postSubmitting ? 'Publishing...' : 'Publish Post'}
                             </button>
                         </form>
+                    </div>
+                </div>
+            ) : null}
+
+            {communityPickerOpen ? (
+                <div className="ph-modal-overlay" role="dialog" aria-modal="true">
+                    <div className="ph-modal">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <h2 style={{ marginTop: 0 }}>Choose Active Community</h2>
+                            <button type="button" className="ph-action-btn" onClick={() => setCommunityPickerOpen(false)}>
+                                <X size={16} />
+                            </button>
+                        </div>
+                        <div style={{ display: 'grid', gap: '0.45rem' }}>
+                            {switchableCommunities.map((item) => {
+                                const isSelected = Number(activeCommunityId) === Number(item.id);
+                                return (
+                                    <button
+                                        key={item.id}
+                                        type="button"
+                                        className={`ph-btn ${isSelected ? 'ph-btn-primary' : ''}`}
+                                        style={{ justifyContent: 'space-between' }}
+                                        onClick={() => {
+                                            setActiveCommunityId(Number(item.id));
+                                            setCommunityPickerOpen(false);
+                                        }}
+                                    >
+                                        <span>{item.name} (@{item.profile_id})</span>
+                                        {isSelected ? <span>Active</span> : null}
+                                    </button>
+                                );
+                            })}
+                        </div>
                     </div>
                 </div>
             ) : null}
@@ -655,9 +740,24 @@ export default function PersohubFeedPage() {
                 title="Delete Post"
                 message="This action cannot be undone. Delete this post?"
                 confirmLabel="Delete"
+                pendingLabel="Deleting..."
                 onConfirm={handleConfirmDeletePost}
                 onCancel={() => setDeleteTargetPost(null)}
                 pending={deleteSubmitting}
+            />
+
+            <ConfirmModal
+                open={Boolean(visibilityTargetPost)}
+                title={Number(visibilityTargetPost?.is_hidden || 0) === 1 ? 'Hide Post' : 'Unhide Post'}
+                message={
+                    Number(visibilityTargetPost?.is_hidden || 0) === 1
+                        ? 'Hide this post from feed?'
+                        : 'Unhide this post and show it in feed again?'
+                }
+                confirmLabel={Number(visibilityTargetPost?.is_hidden || 0) === 1 ? 'Hide' : 'Unhide'}
+                onConfirm={handleConfirmToggleVisibility}
+                onCancel={() => setVisibilityTargetPost(null)}
+                pending={Boolean(visibilityTargetPost?.slug_token && pendingHideSlugs.has(visibilityTargetPost.slug_token))}
             />
         </div>
     );

@@ -792,7 +792,6 @@ class CcCommunityCreateRequest(BaseModel):
     club_id: Optional[int] = Field(default=None, ge=1)
     admin_id: Optional[int] = Field(default=None, ge=1)
     admins: List[CcCommunityAdminMemberInput] = Field(default_factory=list)
-    password: str = Field(..., min_length=8)
     logo_url: Optional[str] = Field(default=None, max_length=500)
     description: Optional[str] = None
     is_active: bool = True
@@ -874,12 +873,6 @@ class CcCommunityUpdateRequest(BaseModel):
         if self.admins is not None and len(self.admins) == 0:
             raise ValueError("admins cannot be empty")
         return self
-
-
-class CcCommunityResetPasswordRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    new_password: str = Field(..., min_length=8)
 
 
 class CcCommunityResponse(BaseModel):

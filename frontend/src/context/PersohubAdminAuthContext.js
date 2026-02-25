@@ -1,104 +1,78 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useMemo } from 'react';
 
-import { persohubAdminApi } from '@/pages/persohub/admin/api';
+import { useAuth } from '@/context/AuthContext';
+import { usePersohubActor } from '@/context/PersohubActorContext';
 
 const PersohubAdminAuthContext = createContext(null);
 
 export function PersohubAdminAuthProvider({ children }) {
-    const [community, setCommunity] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [selectionToken, setSelectionToken] = useState('');
-    const [availableClubs, setAvailableClubs] = useState([]);
-
-    const clearSelection = useCallback(() => {
-        setSelectionToken('');
-        setAvailableClubs([]);
-    }, []);
+    const { logout: pdaLogout, getAuthHeader, loading: authLoading } = useAuth();
+    const {
+        resolvedCommunity,
+        mode,
+        setMode,
+        activeCommunityId,
+        setActiveCommunityId,
+        switchableCommunities,
+        canUseCommunityMode,
+        loading: actorLoading,
+        loadSwitchOptions,
+        getPersohubActorHeader,
+    } = usePersohubActor();
+    const ownerCommunities = useMemo(
+        () => (switchableCommunities || []).filter((item) => Boolean(item?.is_club_owner || item?.is_club_superadmin)),
+        [switchableCommunities],
+    );
+    const adminCommunity = (mode === 'community' && (resolvedCommunity?.is_club_owner || resolvedCommunity?.is_club_superadmin)) ? resolvedCommunity : null;
+    const adminCanUseCommunityMode = ownerCommunities.length > 0;
 
     const logout = useCallback(() => {
-        persohubAdminApi.logout();
-        setCommunity(null);
-        clearSelection();
-    }, [clearSelection]);
+        pdaLogout();
+    }, [pdaLogout]);
 
-    const loadSession = useCallback(async () => {
-        if (!persohubAdminApi.getAuthHeader().Authorization) {
-            setCommunity(null);
-            setLoading(false);
-            return;
-        }
-
-        try {
-            const me = await persohubAdminApi.me();
-            setCommunity(me || null);
-            clearSelection();
-        } catch {
-            persohubAdminApi.logout();
-            setCommunity(null);
-            clearSelection();
-        } finally {
-            setLoading(false);
-        }
-    }, [clearSelection]);
-
-    useEffect(() => {
-        loadSession();
-    }, [loadSession]);
-
-    const login = useCallback(async (identifier, password) => {
-        const response = await persohubAdminApi.login(identifier, password);
-        setSelectionToken(response?.selection_token || '');
-        setAvailableClubs(response?.clubs || response?.communities || []);
-        return response;
-    }, []);
-
-    const selectClub = useCallback(async (clubId, communityId = null) => {
-        if (!selectionToken) {
-            throw new Error('No pending club selection');
-        }
-        const response = await persohubAdminApi.selectClub(selectionToken, clubId, communityId);
-        setCommunity(response?.community || null);
-        clearSelection();
-        return response;
-    }, [clearSelection, selectionToken]);
-
-    const selectCommunity = useCallback(async (communityId) => {
-        if (!selectionToken) {
-            throw new Error('No pending club selection');
-        }
-        const response = await persohubAdminApi.selectCommunity(selectionToken, communityId);
-        setCommunity(response?.community || null);
-        clearSelection();
-        return response;
-    }, [clearSelection, selectionToken]);
-
-    const getAuthHeader = useCallback(() => persohubAdminApi.getAuthHeader(), []);
+    const getMergedAuthHeader = useCallback(() => ({
+        ...getAuthHeader(),
+        ...getPersohubActorHeader(),
+    }), [getAuthHeader, getPersohubActorHeader]);
 
     const value = useMemo(() => ({
-        community,
-        loading,
-        login,
+        community: adminCommunity,
+        loading: authLoading || actorLoading,
+        login: async () => {
+            throw new Error('Deprecated: use PDA login + account switch');
+        },
         logout,
-        selectClub,
-        selectCommunity,
-        pendingSelectionToken: selectionToken,
-        availableClubs,
-        availableCommunities: availableClubs,
-        getAuthHeader,
-        reloadSession: loadSession,
-        clearSelection,
+        selectClub: async () => {
+            throw new Error('Deprecated: use account switch');
+        },
+        selectCommunity: async () => {
+            throw new Error('Deprecated: use account switch');
+        },
+        pendingSelectionToken: '',
+        availableClubs: [],
+        availableCommunities: ownerCommunities,
+        getAuthHeader: getMergedAuthHeader,
+        reloadSession: loadSwitchOptions,
+        clearSelection: () => {},
+        mode,
+        setMode,
+        activeCommunityId,
+        setActiveCommunityId,
+        switchableCommunities: ownerCommunities,
+        canUseCommunityMode: adminCanUseCommunityMode,
     }), [
-        availableClubs,
-        clearSelection,
-        community,
-        getAuthHeader,
-        loadSession,
-        loading,
-        login,
+        activeCommunityId,
+        actorLoading,
+        authLoading,
+        adminCanUseCommunityMode,
+        adminCommunity,
+        getMergedAuthHeader,
+        loadSwitchOptions,
         logout,
-        selectClub,
-        selectCommunity,
-        selectionToken,
+        mode,
+        ownerCommunities,
+        setActiveCommunityId,
+        setMode,
     ]);
 
     return (

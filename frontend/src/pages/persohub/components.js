@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, MessageCircle, Heart, Share2, Pencil, Trash2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, MessageCircle, Heart, Share2, Pencil, Trash2, X, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
+import ParsedDescription from '@/components/common/ParsedDescription';
 
 export const formatRelativeTime = (value) => {
     if (!value) return '';
@@ -16,11 +17,6 @@ export const formatRelativeTime = (value) => {
     const days = Math.floor(hours / 24);
     if (days < 7) return `${days}d`;
     return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
-};
-
-const tokenizeDescription = (text) => {
-    if (!text) return [];
-    return text.split(/(#[A-Za-z0-9_]+|@[a-z0-9_]+)/g).filter(Boolean);
 };
 
 const PdfAttachmentPreview = ({ pdfUrl, previewImageUrls = [] }) => {
@@ -47,17 +43,19 @@ const PdfAttachmentPreview = ({ pdfUrl, previewImageUrls = [] }) => {
 
     return (
         <div className="ph-pdf-preview">
-            <img src={visible} alt={`PDF page ${pageIndex + 1}`} className="ph-attachment-slide" loading="lazy" />
-            {pagesCount > 1 ? (
-                <>
-                    <button type="button" className="ph-slide-btn ph-slide-btn-left" onClick={goPrevPage}>
-                        <ChevronLeft size={18} />
-                    </button>
-                    <button type="button" className="ph-slide-btn ph-slide-btn-right" onClick={goNextPage}>
-                        <ChevronRight size={18} />
-                    </button>
-                </>
-            ) : null}
+            <div className="ph-pdf-canvas">
+                <img src={visible} alt={`PDF page ${pageIndex + 1}`} className="ph-attachment-slide" loading="lazy" />
+                {pagesCount > 1 ? (
+                    <>
+                        <button type="button" className="ph-slide-btn ph-slide-btn-left" onClick={goPrevPage}>
+                            <ChevronLeft size={18} />
+                        </button>
+                        <button type="button" className="ph-slide-btn ph-slide-btn-right" onClick={goNextPage}>
+                            <ChevronRight size={18} />
+                        </button>
+                    </>
+                ) : null}
+            </div>
             <div className="ph-pdf-meta">
                 <span>PDF page {pageIndex + 1}/{pagesCount}</span>
                 <a href={pdfUrl} target="_blank" rel="noreferrer">Open PDF</a>
@@ -102,11 +100,28 @@ export const PersohubHeader = ({ subtitle = '', leftSlot = null }) => {
 };
 
 export const AttachmentCarousel = ({ attachments }) => {
+    const inputAttachments = attachments || [];
+    const hasImageAttachment = inputAttachments.some((entry) => entry?.attachment_kind === 'image');
+    const audioAttachments = inputAttachments.filter((entry) => entry?.attachment_kind === 'audio');
+    const shouldUseImageAsAudioCover = hasImageAttachment && audioAttachments.length > 0;
+    const visibleAttachments = shouldUseImageAsAudioCover
+        ? inputAttachments.filter((entry) => entry?.attachment_kind !== 'audio')
+        : inputAttachments;
+
     const [index, setIndex] = useState(0);
-    const total = attachments?.length || 0;
-    const item = total ? attachments[index] : null;
+    const total = visibleAttachments.length || 0;
+    const item = total ? visibleAttachments[index] : null;
+
+    useEffect(() => {
+        if (index < total) return;
+        setIndex(0);
+    }, [index, total]);
 
     if (!item) return null;
+
+    const audioCoverUrl = shouldUseImageAsAudioCover
+        ? (visibleAttachments.find((entry) => entry?.attachment_kind === 'image')?.s3_url || '')
+        : '';
 
     const goPrev = () => setIndex((prev) => (prev - 1 + total) % total);
     const goNext = () => setIndex((prev) => (prev + 1) % total);
@@ -148,7 +163,7 @@ export const AttachmentCarousel = ({ attachments }) => {
                         <ChevronRight size={18} />
                     </button>
                     <div className="ph-dots">
-                        {attachments.map((_, idx) => (
+                        {visibleAttachments.map((_, idx) => (
                             <button
                                 key={idx}
                                 type="button"
@@ -159,6 +174,30 @@ export const AttachmentCarousel = ({ attachments }) => {
                         ))}
                     </div>
                 </>
+            ) : null}
+
+            {shouldUseImageAsAudioCover ? (
+                <div
+                    className="ph-audio-cover-player"
+                    style={{
+                        marginTop: '0.45rem',
+                        borderRadius: '12px',
+                        border: '1px solid rgba(0,0,0,0.08)',
+                        background: '#fff',
+                        padding: '0.55rem 0.65rem',
+                    }}
+                >
+                    {audioAttachments.map((audioItem, audioIdx) => (
+                        <div key={`${audioItem?.id || audioItem?.s3_url || audioIdx}`} style={{ marginBottom: audioIdx < audioAttachments.length - 1 ? '0.4rem' : 0 }}>
+                            <audio
+                                src={audioItem?.s3_url}
+                                controls
+                                preload="metadata"
+                                style={{ width: '100%' }}
+                            />
+                        </div>
+                    ))}
+                </div>
             ) : null}
         </div>
     );
@@ -176,6 +215,8 @@ export const PostCard = ({
     allowModeration,
     onDelete,
     onEdit,
+    onHide,
+    hidePending = false,
 }) => {
     const fallbackLogo = 'https://placehold.co/64x64?text=PDA';
     const [communityAvatarSrc, setCommunityAvatarSrc] = useState(
@@ -195,7 +236,6 @@ export const PostCard = ({
         setCommunityAvatarSrc(post?.community?.logo_url || post?.community?.club_logo_url || fallbackLogo);
     }, [post?.community?.logo_url, post?.community?.club_logo_url]);
 
-    const tokens = useMemo(() => tokenizeDescription(post.description || ''), [post.description]);
     const showReadMore = (post.description || '').length > 180;
     const visibleText = expanded || !showReadMore ? (post.description || '') : `${(post.description || '').slice(0, 180)}...`;
 
@@ -278,6 +318,18 @@ export const PostCard = ({
                             <Trash2 size={14} />
                         </button>
                     ) : null}
+                    {allowModeration ? (
+                        <button
+                            type="button"
+                            className="ph-action-btn"
+                            onClick={() => onHide?.(post)}
+                            data-testid={`ph-post-hide-${post.slug_token}`}
+                            disabled={hidePending}
+                            title={Number(post?.is_hidden || 0) === 1 ? 'Visible in feed (click to hide)' : 'Hidden from feed (click to unhide)'}
+                        >
+                            {Number(post?.is_hidden || 0) === 1 ? <Eye size={14} /> : <EyeOff size={14} />}
+                        </button>
+                    ) : null}
                 </div>
             </div>
 
@@ -285,42 +337,15 @@ export const PostCard = ({
                 <AttachmentCarousel attachments={post.attachments} />
 
                 <div className="ph-desc">
-                    {(expanded || !showReadMore ? tokens : tokenizeDescription(visibleText)).map((token, idx) => {
-                        if (token.startsWith('#')) {
-                            return (
-                                <button
-                                    key={`${token}-${idx}`}
-                                    type="button"
-                                    className="ph-chip"
-                                    onClick={() => onHashtagClick?.(token.replace('#', ''))}
-                                    data-testid={`ph-hashtag-${token.replace('#', '')}`}
-                                >
-                                    {token}
-                                </button>
-                            );
-                        }
-                        if (token.startsWith('@')) {
-                            return (
-                                <Link key={`${token}-${idx}`} to={`/persohub/${token.replace('@', '')}`} className="ph-chip ph-chip-mention">
-                                    {token}
-                                </Link>
-                            );
-                        }
-                        return <span key={`${idx}-${token}`}>{token}</span>;
-                    })}
+                    <ParsedDescription
+                        description={visibleText}
+                        onHashtagClick={onHashtagClick}
+                    />
                     {showReadMore ? (
                         <button type="button" className="ph-action-btn" onClick={() => setExpanded((prev) => !prev)}>
                             {expanded ? 'Show less' : 'Read more'}
                         </button>
                     ) : null}
-                </div>
-
-                <div style={{ marginTop: '0.5rem' }}>
-                    {(post.mentions || []).map((mention) => (
-                        <Link key={mention.user_id} to={`/persohub/${mention.profile_name}`} className="ph-chip ph-chip-mention">
-                            @{mention.profile_name}
-                        </Link>
-                    ))}
                 </div>
 
                 <div className="ph-post-actions">
@@ -395,11 +420,29 @@ export const PostCard = ({
 };
 
 export const CommunityListPanel = ({ communities, onToggleFollow, isLoggedIn }) => {
+    const [query, setQuery] = useState('');
+    const normalized = String(query || '').trim().toLowerCase();
+    const filteredCommunities = normalized
+        ? (communities || []).filter((item) => {
+            const name = String(item?.name || '').toLowerCase();
+            const handle = String(item?.profile_id || '').toLowerCase();
+            const club = String(item?.club_name || '').toLowerCase();
+            return name.includes(normalized) || handle.includes(normalized) || club.includes(normalized);
+        })
+        : (communities || []);
+
     return (
         <section className="ph-card ph-side-card" data-testid="ph-community-panel">
             <h3 style={{ marginTop: 0, marginBottom: '0.7rem' }}>Communities</h3>
+            <input
+                className="ph-input"
+                placeholder="Search communities..."
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                style={{ marginBottom: '0.6rem' }}
+            />
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
-                {communities.map((item) => (
+                {filteredCommunities.map((item) => (
                     <div key={item.id} className="ph-community-item" style={{ borderRadius: '12px', padding: '0.55rem', background: '#fff', boxShadow: 'inset 0 0 0 1px rgba(96,74,134,0.18)' }}>
                         <Link to={`/persohub/${item.profile_id}`} className="ph-community-link" style={{ fontWeight: 800 }}>{item.name}</Link>
                         <div className="ph-muted ph-community-meta">@{item.profile_id} {item.club_name ? `· ${item.club_name}` : ''}</div>
@@ -415,6 +458,9 @@ export const CommunityListPanel = ({ communities, onToggleFollow, isLoggedIn }) 
                         </button>
                     </div>
                 ))}
+                {filteredCommunities.length === 0 ? (
+                    <p className="ph-muted" style={{ margin: 0 }}>No communities found.</p>
+                ) : null}
             </div>
         </section>
     );
@@ -452,6 +498,7 @@ export const ConfirmModal = ({
     title = 'Confirm Action',
     message = 'Are you sure?',
     confirmLabel = 'Confirm',
+    pendingLabel = 'Processing...',
     cancelLabel = 'Cancel',
     confirmClassName = 'ph-btn ph-btn-danger',
     onConfirm,
@@ -469,7 +516,7 @@ export const ConfirmModal = ({
                         {cancelLabel}
                     </button>
                     <button type="button" className={confirmClassName} onClick={onConfirm} disabled={pending}>
-                        {pending ? 'Deleting...' : confirmLabel}
+                        {pending ? pendingLabel : confirmLabel}
                     </button>
                 </div>
             </div>
@@ -489,16 +536,12 @@ const fileNameFromUrl = (url) => {
 
 export const CommunityPostEditModal = ({ open, post, onClose, onSubmit, submitting }) => {
     const [description, setDescription] = useState('');
-    const [mentions, setMentions] = useState('');
     const [existingAttachments, setExistingAttachments] = useState([]);
     const [newFiles, setNewFiles] = useState([]);
 
     useEffect(() => {
         if (!open || !post) return;
-        const mentionRows = post.mentions || [];
-        const profileNames = mentionRows.map((item) => item.profile_name).filter(Boolean);
         setDescription(post.description || '');
-        setMentions(profileNames.join(', '));
         setExistingAttachments(post.attachments || []);
         setNewFiles([]);
     }, [open, post]);
@@ -519,7 +562,6 @@ export const CommunityPostEditModal = ({ open, post, onClose, onSubmit, submitti
                         event.preventDefault();
                         onSubmit?.({
                             description: description.trim(),
-                            mentions,
                             existingAttachments,
                             newFiles,
                         });
@@ -532,15 +574,6 @@ export const CommunityPostEditModal = ({ open, post, onClose, onSubmit, submitti
                         value={description}
                         onChange={(event) => setDescription(event.target.value)}
                         placeholder="Use #hashtags and @profile mentions"
-                    />
-
-                    <label className="ph-muted" htmlFor="ph-edit-post-mentions">Mentions (comma separated profile names)</label>
-                    <input
-                        id="ph-edit-post-mentions"
-                        className="ph-input"
-                        value={mentions}
-                        onChange={(event) => setMentions(event.target.value)}
-                        placeholder="profile_one, profile_two"
                     />
 
                     <p className="ph-muted" style={{ marginBottom: '0.3rem' }}>Existing attachments</p>

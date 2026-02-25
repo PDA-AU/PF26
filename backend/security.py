@@ -7,7 +7,17 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from auth import decode_token, get_current_pda_user
-from models import PdaUser, PdaAdmin, PdaTeam, PersohubAdmin, PersohubClub, PersohubCommunity, PersohubEvent, SystemConfig
+from models import (
+    PdaUser,
+    PdaAdmin,
+    PdaTeam,
+    PersohubAdmin,
+    PersohubClub,
+    PersohubClubAdmin,
+    PersohubCommunity,
+    PersohubEvent,
+    SystemConfig,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -169,6 +179,21 @@ def _club_memberships_for_user(
     )
 
 
+def _is_persohub_club_superadmin_user(db: Session, club_id: int, user_id: int) -> bool:
+    if int(club_id or 0) <= 0 or int(user_id or 0) <= 0:
+        return False
+    row = (
+        db.query(PersohubClubAdmin)
+        .filter(
+            PersohubClubAdmin.club_id == int(club_id),
+            PersohubClubAdmin.user_id == int(user_id),
+            PersohubClubAdmin.is_active == True,  # noqa: E712
+        )
+        .first()
+    )
+    return bool(row)
+
+
 def _resolve_persohub_actor_user(
     db: Session,
     community: PersohubCommunity,
@@ -206,143 +231,76 @@ def is_persohub_club_owner(request: Optional[Request] = None) -> bool:
     return bool(getattr(getattr(request, "state", None), "persohub_is_club_owner", False))
 
 
+def is_persohub_club_superadmin(request: Optional[Request] = None) -> bool:
+    return bool(getattr(getattr(request, "state", None), "persohub_is_club_superadmin", False))
+
+
 def can_access_persohub_events(request: Optional[Request] = None) -> bool:
     return bool(getattr(getattr(request, "state", None), "persohub_can_access_events", False))
 
 
 def require_persohub_community(
     request: Request,
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(community_bearer),
+    user: PdaUser = Depends(get_current_pda_user),
     db: Session = Depends(get_db),
 ) -> PersohubCommunity:
-    if not credentials:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Community authentication required")
+    raw_community_id = str(request.headers.get("X-Persohub-Community-Id") or "").strip()
+    if not raw_community_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Community switch required")
+    try:
+        selected_community_id = int(raw_community_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid X-Persohub-Community-Id")
+    if selected_community_id <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid X-Persohub-Community-Id")
 
-    payload = decode_token(credentials.credentials)
-    token_type = payload.get("type")
-    user_type = payload.get("user_type")
-    if token_type != "access":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid community token")
-
-    community = None
-    actor_user_id = None
-    actor_role = None
-    actor_club_id = None
-    event_policy = {"events": {}}
-    is_club_owner = False
-    can_access_events = False
-
-    if user_type == "community":
-        profile_id = str(payload.get("sub") or "").strip().lower()
-        if not profile_id:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid community token")
-        community = db.query(PersohubCommunity).filter(PersohubCommunity.profile_id == profile_id).first()
-        if not community:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Community account not found")
-        actor_user_id = int(community.admin_id or 0) or None
-        actor_role = "community_account"
-        actor_club_id = int(community.club_id or 0) or None
-        can_access_events = False
-    elif user_type == "persohub_admin":
-        subject = payload.get("sub")
-        try:
-            user_id = int(subject)
-        except (TypeError, ValueError):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid community token")
-
-        resolved_club_id = None
-        raw_club_id = payload.get("club_id")
-        if raw_club_id is not None:
-            try:
-                resolved_club_id = int(raw_club_id)
-            except (TypeError, ValueError):
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid community token")
-        selected_community_id = None
-        raw_community_id = payload.get("community_id")
-        if raw_community_id is not None:
-            try:
-                selected_community_id = int(raw_community_id)
-            except (TypeError, ValueError):
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid community token")
-
-        # One-release fallback for legacy community-scoped admin tokens.
-        if resolved_club_id is None and selected_community_id:
-            legacy_community = db.query(PersohubCommunity).filter(PersohubCommunity.id == selected_community_id).first()
-            if not legacy_community:
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Community account not found")
-            membership = (
-                db.query(PersohubAdmin)
-                .filter(
-                    PersohubAdmin.community_id == selected_community_id,
-                    PersohubAdmin.user_id == user_id,
-                    PersohubAdmin.is_active == True,  # noqa: E712
-                )
-                .first()
-            )
-            if not membership:
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Community admin access revoked")
-            resolved_club_id = int(legacy_community.club_id or 0) or None
-
-        if not resolved_club_id:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid community token")
-
-        club = db.query(PersohubClub).filter(PersohubClub.id == resolved_club_id).first()
-        if not club:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Club not found")
-
-        membership_rows = _club_memberships_for_user(db, club_id=resolved_club_id, user_id=user_id)
-        is_club_owner = int(club.owner_user_id or 0) == int(user_id)
-        is_pda_superadmin = _is_pda_superadmin_user(db, int(user_id))
-        if not is_club_owner and not is_pda_superadmin and not membership_rows:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Community admin access revoked")
-
-        selected_community = None
-        if selected_community_id:
-            selected_community = (
-                db.query(PersohubCommunity)
-                .filter(
-                    PersohubCommunity.id == selected_community_id,
-                    PersohubCommunity.club_id == resolved_club_id,
-                    PersohubCommunity.is_active == True,  # noqa: E712
-                )
-                .first()
-            )
-        if not selected_community and membership_rows:
-            selected_community = membership_rows[0][1]
-        if not selected_community:
-            selected_community = (
-                db.query(PersohubCommunity)
-                .filter(
-                    PersohubCommunity.club_id == resolved_club_id,
-                    PersohubCommunity.is_active == True,  # noqa: E712
-                )
-                .order_by(PersohubCommunity.id.asc())
-                .first()
-            )
-        if not selected_community:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No active communities in this club")
-
-        community = selected_community
-        actor_user_id = int(user_id)
-        actor_role = "owner" if (is_club_owner or is_pda_superadmin) else "admin"
-        actor_club_id = resolved_club_id
-        event_policy = _merge_persohub_admin_policy([row[0] for row in membership_rows])
-        can_access_events = bool(is_club_owner or is_pda_superadmin or any(bool(value) for value in event_policy["events"].values()))
-        is_club_owner = bool(is_club_owner or is_pda_superadmin)
-    else:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid community token")
-
+    community = (
+        db.query(PersohubCommunity)
+        .filter(PersohubCommunity.id == selected_community_id)
+        .first()
+    )
+    if not community:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Community account not found")
     if not community.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Community account is inactive")
+
+    resolved_club_id = int(community.club_id or 0)
+    if resolved_club_id <= 0:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Community not linked to a club")
+
+    user_id = int(user.id)
+    club = db.query(PersohubClub).filter(PersohubClub.id == resolved_club_id).first()
+    if not club:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Club not found")
+
+    membership_rows = _club_memberships_for_user(db, club_id=resolved_club_id, user_id=user_id)
+    membership_community_ids = {int(row[1].id) for row in membership_rows}
+    is_pda_superadmin = _is_pda_superadmin_user(db, user_id)
+    is_club_owner = int(club.owner_user_id or 0) == user_id or is_pda_superadmin
+    is_club_superadmin_user = _is_persohub_club_superadmin_user(db, int(club.id), user_id)
+    if not is_club_owner and not is_club_superadmin_user and not membership_rows:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Community admin access revoked")
+    if not is_club_owner and not is_club_superadmin_user and int(community.id) not in membership_community_ids:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Community admin access revoked")
+    path = str(getattr(request.url, "path", "") or "")
+    if path.startswith("/api/persohub/admin/") and not (is_club_owner or is_club_superadmin_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Club admin access required")
+
+    actor_user_id = user_id
+    actor_role = "owner" if is_club_owner else ("superadmin" if is_club_superadmin_user else "admin")
+    actor_club_id = resolved_club_id
+    event_policy = _merge_persohub_admin_policy([row[0] for row in membership_rows])
+    can_access_events = bool(is_club_owner or is_club_superadmin_user or any(bool(value) for value in event_policy["events"].values()))
 
     request.state.persohub_actor_user_id = actor_user_id
     request.state.persohub_actor_role = actor_role
     request.state.persohub_actor_community_id = int(community.id)
     request.state.persohub_actor_club_id = int(actor_club_id or int(community.club_id or 0) or 0)
     request.state.persohub_is_club_owner = bool(is_club_owner)
+    request.state.persohub_is_club_superadmin = bool(is_club_superadmin_user)
     request.state.persohub_event_policy = _normalize_persohub_event_policy(event_policy)
     request.state.persohub_can_access_events = bool(can_access_events)
-    request.state.persohub_token_user_type = user_type
+    request.state.persohub_token_user_type = "pda"
     return community
 
 
@@ -374,12 +332,6 @@ def require_persohub_event_admin(
     community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ) -> PdaUser:
-    token_user_type = str(getattr(request.state, "persohub_token_user_type", "") or "").strip().lower()
-    if token_user_type == "community":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Community account token cannot access Persohub admin events",
-        )
     admin_user = _resolve_persohub_actor_user(db, community, request=request)
     if not admin_user:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Community admin mapping missing")
@@ -390,7 +342,7 @@ def require_persohub_event_admin(
         actor_club_id = get_persohub_actor_club_id(request) or int(community.club_id or 0)
         if actor_club_id <= 0 or not event or int(event.club_id or 0) != int(actor_club_id):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
-        if not is_persohub_club_owner(request):
+        if not (is_persohub_club_owner(request) or is_persohub_club_superadmin(request)):
             policy = get_persohub_actor_policy(request)
             if not _can_access_event_policy(policy, event_slug):
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin policy does not allow access to this event")
@@ -402,95 +354,64 @@ def get_persohub_admin_context(
     community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
-    token_user_type = str(getattr(request.state, "persohub_token_user_type", "") or "").strip().lower()
-    if token_user_type != "persohub_admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Persohub admin access required")
     admin_user = _resolve_persohub_actor_user(db, community, request=request)
     if not admin_user:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Community admin mapping missing")
     event_policy = get_persohub_actor_policy(request)
     is_owner = is_persohub_club_owner(request)
+    is_club_super = is_persohub_club_superadmin(request)
     return {
         "community": community,
         "admin_user": admin_user,
         "admin_row": {"community_id": community.id, "club_id": get_persohub_actor_club_id(request)},
         "policy": event_policy,
-        "is_superadmin": bool(is_owner),
+        "is_superadmin": bool(is_owner or is_club_super),
         "is_club_owner": bool(is_owner),
-        "can_access_events": bool(is_owner or can_access_persohub_events(request)),
+        "is_club_superadmin": bool(is_club_super),
+        "can_access_events": bool(is_owner or is_club_super or can_access_persohub_events(request)),
     }
 
 
 def get_optional_persohub_community(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_bearer),
+    request: Request,
+    user: Optional[PdaUser] = Depends(get_optional_pda_user),
     db: Session = Depends(get_db),
 ) -> Optional[PersohubCommunity]:
-    if not credentials:
+    if not user:
+        return None
+    raw_community_id = str(request.headers.get("X-Persohub-Community-Id") or "").strip()
+    if not raw_community_id:
         return None
     try:
-        payload = decode_token(credentials.credentials)
-    except HTTPException:
+        selected_community_id = int(raw_community_id)
+    except (TypeError, ValueError):
         return None
-    if payload.get("type") != "access":
+    if selected_community_id <= 0:
         return None
-    user_type = payload.get("user_type")
-    if user_type == "community":
-        profile_id = payload.get("sub")
-        if not profile_id:
-            return None
-        return db.query(PersohubCommunity).filter(PersohubCommunity.profile_id == profile_id).first()
-    if user_type == "persohub_admin":
-        try:
-            user_id = int(payload.get("sub"))
-        except (TypeError, ValueError):
-            return None
-        club_id = payload.get("club_id")
-        if club_id is None and payload.get("community_id") is not None:
-            try:
-                community_id = int(payload.get("community_id"))
-            except (TypeError, ValueError):
-                return None
-            community = db.query(PersohubCommunity).filter(PersohubCommunity.id == community_id).first()
-            if not community:
-                return None
-            club_id = int(community.club_id or 0) or None
-        try:
-            resolved_club_id = int(club_id)
-        except (TypeError, ValueError):
-            return None
-        club = db.query(PersohubClub).filter(PersohubClub.id == resolved_club_id).first()
-        if not club:
-            return None
-        is_owner = int(club.owner_user_id or 0) == int(user_id)
-        memberships = _club_memberships_for_user(db, club_id=resolved_club_id, user_id=user_id)
-        if not is_owner and not memberships:
-            return None
-        if payload.get("community_id") is not None:
-            try:
-                selected_community_id = int(payload.get("community_id"))
-            except (TypeError, ValueError):
-                selected_community_id = None
-            if selected_community_id:
-                selected = (
-                    db.query(PersohubCommunity)
-                    .filter(
-                        PersohubCommunity.id == selected_community_id,
-                        PersohubCommunity.club_id == resolved_club_id,
-                        PersohubCommunity.is_active == True,  # noqa: E712
-                    )
-                    .first()
-                )
-                if selected:
-                    return selected
-        if memberships:
-            return memberships[0][1]
-        return (
-            db.query(PersohubCommunity)
-            .filter(
-                PersohubCommunity.club_id == resolved_club_id,
-                PersohubCommunity.is_active == True,  # noqa: E712
-            )
-            .order_by(PersohubCommunity.id.asc())
-            .first()
+
+    community = (
+        db.query(PersohubCommunity)
+        .filter(
+            PersohubCommunity.id == selected_community_id,
+            PersohubCommunity.is_active == True,  # noqa: E712
         )
+        .first()
+    )
+    if not community:
+        return None
+    club_id = int(community.club_id or 0)
+    if club_id <= 0:
+        return None
+
+    user_id = int(user.id)
+    club = db.query(PersohubClub).filter(PersohubClub.id == club_id).first()
+    if not club:
+        return None
+    is_owner = int(club.owner_user_id or 0) == user_id or _is_pda_superadmin_user(db, user_id)
+    if is_owner:
+        return community
+    memberships = _club_memberships_for_user(db, club_id=club_id, user_id=user_id)
+    for _admin_row, member_community in memberships:
+        if int(member_community.id) == int(community.id):
+            return community
     return None

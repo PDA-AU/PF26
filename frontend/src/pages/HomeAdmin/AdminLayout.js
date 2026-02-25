@@ -179,6 +179,10 @@ export default function AdminLayout({ title, subtitle, children, allowEventAdmin
                                     'Login'
                                 )}
                             </Button>
+
+                            <p className="text-xs text-slate-600">
+                                <Link to="/forgot-password" className="underline hover:text-[#c99612]">Forgot password?</Link>
+                            </p>
                         </form>
                     </div>
                 </div>

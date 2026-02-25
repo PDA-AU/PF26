@@ -22,13 +22,14 @@ class PersohubCommunityAuthResponse(BaseModel):
     current_admin_user_id: Optional[int] = None
     current_admin_name: Optional[str] = None
     current_admin_regno: Optional[str] = None
-    current_admin_role: Optional[Literal["owner", "admin", "community_account"]] = None
+    current_admin_role: Optional[Literal["owner", "superadmin", "admin", "community_account"]] = None
     logo_url: Optional[str] = None
     club_id: Optional[int] = None
     club_name: Optional[str] = None
     club_profile_id: Optional[str] = None
     club_owner_user_id: Optional[int] = None
     is_club_owner: bool = False
+    is_club_superadmin: bool = False
     can_access_events: bool = False
     event_policy: dict = Field(default_factory=lambda: {"events": {}})
     is_root: bool = False
@@ -63,7 +64,7 @@ class PersohubAdminClubOption(BaseModel):
     club_id: int
     club_name: str
     club_profile_id: Optional[str] = None
-    role: Literal["owner", "admin"]
+    role: Literal["owner", "superadmin", "admin"]
     can_access_events: bool = False
 
 
@@ -609,7 +610,6 @@ class PersohubAdminCommunityManageCreateRequest(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=120)
     profile_id: str = Field(..., min_length=3, max_length=64)
-    password: str = Field(..., min_length=8)
     admins: List[PersohubAdminCommunityAdminInput] = Field(default_factory=list)
     logo_url: Optional[str] = Field(default=None, max_length=500)
     description: Optional[str] = None
@@ -711,12 +711,6 @@ class PersohubAdminCommunityManageResponse(BaseModel):
     updated_at: Optional[datetime] = None
 
 
-class PersohubAdminCommunityResetPasswordRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    new_password: str = Field(..., min_length=8)
-
-
 class PersohubAdminEventPolicyAdminRow(BaseModel):
     user_id: int
     regno: Optional[str] = None
@@ -734,6 +728,32 @@ class PersohubAdminEventPolicyUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     policy: dict = Field(default_factory=lambda: {"events": {}})
+
+
+class PersohubAdminEventAdminCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: int = Field(..., ge=1)
+    community_id: Optional[int] = Field(default=None, ge=1)
+
+
+class PersohubAdminClubSuperadminCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: int = Field(..., ge=1)
+
+
+class PersohubAdminClubSuperadminResponse(BaseModel):
+    id: int
+    club_id: int
+    user_id: int
+    regno: Optional[str] = None
+    name: Optional[str] = None
+    role: Literal["superadmin"] = "superadmin"
+    is_active: bool = True
+    created_by_user_id: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 class PersohubAdminProfileUploadPresignRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -839,6 +859,10 @@ class PersohubPostUpdateRequest(BaseModel):
     mentions: Optional[List[str]] = None
 
 
+class PersohubPostVisibilityUpdateRequest(BaseModel):
+    is_hidden: int = Field(default=1, ge=0, le=1)
+
+
 class PersohubCommentCreateRequest(BaseModel):
     comment_text: str = Field(..., min_length=1, max_length=2000)
 
@@ -851,6 +875,9 @@ class PersohubCommunityCard(BaseModel):
     club_logo_url: Optional[str] = None
     club_id: Optional[int] = None
     club_name: Optional[str] = None
+    club_tagline: Optional[str] = None
+    club_description: Optional[str] = None
+    club_url: Optional[str] = None
     is_following: Optional[bool] = None
 
 
@@ -893,6 +920,7 @@ class PersohubPostResponse(BaseModel):
     id: int
     slug_token: str
     description: Optional[str] = None
+    is_hidden: int = 1
     created_at: datetime
     updated_at: Optional[datetime] = None
     like_count: int
@@ -948,9 +976,12 @@ class PersohubPublicProfileResponse(BaseModel):
     is_member: Optional[bool] = None
     team: Optional[str] = None
     designation: Optional[str] = None
+    follower_count: Optional[int] = None
     badges: List[PersohubBadgeResponse] = Field(default_factory=list)
     community: Optional[PersohubCommunityCard] = None
     posts: List[PersohubPostResponse] = Field(default_factory=list)
+    posts_next_cursor: Optional[str] = None
+    posts_has_more: bool = False
     can_edit: bool = False
 
 

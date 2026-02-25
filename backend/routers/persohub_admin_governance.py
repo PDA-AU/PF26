@@ -1,16 +1,34 @@
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from auth import get_password_hash
 from database import get_db
-from models import AdminLog, PdaUser, PersohubAdmin, PersohubCommunity, PersohubEvent
+from models import (
+    AdminLog,
+    PdaUser,
+    PersohubAdmin,
+    PersohubClub,
+    PersohubClubAdmin,
+    PersohubCommunity,
+    PersohubCommunityFollow,
+    PersohubEvent,
+    PersohubHashtag,
+    PersohubPost,
+    PersohubPostAttachment,
+    PersohubPostComment,
+    PersohubPostHashtag,
+    PersohubPostLike,
+    PersohubPostMention,
+)
 from persohub_schemas import (
+    PersohubAdminClubSuperadminCreateRequest,
+    PersohubAdminClubSuperadminResponse,
     PersohubAdminCommunityManageCreateRequest,
     PersohubAdminCommunityManageResponse,
     PersohubAdminCommunityManageUpdateRequest,
-    PersohubAdminCommunityResetPasswordRequest,
+    PersohubAdminEventAdminCreateRequest,
     PersohubAdminEventPoliciesResponse,
     PersohubAdminEventPolicyAdminRow,
     PersohubAdminEventPolicyUpdateRequest,
@@ -21,6 +39,7 @@ from security import (
     get_persohub_actor_club_id,
     get_persohub_actor_user_id,
     is_persohub_club_owner,
+    is_persohub_club_superadmin,
     require_persohub_community,
 )
 
@@ -32,11 +51,27 @@ def _assert_owner(request: Request) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Club owner access required")
 
 
+def _assert_owner_or_superadmin(request: Request) -> None:
+    if not (is_persohub_club_owner(request) or is_persohub_club_superadmin(request)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Club superadmin access required")
+
+
 def _resolve_actor_club_id(request: Request, community: PersohubCommunity) -> int:
     club_id = int(get_persohub_actor_club_id(request) or int(community.club_id or 0) or 0)
     if club_id <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Community is not linked to a club")
     return club_id
+
+
+def _actor_log_identity(db: Session, request: Request) -> tuple[str, str, int]:
+    actor_id = int(get_persohub_actor_user_id(request) or 0)
+    actor_user = db.query(PdaUser).filter(PdaUser.id == actor_id).first() if actor_id > 0 else None
+    register_number = str(getattr(actor_user, "regno", "") or "").strip()
+    if not register_number:
+        register_number = str(getattr(getattr(request, "state", None), "persohub_actor_role", "") or "owner").strip()
+    register_number = (register_number[:64] or "owner")
+    actor_name = str(getattr(actor_user, "name", "") or "").strip() or "persohub_owner"
+    return register_number, actor_name, actor_id
 
 
 def _normalize_events_policy(policy: Optional[dict]) -> dict:
@@ -241,7 +276,7 @@ def list_owner_admin_user_options(
     community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
-    _assert_owner(request)
+    _assert_owner_or_superadmin(request)
     _resolve_actor_club_id(request, community)
     users = db.query(PdaUser).order_by(PdaUser.name.asc(), PdaUser.id.asc()).all()
     return [
@@ -256,7 +291,7 @@ def list_owner_communities(
     community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
-    _assert_owner(request)
+    _assert_owner_or_superadmin(request)
     club_id = _resolve_actor_club_id(request, community)
     rows = (
         db.query(PersohubCommunity)
@@ -274,7 +309,7 @@ def create_owner_community(
     community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
-    _assert_owner(request)
+    _assert_owner_or_superadmin(request)
     club_id = _resolve_actor_club_id(request, community)
 
     if db.query(PersohubCommunity).filter(PersohubCommunity.profile_id == payload.profile_id).first():
@@ -285,7 +320,6 @@ def create_owner_community(
         profile_id=payload.profile_id,
         club_id=club_id,
         admin_id=1,
-        hashed_password=get_password_hash(payload.password),
         logo_url=payload.logo_url,
         description=payload.description,
         is_active=bool(payload.is_active),
@@ -313,7 +347,7 @@ def update_owner_community(
     community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
-    _assert_owner(request)
+    _assert_owner_or_superadmin(request)
     club_id = _resolve_actor_club_id(request, community)
 
     row = db.query(PersohubCommunity).filter(PersohubCommunity.id == community_id).first()
@@ -340,26 +374,6 @@ def update_owner_community(
     return _build_community_response(db, row)
 
 
-@router.post("/persohub/admin/communities/{community_id}/reset-password")
-def reset_owner_community_password(
-    community_id: int,
-    payload: PersohubAdminCommunityResetPasswordRequest,
-    request: Request,
-    community: PersohubCommunity = Depends(require_persohub_community),
-    db: Session = Depends(get_db),
-):
-    _assert_owner(request)
-    club_id = _resolve_actor_club_id(request, community)
-
-    row = db.query(PersohubCommunity).filter(PersohubCommunity.id == community_id).first()
-    if not row or int(row.club_id or 0) != int(club_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Community not found")
-
-    row.hashed_password = get_password_hash(payload.new_password)
-    db.commit()
-    return {"message": "Community password reset successfully"}
-
-
 @router.delete("/persohub/admin/communities/{community_id}")
 def delete_owner_community(
     community_id: int,
@@ -367,7 +381,7 @@ def delete_owner_community(
     community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
-    _assert_owner(request)
+    _assert_owner_or_superadmin(request)
     club_id = _resolve_actor_club_id(request, community)
 
     row = db.query(PersohubCommunity).filter(PersohubCommunity.id == community_id).first()
@@ -380,14 +394,376 @@ def delete_owner_community(
         .update({PersohubEvent.community_id: None}, synchronize_session=False)
     )
 
+    # Cleanup dependent records explicitly to support databases where
+    # historical FK constraints were created without ON DELETE CASCADE.
+    deleted_follows = int(
+        db.query(PersohubCommunityFollow)
+        .filter(PersohubCommunityFollow.community_id == int(row.id))
+        .delete(synchronize_session=False)
+    )
+    deleted_admin_memberships = int(
+        db.query(PersohubAdmin)
+        .filter(PersohubAdmin.community_id == int(row.id))
+        .delete(synchronize_session=False)
+    )
+
+    post_ids = [
+        int(post_id)
+        for (post_id,) in (
+            db.query(PersohubPost.id)
+            .filter(PersohubPost.community_id == int(row.id))
+            .all()
+        )
+    ]
+
+    deleted_post_mentions = 0
+    deleted_post_hashtags = 0
+    deleted_post_likes = 0
+    deleted_post_comments = 0
+    deleted_post_attachments = 0
+    deleted_posts = 0
+
+    if post_ids:
+        hashtag_usage_rows = (
+            db.query(PersohubPostHashtag.hashtag_id, func.count(PersohubPostHashtag.id))
+            .filter(PersohubPostHashtag.post_id.in_(post_ids))
+            .group_by(PersohubPostHashtag.hashtag_id)
+            .all()
+        )
+
+        deleted_post_mentions = int(
+            db.query(PersohubPostMention)
+            .filter(PersohubPostMention.post_id.in_(post_ids))
+            .delete(synchronize_session=False)
+        )
+        deleted_post_likes = int(
+            db.query(PersohubPostLike)
+            .filter(PersohubPostLike.post_id.in_(post_ids))
+            .delete(synchronize_session=False)
+        )
+        deleted_post_comments = int(
+            db.query(PersohubPostComment)
+            .filter(PersohubPostComment.post_id.in_(post_ids))
+            .delete(synchronize_session=False)
+        )
+        deleted_post_attachments = int(
+            db.query(PersohubPostAttachment)
+            .filter(PersohubPostAttachment.post_id.in_(post_ids))
+            .delete(synchronize_session=False)
+        )
+        deleted_post_hashtags = int(
+            db.query(PersohubPostHashtag)
+            .filter(PersohubPostHashtag.post_id.in_(post_ids))
+            .delete(synchronize_session=False)
+        )
+        deleted_posts = int(
+            db.query(PersohubPost)
+            .filter(PersohubPost.id.in_(post_ids))
+            .delete(synchronize_session=False)
+        )
+
+        for hashtag_id, removed_count in hashtag_usage_rows:
+            tag = db.query(PersohubHashtag).filter(PersohubHashtag.id == int(hashtag_id)).first()
+            if not tag:
+                continue
+            tag.count = max(0, int(tag.count or 0) - int(removed_count or 0))
+
     deleted_counts = {
         "community_id": int(row.id),
         "detached_events": detached_events,
+        "deleted_follows": deleted_follows,
+        "deleted_admin_memberships": deleted_admin_memberships,
+        "deleted_posts": deleted_posts,
+        "deleted_post_mentions": deleted_post_mentions,
+        "deleted_post_hashtags": deleted_post_hashtags,
+        "deleted_post_likes": deleted_post_likes,
+        "deleted_post_comments": deleted_post_comments,
+        "deleted_post_attachments": deleted_post_attachments,
     }
 
     db.delete(row)
     db.commit()
     return {"message": "Community deleted", "deleted_counts": deleted_counts}
+
+
+def _serialize_club_superadmin_row(
+    db: Session,
+    row: PersohubClubAdmin,
+) -> PersohubAdminClubSuperadminResponse:
+    user = db.query(PdaUser).filter(PdaUser.id == int(row.user_id)).first()
+    return PersohubAdminClubSuperadminResponse(
+        id=int(row.id),
+        club_id=int(row.club_id),
+        user_id=int(row.user_id),
+        regno=(str(user.regno or "") if user else None) or None,
+        name=(str(user.name or "") if user else None) or None,
+        role="superadmin",
+        is_active=bool(row.is_active),
+        created_by_user_id=(int(row.created_by_user_id) if row.created_by_user_id else None),
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+@router.get("/persohub/admin/policies/superadmins", response_model=List[PersohubAdminClubSuperadminResponse])
+def list_club_superadmins(
+    request: Request,
+    community: PersohubCommunity = Depends(require_persohub_community),
+    db: Session = Depends(get_db),
+):
+    _assert_owner(request)
+    club_id = _resolve_actor_club_id(request, community)
+    rows = (
+        db.query(PersohubClubAdmin)
+        .filter(
+            PersohubClubAdmin.club_id == int(club_id),
+            PersohubClubAdmin.is_active == True,  # noqa: E712
+        )
+        .order_by(PersohubClubAdmin.created_at.desc(), PersohubClubAdmin.id.desc())
+        .all()
+    )
+    return [_serialize_club_superadmin_row(db, row) for row in rows]
+
+
+@router.post("/persohub/admin/policies/superadmins", response_model=PersohubAdminClubSuperadminResponse)
+def add_club_superadmin(
+    payload: PersohubAdminClubSuperadminCreateRequest,
+    request: Request,
+    community: PersohubCommunity = Depends(require_persohub_community),
+    db: Session = Depends(get_db),
+):
+    _assert_owner(request)
+    club_id = _resolve_actor_club_id(request, community)
+    user = db.query(PdaUser).filter(PdaUser.id == int(payload.user_id)).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    club_row = db.query(PersohubClub).filter(PersohubClub.id == int(club_id)).first()
+    owner_user_id = int(getattr(club_row, "owner_user_id", 0) or 0)
+    owner_actor_id = int(get_persohub_actor_user_id(request) or 0)
+    if int(payload.user_id) in {owner_user_id, owner_actor_id}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Owner cannot be added as club superadmin")
+
+    row = (
+        db.query(PersohubClubAdmin)
+        .filter(
+            PersohubClubAdmin.club_id == int(club_id),
+            PersohubClubAdmin.user_id == int(payload.user_id),
+        )
+        .first()
+    )
+    if row:
+        row.role = "superadmin"
+        row.is_active = True
+        if not row.created_by_user_id:
+            row.created_by_user_id = owner_actor_id if owner_actor_id > 0 else None
+    else:
+        row = PersohubClubAdmin(
+            club_id=int(club_id),
+            user_id=int(payload.user_id),
+            role="superadmin",
+            is_active=True,
+            created_by_user_id=owner_actor_id if owner_actor_id > 0 else None,
+        )
+        db.add(row)
+    db.flush()
+    admin_register_number, admin_name, _actor_id = _actor_log_identity(db, request)
+    db.add(
+        AdminLog(
+            admin_id=owner_actor_id if owner_actor_id > 0 else 0,
+            admin_register_number=admin_register_number,
+            admin_name=admin_name,
+            action="grant_persohub_club_superadmin",
+            method=request.method,
+            path=request.url.path,
+            meta={"club_id": int(club_id), "target_user_id": int(payload.user_id)},
+        )
+    )
+    db.commit()
+    db.refresh(row)
+    return _serialize_club_superadmin_row(db, row)
+
+
+@router.delete("/persohub/admin/policies/superadmins/{user_id}")
+def revoke_club_superadmin(
+    user_id: int,
+    request: Request,
+    community: PersohubCommunity = Depends(require_persohub_community),
+    db: Session = Depends(get_db),
+):
+    _assert_owner(request)
+    club_id = _resolve_actor_club_id(request, community)
+    row = (
+        db.query(PersohubClubAdmin)
+        .filter(
+            PersohubClubAdmin.club_id == int(club_id),
+            PersohubClubAdmin.user_id == int(user_id),
+            PersohubClubAdmin.is_active == True,  # noqa: E712
+        )
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active club superadmin not found")
+    row.is_active = False
+    admin_register_number, admin_name, actor_id = _actor_log_identity(db, request)
+    db.add(
+        AdminLog(
+            admin_id=actor_id if actor_id > 0 else 0,
+            admin_register_number=admin_register_number,
+            admin_name=admin_name,
+            action="revoke_persohub_club_superadmin",
+            method=request.method,
+            path=request.url.path,
+            meta={"club_id": int(club_id), "target_user_id": int(user_id)},
+        )
+    )
+    db.commit()
+    return {"message": "Club superadmin revoked"}
+
+
+@router.post("/persohub/admin/policies/event-admins", response_model=PersohubAdminEventPolicyAdminRow)
+def add_event_admin_user(
+    payload: PersohubAdminEventAdminCreateRequest,
+    request: Request,
+    community: PersohubCommunity = Depends(require_persohub_community),
+    db: Session = Depends(get_db),
+):
+    _assert_owner(request)
+    club_id = _resolve_actor_club_id(request, community)
+    user = db.query(PdaUser).filter(PdaUser.id == int(payload.user_id)).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    owner_user_id = int(get_persohub_actor_user_id(request) or 0)
+    if int(payload.user_id) == owner_user_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Owner is already an admin")
+
+    if payload.community_id:
+        target_community = (
+            db.query(PersohubCommunity)
+            .filter(
+                PersohubCommunity.id == int(payload.community_id),
+                PersohubCommunity.club_id == int(club_id),
+                PersohubCommunity.is_active == True,  # noqa: E712
+            )
+            .first()
+        )
+        if not target_community:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Community not found")
+    else:
+        target_community = (
+            db.query(PersohubCommunity)
+            .filter(
+                PersohubCommunity.club_id == int(club_id),
+                PersohubCommunity.is_active == True,  # noqa: E712
+            )
+            .order_by(PersohubCommunity.id.asc())
+            .first()
+        )
+        if not target_community:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active community found in this club")
+
+    row = (
+        db.query(PersohubAdmin)
+        .filter(
+            PersohubAdmin.community_id == int(target_community.id),
+            PersohubAdmin.user_id == int(payload.user_id),
+        )
+        .first()
+    )
+    if row:
+        row.role = "admin"
+        row.is_active = True
+        if not isinstance(row.policy, dict):
+            row.policy = {"events": {}}
+        elif not isinstance(row.policy.get("events"), dict):
+            row.policy = {"events": {}}
+    else:
+        row = PersohubAdmin(
+            community_id=int(target_community.id),
+            user_id=int(payload.user_id),
+            role="admin",
+            is_active=True,
+            policy={"events": {}},
+            created_by_user_id=(owner_user_id if owner_user_id > 0 else None),
+        )
+        db.add(row)
+
+    admin_register_number, admin_name, actor_id = _actor_log_identity(db, request)
+    db.add(
+        AdminLog(
+            admin_id=actor_id if actor_id > 0 else 0,
+            admin_register_number=admin_register_number,
+            admin_name=admin_name,
+            action="add_persohub_event_admin",
+            method=request.method,
+            path=request.url.path,
+            meta={
+                "club_id": int(club_id),
+                "community_id": int(target_community.id),
+                "target_user_id": int(payload.user_id),
+            },
+        )
+    )
+    db.commit()
+
+    return PersohubAdminEventPolicyAdminRow(
+        user_id=int(payload.user_id),
+        regno=(str(user.regno or "") or None),
+        name=(str(user.name or "") or None),
+        is_club_owner=False,
+        policy={"events": {}},
+    )
+
+
+@router.delete("/persohub/admin/policies/event-admins/{user_id}")
+def remove_event_admin_user(
+    user_id: int,
+    request: Request,
+    community: PersohubCommunity = Depends(require_persohub_community),
+    db: Session = Depends(get_db),
+):
+    _assert_owner(request)
+    club_id = _resolve_actor_club_id(request, community)
+    owner_user_id = int(get_persohub_actor_user_id(request) or 0)
+    if int(user_id) == owner_user_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Owner cannot be removed")
+
+    rows = (
+        db.query(PersohubAdmin)
+        .join(PersohubCommunity, PersohubCommunity.id == PersohubAdmin.community_id)
+        .filter(
+            PersohubCommunity.club_id == club_id,
+            PersohubCommunity.is_active == True,  # noqa: E712
+            PersohubAdmin.user_id == int(user_id),
+            PersohubAdmin.is_active == True,  # noqa: E712
+        )
+        .all()
+    )
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event admin not found in this club")
+
+    for row in rows:
+        row.is_active = False
+
+    admin_register_number, admin_name, actor_id = _actor_log_identity(db, request)
+    db.add(
+        AdminLog(
+            admin_id=actor_id if actor_id > 0 else 0,
+            admin_register_number=admin_register_number,
+            admin_name=admin_name,
+            action="remove_persohub_event_admin",
+            method=request.method,
+            path=request.url.path,
+            meta={
+                "club_id": int(club_id),
+                "target_user_id": int(user_id),
+                "rows_affected": len(rows),
+            },
+        )
+    )
+    db.commit()
+    return {"message": "Event admin removed"}
 
 
 @router.get("/persohub/admin/policies/events", response_model=PersohubAdminEventPoliciesResponse)
@@ -472,11 +848,12 @@ def update_owner_event_policy(
         row.policy = {"events": dict(normalized_policy["events"])}
 
     actor_id = int(get_persohub_actor_user_id(request) or 0)
+    admin_register_number, admin_name, actor_id = _actor_log_identity(db, request)
     db.add(
         AdminLog(
             admin_id=actor_id if actor_id > 0 else 0,
-            admin_register_number=str(getattr(getattr(request, "state", None), "persohub_actor_role", "") or "persohub_owner"),
-            admin_name="persohub_owner",
+            admin_register_number=admin_register_number,
+            admin_name=admin_name,
             action="update_persohub_event_policy",
             method=request.method,
             path=request.url.path,

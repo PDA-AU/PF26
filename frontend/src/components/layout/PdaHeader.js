@@ -7,7 +7,8 @@ import persohubLogo from '@/assets/persohub.png';
 import { useAuth } from '@/context/AuthContext';
 
 const navItems = [
-    { to: '/', label: 'Home' }
+    { to: '/', label: 'Home' },
+    { to: '/persohub', label: 'Persohub' },
 ];
 
 const baseNavClass = 'inline-flex items-center rounded-md border-2 border-black px-3 py-2 text-xs font-bold uppercase tracking-[0.14em] shadow-neo transition-[background-color,color,transform,box-shadow] duration-150 hover:-translate-x-[1px] hover:-translate-y-[1px] hover:shadow-[6px_6px_0px_0px_#000000] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none';

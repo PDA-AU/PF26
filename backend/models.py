@@ -91,7 +91,7 @@ class AdminLog(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     admin_id = Column(Integer, nullable=False)
-    admin_register_number = Column(String(10), nullable=False)
+    admin_register_number = Column(String(64), nullable=False)
     admin_name = Column(String(255), nullable=False)
     action = Column(String(255), nullable=False)
     method = Column(String(10), nullable=True)
@@ -107,7 +107,7 @@ class PdaEventLog(Base):
     event_id = Column(Integer, ForeignKey("pda_events.id", ondelete="SET NULL"), nullable=True, index=True)
     event_slug = Column(String(120), nullable=False, index=True)
     admin_id = Column(Integer, nullable=True, index=True)
-    admin_register_number = Column(String(20), nullable=False)
+    admin_register_number = Column(String(64), nullable=False)
     admin_name = Column(String(255), nullable=False)
     action = Column(String(255), nullable=False)
     method = Column(String(10), nullable=True)
@@ -906,7 +906,7 @@ class PersohubEventLog(Base):
     event_id = Column(Integer, ForeignKey("persohub_events.id"), nullable=True, index=True)
     event_slug = Column(String(120), nullable=False, index=True)
     admin_id = Column(Integer, nullable=True, index=True)
-    admin_register_number = Column(String(20), nullable=False)
+    admin_register_number = Column(String(64), nullable=False)
     admin_name = Column(String(255), nullable=False)
     action = Column(String(255), nullable=False)
     method = Column(String(10), nullable=True)
@@ -940,7 +940,6 @@ class PersohubCommunity(Base):
     profile_id = Column(String(64), unique=True, nullable=False, index=True)
     club_id = Column(Integer, ForeignKey("persohub_clubs.id"), nullable=True, index=True)
     admin_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    hashed_password = Column(String(255), nullable=False)
     logo_url = Column(String(500), nullable=True)
     description = Column(Text, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
@@ -966,6 +965,22 @@ class PersohubAdmin(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
+class PersohubClubAdmin(Base):
+    __tablename__ = "persohub_club_admins"
+    __table_args__ = (
+        UniqueConstraint("club_id", "user_id", name="uq_persohub_club_admins_club_user"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    club_id = Column(Integer, ForeignKey("persohub_clubs.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    role = Column(String(16), nullable=False, default="superadmin", server_default="superadmin")
+    is_active = Column(Boolean, nullable=False, default=True, server_default="true")
+    created_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
 class PersohubCommunityFollow(Base):
     __tablename__ = "persohub_community_follows"
     __table_args__ = (
@@ -973,8 +988,8 @@ class PersohubCommunityFollow(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    community_id = Column(Integer, ForeignKey("persohub_communities.id"), nullable=False, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    community_id = Column(Integer, ForeignKey("persohub_communities.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -982,10 +997,11 @@ class PersohubPost(Base):
     __tablename__ = "persohub_posts"
 
     id = Column(Integer, primary_key=True, index=True)
-    community_id = Column(Integer, ForeignKey("persohub_communities.id"), nullable=False, index=True)
+    community_id = Column(Integer, ForeignKey("persohub_communities.id", ondelete="CASCADE"), nullable=False, index=True)
     admin_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     slug_token = Column(String(64), unique=True, nullable=False, index=True)
     description = Column(Text, nullable=True)
+    is_hidden = Column(Integer, nullable=False, default=1, server_default="1")
     like_count = Column(Integer, nullable=False, default=0)
     comment_count = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -996,7 +1012,7 @@ class PersohubPostAttachment(Base):
     __tablename__ = "persohub_post_attachments"
 
     id = Column(Integer, primary_key=True, index=True)
-    post_id = Column(Integer, ForeignKey("persohub_posts.id"), nullable=False, index=True)
+    post_id = Column(Integer, ForeignKey("persohub_posts.id", ondelete="CASCADE"), nullable=False, index=True)
     s3_url = Column(String(800), nullable=False)
     preview_image_urls = Column(JSON, nullable=True)
     mime_type = Column(String(120), nullable=True)
@@ -1013,8 +1029,8 @@ class PersohubPostLike(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    post_id = Column(Integer, ForeignKey("persohub_posts.id"), nullable=False, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    post_id = Column(Integer, ForeignKey("persohub_posts.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -1022,8 +1038,8 @@ class PersohubPostComment(Base):
     __tablename__ = "persohub_post_comments"
 
     id = Column(Integer, primary_key=True, index=True)
-    post_id = Column(Integer, ForeignKey("persohub_posts.id"), nullable=False, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    post_id = Column(Integer, ForeignKey("persohub_posts.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     comment_text = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -1046,8 +1062,8 @@ class PersohubPostHashtag(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    post_id = Column(Integer, ForeignKey("persohub_posts.id"), nullable=False, index=True)
-    hashtag_id = Column(Integer, ForeignKey("persohub_hashtags.id"), nullable=False, index=True)
+    post_id = Column(Integer, ForeignKey("persohub_posts.id", ondelete="CASCADE"), nullable=False, index=True)
+    hashtag_id = Column(Integer, ForeignKey("persohub_hashtags.id", ondelete="CASCADE"), nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -1058,6 +1074,6 @@ class PersohubPostMention(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    post_id = Column(Integer, ForeignKey("persohub_posts.id"), nullable=False, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    post_id = Column(Integer, ForeignKey("persohub_posts.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

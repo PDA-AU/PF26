@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-
 import { Toaster } from "@/components/ui/sonner";
 import LoadingState from "@/components/common/LoadingState";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { PersohubActorProvider } from "@/context/PersohubActorContext";
 import { PersohubAdminAuthProvider, usePersohubAdminAuth } from "@/context/PersohubAdminAuthContext";
 
 // Pages
@@ -116,7 +117,25 @@ const ProtectedPersohubEventsRoute = ({ children }) => {
         return <Navigate to="/persohub/admin" replace />;
     }
 
-    if (!community.can_access_events) {
+    if (!community.is_club_owner && !community.is_club_superadmin) {
+        return <Navigate to="/persohub/admin" replace />;
+    }
+
+    return children;
+};
+
+const ProtectedPersohubClubAdminRoute = ({ children }) => {
+    const { community, loading } = usePersohubAdminAuth();
+
+    if (loading) {
+        return <LoadingState fullScreen />;
+    }
+
+    if (!community) {
+        return <Navigate to="/persohub/admin" replace />;
+    }
+
+    if (!community.is_club_owner && !community.is_club_superadmin) {
         return <Navigate to="/persohub/admin" replace />;
     }
 
@@ -135,7 +154,7 @@ const ProtectedPersohubOwnerRoute = ({ children }) => {
     }
 
     if (!community.is_club_owner) {
-        return <Navigate to="/persohub/admin/persohub-events" replace />;
+        return <Navigate to="/persohub/admin" replace />;
     }
 
     return children;
@@ -254,14 +273,14 @@ function AppRoutes() {
             } />
             <Route path="/persohub/admin" element={<PersohubAdminEntryPage />} />
             <Route path="/persohub/admin/profile" element={
-                <ProtectedPersohubOwnerRoute>
+                <ProtectedPersohubClubAdminRoute>
                     <PersohubAdminProfilePage />
-                </ProtectedPersohubOwnerRoute>
+                </ProtectedPersohubClubAdminRoute>
             } />
             <Route path="/persohub/admin/communities" element={
-                <ProtectedPersohubOwnerRoute>
+                <ProtectedPersohubClubAdminRoute>
                     <PersohubAdminCommunitiesPage />
-                </ProtectedPersohubOwnerRoute>
+                </ProtectedPersohubClubAdminRoute>
             } />
             <Route path="/persohub/admin/policies" element={
                 <ProtectedPersohubOwnerRoute>
@@ -269,9 +288,9 @@ function AppRoutes() {
                 </ProtectedPersohubOwnerRoute>
             } />
             <Route path="/persohub/admin/payments" element={
-                <ProtectedPersohubOwnerRoute>
+                <ProtectedPersohubClubAdminRoute>
                     <PersohubAdminPaymentsPage />
-                </ProtectedPersohubOwnerRoute>
+                </ProtectedPersohubClubAdminRoute>
             } />
             <Route path="/persohub/admin/persohub-events" element={
                 <ProtectedPersohubEventsRoute>
@@ -341,12 +360,14 @@ function AppRoutes() {
 function App() {
     return (
         <AuthProvider>
-            <PersohubAdminAuthProvider>
-                <BrowserRouter>
-                    <AppRoutes />
-                    <Toaster position="top-right" richColors />
-                </BrowserRouter>
-            </PersohubAdminAuthProvider>
+            <PersohubActorProvider>
+                <PersohubAdminAuthProvider>
+                    <BrowserRouter>
+                        <AppRoutes />
+                        <Toaster position="top-right" richColors />
+                    </BrowserRouter>
+                </PersohubAdminAuthProvider>
+            </PersohubActorProvider>
         </AuthProvider>
     );
 }

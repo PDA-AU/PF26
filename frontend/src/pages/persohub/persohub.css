@@ -271,6 +271,13 @@
 }
 
 .ph-pdf-preview {
+    display: flex;
+    flex-direction: column;
+    min-height: 220px;
+    background: #11131a;
+}
+
+.ph-pdf-canvas {
     position: relative;
 }
 
@@ -284,17 +291,15 @@
 }
 
 .ph-pdf-meta {
-    position: absolute;
-    left: 0.5rem;
-    right: 0.5rem;
-    bottom: 0.5rem;
+    border-top: 2px solid #000;
     border: 2px solid #000;
+    border-top-width: 2px;
     background: #fff;
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.25rem 0.45rem;
+    padding: 0.35rem 0.55rem;
     font-size: 0.72rem;
     font-weight: 700;
 }
@@ -599,7 +604,6 @@
     min-height: 120px;
     resize: vertical;
 }
-
 .ph-comment {
     border: 2px solid #000;
     border-radius: 0.375rem;

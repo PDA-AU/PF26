@@ -280,12 +280,12 @@ def get_feed(
         if followed_ids:
             followed_total = (
                 db.query(func.count(PersohubPost.id))
-                .filter(PersohubPost.community_id.in_(followed_ids))
+                .filter(PersohubPost.community_id.in_(followed_ids), PersohubPost.is_hidden == 1)
                 .scalar()
             ) or 0
             other_total = (
                 db.query(func.count(PersohubPost.id))
-                .filter(~PersohubPost.community_id.in_(followed_ids))
+                .filter(~PersohubPost.community_id.in_(followed_ids), PersohubPost.is_hidden == 1)
                 .scalar()
             ) or 0
             total = int(followed_total + other_total)
@@ -296,7 +296,7 @@ def get_feed(
                 followed_limit = min(limit, followed_total - followed_offset)
                 posts.extend(
                     db.query(PersohubPost)
-                    .filter(PersohubPost.community_id.in_(followed_ids))
+                    .filter(PersohubPost.community_id.in_(followed_ids), PersohubPost.is_hidden == 1)
                     .order_by(PersohubPost.created_at.desc(), PersohubPost.id.desc())
                     .offset(followed_offset)
                     .limit(followed_limit)
@@ -308,25 +308,27 @@ def get_feed(
                 other_offset = max(0, offset - followed_total)
                 posts.extend(
                     db.query(PersohubPost)
-                    .filter(~PersohubPost.community_id.in_(followed_ids))
+                    .filter(~PersohubPost.community_id.in_(followed_ids), PersohubPost.is_hidden == 1)
                     .order_by(PersohubPost.like_count.desc(), PersohubPost.created_at.desc(), PersohubPost.id.desc())
                     .offset(other_offset)
                     .limit(remaining)
                     .all()
                 )
         else:
-            total = int(db.query(func.count(PersohubPost.id)).scalar() or 0)
+            total = int(db.query(func.count(PersohubPost.id)).filter(PersohubPost.is_hidden == 1).scalar() or 0)
             posts = (
                 db.query(PersohubPost)
+                .filter(PersohubPost.is_hidden == 1)
                 .order_by(PersohubPost.like_count.desc(), PersohubPost.created_at.desc(), PersohubPost.id.desc())
                 .offset(offset)
                 .limit(limit)
                 .all()
             )
     else:
-        total = int(db.query(func.count(PersohubPost.id)).scalar() or 0)
+        total = int(db.query(func.count(PersohubPost.id)).filter(PersohubPost.is_hidden == 1).scalar() or 0)
         posts = (
             db.query(PersohubPost)
+            .filter(PersohubPost.is_hidden == 1)
             .order_by(PersohubPost.like_count.desc(), PersohubPost.created_at.desc(), PersohubPost.id.desc())
             .offset(offset)
             .limit(limit)
@@ -485,7 +487,7 @@ def get_hashtag_posts(
 
     posts = (
         db.query(PersohubPost)
-        .filter(PersohubPost.id.in_(post_ids))
+        .filter(PersohubPost.id.in_(post_ids), PersohubPost.is_hidden == 1)
         .order_by(PersohubPost.created_at.desc())
         .all()
     )
@@ -575,31 +577,50 @@ def search_suggestions(
 @router.get("/persohub/profile/{profile_name}", response_model=PersohubPublicProfileResponse)
 def get_public_profile(
     profile_name: str,
+    limit: int = Query(default=20, ge=1, le=100),
+    cursor: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
     user: Optional[PdaUser] = Depends(get_optional_pda_user),
     community_auth: Optional[PersohubCommunity] = Depends(get_optional_persohub_community),
 ):
     key = profile_name.strip().lower()
+    offset = _parse_cursor_offset(cursor)
 
     community = db.query(PersohubCommunity).filter(PersohubCommunity.profile_id == key).first()
     if community:
         community_card = build_community_card(db, community, current_user_id=(user.id if user else None))
+        can_edit_community = bool(community_auth and community_auth.id == community.id)
+        follower_count = int(
+            db.query(func.count(PersohubCommunityFollow.id))
+            .filter(PersohubCommunityFollow.community_id == community.id)
+            .scalar()
+            or 0
+        )
+        posts_query = db.query(PersohubPost).filter(PersohubPost.community_id == community.id)
+        if not can_edit_community:
+            posts_query = posts_query.filter(PersohubPost.is_hidden == 1)
+        total_posts = int(posts_query.count() or 0)
         posts = (
-            db.query(PersohubPost)
-            .filter(PersohubPost.community_id == community.id)
-            .order_by(PersohubPost.created_at.desc())
-            .limit(100)
+            posts_query
+            .order_by(PersohubPost.created_at.desc(), PersohubPost.id.desc())
+            .offset(offset)
+            .limit(limit)
             .all()
         )
+        next_offset = offset + len(posts)
+        has_more = next_offset < total_posts
         return PersohubPublicProfileResponse(
             profile_type="community",
             profile_name=community.profile_id,
             name=community.name,
             image_url=community_card.logo_url,
             about=community.description,
+            follower_count=follower_count,
             community=community_card,
             posts=build_post_responses_bulk(db, posts, current_user_id=(user.id if user else None)),
-            can_edit=bool(community_auth and community_auth.id == community.id),
+            posts_next_cursor=str(next_offset) if has_more else None,
+            posts_has_more=has_more,
+            can_edit=can_edit_community,
         )
 
     person = db.query(PdaUser).filter(PdaUser.profile_name == key).first()
@@ -608,14 +629,21 @@ def get_public_profile(
 
     team = db.query(PdaTeam).filter(PdaTeam.user_id == person.id).first()
     badges_rows = get_user_badge_assignments(db, person.id, limit=50)
-    mentioned_posts = (
+    mentioned_posts_query = (
         db.query(PersohubPost)
         .join(PersohubPostMention, PersohubPostMention.post_id == PersohubPost.id)
         .filter(PersohubPostMention.user_id == person.id)
-        .order_by(PersohubPost.created_at.desc())
-        .limit(50)
+    )
+    total_posts = int(mentioned_posts_query.count() or 0)
+    mentioned_posts = (
+        mentioned_posts_query
+        .order_by(PersohubPost.created_at.desc(), PersohubPost.id.desc())
+        .offset(offset)
+        .limit(limit)
         .all()
     )
+    next_offset = offset + len(mentioned_posts)
+    has_more = next_offset < total_posts
 
     return PersohubPublicProfileResponse(
         profile_type="user",
@@ -640,6 +668,8 @@ def get_public_profile(
             for assignment, badge in badges_rows
         ],
         posts=build_post_responses_bulk(db, mentioned_posts, current_user_id=(user.id if user else None)),
+        posts_next_cursor=str(next_offset) if has_more else None,
+        posts_has_more=has_more,
         can_edit=bool(user and user.id == person.id),
     )
 

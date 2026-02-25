@@ -476,7 +476,7 @@ function EventFormFields({
 
 export default function PersohubAdminEventsPage() {
     const { community } = usePersohubAdminAuth();
-    const canMutate = Boolean(community?.is_club_owner);
+    const canMutate = Boolean(community?.is_club_owner || community?.is_club_superadmin);
     const canAccessEvents = Boolean(community?.can_access_events);
 
     const [events, setEvents] = useState([]);

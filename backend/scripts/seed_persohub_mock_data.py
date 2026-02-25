@@ -606,7 +606,6 @@ def seed_mock_data(
                 profile_id=profile_id,
                 club_id=club.id,
                 admin_id=admin.id,
-                hashed_password=get_password_hash("password"),
                 logo_url=f"https://placehold.co/300x300?text={profile_id}",
                 description=f"{MOCK_MARKER}Generated community for Persohub testing",
                 is_active=True,

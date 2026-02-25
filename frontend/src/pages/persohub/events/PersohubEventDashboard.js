@@ -242,6 +242,7 @@ export default function EventDashboard() {
         confirmPassword: ''
     });
     const [registrationCtaModalOpen, setRegistrationCtaModalOpen] = useState(false);
+    const [registrationCtaVariant, setRegistrationCtaVariant] = useState('registered');
     const [paymentModalOpen, setPaymentModalOpen] = useState(false);
     const [paymentScreenshot, setPaymentScreenshot] = useState(null);
     const [paymentComment, setPaymentComment] = useState('');
@@ -669,6 +670,7 @@ export default function EventDashboard() {
             toast.success('Registered successfully');
             closeRegistrationDialog(true);
             if (whatsappUrl) {
+                setRegistrationCtaVariant('registered');
                 setRegistrationCtaModalOpen(true);
             }
             await fetchData();
@@ -694,6 +696,7 @@ export default function EventDashboard() {
                 toast.success('Team created');
             }
             if (!nextRequiresPayment && whatsappUrl) {
+                setRegistrationCtaVariant('registered');
                 setRegistrationCtaModalOpen(true);
             }
             if (nextRequiresPayment) {
@@ -721,6 +724,7 @@ export default function EventDashboard() {
                 toast.success('Joined team');
             }
             if (!nextRequiresPayment && whatsappUrl) {
+                setRegistrationCtaVariant('registered');
                 setRegistrationCtaModalOpen(true);
             }
         } catch (error) {
@@ -777,6 +781,10 @@ export default function EventDashboard() {
             );
             toast.success('Payment submitted. Pending confirmation.');
             closePaymentModal(true);
+            if (whatsappUrl) {
+                setRegistrationCtaVariant('payment_submitted');
+                setRegistrationCtaModalOpen(true);
+            }
             await fetchData();
         } catch (error) {
             toast.error(error?.response?.data?.detail || 'Failed to submit payment proof');
@@ -2625,12 +2633,14 @@ export default function EventDashboard() {
                 <DialogContent className="max-w-md border-4 border-black bg-white">
                     <DialogHeader>
                         <DialogTitle className="font-heading text-xl font-black uppercase tracking-tight">
-                            Registration Confirmed
+                            {registrationCtaVariant === 'payment_submitted' ? 'Payment Submitted' : 'Registration Confirmed'}
                         </DialogTitle>
                     </DialogHeader>
                     <div className="space-y-4">
                         <p className="text-sm font-medium text-slate-700">
-                            You are registered. Join the external channel for updates.
+                            {registrationCtaVariant === 'payment_submitted'
+                                ? 'Payment proof submitted successfully. Join the external channel for updates while confirmation is pending.'
+                                : 'You are registered. Join the external channel for updates.'}
                         </p>
                         {whatsappUrl ? (
                             <a href={whatsappUrl} target="_blank" rel="noreferrer">

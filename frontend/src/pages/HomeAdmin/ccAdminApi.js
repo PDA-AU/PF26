@@ -10,8 +10,6 @@ export const ccAdminApi = {
     listCommunities: (headers) => axios.get(`${API}/pda-admin/cc/communities`, { headers }),
     createCommunity: (payload, headers) => axios.post(`${API}/pda-admin/cc/communities`, payload, { headers }),
     updateCommunity: (communityId, payload, headers) => axios.put(`${API}/pda-admin/cc/communities/${communityId}`, payload, { headers }),
-    resetCommunityPassword: (communityId, payload, headers) =>
-        axios.post(`${API}/pda-admin/cc/communities/${communityId}/reset-password`, payload, { headers }),
     deleteCommunity: (communityId, headers) => axios.delete(`${API}/pda-admin/cc/communities/${communityId}`, { headers }),
 
     listSympos: (headers) => axios.get(`${API}/pda-admin/cc/persohub-sympos`, { headers }),

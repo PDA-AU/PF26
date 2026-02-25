@@ -39,21 +39,47 @@ const renderUrlText = (text, keyPrefix) => {
     });
 };
 
-const renderMentionHashtagText = (text, keyPrefix) => {
+const renderMentionHashtagText = (
+    text,
+    keyPrefix,
+    { onHashtagClick } = {},
+) => {
     const tokens = splitMentionHashtagTokens(text);
     return tokens.filter(Boolean).map((token, index) => {
         if (token.startsWith('@')) {
+            const mentionValue = token.slice(1);
             return (
-                <span key={`${keyPrefix}-m-${index}`} className="font-semibold text-teal-700">
+                <a
+                    key={`${keyPrefix}-m-${index}`}
+                    href={`/persohub/${mentionValue}`}
+                    className="font-semibold text-teal-700 underline underline-offset-2 hover:text-teal-800"
+                >
                     {token}
-                </span>
+                </a>
             );
         }
         if (token.startsWith('#')) {
+            const hashtagValue = token.slice(1);
+            if (typeof onHashtagClick === 'function') {
+                return (
+                    <button
+                        key={`${keyPrefix}-h-${index}`}
+                        type="button"
+                        className="cursor-pointer border-0 bg-transparent p-0 font-semibold text-orange-700 underline underline-offset-2 hover:text-orange-800"
+                        onClick={() => onHashtagClick(hashtagValue)}
+                    >
+                        {token}
+                    </button>
+                );
+            }
             return (
-                <span key={`${keyPrefix}-h-${index}`} className="font-semibold text-orange-700">
+                <a
+                    key={`${keyPrefix}-h-${index}`}
+                    href={`/persohub?hashtag=${encodeURIComponent(hashtagValue)}`}
+                    className="font-semibold text-orange-700 underline underline-offset-2 hover:text-orange-800"
+                >
                     {token}
-                </span>
+                </a>
             );
         }
         return (
@@ -64,26 +90,51 @@ const renderMentionHashtagText = (text, keyPrefix) => {
     });
 };
 
-const renderInlineDescription = (text, keyPrefix) => {
-    const tokens = String(text || '').split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g);
+const renderMarkdownText = (text, keyPrefix, { onHashtagClick } = {}) => {
+    const tokens = String(text || '').split(/(\*\*[^*]+\*\*|\*[^*]+\*|_[^_]+_)/g);
     return tokens.filter(Boolean).map((token, index) => {
         if (token.startsWith('**') && token.endsWith('**') && token.length > 4) {
             return (
                 <strong key={`${keyPrefix}-b2-${index}`} className="font-extrabold text-black">
-                    {renderMentionHashtagText(token.slice(2, -2), `${keyPrefix}-b2-${index}`)}
+                    {renderUrlText(token.slice(2, -2), `${keyPrefix}-b2-${index}`)}
                 </strong>
             );
         }
         if (token.startsWith('*') && token.endsWith('*') && token.length > 2) {
             return (
                 <strong key={`${keyPrefix}-b-${index}`} className="font-extrabold text-black">
-                    {renderMentionHashtagText(token.slice(1, -1), `${keyPrefix}-b-${index}`)}
+                    {renderUrlText(token.slice(1, -1), `${keyPrefix}-b-${index}`)}
                 </strong>
+            );
+        }
+        if (token.startsWith('_') && token.endsWith('_') && token.length > 2) {
+            return (
+                <em key={`${keyPrefix}-i-${index}`} className="italic">
+                    {renderUrlText(token.slice(1, -1), `${keyPrefix}-i-${index}`)}
+                </em>
             );
         }
         return (
             <React.Fragment key={`${keyPrefix}-n-${index}`}>
-                {renderMentionHashtagText(token, `${keyPrefix}-n-${index}`)}
+                {renderMentionHashtagText(token, `${keyPrefix}-n-${index}`, { onHashtagClick })}
+            </React.Fragment>
+        );
+    });
+};
+
+const renderInlineDescription = (text, keyPrefix, { onHashtagClick } = {}) => {
+    const tokens = splitMentionHashtagTokens(text);
+    return tokens.filter(Boolean).map((token, index) => {
+        if (token.startsWith('@') || token.startsWith('#')) {
+            return (
+                <React.Fragment key={`${keyPrefix}-mh-${index}`}>
+                    {renderMentionHashtagText(token, `${keyPrefix}-mh-${index}`, { onHashtagClick })}
+                </React.Fragment>
+            );
+        }
+        return (
+            <React.Fragment key={`${keyPrefix}-md-${index}`}>
+                {renderMarkdownText(token, `${keyPrefix}-md-${index}`, { onHashtagClick })}
             </React.Fragment>
         );
     });
@@ -166,7 +217,8 @@ export const parseDescriptionBlocks = (description) => {
 export default function ParsedDescription({
     description,
     emptyText = null,
-    listClassName = 'list-disc space-y-1 pl-5'
+    listClassName = 'list-disc space-y-1 pl-5',
+    onHashtagClick,
 }) {
     const descriptionBlocks = useMemo(() => parseDescriptionBlocks(description), [description]);
 
@@ -182,7 +234,9 @@ export default function ParsedDescription({
                         <ul key={`desc-list-${index}`} className={listClassName}>
                             {block.items.map((item, itemIndex) => (
                                 <li key={`desc-list-${index}-${itemIndex}`}>
-                                    {renderInlineDescription(item, `desc-list-${index}-${itemIndex}`)}
+                                    {renderInlineDescription(item, `desc-list-${index}-${itemIndex}`, {
+                                        onHashtagClick,
+                                    })}
                                 </li>
                             ))}
                         </ul>
@@ -190,7 +244,9 @@ export default function ParsedDescription({
                 }
                 return (
                     <p key={`desc-text-${index}`}>
-                        {renderInlineDescription(block.text, `desc-text-${index}`)}
+                        {renderInlineDescription(block.text, `desc-text-${index}`, {
+                            onHashtagClick,
+                        })}
                     </p>
                 );
             })}

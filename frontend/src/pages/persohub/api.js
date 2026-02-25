@@ -1,31 +1,23 @@
 import axios from 'axios';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-const COMMUNITY_ACCESS_TOKEN_KEY = 'persohubCommunityAccessToken';
-const COMMUNITY_REFRESH_TOKEN_KEY = 'persohubCommunityRefreshToken';
 
 const getPdaAccessToken = () => localStorage.getItem('pdaAccessToken');
-const getCommunityAccessToken = () => localStorage.getItem(COMMUNITY_ACCESS_TOKEN_KEY);
-const getCommunityRefreshToken = () => localStorage.getItem(COMMUNITY_REFRESH_TOKEN_KEY);
+let persohubActorHeaderGetter = () => ({});
 
 const getPdaAuthHeader = () => {
     const token = getPdaAccessToken();
     return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
-const getCommunityAuthHeader = () => {
-    const token = getCommunityAccessToken();
-    return token ? { Authorization: `Bearer ${token}` } : {};
-};
-
-const saveCommunityTokens = ({ access_token, refresh_token }) => {
-    localStorage.setItem(COMMUNITY_ACCESS_TOKEN_KEY, access_token);
-    localStorage.setItem(COMMUNITY_REFRESH_TOKEN_KEY, refresh_token);
-};
-
-const clearCommunityTokens = () => {
-    localStorage.removeItem(COMMUNITY_ACCESS_TOKEN_KEY);
-    localStorage.removeItem(COMMUNITY_REFRESH_TOKEN_KEY);
+const getPersohubActorHeader = () => {
+    try {
+        const headers = persohubActorHeaderGetter?.();
+        if (headers && typeof headers === 'object') return headers;
+    } catch {
+        // no-op
+    }
+    return {};
 };
 
 const parseApiError = (error, fallback) => {
@@ -66,17 +58,10 @@ const putWithRetry = async (url, data, headers, maxAttempts = 2) => {
     throw lastError;
 };
 
-const assertNoCommunitySessionForUserInteraction = (actionLabel) => {
-    if (getCommunityAccessToken()) {
-        throw new Error(`Logout community session to ${actionLabel} as a PDA user.`);
-    }
-};
-
 export const persohubApi = {
-    getCommunityAccessToken,
-    getCommunityRefreshToken,
-    saveCommunityTokens,
-    clearCommunityTokens,
+    setActorHeaderGetter(getter) {
+        persohubActorHeaderGetter = typeof getter === 'function' ? getter : (() => ({}));
+    },
     parseApiError,
 
     async fetchFeed(limit = 20, cursor = null) {
@@ -109,7 +94,6 @@ export const persohubApi = {
     },
 
     async createComment(slugToken, commentText) {
-        assertNoCommunitySessionForUserInteraction('comment');
         const response = await axios.post(
             `${API}/persohub/posts/${slugToken}/comments`,
             { comment_text: commentText },
@@ -119,7 +103,6 @@ export const persohubApi = {
     },
 
     async toggleLike(slugToken) {
-        assertNoCommunitySessionForUserInteraction('like');
         const response = await axios.post(
             `${API}/persohub/posts/${slugToken}/like-toggle`,
             {},
@@ -142,11 +125,12 @@ export const persohubApi = {
         return response.data;
     },
 
-    async fetchProfile(profileName) {
+    async fetchProfile(profileName, { limit = 20, cursor = null } = {}) {
         const response = await axios.get(`${API}/persohub/profile/${encodeURIComponent(profileName)}`, {
+            params: { limit, ...(cursor ? { cursor } : {}) },
             headers: {
                 ...getPdaAuthHeader(),
-                ...getCommunityAuthHeader(),
+                ...getPersohubActorHeader(),
             },
         });
         return response.data;
@@ -161,62 +145,47 @@ export const persohubApi = {
         return response.data;
     },
 
-    async communityLogin(profileId, password) {
-        const response = await axios.post(`${API}/persohub/community/auth/login`, {
-            profile_id: profileId,
-            password,
-        });
-        this.saveCommunityTokens(response.data);
-        return response.data;
-    },
-
-    async communityRefresh() {
-        const refreshToken = getCommunityRefreshToken();
-        if (!refreshToken) throw new Error('Missing community refresh token');
-
-        const response = await axios.post(`${API}/persohub/community/auth/refresh`, {
-            refresh_token: refreshToken,
-        });
-        this.saveCommunityTokens(response.data);
-        return response.data;
-    },
-
-    async communityMe() {
-        try {
-            const response = await axios.get(`${API}/persohub/community/auth/me`, {
-                headers: { ...getCommunityAuthHeader() },
-            });
-            return response.data;
-        } catch (error) {
-            if (error?.response?.status === 401 && getCommunityRefreshToken()) {
-                await this.communityRefresh();
-                const response = await axios.get(`${API}/persohub/community/auth/me`, {
-                    headers: { ...getCommunityAuthHeader() },
-                });
-                return response.data;
-            }
-            throw error;
-        }
-    },
-
     async createCommunityPost(payload) {
         const response = await axios.post(`${API}/persohub/community/posts`, payload, {
-            headers: { ...getCommunityAuthHeader() },
+            headers: {
+                ...getPdaAuthHeader(),
+                ...getPersohubActorHeader(),
+            },
         });
         return response.data;
     },
 
     async updateCommunityPost(slugToken, payload) {
         const response = await axios.put(`${API}/persohub/community/posts/${slugToken}`, payload, {
-            headers: { ...getCommunityAuthHeader() },
+            headers: {
+                ...getPdaAuthHeader(),
+                ...getPersohubActorHeader(),
+            },
         });
         return response.data;
     },
 
     async deleteCommunityPost(slugToken) {
         const response = await axios.delete(`${API}/persohub/community/posts/${slugToken}`, {
-            headers: { ...getCommunityAuthHeader() },
+            headers: {
+                ...getPdaAuthHeader(),
+                ...getPersohubActorHeader(),
+            },
         });
+        return response.data;
+    },
+
+    async updateCommunityPostVisibility(slugToken, isHidden) {
+        const response = await axios.put(
+            `${API}/persohub/community/posts/${slugToken}/visibility`,
+            { is_hidden: Number(isHidden ? 1 : 0) },
+            {
+                headers: {
+                    ...getPdaAuthHeader(),
+                    ...getPersohubActorHeader(),
+                },
+            },
+        );
         return response.data;
     },
 
@@ -228,7 +197,12 @@ export const persohubApi = {
                 content_type: file.type || 'application/octet-stream',
                 size_bytes: file.size,
             },
-            { headers: { ...getCommunityAuthHeader() } },
+            {
+                headers: {
+                    ...getPdaAuthHeader(),
+                    ...getPersohubActorHeader(),
+                },
+            },
         );
         return response.data;
     },
@@ -241,35 +215,52 @@ export const persohubApi = {
                 content_type: file.type || 'application/octet-stream',
                 size_bytes: file.size,
             },
-            { headers: { ...getCommunityAuthHeader() } },
+            {
+                headers: {
+                    ...getPdaAuthHeader(),
+                    ...getPersohubActorHeader(),
+                },
+            },
         );
         return response.data;
     },
 
     async getMultipartPartUrl(payload) {
         const response = await axios.post(`${API}/persohub/community/uploads/multipart/part-url`, payload, {
-            headers: { ...getCommunityAuthHeader() },
+            headers: {
+                ...getPdaAuthHeader(),
+                ...getPersohubActorHeader(),
+            },
         });
         return response.data;
     },
 
     async completeMultipartUpload(payload) {
         const response = await axios.post(`${API}/persohub/community/uploads/multipart/complete`, payload, {
-            headers: { ...getCommunityAuthHeader() },
+            headers: {
+                ...getPdaAuthHeader(),
+                ...getPersohubActorHeader(),
+            },
         });
         return response.data;
     },
 
     async abortMultipartUpload(payload) {
         const response = await axios.post(`${API}/persohub/community/uploads/multipart/abort`, payload, {
-            headers: { ...getCommunityAuthHeader() },
+            headers: {
+                ...getPdaAuthHeader(),
+                ...getPersohubActorHeader(),
+            },
         });
         return response.data;
     },
 
     async generatePdfPreview(payload) {
         const response = await axios.post(`${API}/persohub/community/uploads/pdf-preview`, payload, {
-            headers: { ...getCommunityAuthHeader() },
+            headers: {
+                ...getPdaAuthHeader(),
+                ...getPersohubActorHeader(),
+            },
         });
         return response.data;
     },

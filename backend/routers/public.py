@@ -117,7 +117,6 @@ def list_routes():
             {"method": "GET", "path": "/pda-admin/cc/communities"},
             {"method": "POST", "path": "/pda-admin/cc/communities"},
             {"method": "PUT", "path": "/pda-admin/cc/communities/{community_id}"},
-            {"method": "POST", "path": "/pda-admin/cc/communities/{community_id}/reset-password"},
             {"method": "DELETE", "path": "/pda-admin/cc/communities/{community_id}"},
             {"method": "GET", "path": "/pda-admin/cc/persohub-sympos"},
             {"method": "POST", "path": "/pda-admin/cc/persohub-sympos"},

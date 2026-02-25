@@ -27,6 +27,17 @@ const normalizeProfileImageUrl = (value) => {
     return raw;
 };
 
+const extractInlineMentions = (description) => {
+    const matches = String(description || '').match(/@([a-z0-9_]+)/gi) || [];
+    return Array.from(
+        new Set(
+            matches
+                .map((value) => value.replace(/^@+/, '').trim().toLowerCase())
+                .filter(Boolean),
+        ),
+    );
+};
+
 export default function PersohubProfilePage() {
     const { profileName } = useParams();
     const navigate = useNavigate();
@@ -34,12 +45,18 @@ export default function PersohubProfilePage() {
 
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [postsCursor, setPostsCursor] = useState(null);
+    const [postsHasMore, setPostsHasMore] = useState(false);
+    const [loadingMorePosts, setLoadingMorePosts] = useState(false);
     const [sharePost, setSharePost] = useState(null);
     const [editPostModalOpen, setEditPostModalOpen] = useState(false);
     const [editingPost, setEditingPost] = useState(null);
     const [editSubmitting, setEditSubmitting] = useState(false);
     const [pendingLikeSlugs, setPendingLikeSlugs] = useState(() => new Set());
     const pendingLikeSlugsRef = useRef(new Set());
+    const [pendingHideSlugs, setPendingHideSlugs] = useState(() => new Set());
+    const pendingHideSlugsRef = useRef(new Set());
+    const [visibilityTargetPost, setVisibilityTargetPost] = useState(null);
     const [deleteTargetPost, setDeleteTargetPost] = useState(null);
     const [deleteSubmitting, setDeleteSubmitting] = useState(false);
     const [profileQrOpen, setProfileQrOpen] = useState(false);
@@ -55,8 +72,10 @@ export default function PersohubProfilePage() {
         if (!profileName) return;
         setLoading(true);
         try {
-            const data = await persohubApi.fetchProfile(profileName);
+            const data = await persohubApi.fetchProfile(profileName, { limit: 20, cursor: null });
             setProfile(data);
+            setPostsCursor(data?.posts_next_cursor || null);
+            setPostsHasMore(Boolean(data?.posts_has_more));
         } catch (error) {
             toast.error(persohubApi.parseApiError(error, 'Failed to load profile'));
             navigate('/persohub', { replace: true });
@@ -64,6 +83,32 @@ export default function PersohubProfilePage() {
             setLoading(false);
         }
     }, [profileName, navigate]);
+
+    const handleLoadMorePosts = useCallback(async () => {
+        if (!profileName || !postsHasMore || !postsCursor || loadingMorePosts) return;
+        setLoadingMorePosts(true);
+        try {
+            const page = await persohubApi.fetchProfile(profileName, { limit: 20, cursor: postsCursor });
+            const nextItems = Array.isArray(page?.posts) ? page.posts : [];
+            setProfile((prev) => {
+                const existing = Array.isArray(prev?.posts) ? prev.posts : [];
+                const seen = new Set(existing.map((item) => item.slug_token));
+                const merged = [...existing];
+                for (const item of nextItems) {
+                    if (!item?.slug_token || seen.has(item.slug_token)) continue;
+                    seen.add(item.slug_token);
+                    merged.push(item);
+                }
+                return { ...(prev || {}), posts: merged };
+            });
+            setPostsCursor(page?.posts_next_cursor || null);
+            setPostsHasMore(Boolean(page?.posts_has_more));
+        } catch (error) {
+            toast.error(persohubApi.parseApiError(error, 'Failed to load more posts'));
+        } finally {
+            setLoadingMorePosts(false);
+        }
+    }, [profileName, postsHasMore, postsCursor, loadingMorePosts]);
 
     useEffect(() => {
         loadProfile();
@@ -140,6 +185,31 @@ export default function PersohubProfilePage() {
         setEditPostModalOpen(true);
     };
 
+    const handleTogglePostVisibility = async (post) => {
+        setVisibilityTargetPost(post || null);
+    };
+
+    const handleConfirmTogglePostVisibility = async () => {
+        const post = visibilityTargetPost;
+        if (!post?.slug_token) return;
+        const slugToken = post.slug_token;
+        if (pendingHideSlugsRef.current.has(slugToken)) return;
+        pendingHideSlugsRef.current.add(slugToken);
+        setPendingHideSlugs(new Set(pendingHideSlugsRef.current));
+        try {
+            const nextHidden = Number(post.is_hidden || 0) === 1 ? 0 : 1;
+            const updated = await persohubApi.updateCommunityPostVisibility(slugToken, nextHidden === 0 ? 0 : 1);
+            patchPost(updated);
+            toast.success(nextHidden === 0 ? 'Post hidden from feed' : 'Post unhidden');
+            setVisibilityTargetPost(null);
+        } catch (error) {
+            toast.error(persohubApi.parseApiError(error, 'Failed to update post visibility'));
+        } finally {
+            pendingHideSlugsRef.current.delete(slugToken);
+            setPendingHideSlugs(new Set(pendingHideSlugsRef.current));
+        }
+    };
+
     const handleSubmitEditPost = async (payload) => {
         if (!editingPost) return;
         setEditSubmitting(true);
@@ -160,10 +230,7 @@ export default function PersohubProfilePage() {
                 mime_type: item.mime_type,
                 size_bytes: item.size_bytes,
             }));
-            const mentions = (payload.mentions || '')
-                .split(',')
-                .map((item) => item.trim().replace(/^@+/, '').toLowerCase())
-                .filter(Boolean);
+            const mentions = extractInlineMentions(payload.description);
 
             const updated = await persohubApi.updateCommunityPost(editingPost.slug_token, {
                 description: payload.description,
@@ -354,8 +421,14 @@ export default function PersohubProfilePage() {
                                     <p className="mt-1 font-heading text-3xl font-black">{totalComments}</p>
                                 </div>
                                 <div className={tileClass}>
-                                    <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">Badges</p>
-                                    <p className="mt-1 font-heading text-3xl font-black">{profileBadges.length}</p>
+                                    <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">
+                                        {profile.profile_type === 'community' ? 'Followers' : 'Badges'}
+                                    </p>
+                                    <p className="mt-1 font-heading text-3xl font-black">
+                                        {profile.profile_type === 'community'
+                                            ? Number(profile?.follower_count || 0)
+                                            : profileBadges.length}
+                                    </p>
                                 </div>
                             </div>
                             {profile.profile_type === 'user' ? (
@@ -370,35 +443,68 @@ export default function PersohubProfilePage() {
                             ) : null}
                         </div>
                         <div className={panelClass}>
-                            <h2 className="font-heading text-3xl font-black uppercase tracking-tight">Badges</h2>
-                            {profileBadges.length === 0 ? (
-                                <p className="mt-4 rounded-md border-2 border-black bg-[#fffdf0] p-4 text-sm font-medium text-slate-700 shadow-neo">
-                                    No badges available for this profile yet.
-                                </p>
+                            {profile.profile_type === 'community' ? (
+                                <>
+                                    <h2 className="font-heading text-3xl font-black uppercase tracking-tight">About Club</h2>
+                                    <div className="mt-4 space-y-3 rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
+                                        {profile?.community?.club_logo_url ? (
+                                            <img
+                                                src={profile.community.club_logo_url}
+                                                alt="Club logo"
+                                                className="h-20 w-20 rounded-md border-2 border-black object-cover"
+                                            />
+                                        ) : null}
+                                        {profile?.community?.club_tagline ? (
+                                            <p className="text-sm font-semibold text-slate-700">{profile.community.club_tagline}</p>
+                                        ) : null}
+                                        {profile?.community?.club_description ? (
+                                            <p
+                                                className="max-h-24 overflow-y-auto pr-1 text-sm font-medium text-slate-700"
+                                                title={profile.community.club_description}
+                                            >
+                                                {profile.community.club_description}
+                                            </p>
+                                        ) : null}
+                                        {!profile?.community?.club_logo_url
+                                            && !profile?.community?.club_tagline
+                                            && !profile?.community?.club_description ? (
+                                                <p className="text-sm font-medium text-slate-700">No additional club details available.</p>
+                                            ) : null}
+                                    </div>
+                                </>
                             ) : (
-                                <div className="mt-4 ph-badge-grid-scroll" role="list" aria-label="Profile badges">
-                                    {profileBadges.map((badge) => (
-                                        <button
-                                            key={badge.id}
-                                            type="button"
-                                            className="ph-badge-card"
-                                            onClick={() => handleOpenBadgeModal(badge)}
-                                            role="listitem"
-                                        >
-                                            <div className="ph-badge-media">
-                                                {badge.image_url ? (
-                                                    <img src={badge.image_url} alt={badge.title || 'Badge'} className="ph-badge-image" />
-                                                ) : (
-                                                    <div className="ph-badge-fallback">Badge</div>
-                                                )}
-                                            </div>
-                                            <div className="ph-badge-copy">
-                                                <p className="ph-badge-title">{badge.title || 'Badge'}</p>
-                                                <p className="ph-badge-meta">{badge.place || 'Achievement'}</p>
-                                            </div>
-                                        </button>
-                                    ))}
-                                </div>
+                                <>
+                                    <h2 className="font-heading text-3xl font-black uppercase tracking-tight">Badges</h2>
+                                    {profileBadges.length === 0 ? (
+                                        <p className="mt-4 rounded-md border-2 border-black bg-[#fffdf0] p-4 text-sm font-medium text-slate-700 shadow-neo">
+                                            No badges available for this profile yet.
+                                        </p>
+                                    ) : (
+                                        <div className="mt-4 ph-badge-grid-scroll" role="list" aria-label="Profile badges">
+                                            {profileBadges.map((badge) => (
+                                                <button
+                                                    key={badge.id}
+                                                    type="button"
+                                                    className="ph-badge-card"
+                                                    onClick={() => handleOpenBadgeModal(badge)}
+                                                    role="listitem"
+                                                >
+                                                    <div className="ph-badge-media">
+                                                        {badge.image_url ? (
+                                                            <img src={badge.image_url} alt={badge.title || 'Badge'} className="ph-badge-image" />
+                                                        ) : (
+                                                            <div className="ph-badge-fallback">Badge</div>
+                                                        )}
+                                                    </div>
+                                                    <div className="ph-badge-copy">
+                                                        <p className="ph-badge-title">{badge.title || 'Badge'}</p>
+                                                        <p className="ph-badge-meta">{badge.place || 'Achievement'}</p>
+                                                    </div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </>
                             )}
                         </div>
                     </section>
@@ -415,23 +521,39 @@ export default function PersohubProfilePage() {
                                 <EmptyState title="No posts" subtitle="Nothing to show on this profile yet." />
                             </div>
                         ) : (
-                            <div className="mt-5 ph-feed">
-                                {profilePosts.map((post) => (
-                                    <PostCard
-                                        key={post.slug_token}
-                                        post={post}
-                                        onLike={handleLike}
-                                        likePending={pendingLikeSlugs.has(post.slug_token)}
-                                        onShare={setSharePost}
-                                        onHashtagClick={(hashtag) => navigate(`/persohub?hashtag=${encodeURIComponent(hashtag)}`)}
-                                        isUserLoggedIn={isUserLoggedIn}
-                                        fetchComments={persohubApi.fetchComments}
-                                        createComment={handleCreateComment}
-                                        allowModeration={Boolean(profile.can_edit)}
-                                        onDelete={handleDeletePost}
-                                        onEdit={handleEditPost}
-                                    />
-                                ))}
+                            <div className="mt-5">
+                                <div className="ph-feed">
+                                    {profilePosts.map((post) => (
+                                        <PostCard
+                                            key={post.slug_token}
+                                            post={post}
+                                            onLike={handleLike}
+                                            likePending={pendingLikeSlugs.has(post.slug_token)}
+                                            hidePending={pendingHideSlugs.has(post.slug_token)}
+                                            onShare={setSharePost}
+                                            onHashtagClick={(hashtag) => navigate(`/persohub?hashtag=${encodeURIComponent(hashtag)}`)}
+                                            isUserLoggedIn={isUserLoggedIn}
+                                            fetchComments={persohubApi.fetchComments}
+                                            createComment={handleCreateComment}
+                                            allowModeration={Boolean(profile.can_edit)}
+                                            onDelete={handleDeletePost}
+                                            onEdit={handleEditPost}
+                                            onHide={handleTogglePostVisibility}
+                                        />
+                                    ))}
+                                </div>
+                                {postsHasMore ? (
+                                    <div className="mt-4 flex justify-center">
+                                        <button
+                                            type="button"
+                                            className="ph-action-btn"
+                                            onClick={handleLoadMorePosts}
+                                            disabled={loadingMorePosts}
+                                        >
+                                            {loadingMorePosts ? 'Loading...' : 'Load more posts'}
+                                        </button>
+                                    </div>
+                                ) : null}
                             </div>
                         )}
                     </section>
@@ -508,9 +630,24 @@ export default function PersohubProfilePage() {
                 title="Delete Post"
                 message="This action cannot be undone. Delete this post?"
                 confirmLabel="Delete"
+                pendingLabel="Deleting..."
                 onConfirm={handleConfirmDeletePost}
                 onCancel={() => setDeleteTargetPost(null)}
                 pending={deleteSubmitting}
+            />
+
+            <ConfirmModal
+                open={Boolean(visibilityTargetPost)}
+                title={Number(visibilityTargetPost?.is_hidden || 0) === 1 ? 'Hide Post' : 'Unhide Post'}
+                message={
+                    Number(visibilityTargetPost?.is_hidden || 0) === 1
+                        ? 'Hide this post from feed?'
+                        : 'Unhide this post and show it in feed again?'
+                }
+                confirmLabel={Number(visibilityTargetPost?.is_hidden || 0) === 1 ? 'Hide' : 'Unhide'}
+                onConfirm={handleConfirmTogglePostVisibility}
+                onCancel={() => setVisibilityTargetPost(null)}
+                pending={Boolean(visibilityTargetPost?.slug_token && pendingHideSlugs.has(visibilityTargetPost.slug_token))}
             />
 
             <BadgeRevealModal

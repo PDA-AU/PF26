@@ -13,7 +13,7 @@ from persohub_schemas import (
     PersohubAdminProfileUploadPresignRequest,
     PersohubAdminProfileUploadPresignResponse,
 )
-from security import is_persohub_club_owner, require_persohub_community
+from security import is_persohub_club_owner, is_persohub_club_superadmin, require_persohub_community
 from utils import _generate_presigned_put_url
 
 router = APIRouter()
@@ -81,7 +81,7 @@ def get_persohub_admin_profile(
     community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
-    return _build_profile_response(db, community, can_edit=is_persohub_club_owner(request))
+    return _build_profile_response(db, community, can_edit=_can_mutate_club_admin(request))
 
 
 @router.put("/persohub/admin/profile/community", response_model=PersohubAdminProfileResponse)
@@ -91,8 +91,8 @@ def update_persohub_admin_community_profile(
     community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
-    if not is_persohub_club_owner(request):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Club owner access required")
+    if not _can_mutate_club_admin(request):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Club admin access required")
 
     updates = payload.model_dump(exclude_unset=True)
 
@@ -122,10 +122,10 @@ def update_persohub_admin_club_profile(
     if not club:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Linked club not found")
 
-    if not is_persohub_club_owner(request):
+    if not _can_mutate_club_admin(request):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Club owner access required",
+            detail="Club admin access required",
         )
 
     updates = payload.model_dump(exclude_unset=True)
@@ -176,3 +176,6 @@ def presign_persohub_profile_upload(
         allowed_types=list(ALLOWED_PROFILE_IMAGE_TYPES),
     )
     return PersohubAdminProfileUploadPresignResponse(**presigned)
+def _can_mutate_club_admin(request: Request) -> bool:
+    return bool(is_persohub_club_owner(request) or is_persohub_club_superadmin(request))
+

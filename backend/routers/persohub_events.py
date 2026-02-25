@@ -371,10 +371,18 @@ def _send_payment_review_email(user: PdaUser, event: PersohubEvent) -> None:
     if not user.email:
         return
     subject = f"Payment received for review - {event.title}"
+    whatsapp_url = str(getattr(event, "whatsapp_url", "") or "").strip()
+    whatsapp_text = f"\nJoin our WhatsApp channel for updates: {whatsapp_url}\n" if whatsapp_url else ""
+    whatsapp_html = (
+        f'<p><a href="{whatsapp_url}" target="_blank" rel="noreferrer">Join our WhatsApp channel for updates</a></p>'
+        if whatsapp_url
+        else ""
+    )
     text = (
         f"Hello {user.name},\n\n"
         f"We received your payment proof for {event.title} ({event.event_code}).\n"
-        "Your registration is pending confirmation.\n\n"
+        "Your registration is pending confirmation.\n"
+        f"{whatsapp_text}\n"
         "Regards,\nPersohub Team"
     )
     html = (
@@ -382,6 +390,7 @@ def _send_payment_review_email(user: PdaUser, event: PersohubEvent) -> None:
         f"<p>Hello {user.name},</p>"
         f"<p>We received your payment proof for <strong>{event.title}</strong> ({event.event_code}).</p>"
         "<p>Your registration is pending confirmation.</p>"
+        f"{whatsapp_html}"
         "<p>Regards,<br/><strong>Persohub Team</strong></p>"
         "</body></html>"
     )

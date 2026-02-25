@@ -5,7 +5,6 @@ from typing import List, Optional, Set
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from auth import get_password_hash
 from models import (
     PdaTeam,
     PdaUser,
@@ -185,7 +184,6 @@ def ensure_default_persohub_setup(db: Session) -> None:
             profile_id=item["profile_id"],
             club_id=club.id,
             admin_id=admin_user.id,
-            hashed_password=get_password_hash(f"{item['profile_id']}@123"),
             logo_url=club.club_logo_url,
             description=f"Official {item['name']} community",
             is_active=True,

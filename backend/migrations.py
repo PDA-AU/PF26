@@ -692,6 +692,25 @@ def drop_admin_logs_fk(engine):
             conn.execute(text(f"ALTER TABLE admin_logs DROP CONSTRAINT IF EXISTS {constraint_name}"))
 
 
+def ensure_log_column_sizes(engine):
+    with engine.begin() as conn:
+        if _table_exists(conn, "admin_logs"):
+            conn.execute(text("ALTER TABLE admin_logs ALTER COLUMN admin_register_number TYPE VARCHAR(64)"))
+            conn.execute(text("ALTER TABLE admin_logs ALTER COLUMN admin_name TYPE VARCHAR(255)"))
+            conn.execute(text("ALTER TABLE admin_logs ALTER COLUMN action TYPE VARCHAR(255)"))
+            conn.execute(text("ALTER TABLE admin_logs ALTER COLUMN path TYPE VARCHAR(500)"))
+        if _table_exists(conn, "pda_event_logs"):
+            conn.execute(text("ALTER TABLE pda_event_logs ALTER COLUMN admin_register_number TYPE VARCHAR(64)"))
+            conn.execute(text("ALTER TABLE pda_event_logs ALTER COLUMN admin_name TYPE VARCHAR(255)"))
+            conn.execute(text("ALTER TABLE pda_event_logs ALTER COLUMN action TYPE VARCHAR(255)"))
+            conn.execute(text("ALTER TABLE pda_event_logs ALTER COLUMN path TYPE VARCHAR(500)"))
+        if _table_exists(conn, "persohub_event_logs"):
+            conn.execute(text("ALTER TABLE persohub_event_logs ALTER COLUMN admin_register_number TYPE VARCHAR(64)"))
+            conn.execute(text("ALTER TABLE persohub_event_logs ALTER COLUMN admin_name TYPE VARCHAR(255)"))
+            conn.execute(text("ALTER TABLE persohub_event_logs ALTER COLUMN action TYPE VARCHAR(255)"))
+            conn.execute(text("ALTER TABLE persohub_event_logs ALTER COLUMN path TYPE VARCHAR(500)"))
+
+
 def ensure_email_auth_columns(engine):
     with engine.begin() as conn:
         if _table_exists(conn, "users"):
@@ -3032,7 +3051,6 @@ def ensure_persohub_tables(engine):
                     profile_id VARCHAR(64) UNIQUE NOT NULL,
                     club_id INTEGER REFERENCES persohub_clubs(id) ON DELETE SET NULL,
                     admin_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-                    hashed_password VARCHAR(255) NOT NULL,
                     logo_url VARCHAR(500),
                     description TEXT,
                     is_active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -3043,6 +3061,7 @@ def ensure_persohub_tables(engine):
                 """
             )
         )
+        conn.execute(text("ALTER TABLE persohub_communities DROP COLUMN IF EXISTS hashed_password"))
         conn.execute(text("ALTER TABLE persohub_communities ADD COLUMN IF NOT EXISTS is_root BOOLEAN NOT NULL DEFAULT FALSE"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_communities_club_id ON persohub_communities(club_id)"))
 
@@ -3148,6 +3167,7 @@ def ensure_persohub_tables(engine):
                     admin_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
                     slug_token VARCHAR(64) UNIQUE NOT NULL,
                     description TEXT,
+                    is_hidden INTEGER NOT NULL DEFAULT 1,
                     like_count INTEGER NOT NULL DEFAULT 0,
                     comment_count INTEGER NOT NULL DEFAULT 0,
                     created_at TIMESTAMPTZ DEFAULT now(),
@@ -3156,6 +3176,8 @@ def ensure_persohub_tables(engine):
                 """
             )
         )
+        conn.execute(text("ALTER TABLE persohub_posts ADD COLUMN IF NOT EXISTS is_hidden INTEGER NOT NULL DEFAULT 1"))
+        conn.execute(text("UPDATE persohub_posts SET is_hidden = 1 WHERE is_hidden IS NULL"))
         conn.execute(text("ALTER TABLE persohub_posts DROP COLUMN IF EXISTS title"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_posts_community_created ON persohub_posts(community_id, created_at DESC)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_posts_likes_created ON persohub_posts(like_count DESC, created_at DESC)"))
@@ -3307,6 +3329,38 @@ def ensure_persohub_tables(engine):
                 ALTER TABLE persohub_post_mentions
                 ADD CONSTRAINT persohub_post_mentions_post_id_fkey
                 FOREIGN KEY (post_id) REFERENCES persohub_posts(id) ON DELETE CASCADE
+                """
+            )
+        )
+
+        # Ensure legacy community-level FKs also cascade on delete.
+        conn.execute(text("ALTER TABLE persohub_community_follows DROP CONSTRAINT IF EXISTS persohub_community_follows_community_id_fkey"))
+        conn.execute(
+            text(
+                """
+                ALTER TABLE persohub_community_follows
+                ADD CONSTRAINT persohub_community_follows_community_id_fkey
+                FOREIGN KEY (community_id) REFERENCES persohub_communities(id) ON DELETE CASCADE
+                """
+            )
+        )
+        conn.execute(text("ALTER TABLE persohub_community_follows DROP CONSTRAINT IF EXISTS persohub_community_follows_user_id_fkey"))
+        conn.execute(
+            text(
+                """
+                ALTER TABLE persohub_community_follows
+                ADD CONSTRAINT persohub_community_follows_user_id_fkey
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                """
+            )
+        )
+        conn.execute(text("ALTER TABLE persohub_posts DROP CONSTRAINT IF EXISTS persohub_posts_community_id_fkey"))
+        conn.execute(
+            text(
+                """
+                ALTER TABLE persohub_posts
+                ADD CONSTRAINT persohub_posts_community_id_fkey
+                FOREIGN KEY (community_id) REFERENCES persohub_communities(id) ON DELETE CASCADE
                 """
             )
         )
@@ -3474,6 +3528,77 @@ def ensure_persohub_admins_table(engine):
                         ),
                         {"community_id": community_id, "resolved_admin_id": resolved_admin_id},
                     )
+
+def ensure_persohub_club_admins_table(engine):
+    with engine.begin() as conn:
+        if not _table_exists(conn, "persohub_clubs") or not _table_exists(conn, "users"):
+            return
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS persohub_club_admins (
+                    id SERIAL PRIMARY KEY,
+                    club_id INTEGER NOT NULL REFERENCES persohub_clubs(id) ON DELETE CASCADE,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    role VARCHAR(16) NOT NULL DEFAULT 'superadmin',
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ
+                )
+                """
+            )
+        )
+        conn.execute(text("ALTER TABLE persohub_club_admins ADD COLUMN IF NOT EXISTS role VARCHAR(16)"))
+        conn.execute(text("ALTER TABLE persohub_club_admins ADD COLUMN IF NOT EXISTS is_active BOOLEAN"))
+        conn.execute(text("ALTER TABLE persohub_club_admins ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER"))
+        conn.execute(text("ALTER TABLE persohub_club_admins ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now()"))
+        conn.execute(text("ALTER TABLE persohub_club_admins ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ"))
+        conn.execute(text("UPDATE persohub_club_admins SET role = 'superadmin' WHERE role IS NULL OR btrim(role) = ''"))
+        conn.execute(text("UPDATE persohub_club_admins SET role = lower(role)"))
+        conn.execute(text("UPDATE persohub_club_admins SET role = 'superadmin' WHERE role <> 'superadmin'"))
+        conn.execute(text("UPDATE persohub_club_admins SET is_active = TRUE WHERE is_active IS NULL"))
+        conn.execute(text("ALTER TABLE persohub_club_admins ALTER COLUMN role SET NOT NULL"))
+        conn.execute(text("ALTER TABLE persohub_club_admins ALTER COLUMN role SET DEFAULT 'superadmin'"))
+        conn.execute(text("ALTER TABLE persohub_club_admins ALTER COLUMN is_active SET NOT NULL"))
+        conn.execute(text("ALTER TABLE persohub_club_admins ALTER COLUMN is_active SET DEFAULT TRUE"))
+
+        if _constraint_exists(conn, "persohub_club_admins", "chk_persohub_club_admins_role"):
+            conn.execute(text("ALTER TABLE persohub_club_admins DROP CONSTRAINT chk_persohub_club_admins_role"))
+        if not _constraint_exists(conn, "persohub_club_admins", "chk_persohub_club_admins_role_superadmin_only"):
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE persohub_club_admins
+                    ADD CONSTRAINT chk_persohub_club_admins_role_superadmin_only
+                    CHECK (role = 'superadmin')
+                    """
+                )
+            )
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_persohub_club_admins_club_user
+                ON persohub_club_admins(club_id, user_id)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS idx_persohub_club_admins_club_active
+                ON persohub_club_admins(club_id, is_active)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS idx_persohub_club_admins_user_active
+                ON persohub_club_admins(user_id, is_active)
+                """
+            )
+        )
 
 
 def ensure_persohub_owner_policy_refactor(engine):

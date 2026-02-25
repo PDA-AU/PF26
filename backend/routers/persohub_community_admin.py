@@ -19,6 +19,7 @@ from persohub_schemas import (
     PersohubPdfPreviewGenerateRequest,
     PersohubPdfPreviewGenerateResponse,
     PersohubPostCreateRequest,
+    PersohubPostVisibilityUpdateRequest,
     PersohubPostResponse,
     PersohubPostUpdateRequest,
     PersohubUploadPresignRequest,
@@ -188,6 +189,29 @@ def delete_community_post(
     db.delete(post)
     db.commit()
     return {"status": "ok"}
+
+
+@router.put("/persohub/community/posts/{slug_token}/visibility", response_model=PersohubPostResponse)
+def update_community_post_visibility(
+    slug_token: str,
+    payload: PersohubPostVisibilityUpdateRequest,
+    request: Request,
+    community: PersohubCommunity = Depends(require_persohub_community),
+    db: Session = Depends(get_db),
+):
+    actor_user_id = int(get_persohub_actor_user_id(request) or int(community.admin_id or 0))
+    if actor_user_id <= 0:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Community admin mapping missing")
+    post = db.query(PersohubPost).filter(PersohubPost.slug_token == slug_token).first()
+    if not post:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+    if post.community_id != community.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot modify other community posts")
+
+    post.is_hidden = 1 if int(payload.is_hidden or 0) == 1 else 0
+    db.commit()
+    db.refresh(post)
+    return build_post_response(db, post, current_user_id=actor_user_id)
 
 
 @router.post("/persohub/community/uploads/presign", response_model=PersohubUploadPresignResponse)

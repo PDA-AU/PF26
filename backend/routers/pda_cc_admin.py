@@ -6,7 +6,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from auth import get_password_hash, verify_password
+from auth import verify_password
 from database import get_db
 from emailer import send_email_async
 from models import (
@@ -42,7 +42,6 @@ from schemas import (
     CcPersohubPaymentConfirmRequest,
     CcPersohubPaymentDeclineRequest,
     CcPersohubPaymentReviewListItem,
-    CcCommunityResetPasswordRequest,
     CcCommunityResponse,
     CcCommunityUpdateRequest,
     CcDeleteSummaryResponse,
@@ -442,7 +441,7 @@ def _send_payment_status_email(
     safe_name = str(participant.name or "Participant")
     event_title = str(event.title or "event")
     whatsapp_url = str(getattr(event, "whatsapp_url", "") or "").strip()
-    whatsapp_text = f"\nJoin updates: {whatsapp_url}\n" if whatsapp_url else ""
+    whatsapp_text = f"\nJoin our WhatsApp channel for updates: {whatsapp_url}\n" if whatsapp_url else ""
     if state == "approved":
         subject = f"Registration confirmed - {event_title}"
         text = (
@@ -459,6 +458,7 @@ def _send_payment_status_email(
             f"Your payment submission for {event_title} was declined."
             f"{reason_text}"
             "You can resubmit payment proof from the event dashboard.\n\n"
+            f"{whatsapp_text}\n"
             "Regards,\nPersohub Team"
         )
     html = "<html><body>" + "".join(f"<p>{line}</p>" for line in text.split("\n") if line) + "</body></html>"
@@ -903,6 +903,7 @@ def delete_cc_club(
         "linked_events": 0,
         "legacy_sympo_rows": 0,
         "normalized_sympos": 0,
+        "deleted_sympo_event_links": 0,
     }
     if community_ids:
         deleted_counts["linked_posts"] = int(
@@ -913,9 +914,23 @@ def delete_cc_club(
     )
 
     deleted_counts["legacy_sympo_rows"] = 0
-    deleted_counts["normalized_sympos"] = int(
-        db.query(PersohubSympo).filter(PersohubSympo.organising_club_id == club_id).count()
-    )
+    sympo_ids = [
+        int(sympo_id)
+        for (sympo_id,) in (
+            db.query(PersohubSympo.id)
+            .filter(PersohubSympo.organising_club_id == club_id)
+            .all()
+        )
+    ]
+    deleted_counts["normalized_sympos"] = len(sympo_ids)
+
+    if sympo_ids:
+        deleted_counts["deleted_sympo_event_links"] = int(
+            db.query(PersohubSympoEvent)
+            .filter(PersohubSympoEvent.sympo_id.in_(sympo_ids))
+            .delete(synchronize_session=False)
+        )
+        db.query(PersohubSympo).filter(PersohubSympo.id.in_(sympo_ids)).delete(synchronize_session=False)
 
     if community_ids:
         db.query(PersohubCommunity).filter(PersohubCommunity.id.in_(community_ids)).delete(synchronize_session=False)
@@ -980,7 +995,6 @@ def create_cc_community(
         profile_id=payload.profile_id,
         club_id=payload.club_id,
         admin_id=primary_admin_id,
-        hashed_password=get_password_hash(payload.password),
         logo_url=payload.logo_url,
         description=payload.description,
         is_active=payload.is_active,
@@ -1095,31 +1109,6 @@ def update_cc_community(
         club,
         admin_members_map.get(int(community.id), []),
     )
-
-
-@router.post("/pda-admin/cc/communities/{community_id}/reset-password")
-def reset_cc_community_password(
-    community_id: int,
-    payload: CcCommunityResetPasswordRequest,
-    admin: PdaUser = Depends(require_superadmin),
-    db: Session = Depends(get_db),
-    request: Request = None,
-):
-    community = db.query(PersohubCommunity).filter(PersohubCommunity.id == community_id).first()
-    if not community:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Community not found")
-
-    community.hashed_password = get_password_hash(payload.new_password)
-    db.commit()
-    log_admin_action(
-        db,
-        admin,
-        "Reset C&C community password",
-        request.method if request else None,
-        request.url.path if request else None,
-        {"community_id": community.id},
-    )
-    return {"message": "Community password reset successfully"}
 
 
 @router.delete("/pda-admin/cc/communities/{community_id}", response_model=CcDeleteSummaryResponse)
