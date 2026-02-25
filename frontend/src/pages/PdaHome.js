@@ -398,7 +398,7 @@ export default function PdaHome() {
                         actionLabel: action.label,
                     })
                 }
-                className="flex h-[560px] w-full flex-col overflow-hidden rounded-2xl border border-black/10 bg-white p-5 text-left transition hover:-translate-y-1 hover:border-black/25 hover:shadow-md"
+                className="flex h-[640px] w-full flex-col overflow-hidden rounded-2xl border border-black/10 bg-white p-5 text-left transition hover:-translate-y-1 hover:border-black/25 hover:shadow-md"
             >
                 <div className="mb-4 aspect-[4/5] w-full shrink-0 overflow-hidden rounded-xl border border-black/10 bg-[#fff7dc]">
                     {preferredSrc ? (
@@ -425,7 +425,7 @@ export default function PdaHome() {
                     )}
                 </div>
                 <h3 className="mt-4 shrink-0 text-xl font-heading font-bold leading-tight line-clamp-2">{item.title}</h3>
-                <div className="relative mt-2 h-40 shrink-0 overflow-y-auto pr-2 text-sm leading-5 text-slate-700">
+                <div className="relative mt-2 h-52 shrink-0 overflow-y-auto pr-2 text-sm leading-5 text-slate-700">
                     {description ? (
                         <div className="break-words [overflow-wrap:anywhere] [&>p]:m-0 [&>p+p]:mt-1.5 [&>ul]:m-0 [&>ul]:space-y-1 [&>ul]:pl-5">
                             <ParsedDescription description={description} />
