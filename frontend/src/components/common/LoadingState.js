@@ -1,6 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import loadingVideo from '@/assets/loading.webm';
 
+const isSafariBrowser = () => {
+    if (typeof navigator === 'undefined') return false;
+    const ua = String(navigator.userAgent || '');
+    return /Safari/i.test(ua) && !/Chrome|Chromium|CriOS|Edg|OPR|Firefox|FxiOS|Android/i.test(ua);
+};
+
 export default function LoadingState({
     fullScreen = false,
     variant = 'card',
@@ -9,10 +15,12 @@ export default function LoadingState({
     containerClassName = '',
     cardClassName = '',
 }) {
-    const [videoFailed, setVideoFailed] = useState(false);
+    const isSafari = useMemo(() => isSafariBrowser(), []);
+    const [videoFailed, setVideoFailed] = useState(isSafari);
     const videoRef = useRef(null);
     const minDurationAttr = Number.isFinite(Number(minDurationMs)) ? Math.max(0, Number(minDurationMs)) : 400;
     const loadingVideoMp4 = useMemo(() => loadingVideo.replace(/\.webm(\?.*)?$/i, '.mp4$1'), []);
+    const effectiveMessage = isSafari ? 'Loading...' : message;
     const sharedVideoProps = useMemo(() => ({
         autoPlay: true,
         loop: true,
@@ -64,7 +72,7 @@ export default function LoadingState({
                     <div className="mx-auto w-full max-w-[220px] sm:max-w-[260px] md:max-w-[320px]">
                         {renderLoaderMedia('mx-auto aspect-square h-auto w-full rounded-xl object-contain')}
                     </div>
-                    {videoFailed ? <p className="mt-3 font-heading text-lg sm:text-xl">{message}</p> : null}
+                    {videoFailed ? <p className="mt-3 font-heading text-lg sm:text-xl">{effectiveMessage}</p> : null}
                 </div>
             </div>
         );
@@ -76,7 +84,7 @@ export default function LoadingState({
                 className={`flex items-center justify-center gap-2 text-sm text-slate-500 ${containerClassName}`.trim()}
                 data-min-loader-ms={minDurationAttr}
             >
-                <span>{message}</span>
+                <span>{effectiveMessage}</span>
             </div>
         );
     }
@@ -86,7 +94,7 @@ export default function LoadingState({
             className={`neo-card text-center py-12 ${containerClassName}`.trim()}
             data-min-loader-ms={minDurationAttr}
         >
-            <p className={`mt-4 ${cardClassName}`.trim()}>{message}</p>
+            <p className={`mt-4 ${cardClassName}`.trim()}>{effectiveMessage}</p>
         </div>
     );
 }
