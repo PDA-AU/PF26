@@ -1,6 +1,6 @@
 import React from "react";
 import "@/App.css";
-import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import LoadingState from "@/components/common/LoadingState";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
@@ -20,7 +20,6 @@ import EmailAdmin from "@/pages/HomeAdmin/EmailAdmin";
 import CCAdmin from "@/pages/HomeAdmin/CCAdmin";
 import BadgesAdmin from "@/pages/HomeAdmin/BadgesAdmin";
 import PersohubPaymentsAdminPage from "@/pages/HomeAdmin/PersohubPaymentsAdminPage";
-import EventDashboard from "@/pages/events/EventDashboard";
 import PdaLogin from "@/pages/pda/PdaLogin";
 import PdaRecruit from "@/pages/pda/PdaRecruit";
 import PdaSignup from "@/pages/pda/PdaSignup";
@@ -82,6 +81,15 @@ const PersohubEventAdminBaseRedirect = () => {
     const { eventSlug } = useParams();
     if (!eventSlug) return <Navigate to="/persohub/admin/persohub-events" replace />;
     return <Navigate to={`/persohub/admin/persohub-events/${eventSlug}/dashboard`} replace />;
+};
+
+const LegacyEventsRouteRedirect = () => {
+    const { "*": rest = "" } = useParams();
+    const location = useLocation();
+    const targetPath = String(rest || "").trim()
+        ? `/persohub/events/${rest}`
+        : "/persohub/events";
+    return <Navigate to={`${targetPath}${location.search || ""}${location.hash || ""}`} replace />;
 };
 
 const ProtectedPersohubEventsRoute = ({ children }) => {
@@ -197,10 +205,8 @@ function AppRoutes() {
             } />
             <Route path="/admin/logs" element={<LogsAdmin />} />
             <Route path="/admin/superadmin" element={<SuperAdmin />} />
-            <Route path="/event/:eventSlug" element={<EventDashboard />} />
-            <Route path="/event/:eventSlug/:profileName" element={<EventDashboard />} />
-            <Route path="/events/:eventSlug" element={<EventDashboard />} />
-            <Route path="/events/:eventSlug/:profileName" element={<EventDashboard />} />
+            <Route path="/event/*" element={<LegacyEventsRouteRedirect />} />
+            <Route path="/events/*" element={<LegacyEventsRouteRedirect />} />
             <Route path="/persohub" element={<PersohubFeedPage />} />
             <Route path="/persohub/p/:slugToken" element={<PersohubPostPage />} />
             <Route path="/persohub/tmp/chakravyuha" element={

@@ -59,6 +59,9 @@ export default function PersohubAdminCommunitiesPage() {
     const [editingCommunity, setEditingCommunity] = useState(null);
     const [form, setForm] = useState(emptyForm);
     const [adminSearch, setAdminSearch] = useState('');
+    const [logoFile, setLogoFile] = useState(null);
+    const [logoPreviewUrl, setLogoPreviewUrl] = useState('');
+    const [logoUploading, setLogoUploading] = useState(false);
 
     const [deleteTarget, setDeleteTarget] = useState(null);
     const [deleteConfirmText, setDeleteConfirmText] = useState('');
@@ -83,10 +86,20 @@ export default function PersohubAdminCommunitiesPage() {
         loadData();
     }, [loadData]);
 
+    useEffect(() => {
+        return () => {
+            if (String(logoPreviewUrl || '').startsWith('blob:')) {
+                URL.revokeObjectURL(logoPreviewUrl);
+            }
+        };
+    }, [logoPreviewUrl]);
+
     const openCreateDialog = () => {
         setEditingCommunity(null);
         setForm({ ...emptyForm, admins: [{ row_id: makeAdminRowId(), user_id: '', is_active: true }] });
         setAdminSearch('');
+        setLogoFile(null);
+        setLogoPreviewUrl('');
         setDialogOpen(true);
     };
 
@@ -106,7 +119,45 @@ export default function PersohubAdminCommunitiesPage() {
             admins: adminRows.length ? adminRows : [{ row_id: makeAdminRowId(), user_id: '', is_active: true }],
         });
         setAdminSearch('');
+        setLogoFile(null);
+        setLogoPreviewUrl(String(community.logo_url || '').trim());
         setDialogOpen(true);
+    };
+
+    const onLogoFileChange = (event) => {
+        const file = event?.target?.files?.[0] || null;
+        if (!file) {
+            return;
+        }
+        if (!String(file.type || '').startsWith('image/')) {
+            toast.error('Only image files are allowed');
+            return;
+        }
+        setLogoFile(file);
+        const objectUrl = URL.createObjectURL(file);
+        setLogoPreviewUrl(objectUrl);
+    };
+
+    const uploadSelectedLogo = async () => {
+        if (!logoFile) return;
+        setLogoUploading(true);
+        try {
+            const uploadedUrl = await persohubAdminApi.uploadProfileImage(logoFile);
+            setForm((prev) => ({ ...prev, logo_url: String(uploadedUrl || '').trim() }));
+            setLogoPreviewUrl(String(uploadedUrl || '').trim());
+            setLogoFile(null);
+            toast.success('Community logo uploaded');
+        } catch (error) {
+            toast.error(persohubAdminApi.parseApiError(error, 'Failed to upload logo'));
+        } finally {
+            setLogoUploading(false);
+        }
+    };
+
+    const clearLogo = () => {
+        setLogoFile(null);
+        setLogoPreviewUrl('');
+        setForm((prev) => ({ ...prev, logo_url: '' }));
     };
 
     const addAdminRow = () => {
@@ -167,6 +218,10 @@ export default function PersohubAdminCommunitiesPage() {
 
     const submitCommunity = async (event) => {
         event.preventDefault();
+        if (logoFile) {
+            toast.error('Upload selected logo before saving');
+            return;
+        }
         setSaving(true);
         try {
             const payload = normalizePayload(form, !editingCommunity);
@@ -180,6 +235,8 @@ export default function PersohubAdminCommunitiesPage() {
             setDialogOpen(false);
             setEditingCommunity(null);
             setForm(emptyForm);
+            setLogoFile(null);
+            setLogoPreviewUrl('');
             await loadData();
         } catch (error) {
             toast.error(persohubAdminApi.parseApiError(error, error?.message || 'Failed to save community'));
@@ -289,9 +346,43 @@ export default function PersohubAdminCommunitiesPage() {
                                 </SelectContent>
                             </Select>
                         </div>
-                        <div className="md:col-span-2">
-                            <Label>Logo URL</Label>
-                            <Input value={form.logo_url} onChange={(e) => setForm((prev) => ({ ...prev, logo_url: e.target.value }))} />
+                        <div className="md:col-span-2 space-y-3">
+                            <Label>Logo</Label>
+                            {logoPreviewUrl ? (
+                                <img
+                                    src={logoPreviewUrl}
+                                    alt="Community logo preview"
+                                    className="h-24 w-24 rounded-lg border border-black/10 object-cover"
+                                />
+                            ) : (
+                                <div className="flex h-24 w-24 items-center justify-center rounded-lg border border-dashed border-black/20 bg-slate-50 text-xs text-slate-500">
+                                    No logo
+                                </div>
+                            )}
+                            <Input type="file" accept="image/*" onChange={onLogoFileChange} />
+                            <div className="flex flex-wrap gap-2">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="border-black/20"
+                                    onClick={uploadSelectedLogo}
+                                    disabled={!logoFile || saving || logoUploading}
+                                >
+                                    {logoUploading ? 'Uploading...' : 'Upload to S3'}
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="border-black/20"
+                                    onClick={clearLogo}
+                                    disabled={saving || logoUploading}
+                                >
+                                    Remove Logo
+                                </Button>
+                            </div>
+                            {form.logo_url ? (
+                                <p className="text-xs text-slate-500 break-all">{form.logo_url}</p>
+                            ) : null}
                         </div>
                         <div className="md:col-span-2">
                             <Label>Description</Label>

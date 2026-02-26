@@ -340,13 +340,13 @@ export default function PdaProfile() {
             };
             if (ENABLE_PROFILE_ACHIEVEMENTS_AND_CERTIFICATES) {
                 const [eventsRes, achievementsRes] = await Promise.all([
-                    axios.get(`${API}/pda/me/events`, { headers: getAuthHeader() }),
-                    axios.get(`${API}/pda/me/achievements`, { headers: getAuthHeader() })
+                    axios.get(`${API}/persohub/me/persohub-events`, { headers: getAuthHeader() }),
+                    axios.get(`${API}/persohub/me/persohub-achievements`, { headers: getAuthHeader() })
                 ]);
                 setMyEvents(eventsRes.data || []);
                 setAchievements((achievementsRes.data || []).map(normalizeAchievement));
             } else {
-                const eventsRes = await axios.get(`${API}/pda/me/events`, { headers: getAuthHeader() });
+                const eventsRes = await axios.get(`${API}/persohub/me/persohub-events`, { headers: getAuthHeader() });
                 setMyEvents(eventsRes.data || []);
                 setAchievements([]);
             }
@@ -591,7 +591,7 @@ export default function PdaProfile() {
     const handleDownloadCertificate = async (eventSlug) => {
         setCertificateLoadingSlug(eventSlug);
         try {
-            const response = await axios.get(`${API}/pda/me/certificates/${eventSlug}`, { headers: getAuthHeader() });
+            const response = await axios.get(`${API}/persohub/me/persohub-certificates/${eventSlug}`, { headers: getAuthHeader() });
             const data = response.data;
             if (!data?.eligible) {
                 toast.error('Certificate is available only for closed events with attendance');

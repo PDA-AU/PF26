@@ -570,7 +570,7 @@ export default function PersohubProfilePage() {
                                             <button
                                                 key={badge.id}
                                                 type="button"
-                                                className="cursor-pointer rounded-md border-2 border-black bg-[#fffdf0] p-2 shadow-neo transition-transform duration-100 hover:-translate-x-[1px] hover:-translate-y-[1px] aspect-square grid grid-rows-[1fr_auto] gap-2 text-left"
+                                                className="min-w-0 cursor-pointer rounded-md border-2 border-black bg-[#fffdf0] p-2 shadow-neo transition-transform duration-100 hover:-translate-x-[1px] hover:-translate-y-[1px] aspect-square grid grid-rows-[1fr_auto] gap-2 text-left"
                                                 onClick={() => handleOpenBadgeModal(badge)}
                                                 role="listitem"
                                             >
@@ -583,9 +583,9 @@ export default function PersohubProfilePage() {
                                                         </div>
                                                     )}
                                                 </div>
-                                                <div>
-                                                    <p className="font-heading text-sm font-black uppercase tracking-tight text-black">{badge.title || 'Badge'}</p>
-                                                    <p className="mt-1 font-mono text-[10px] font-bold uppercase tracking-[0.08em] text-slate-700">
+                                                <div className="min-w-0">
+                                                    <p className="break-words font-heading text-sm font-black uppercase tracking-tight text-black">{badge.title || 'Badge'}</p>
+                                                    <p className="mt-1 break-words font-mono text-[10px] font-bold uppercase tracking-[0.08em] text-slate-700">
                                                         {[badge.place, badge.event_title].filter(Boolean).join(' · ') || 'Achievement'}
                                                     </p>
                                                 </div>
