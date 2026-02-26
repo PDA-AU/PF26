@@ -373,6 +373,17 @@ export default function EventDashboard() {
     );
     const showRoundDescriptionToggle = selectedRoundDescription.length > 340;
 
+    const getErrorMessage = useCallback((error, fallback) => {
+        const detail = error?.response?.data?.detail;
+        if (Array.isArray(detail)) {
+            return detail.map((item) => item?.msg || item?.detail || JSON.stringify(item)).join(', ');
+        }
+        if (detail && typeof detail === 'object') {
+            return detail.msg || detail.detail || JSON.stringify(detail);
+        }
+        return detail || fallback;
+    }, []);
+
     const fetchData = useCallback(async (options = {}) => {
         const authHeaderOverride = options.authHeaderOverride;
         const resolvedAuthHeader = authHeaderOverride || getAuthHeader();
@@ -497,17 +508,6 @@ export default function EventDashboard() {
             setRegistrationDialogOpen(true);
         }
     };
-
-    const getErrorMessage = useCallback((error, fallback) => {
-        const detail = error?.response?.data?.detail;
-        if (Array.isArray(detail)) {
-            return detail.map((item) => item?.msg || item?.detail || JSON.stringify(item)).join(', ');
-        }
-        if (detail && typeof detail === 'object') {
-            return detail.msg || detail.detail || JSON.stringify(detail);
-        }
-        return detail || fallback;
-    }, []);
 
     const handleLoginSubmit = async (e) => {
         e.preventDefault();
