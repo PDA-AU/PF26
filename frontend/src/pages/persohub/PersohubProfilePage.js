@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import QRCode from 'qrcode';
-import { ArrowLeft, QrCode, X, Mail, Instagram, Github, Linkedin } from 'lucide-react';
+import { ArrowLeft, QrCode, X, Mail, Instagram, Github, Linkedin, Award } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useAuth } from '@/context/AuthContext';
@@ -344,7 +344,6 @@ export default function PersohubProfilePage() {
     const totalLikes = profilePosts.reduce((sum, post) => sum + Number(post?.like_count || 0), 0);
     const totalComments = profilePosts.reduce((sum, post) => sum + Number(post?.comment_count || 0), 0);
     const panelClass = 'rounded-md border-4 border-black bg-white p-6 shadow-[8px_8px_0px_0px_#000000]';
-    const tileClass = 'rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo';
 
     return (
         <div className="ph-profile-page min-h-screen bg-[#fffdf5] text-black flex flex-col">
@@ -430,27 +429,27 @@ export default function PersohubProfilePage() {
                             </div>
                         </div>
                     </section>
-                    <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+                    <section className={profile.profile_type === 'user' ? 'grid gap-6 lg:grid-cols-[1.1fr_0.9fr]' : ''}>
                         <div className={panelClass}>
                             <h2 className="font-heading text-3xl font-black uppercase tracking-tight">Profile Details</h2>
                             <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                                <div className={tileClass}>
+                                <div className="rounded-md border-2 border-black bg-[#fffdf0] px-3 py-2 shadow-neo">
                                     <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">Posts</p>
-                                    <p className="mt-1 font-heading text-3xl font-black">{profilePosts.length}</p>
+                                    <p className="mt-1 font-heading text-2xl font-black">{profilePosts.length}</p>
                                 </div>
-                                <div className={tileClass}>
+                                <div className="rounded-md border-2 border-black bg-[#fffdf0] px-3 py-2 shadow-neo">
                                     <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">Total Likes</p>
-                                    <p className="mt-1 font-heading text-3xl font-black">{totalLikes}</p>
+                                    <p className="mt-1 font-heading text-2xl font-black">{totalLikes}</p>
                                 </div>
-                                <div className={tileClass}>
+                                <div className="rounded-md border-2 border-black bg-[#fffdf0] px-3 py-2 shadow-neo">
                                     <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">Total Comments</p>
-                                    <p className="mt-1 font-heading text-3xl font-black">{totalComments}</p>
+                                    <p className="mt-1 font-heading text-2xl font-black">{totalComments}</p>
                                 </div>
-                                <div className={tileClass}>
+                                <div className="rounded-md border-2 border-black bg-[#fffdf0] px-3 py-2 shadow-neo">
                                     <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">
                                         {profile.profile_type === 'community' ? 'Followers' : 'Badges'}
                                     </p>
-                                    <p className="mt-1 font-heading text-3xl font-black">
+                                    <p className="mt-1 font-heading text-2xl font-black">
                                         {profile.profile_type === 'community'
                                             ? Number(profile?.follower_count || 0)
                                             : profileBadges.length}
@@ -524,71 +523,48 @@ export default function PersohubProfilePage() {
                                 <p className="mt-4 text-sm font-medium text-slate-700">Community admin mode enabled: posts are editable.</p>
                             ) : null}
                         </div>
-                        <div className={panelClass}>
-                            {profile.profile_type === 'community' ? (
-                                <>
-                                    <h2 className="font-heading text-3xl font-black uppercase tracking-tight">About Club</h2>
-                                    <div className="mt-4 space-y-3 rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
-                                        {profile?.community?.club_logo_url ? (
-                                            <img
-                                                src={profile.community.club_logo_url}
-                                                alt="Club logo"
-                                                className="h-20 w-20 rounded-md border-2 border-black object-cover"
-                                            />
-                                        ) : null}
-                                        {profile?.community?.club_tagline ? (
-                                            <p className="text-sm font-semibold text-slate-700">{profile.community.club_tagline}</p>
-                                        ) : null}
-                                        {profile?.community?.club_description ? (
-                                            <p
-                                                className="max-h-24 overflow-y-auto pr-1 text-sm font-medium text-slate-700"
-                                                title={profile.community.club_description}
-                                            >
-                                                {profile.community.club_description}
-                                            </p>
-                                        ) : null}
-                                        {!profile?.community?.club_logo_url
-                                            && !profile?.community?.club_tagline
-                                            && !profile?.community?.club_description ? (
-                                                <p className="text-sm font-medium text-slate-700">No additional club details available.</p>
-                                            ) : null}
-                                    </div>
-                                </>
-                            ) : (
-                                <>
+
+                        {profile.profile_type === 'user' ? (
+                            <div className={panelClass}>
+                                <div className="flex items-center justify-between gap-3">
                                     <h2 className="font-heading text-3xl font-black uppercase tracking-tight">Badges</h2>
-                                    {profileBadges.length === 0 ? (
-                                        <p className="mt-4 rounded-md border-2 border-black bg-[#fffdf0] p-4 text-sm font-medium text-slate-700 shadow-neo">
-                                            No badges available for this profile yet.
-                                        </p>
-                                    ) : (
-                                        <div className="mt-4 ph-badge-grid-scroll" role="list" aria-label="Profile badges">
-                                            {profileBadges.map((badge) => (
-                                                <button
-                                                    key={badge.id}
-                                                    type="button"
-                                                    className="ph-badge-card"
-                                                    onClick={() => handleOpenBadgeModal(badge)}
-                                                    role="listitem"
-                                                >
-                                                    <div className="ph-badge-media">
-                                                        {badge.image_url ? (
-                                                            <img src={badge.image_url} alt={badge.title || 'Badge'} className="ph-badge-image" />
-                                                        ) : (
-                                                            <div className="ph-badge-fallback">Badge</div>
-                                                        )}
-                                                    </div>
-                                                    <div className="ph-badge-copy">
-                                                        <p className="ph-badge-title">{badge.title || 'Badge'}</p>
-                                                        <p className="ph-badge-meta">{badge.place || 'Achievement'}</p>
-                                                    </div>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
-                                </>
-                            )}
-                        </div>
+                                    <Award className="h-6 w-6 text-[#8B5CF6]" />
+                                </div>
+                                {profileBadges.length === 0 ? (
+                                    <p className="mt-4 rounded-md border-2 border-black bg-[#fffdf0] p-4 text-sm font-medium text-slate-700 shadow-neo">
+                                        No badges available for this profile yet.
+                                    </p>
+                                ) : (
+                                    <div className="mt-4 grid max-h-[360px] gap-3 overflow-y-auto pr-1 sm:grid-cols-2" role="list" aria-label="Profile badges">
+                                        {profileBadges.map((badge) => (
+                                            <button
+                                                key={badge.id}
+                                                type="button"
+                                                className="cursor-pointer rounded-md border-2 border-black bg-[#fffdf0] p-2 shadow-neo transition-transform duration-100 hover:-translate-x-[1px] hover:-translate-y-[1px] aspect-square grid grid-rows-[1fr_auto] gap-2 text-left"
+                                                onClick={() => handleOpenBadgeModal(badge)}
+                                                role="listitem"
+                                            >
+                                                <div className="min-h-0 overflow-hidden rounded-md border-2 border-black bg-[#11131a]">
+                                                    {badge.image_url ? (
+                                                        <img src={badge.image_url} alt={badge.title || 'Badge'} className="h-full w-full object-cover" />
+                                                    ) : (
+                                                        <div className="flex h-full w-full items-center justify-center bg-[#11131a]">
+                                                            <span className="font-heading text-xs font-black uppercase tracking-[0.08em] text-[#FDE047]">Badge</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <div>
+                                                    <p className="font-heading text-sm font-black uppercase tracking-tight text-black">{badge.title || 'Badge'}</p>
+                                                    <p className="mt-1 font-mono text-[10px] font-bold uppercase tracking-[0.08em] text-slate-700">
+                                                        {[badge.place, badge.event_title].filter(Boolean).join(' · ') || 'Achievement'}
+                                                    </p>
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        ) : null}
                     </section>
 
                     <section className={panelClass}>

@@ -838,6 +838,7 @@ export default function PersohubFeedPage() {
                                                 onDelete={handleDeletePost}
                                                 onEdit={handleEditPost}
                                                 onHide={handleHidePost}
+                                                compactEventMobile={isMobileViewport && feedType === 'event'}
                                             />
                                         ))}
                                         {!activeHashtag && feedHasMore ? <div ref={feedSentinelRef} className="ph-feed-sentinel" aria-hidden="true" /> : null}
