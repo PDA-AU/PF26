@@ -291,6 +291,7 @@ export const PostCard = ({
     fetchComments,
     createComment,
     allowModeration,
+    allowEventPostModeration = false,
     onDelete,
     onEdit,
     onHide,
@@ -363,6 +364,7 @@ export const PostCard = ({
         .filter(Boolean)
         .map((tag) => `#${tag}`)
         .join(' ');
+    const canEditDeletePost = Boolean(allowModeration && (!isEventPost || allowEventPostModeration));
     const showInlineModeration = Boolean(allowModeration && !isMobileViewport);
     const showMobileModerationMenu = Boolean(allowModeration && isMobileViewport);
     const communityProfileId = String(post?.community?.profile_id || '').trim().toLowerCase();
@@ -436,12 +438,12 @@ export const PostCard = ({
                     </div>
                 </div>
                 <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
-                    {showInlineModeration && !isEventPost ? (
+                    {showInlineModeration && canEditDeletePost ? (
                         <button type="button" className="ph-action-btn" onClick={() => onEdit?.(post)} data-testid={`ph-post-edit-${post.slug_token}`}>
                             <Pencil size={14} />
                         </button>
                     ) : null}
-                    {showInlineModeration && !isEventPost ? (
+                    {showInlineModeration && canEditDeletePost ? (
                         <button type="button" className="ph-action-btn" onClick={() => onDelete?.(post)} data-testid={`ph-post-delete-${post.slug_token}`}>
                             <Trash2 size={14} />
                         </button>
@@ -570,7 +572,7 @@ export const PostCard = ({
                             </button>
                         </div>
                         <div style={{ display: 'grid', gap: '0.45rem' }}>
-                            {!isEventPost ? (
+                            {canEditDeletePost ? (
                                 <button
                                     type="button"
                                     className="ph-btn"
@@ -583,7 +585,7 @@ export const PostCard = ({
                                     <Pencil size={14} /> Edit
                                 </button>
                             ) : null}
-                            {!isEventPost ? (
+                            {canEditDeletePost ? (
                                 <button
                                     type="button"
                                     className="ph-btn ph-btn-danger"

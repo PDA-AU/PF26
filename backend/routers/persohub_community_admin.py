@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import PersohubCommunity, PersohubPost
+from models import PdaUser, PersohubCommunity, PersohubPost
 from persohub_schemas import (
     PersohubMultipartAbortRequest,
     PersohubMultipartCompleteRequest,
@@ -31,7 +31,7 @@ from routers.persohub_shared import (
     replace_post_attachments,
     sync_post_tags_and_mentions,
 )
-from security import get_persohub_actor_user_id, require_persohub_community
+from security import get_current_pda_user, get_persohub_actor_user_id, require_persohub_community
 from utils import (
     S3_BUCKET_NAME,
     S3_CLIENT,
@@ -51,6 +51,14 @@ MAX_SINGLE_UPLOAD_BYTES = 100 * 1024 * 1024
 PART_SIZE = 10 * 1024 * 1024
 PDF_PREVIEW_MAX_PAGES = 20
 PDF_PREVIEW_RENDER_SCALE = 1.5
+
+
+def _is_global_feed_superadmin(user: PdaUser) -> bool:
+    return bool(
+        user
+        and bool(getattr(user, "is_superadmin", False))
+        and str(getattr(user, "regno", "") or "").strip() == "0000000000"
+    )
 
 
 def _validate_content_type(content_type: str) -> None:
@@ -152,17 +160,19 @@ def update_community_post(
     payload: PersohubPostUpdateRequest,
     request: Request,
     community: PersohubCommunity = Depends(require_persohub_community),
+    user: PdaUser = Depends(get_current_pda_user),
     db: Session = Depends(get_db),
 ):
     actor_user_id = int(get_persohub_actor_user_id(request) or int(community.admin_id or 0))
+    is_global_superadmin = _is_global_feed_superadmin(user)
     if actor_user_id <= 0:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Community admin mapping missing")
     post = db.query(PersohubPost).filter(PersohubPost.slug_token == slug_token).first()
     if not post:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
-    if post.community_id != community.id:
+    if post.community_id != community.id and not is_global_superadmin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot edit other community posts")
-    if str(getattr(post, "post_type", "community") or "community").lower() == "event":
+    if str(getattr(post, "post_type", "community") or "community").lower() == "event" and not is_global_superadmin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Event-derived posts are read-only")
 
     if payload.description is not None:
@@ -180,14 +190,16 @@ def update_community_post(
 def delete_community_post(
     slug_token: str,
     community: PersohubCommunity = Depends(require_persohub_community),
+    user: PdaUser = Depends(get_current_pda_user),
     db: Session = Depends(get_db),
 ):
+    is_global_superadmin = _is_global_feed_superadmin(user)
     post = db.query(PersohubPost).filter(PersohubPost.slug_token == slug_token).first()
     if not post:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
-    if post.community_id != community.id:
+    if post.community_id != community.id and not is_global_superadmin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot delete other community posts")
-    if str(getattr(post, "post_type", "community") or "community").lower() == "event":
+    if str(getattr(post, "post_type", "community") or "community").lower() == "event" and not is_global_superadmin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Event-derived posts are read-only")
 
     db.delete(post)
@@ -201,15 +213,17 @@ def update_community_post_visibility(
     payload: PersohubPostVisibilityUpdateRequest,
     request: Request,
     community: PersohubCommunity = Depends(require_persohub_community),
+    user: PdaUser = Depends(get_current_pda_user),
     db: Session = Depends(get_db),
 ):
     actor_user_id = int(get_persohub_actor_user_id(request) or int(community.admin_id or 0))
+    is_global_superadmin = _is_global_feed_superadmin(user)
     if actor_user_id <= 0:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Community admin mapping missing")
     post = db.query(PersohubPost).filter(PersohubPost.slug_token == slug_token).first()
     if not post:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
-    if post.community_id != community.id:
+    if post.community_id != community.id and not is_global_superadmin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot modify other community posts")
 
     post.is_hidden = 1 if int(payload.is_hidden or 0) == 1 else 0

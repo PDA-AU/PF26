@@ -93,6 +93,11 @@ export default function PersohubFeedPage() {
     const feedSentinelRef = useRef(null);
 
     const isUserLoggedIn = Boolean(user);
+    const isGlobalFeedSuperadmin = Boolean(
+        user
+        && user.is_superadmin
+        && String(user.regno || '').trim() === '0000000000'
+    );
     const userFeedScope = user?.id ?? null;
     const publicProfilePath = user?.profile_name
         ? `/persohub/${encodeURIComponent(user.profile_name)}`
@@ -521,6 +526,7 @@ export default function PersohubFeedPage() {
     };
 
     const canModeratePost = (post) => {
+        if (isGlobalFeedSuperadmin && mode === 'community') return true;
         if (!resolvedCommunity || mode !== 'community') return false;
         return resolvedCommunity.profile_id === post.community.profile_id;
     };
@@ -662,25 +668,16 @@ export default function PersohubFeedPage() {
                 </form>
             ) : null}
 
-            {isUserLoggedIn ? (
+            {isUserLoggedIn && mode === 'user' ? (
                 <button
                     type="button"
                     className="ph-btn"
                     style={{ marginBottom: '0.5rem' }}
                     onClick={() => {
-                        if (mode === 'user') {
-                            navigate(publicProfilePath);
-                            return;
-                        }
-                        const communityProfileId = String(resolvedCommunity?.profile_id || '').trim();
-                        if (communityProfileId) {
-                            navigate(`/persohub/${encodeURIComponent(communityProfileId)}`);
-                            return;
-                        }
                         navigate(publicProfilePath);
                     }}
                 >
-                    {mode === 'user' ? 'View Public Profile' : 'View Community Profile'}
+                    View Public Profile
                 </button>
             ) : null}
 
@@ -698,6 +695,23 @@ export default function PersohubFeedPage() {
                                 ? `${resolvedCommunity.name} (@${resolvedCommunity.profile_id})`
                                 : 'Choose active community'}
                         </button>
+                        {isUserLoggedIn ? (
+                            <button
+                                type="button"
+                                className="ph-btn"
+                                style={{ marginTop: '0.5rem' }}
+                                onClick={() => {
+                                    const communityProfileId = String(resolvedCommunity?.profile_id || '').trim();
+                                    if (communityProfileId) {
+                                        navigate(`/persohub/${encodeURIComponent(communityProfileId)}`);
+                                        return;
+                                    }
+                                    navigate(publicProfilePath);
+                                }}
+                            >
+                                View Community Profile
+                            </button>
+                        ) : null}
                         <p className="ph-muted" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
                             Acting as <strong>@{resolvedCommunity?.profile_id || '—'}</strong>
                         </p>
@@ -835,6 +849,7 @@ export default function PersohubFeedPage() {
                                                 fetchComments={persohubApi.fetchComments}
                                                 createComment={handleCreateComment}
                                                 allowModeration={canModeratePost(post)}
+                                                allowEventPostModeration={isGlobalFeedSuperadmin}
                                                 onDelete={handleDeletePost}
                                                 onEdit={handleEditPost}
                                                 onHide={handleHidePost}
@@ -960,7 +975,6 @@ export default function PersohubFeedPage() {
                                         }}
                                     >
                                         <span>{item.name} (@{item.profile_id})</span>
-                                        {isSelected ? <span>Active</span> : null}
                                     </button>
                                 );
                             })}

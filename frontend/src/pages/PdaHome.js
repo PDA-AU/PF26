@@ -11,6 +11,7 @@ import axios from 'axios';
 import pdaLogo from '@/assets/pda-logo.png';
 import pdaGroupPhoto from '@/assets/pda-group-photo.png';
 import founderPhoto from '@/assets/founder.png';
+import persohubLogo from '@/assets/persohub.png';
 import { useAuth } from '@/context/AuthContext';
 import { filterPosterAssetsByRatio, parsePosterAssets, pickPosterAssetByRatio, resolvePosterUrl } from '@/utils/posterAssets';
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -512,6 +513,29 @@ export default function PdaHome() {
                         </div>
                     </section>
                 ) : null}
+
+                <section className="mx-auto w-full max-w-6xl px-5 pb-4">
+                    <Link
+                        to="/persohub"
+                        className="group flex w-full items-center justify-between gap-4 rounded-3xl border border-black/10 bg-gradient-to-r from-[#11131a] via-[#2b1f5f] to-[#8B5CF6] px-4 py-4 text-white shadow-lg transition-transform duration-150 hover:-translate-y-[1px] sm:px-6 sm:py-5"
+                        data-reveal
+                    >
+                        <div className="min-w-0 hidden sm:block">
+                            <p className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-[#FDE047] sm:text-xs">Persohub</p>
+                            <h3 className="mt-1 font-heading text-xl font-black uppercase tracking-tight sm:text-2xl">Visit PERSOHUB</h3>
+                            <p className="mt-1 hidden text-xs font-medium text-white/90 sm:block sm:text-sm">
+                                Explore the social feed, communities, and event updates.
+                            </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-3">
+                            <img src={persohubLogo} alt="Persohub logo" className="h-16 w-16 object-contain sm:h-20 sm:w-20" />
+                            <span className="inline-flex items-center gap-2 rounded-md border-2 border-black bg-[#FDE047] px-3 py-2 text-xs font-bold uppercase tracking-[0.12em] text-black shadow-[2px_2px_0px_0px_#000000] transition-all duration-150 group-hover:-translate-x-[1px] group-hover:-translate-y-[1px] group-hover:shadow-[5px_5px_0px_0px_#000000] sm:px-4 sm:text-sm">
+                                Persohub
+                                <ArrowRight className="h-4 w-4" />
+                            </span>
+                        </div>
+                    </Link>
+                </section>
 
                 {combinedFeaturedItems.length > 0 ? (
                     <section className="mx-auto w-full max-w-6xl px-5 pb-8">

@@ -1198,7 +1198,7 @@ export default function EventDashboard() {
                         <div className="grid gap-0 lg:grid-cols-[1.25fr_0.75fr]">
                             <div className="p-6 sm:p-8">
                                 <p className="font-mono text-xs font-bold uppercase tracking-[0.2em] text-[#8B5CF6]">{eventInfo.event_code}</p>
-                                <div className="mt-2 flex flex-wrap items-center gap-3">
+                                <div className="mt-2 flex min-w-0 flex-wrap items-center gap-3">
                                     <h1 className="font-heading text-4xl font-black uppercase tracking-tight sm:text-5xl">{eventInfo.title}</h1>
                                     <span className="rounded-md border-2 border-black bg-white px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] shadow-neo">
                                         {eventInfo.status}
@@ -1218,7 +1218,7 @@ export default function EventDashboard() {
                                                 }
                                                 setRegistrationDialogOpen(true);
                                             }}
-                                            className={`border-2 border-black shadow-neo ${
+                                            className={`max-w-full border-2 border-black shadow-neo ${
                                                 isPendingRegistration
                                                     ? 'bg-amber-200 text-amber-900 cursor-not-allowed'
                                                     : (isRegistered
@@ -1227,7 +1227,7 @@ export default function EventDashboard() {
                                             }`}
                                             disabled={isRegistered}
                                         >
-                                            {registrationCtaLabel}
+                                            <span className="max-w-[14rem] truncate sm:max-w-[18rem]">{registrationCtaLabel}</span>
                                         </Button>
                                     ) : null}
                                 </div>
@@ -1282,13 +1282,13 @@ export default function EventDashboard() {
                                 ) : null}
                                 {whatsappUrl ? (
                                     <div className="mt-3">
-                                        <a href={whatsappUrl} target="_blank" rel="noreferrer">
+                                        <a href={whatsappUrl} target="_blank" rel="noreferrer" className="inline-block max-w-full">
                                             <Button
                                                 data-testid="event-overview-whatsapp-button"
-                                                className="border-2 border-black bg-[#DC2626] text-white shadow-neo hover:bg-[#B91C1C]"
+                                                className="max-w-full border-2 border-black bg-[#DC2626] text-white shadow-neo hover:bg-[#B91C1C]"
                                             >
-                                                <ExternalLink className="mr-2 h-4 w-4" />
-                                                {externalUrlLabel}
+                                                <ExternalLink className="mr-2 h-4 w-4 shrink-0" />
+                                                <span className="max-w-[12rem] truncate sm:max-w-[20rem]">{externalUrlLabel}</span>
                                             </Button>
                                         </a>
                                     </div>
@@ -1296,12 +1296,12 @@ export default function EventDashboard() {
                                 <div className="mt-3">
                                     <Button
                                         data-testid="event-overview-view-event-slug-qr-button"
-                                        className="border-2 border-black bg-[#11131a] text-white shadow-neo hover:bg-[#1f2330]"
+                                        className="max-w-full border-2 border-black bg-[#11131a] text-white shadow-neo hover:bg-[#1f2330]"
                                         onClick={loadEventQr}
                                         disabled={slugQrLoading}
                                     >
-                                        <QrCode className="mr-2 h-4 w-4" />
-                                        {slugQrLoading ? 'Generating QR...' : 'View Event QR'}
+                                        <QrCode className="mr-2 h-4 w-4 shrink-0" />
+                                        <span className="truncate">{slugQrLoading ? 'Generating QR...' : 'View Event QR'}</span>
                                     </Button>
                                 </div>
                             </div>

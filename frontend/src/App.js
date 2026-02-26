@@ -20,17 +20,7 @@ import EmailAdmin from "@/pages/HomeAdmin/EmailAdmin";
 import CCAdmin from "@/pages/HomeAdmin/CCAdmin";
 import BadgesAdmin from "@/pages/HomeAdmin/BadgesAdmin";
 import PersohubPaymentsAdminPage from "@/pages/HomeAdmin/PersohubPaymentsAdminPage";
-import AdminEvents from "@/pages/events/AdminEvents";
 import EventDashboard from "@/pages/events/EventDashboard";
-import EventAdminDashboardPage from "@/pages/events/admin/EventAdminDashboardPage";
-import EventAdminAttendancePage from "@/pages/events/admin/EventAdminAttendancePage";
-import EventAdminRoundsPage from "@/pages/events/admin/EventAdminRoundsPage";
-import EventAdminScoringPage from "@/pages/events/admin/EventAdminScoringPage";
-import EventAdminParticipantsPage from "@/pages/events/admin/EventAdminParticipantsPage";
-import EventAdminLeaderboardPage from "@/pages/events/admin/EventAdminLeaderboardPage";
-import EventAdminLogsPage from "@/pages/events/admin/EventAdminLogsPage";
-import EventAdminBadgesPage from "@/pages/events/admin/EventAdminBadgesPage";
-import EventAdminEmailPage from "@/pages/events/admin/EventAdminEmailPage";
 import PdaLogin from "@/pages/pda/PdaLogin";
 import PdaRecruit from "@/pages/pda/PdaRecruit";
 import PdaSignup from "@/pages/pda/PdaSignup";
@@ -86,18 +76,6 @@ const ProtectedPdaRoute = ({ children, requirePf = false, requireHome = false, r
     }
 
     return children;
-};
-
-const EventAdminBaseRedirect = () => {
-    const { eventSlug } = useParams();
-    if (!eventSlug) return <Navigate to="/admin/events" replace />;
-    return <Navigate to={`/admin/events/${eventSlug}/dashboard`} replace />;
-};
-
-const EventAdminBaseRedirectLegacy = () => {
-    const { eventSlug } = useParams();
-    if (!eventSlug) return <Navigate to="/admin/events" replace />;
-    return <Navigate to={`/admin/events/${eventSlug}/dashboard`} replace />;
 };
 
 const PersohubEventAdminBaseRedirect = () => {
@@ -210,58 +188,8 @@ function AppRoutes() {
                     <PersohubPaymentsAdminPage />
                 </ProtectedPdaRoute>
             } />
-            <Route path="/admin/events" element={
-                <ProtectedPdaRoute requireEvents>
-                    <AdminEvents />
-                </ProtectedPdaRoute>
-            } />
-            <Route path="/admin/event/:eventSlug" element={<EventAdminBaseRedirectLegacy />} />
-            <Route path="/admin/events/:eventSlug" element={<EventAdminBaseRedirect />} />
-            <Route path="/admin/events/:eventSlug/dashboard" element={
-                <ProtectedPdaRoute requireEvents>
-                    <EventAdminDashboardPage />
-                </ProtectedPdaRoute>
-            } />
-            <Route path="/admin/events/:eventSlug/attendance" element={
-                <ProtectedPdaRoute requireEvents>
-                    <EventAdminAttendancePage />
-                </ProtectedPdaRoute>
-            } />
-            <Route path="/admin/events/:eventSlug/rounds" element={
-                <ProtectedPdaRoute requireEvents>
-                    <EventAdminRoundsPage />
-                </ProtectedPdaRoute>
-            } />
-            <Route path="/admin/events/:eventSlug/rounds/:roundId/scoring" element={
-                <ProtectedPdaRoute requireEvents>
-                    <EventAdminScoringPage />
-                </ProtectedPdaRoute>
-            } />
-            <Route path="/admin/events/:eventSlug/participants" element={
-                <ProtectedPdaRoute requireEvents>
-                    <EventAdminParticipantsPage />
-                </ProtectedPdaRoute>
-            } />
-            <Route path="/admin/events/:eventSlug/leaderboard" element={
-                <ProtectedPdaRoute requireEvents>
-                    <EventAdminLeaderboardPage />
-                </ProtectedPdaRoute>
-            } />
-            <Route path="/admin/events/:eventSlug/email" element={
-                <ProtectedPdaRoute requireEvents>
-                    <EventAdminEmailPage />
-                </ProtectedPdaRoute>
-            } />
-            <Route path="/admin/events/:eventSlug/badges" element={
-                <ProtectedPdaRoute requireEvents>
-                    <EventAdminBadgesPage />
-                </ProtectedPdaRoute>
-            } />
-            <Route path="/admin/events/:eventSlug/logs" element={
-                <ProtectedPdaRoute requireEvents>
-                    <EventAdminLogsPage />
-                </ProtectedPdaRoute>
-            } />
+            <Route path="/admin/event/:eventSlug" element={<Navigate to="/persohub/admin" replace />} />
+            <Route path="/admin/events/*" element={<Navigate to="/persohub/admin" replace />} />
             <Route path="/admin/recruitments" element={
                 <ProtectedPdaRoute requireSuperAdmin>
                     <RecruitmentsAdmin />
