@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { usePersohubAdminAuth } from '@/context/PersohubAdminAuthContext';
 
@@ -110,7 +110,7 @@ function AttendanceContent() {
     const [attendanceRoundId, setAttendanceRoundId] = useState('');
     const [attendanceLevel, setAttendanceLevel] = useState(ATTENDANCE_LEVEL_ROUND);
     const [search, setSearch] = useState('');
-    const [scanToken, setScanToken] = useState('');
+    const [markedFilter, setMarkedFilter] = useState('all');
     const [loading, setLoading] = useState(true);
     const [isScanning, setIsScanning] = useState(false);
     const [savingChanges, setSavingChanges] = useState(false);
@@ -296,7 +296,6 @@ function AttendanceContent() {
             highlightTimerRef.current = null;
         }, 5000);
 
-        setScanToken('');
         toast.success('Attendance marked locally. Click Save to update DB.');
     }
 
@@ -382,7 +381,7 @@ function AttendanceContent() {
 
     const startScanner = async () => {
         if (!navigator?.mediaDevices?.getUserMedia) {
-            toast.error('Camera scanning unavailable. Use Upload QR Image or manual token.');
+            toast.error('Camera scanning unavailable. Use Upload QR Image.');
             return;
         }
         try {
@@ -451,9 +450,21 @@ function AttendanceContent() {
         }
     };
 
+    const rowPresenceMap = useMemo(() => (
+        rows.reduce((acc, row) => {
+            acc[`${row.entity_type}-${row.entity_id}`] = Boolean(row.is_present);
+            return acc;
+        }, {})
+    ), [rows]);
+    const getPresentValue = useCallback((row) => {
+        const key = `${row.entity_type}-${row.entity_id}`;
+        if (Object.prototype.hasOwnProperty.call(presenceDraft, key)) {
+            return Boolean(presenceDraft[key]);
+        }
+        return Boolean(row.is_present);
+    }, [presenceDraft]);
     const displayedRows = useMemo(() => {
         const needle = search.trim().toLowerCase();
-        if (!needle) return rows;
         return rows.filter((row) => {
             const haystack = [
                 String(row.name || ''),
@@ -462,15 +473,13 @@ function AttendanceContent() {
                 String(row.department || ''),
                 String(row.entity_type || ''),
             ].join(' ').toLowerCase();
-            return haystack.includes(needle);
+            if (needle && !haystack.includes(needle)) return false;
+            const isMarked = getPresentValue(row);
+            if (markedFilter === 'marked' && !isMarked) return false;
+            if (markedFilter === 'unmarked' && isMarked) return false;
+            return true;
         });
-    }, [rows, search]);
-    const rowPresenceMap = useMemo(() => (
-        rows.reduce((acc, row) => {
-            acc[`${row.entity_type}-${row.entity_id}`] = Boolean(row.is_present);
-            return acc;
-        }, {})
-    ), [rows]);
+    }, [getPresentValue, markedFilter, rows, search]);
 
     const totalRows = displayedRows.length;
     const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
@@ -483,21 +492,13 @@ function AttendanceContent() {
 
     useEffect(() => {
         setCurrentPage(1);
-    }, [attendanceRoundId, pageSize, search, effectiveAttendanceLevel]);
+    }, [attendanceRoundId, pageSize, search, markedFilter, effectiveAttendanceLevel]);
 
     useEffect(() => {
         if (currentPage > totalPages) {
             setCurrentPage(totalPages);
         }
     }, [currentPage, totalPages]);
-
-    const getPresentValue = useCallback((row) => {
-        const key = `${row.entity_type}-${row.entity_id}`;
-        if (Object.prototype.hasOwnProperty.call(presenceDraft, key)) {
-            return Boolean(presenceDraft[key]);
-        }
-        return Boolean(row.is_present);
-    }, [presenceDraft]);
 
     const handlePresenceChange = useCallback((row, checked) => {
         if (!canEditCurrentLevel) return;
@@ -519,32 +520,6 @@ function AttendanceContent() {
             return next;
         });
     }, [canEditCurrentLevel, pushLocalUndo, rowPresenceMap]);
-
-    const areAllPageRowsChecked = pagedRows.length > 0 && pagedRows.every((row) => getPresentValue(row));
-    const hasSomePageRowsChecked = pagedRows.some((row) => getPresentValue(row));
-
-    const handleToggleAllCurrentPage = useCallback((checked) => {
-        if (!canEditCurrentLevel) return;
-        const nextValue = checked === true;
-        setPresenceDraft((prev) => {
-            const previousSnapshot = { ...prev };
-            const next = { ...prev };
-            pagedRows.forEach((row) => {
-                const key = `${row.entity_type}-${row.entity_id}`;
-                const originalValue = Boolean(rowPresenceMap[key]);
-                if (nextValue === originalValue) {
-                    delete next[key];
-                } else {
-                    next[key] = nextValue;
-                }
-            });
-            pushLocalUndo({
-                label: 'Undo bulk attendance draft edit',
-                undoFn: () => setPresenceDraft(previousSnapshot),
-            });
-            return next;
-        });
-    }, [canEditCurrentLevel, pagedRows, pushLocalUndo, rowPresenceMap]);
 
     const dirtyCount = Object.keys(presenceDraft).length;
 
@@ -779,6 +754,17 @@ function AttendanceContent() {
                         />
                     </div>
                 </div>
+                <div className="mt-3">
+                    <Label>Marked Filter</Label>
+                    <Select value={markedFilter} onValueChange={setMarkedFilter}>
+                        <SelectTrigger className="w-[220px] neo-input"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">All</SelectItem>
+                            <SelectItem value="marked">Marked</SelectItem>
+                            <SelectItem value="unmarked">Unmarked</SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
                 <input
                     ref={qrImageInputRef}
                     type="file"
@@ -791,10 +777,6 @@ function AttendanceContent() {
                         <video ref={cameraRef} className="h-64 w-full rounded-lg bg-black object-cover" muted playsInline />
                     </div>
                 ) : null}
-                <div className="mt-3 flex gap-2">
-                    <Input value={scanToken} onChange={(e) => setScanToken(e.target.value)} placeholder="Manual token input" disabled={(isRoundLevelSelected && !attendanceRoundId) || !canEditCurrentLevel} />
-                    <Button onClick={() => markFromToken(scanToken)} disabled={(isRoundLevelSelected && !attendanceRoundId) || !canEditCurrentLevel}>Mark Locally</Button>
-                </div>
                 {isRoundLevelSelected && isSelectedRoundReadOnly ? (
                     <p className="mt-3 text-sm font-medium text-amber-700">
                         Round is completed/reveal. Attendance is view-only.
@@ -816,40 +798,31 @@ function AttendanceContent() {
                     <table className="neo-table">
                         <thead>
                             <tr>
-                                <th>Type</th>
+                                <th>Si.No</th>
                                 <th>Name</th>
                                 <th>Code</th>
                                 <th>Marked At (IST)</th>
-                                <th>
-                                    <div className="flex items-center gap-2">
-                                        <span>Present</span>
-                                        <Checkbox
-                                            checked={areAllPageRowsChecked ? true : (hasSomePageRowsChecked ? 'indeterminate' : false)}
-                                            onCheckedChange={handleToggleAllCurrentPage}
-                                            disabled={!canEditCurrentLevel}
-                                        />
-                                    </div>
-                                </th>
+                                <th>Present</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {pagedRows.map((row) => (
+                            {pagedRows.map((row, index) => (
                                 (() => {
                                     const rowKey = `${row.entity_type}-${row.entity_id}`;
                                     const isHighlighted = highlightedRowKey === rowKey;
                                     const tdClassName = isHighlighted ? '!bg-amber-200 transition-colors' : '';
                                     return (
                                         <tr key={rowKey}>
-                                            <td className={tdClassName}>{row.entity_type}</td>
+                                            <td className={tdClassName}>{(currentPage - 1) * pageSize + index + 1}</td>
                                             <td className={tdClassName}>{row.name}</td>
                                             <td className={tdClassName}>{row.regno_or_code}</td>
                                             <td className={tdClassName}>{formatMarkedAtIst(row.marked_at)}</td>
                                             <td className={tdClassName}>
-                                        <Checkbox
-                                            checked={getPresentValue(row)}
-                                            onCheckedChange={(checked) => handlePresenceChange(row, checked)}
-                                            disabled={!canEditCurrentLevel}
-                                        />
+                                                <Switch
+                                                    checked={getPresentValue(row)}
+                                                    onCheckedChange={(checked) => handlePresenceChange(row, checked)}
+                                                    disabled={!canEditCurrentLevel}
+                                                />
                                             </td>
                                         </tr>
                                     );

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import pdaLogo from '@/assets/pda-logo.png';
 import persohubLogo from '@/assets/persohub.png';
 import { useAuth } from '@/context/AuthContext';
+import { usePersohubActor } from '@/context/PersohubActorContext';
 
 const navItems = [
     { to: '/', label: 'Home' },
@@ -14,11 +15,24 @@ const baseNavClass = 'inline-flex items-center rounded-md border-2 border-black 
 
 export default function PdaHeader() {
     const { user, logout } = useAuth();
+    const {
+        mode,
+        setMode,
+        canUseCommunityMode,
+        switchableCommunities,
+        activeCommunityId,
+        setActiveCommunityId,
+    } = usePersohubActor();
     const location = useLocation();
     const [menuOpen, setMenuOpen] = useState(false);
+    const [communityPickerOpen, setCommunityPickerOpen] = useState(false);
     const isPersohubRoute = location.pathname.startsWith('/persohub');
+    const isPersohubAdminRoute = location.pathname.startsWith('/persohub/admin');
+    const showPersohubModeToggle = isPersohubRoute && !isPersohubAdminRoute;
     const headerLogo = isPersohubRoute ? persohubLogo : pdaLogo;
     const headerLogoAlt = isPersohubRoute ? 'Persohub logo' : 'PDA logo';
+    const hasCommunityOptions = canUseCommunityMode && (switchableCommunities?.length || 0) > 0;
+    const activeCommunity = switchableCommunities.find((item) => Number(item.id) === Number(activeCommunityId)) || null;
 
     const userInitials = user?.name
         ? user.name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase()
@@ -117,6 +131,41 @@ export default function PdaHeader() {
                             <Sparkles className="h-3 w-3" />
                             Quick Menu
                         </div>
+                        {showPersohubModeToggle ? (
+                            <>
+                                <div className="mb-3 grid grid-cols-2 gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setMode('user')}
+                                        className={`${baseNavClass} w-full justify-center ${mode === 'user' ? 'bg-[#FDE047]' : 'bg-white'}`}
+                                    >
+                                        User
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setMode('community')}
+                                        disabled={!canUseCommunityMode}
+                                        className={`${baseNavClass} w-full justify-center ${mode === 'community' ? 'bg-[#C4B5FD]' : 'bg-white'} disabled:opacity-50`}
+                                    >
+                                        Community
+                                    </button>
+                                </div>
+                                {mode === 'community' && hasCommunityOptions ? (
+                                    <div className="mb-3">
+                                        <label className="mb-1 block font-mono text-[10px] font-bold uppercase tracking-[0.12em] text-slate-600">
+                                            Active Community
+                                        </label>
+                                        <button
+                                            type="button"
+                                            onClick={() => setCommunityPickerOpen(true)}
+                                            className="h-10 w-full rounded-md border-2 border-black bg-white px-3 text-left text-sm font-bold text-black outline-none shadow-neo"
+                                        >
+                                            {activeCommunity ? `${activeCommunity.name} (@${activeCommunity.profile_id})` : 'Choose community'}
+                                        </button>
+                                    </div>
+                                ) : null}
+                            </>
+                        ) : null}
                         <div className="grid gap-2">
                             {navItems.map((item) => (
                                 <Link
@@ -171,6 +220,43 @@ export default function PdaHeader() {
                                     </button>
                                 </>
                             )}
+                        </div>
+                    </div>
+                ) : null}
+
+                {communityPickerOpen && mode === 'community' && hasCommunityOptions ? (
+                    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4">
+                        <div className="w-full max-w-md rounded-md border-4 border-black bg-white p-4 shadow-[8px_8px_0px_0px_#000000]">
+                            <div className="mb-3 flex items-center justify-between">
+                                <h3 className="font-heading text-xl font-black uppercase tracking-tight">Choose Community</h3>
+                                <button
+                                    type="button"
+                                    onClick={() => setCommunityPickerOpen(false)}
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border-2 border-black bg-white"
+                                    aria-label="Close community picker"
+                                >
+                                    <X className="h-4 w-4" />
+                                </button>
+                            </div>
+                            <div className="grid gap-2">
+                                {switchableCommunities.map((item) => {
+                                    const isSelected = Number(item.id) === Number(activeCommunityId);
+                                    return (
+                                        <button
+                                            key={item.id}
+                                            type="button"
+                                            onClick={() => {
+                                                setActiveCommunityId(Number(item.id));
+                                                setCommunityPickerOpen(false);
+                                            }}
+                                            className={`${baseNavClass} w-full justify-between ${isSelected ? 'bg-[#FDE047]' : 'bg-white'}`}
+                                        >
+                                            <span>{item.name} (@{item.profile_id})</span>
+                                            {isSelected ? <span>Active</span> : null}
+                                        </button>
+                                    );
+                                })}
+                            </div>
                         </div>
                     </div>
                 ) : null}

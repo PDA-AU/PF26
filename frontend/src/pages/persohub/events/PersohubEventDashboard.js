@@ -15,6 +15,9 @@ import {
     Upload,
     LogIn,
     QrCode,
+    Trash2,
+    UserMinus,
+    UserX,
     UserPlus,
     Users,
     XCircle
@@ -256,6 +259,12 @@ export default function EventDashboard() {
     const [creatingTeam, setCreatingTeam] = useState(false);
     const [joiningTeam, setJoiningTeam] = useState(false);
     const [inviting, setInviting] = useState(false);
+    const [leaveTeamLoading, setLeaveTeamLoading] = useState(false);
+    const [removeMemberLoading, setRemoveMemberLoading] = useState(false);
+    const [deleteTeamLoading, setDeleteTeamLoading] = useState(false);
+    const [leaveTeamDialogOpen, setLeaveTeamDialogOpen] = useState(false);
+    const [deleteTeamDialogOpen, setDeleteTeamDialogOpen] = useState(false);
+    const [removeMemberDialog, setRemoveMemberDialog] = useState({ open: false, userId: null, name: '' });
 
     const [qrDialogOpen, setQrDialogOpen] = useState(false);
     const [qrImageUrl, setQrImageUrl] = useState('');
@@ -513,12 +522,12 @@ export default function EventDashboard() {
             setDashboard(null);
             setEventProfile(null);
             setRoundStatuses([]);
-            toast.error(error?.response?.data?.detail || 'Failed to load event');
+            toast.error(getErrorMessage(error, 'Failed to load event'));
             return { eventInfo: null, dashboard: null, is_registered: false };
         } finally {
             setLoading(false);
         }
-    }, [eventSlug, getAuthHeader, isLoggedIn, shouldFetchParticipantData]);
+    }, [eventSlug, getAuthHeader, getErrorMessage, isLoggedIn, shouldFetchParticipantData]);
 
     useEffect(() => {
         fetchData();
@@ -691,7 +700,7 @@ export default function EventDashboard() {
             }
             await fetchData();
         } catch (error) {
-            toast.error(error?.response?.data?.detail || 'Registration failed');
+            toast.error(getErrorMessage(error, 'Registration failed'));
         } finally {
             setRegistering(false);
         }
@@ -719,7 +728,7 @@ export default function EventDashboard() {
                 setPaymentModalOpen(true);
             }
         } catch (error) {
-            toast.error(error?.response?.data?.detail || 'Failed to create team');
+            toast.error(getErrorMessage(error, 'Failed to create team'));
         } finally {
             setCreatingTeam(false);
         }
@@ -744,7 +753,7 @@ export default function EventDashboard() {
                 setRegistrationCtaModalOpen(true);
             }
         } catch (error) {
-            toast.error(error?.response?.data?.detail || 'Failed to join team');
+            toast.error(getErrorMessage(error, 'Failed to join team'));
         } finally {
             setJoiningTeam(false);
         }
@@ -803,7 +812,7 @@ export default function EventDashboard() {
             }
             await fetchData();
         } catch (error) {
-            toast.error(error?.response?.data?.detail || 'Failed to submit payment proof');
+            toast.error(getErrorMessage(error, 'Failed to submit payment proof'));
         } finally {
             setPaymentSubmitting(false);
             setPaymentUploadProgress(null);
@@ -820,9 +829,52 @@ export default function EventDashboard() {
             setInviteRegno('');
             await fetchData();
         } catch (error) {
-            toast.error(error?.response?.data?.detail || 'Invite failed');
+            toast.error(getErrorMessage(error, 'Invite failed'));
         } finally {
             setInviting(false);
+        }
+    };
+
+    const leaveTeam = async () => {
+        setLeaveTeamLoading(true);
+        try {
+            await axios.delete(`${API}/persohub/persohub-events/${eventSlug}/team/leave`, { headers: getAuthHeader() });
+            toast.success('You left the team');
+            setLeaveTeamDialogOpen(false);
+            await fetchData();
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to leave team'));
+        } finally {
+            setLeaveTeamLoading(false);
+        }
+    };
+
+    const removeMemberFromTeam = async () => {
+        if (!removeMemberDialog?.userId) return;
+        setRemoveMemberLoading(true);
+        try {
+            await axios.delete(`${API}/persohub/persohub-events/${eventSlug}/team/members/${removeMemberDialog.userId}`, { headers: getAuthHeader() });
+            toast.success('Team member removed');
+            setRemoveMemberDialog({ open: false, userId: null, name: '' });
+            await fetchData();
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to remove team member'));
+        } finally {
+            setRemoveMemberLoading(false);
+        }
+    };
+
+    const deleteTeam = async () => {
+        setDeleteTeamLoading(true);
+        try {
+            await axios.delete(`${API}/persohub/persohub-events/${eventSlug}/team`, { headers: getAuthHeader() });
+            toast.success('Team removed');
+            setDeleteTeamDialogOpen(false);
+            await fetchData();
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to remove team'));
+        } finally {
+            setDeleteTeamLoading(false);
         }
     };
 
@@ -846,7 +898,7 @@ export default function EventDashboard() {
             setQrImageUrl(dataUrl);
             setQrDialogOpen(true);
         } catch (error) {
-            toast.error(error?.response?.data?.detail || 'Failed to generate attendance QR');
+            toast.error(getErrorMessage(error, 'Failed to generate attendance QR'));
         } finally {
             setQrLoading(false);
         }
@@ -1567,8 +1619,21 @@ export default function EventDashboard() {
                                                     </div>
                                                     <div className="mt-4 space-y-2">
                                                         {(dashboard?.team_members || []).map((member) => (
-                                                            <div key={`${member.user_id}-${member.role}`} className="rounded-md border-2 border-black bg-white px-3 py-2 text-sm font-medium shadow-neo">
-                                                                <span className="font-bold text-black">{member.name}</span> ({member.regno}) · {member.role}
+                                                            <div key={`${member.user_id}-${member.role}`} className="flex items-center justify-between gap-2 rounded-md border-2 border-black bg-white px-3 py-2 text-sm font-medium shadow-neo">
+                                                                <div className="min-w-0">
+                                                                    <span className="font-bold text-black">{member.name}</span> ({member.regno}) · {member.role}
+                                                                </div>
+                                                                {isLeader && String(member?.role || '').toLowerCase() !== 'leader' ? (
+                                                                    <Button
+                                                                        type="button"
+                                                                        size="sm"
+                                                                        className="shrink-0 border-2 border-black bg-[#f43f5e] px-2 py-1 text-white shadow-neo hover:bg-[#e11d48]"
+                                                                        onClick={() => setRemoveMemberDialog({ open: true, userId: member.user_id, name: member.name })}
+                                                                    >
+                                                                        <UserX className="mr-1 h-3.5 w-3.5" />
+                                                                        Remove
+                                                                    </Button>
+                                                                ) : null}
                                                             </div>
                                                         ))}
                                                         {(dashboard?.team_members || []).length === 0 ? (
@@ -1600,6 +1665,27 @@ export default function EventDashboard() {
                                                             </div>
                                                         </form>
                                                     ) : null}
+                                                    <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                                                        {!isLeader ? (
+                                                            <Button
+                                                                type="button"
+                                                                className="border-2 border-black bg-[#f59e0b] text-black shadow-neo hover:bg-[#d97706]"
+                                                                onClick={() => setLeaveTeamDialogOpen(true)}
+                                                            >
+                                                                <UserMinus className="mr-2 h-4 w-4" />
+                                                                Leave Team
+                                                            </Button>
+                                                        ) : (
+                                                            <Button
+                                                                type="button"
+                                                                className="border-2 border-black bg-[#ef4444] text-white shadow-neo hover:bg-[#dc2626]"
+                                                                onClick={() => setDeleteTeamDialogOpen(true)}
+                                                            >
+                                                                <Trash2 className="mr-2 h-4 w-4" />
+                                                                Remove Team
+                                                            </Button>
+                                                        )}
+                                                    </div>
                                                 </>
                                             )}
                                         </div>
@@ -2630,6 +2716,63 @@ export default function EventDashboard() {
                             </div>
                         </>
                     ) : null}
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={leaveTeamDialogOpen} onOpenChange={setLeaveTeamDialogOpen}>
+                <DialogContent className="max-w-md border-4 border-black bg-white">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading text-xl font-black uppercase tracking-tight">Leave Team</DialogTitle>
+                    </DialogHeader>
+                    <p className="text-sm font-medium text-slate-700">
+                        You will be removed from this team. This action cannot be undone automatically.
+                    </p>
+                    <div className="flex justify-end gap-2">
+                        <Button type="button" variant="outline" className="border-2 border-black shadow-neo" onClick={() => setLeaveTeamDialogOpen(false)} disabled={leaveTeamLoading}>
+                            Cancel
+                        </Button>
+                        <Button type="button" className="border-2 border-black bg-[#f59e0b] text-black shadow-neo hover:bg-[#d97706]" onClick={leaveTeam} disabled={leaveTeamLoading}>
+                            {leaveTeamLoading ? 'Leaving...' : 'Confirm Leave'}
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={removeMemberDialog.open} onOpenChange={(open) => setRemoveMemberDialog(open ? removeMemberDialog : { open: false, userId: null, name: '' })}>
+                <DialogContent className="max-w-md border-4 border-black bg-white">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading text-xl font-black uppercase tracking-tight">Remove Member</DialogTitle>
+                    </DialogHeader>
+                    <p className="text-sm font-medium text-slate-700">
+                        Remove <span className="font-bold text-black">{removeMemberDialog.name || 'this member'}</span> from your team?
+                    </p>
+                    <div className="flex justify-end gap-2">
+                        <Button type="button" variant="outline" className="border-2 border-black shadow-neo" onClick={() => setRemoveMemberDialog({ open: false, userId: null, name: '' })} disabled={removeMemberLoading}>
+                            Cancel
+                        </Button>
+                        <Button type="button" className="border-2 border-black bg-[#f43f5e] text-white shadow-neo hover:bg-[#e11d48]" onClick={removeMemberFromTeam} disabled={removeMemberLoading}>
+                            {removeMemberLoading ? 'Removing...' : 'Confirm Remove'}
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={deleteTeamDialogOpen} onOpenChange={setDeleteTeamDialogOpen}>
+                <DialogContent className="max-w-md border-4 border-black bg-white">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading text-xl font-black uppercase tracking-tight">Remove Team</DialogTitle>
+                    </DialogHeader>
+                    <p className="text-sm font-medium text-slate-700">
+                        This will remove your team. It is allowed only before any score rows exist.
+                    </p>
+                    <div className="flex justify-end gap-2">
+                        <Button type="button" variant="outline" className="border-2 border-black shadow-neo" onClick={() => setDeleteTeamDialogOpen(false)} disabled={deleteTeamLoading}>
+                            Cancel
+                        </Button>
+                        <Button type="button" className="border-2 border-black bg-[#dc2626] text-white shadow-neo hover:bg-[#b91c1c]" onClick={deleteTeam} disabled={deleteTeamLoading}>
+                            {deleteTeamLoading ? 'Removing...' : 'Confirm Remove Team'}
+                        </Button>
+                    </div>
                 </DialogContent>
             </Dialog>
 

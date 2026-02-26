@@ -1,6 +1,23 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, MessageCircle, Heart, Share2, Pencil, Trash2, X, Eye, EyeOff } from 'lucide-react';
+import {
+    CalendarDays,
+    ChevronLeft,
+    ChevronRight,
+    LogIn,
+    MessageCircle,
+    Heart,
+    Newspaper,
+    Share2,
+    Pencil,
+    Trash2,
+    UserRound,
+    Users,
+    X,
+    Eye,
+    EyeOff,
+    ExternalLink,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import ParsedDescription from '@/components/common/ParsedDescription';
 
@@ -96,6 +113,66 @@ export const PersohubHeader = ({ subtitle = '', leftSlot = null }) => {
             </div>
             {subtitle ? <p className="ph-sub">{subtitle}</p> : null}
         </header>
+    );
+};
+
+export const PersohubMobileNav = ({
+    visible = true,
+    activeTab = 'event',
+    isUserLoggedIn = false,
+    onCommunities,
+    onEventFeed,
+    onCommunityFeed,
+    onAccount,
+    ariaLabel = 'Persohub mobile navigation',
+}) => {
+    if (!visible) return null;
+
+    return (
+        <nav className="ph-mobile-bottom-nav" aria-label={ariaLabel}>
+            <div className="ph-mobile-nav-icon-row">
+                <button
+                    type="button"
+                    aria-label="Communities"
+                    title="Communities"
+                    className={`ph-mobile-tab-btn ${activeTab === 'communities' ? 'is-active' : ''}`}
+                    onClick={onCommunities}
+                    data-testid="ph-mobile-tab-communities"
+                >
+                    <Users size={17} />
+                </button>
+                <button
+                    type="button"
+                    aria-label="Event feed"
+                    title="Event feed"
+                    className={`ph-mobile-tab-btn ${activeTab === 'event' ? 'is-active' : ''}`}
+                    onClick={onEventFeed}
+                    data-testid="ph-mobile-tab-event"
+                >
+                    <CalendarDays size={17} />
+                </button>
+                <button
+                    type="button"
+                    aria-label="Community feed"
+                    title="Community feed"
+                    className={`ph-mobile-tab-btn ${activeTab === 'community' ? 'is-active' : ''}`}
+                    onClick={onCommunityFeed}
+                    data-testid="ph-mobile-tab-community"
+                >
+                    <Newspaper size={17} />
+                </button>
+                <button
+                    type="button"
+                    aria-label={isUserLoggedIn ? 'Public profile' : 'Account login'}
+                    title={isUserLoggedIn ? 'Public profile' : 'Account login'}
+                    className={`ph-mobile-tab-btn ${activeTab === 'account' ? 'is-active' : ''}`}
+                    onClick={onAccount}
+                    data-testid="ph-mobile-tab-account"
+                >
+                    {isUserLoggedIn ? <UserRound size={17} /> : <LogIn size={17} />}
+                </button>
+            </div>
+        </nav>
     );
 };
 
@@ -217,7 +294,9 @@ export const PostCard = ({
     onEdit,
     onHide,
     hidePending = false,
+    onExplore,
 }) => {
+    const READ_MORE_PREVIEW_LIMIT = 800;
     const fallbackLogo = 'https://placehold.co/64x64?text=PDA';
     const [communityAvatarSrc, setCommunityAvatarSrc] = useState(
         post?.community?.logo_url || post?.community?.club_logo_url || fallbackLogo,
@@ -236,8 +315,11 @@ export const PostCard = ({
         setCommunityAvatarSrc(post?.community?.logo_url || post?.community?.club_logo_url || fallbackLogo);
     }, [post?.community?.logo_url, post?.community?.club_logo_url]);
 
-    const showReadMore = (post.description || '').length > 180;
-    const visibleText = expanded || !showReadMore ? (post.description || '') : `${(post.description || '').slice(0, 180)}...`;
+    const showReadMore = (post.description || '').length > READ_MORE_PREVIEW_LIMIT;
+    const visibleText = expanded || !showReadMore
+        ? (post.description || '')
+        : `${(post.description || '').slice(0, READ_MORE_PREVIEW_LIMIT)}...`;
+    const isEventPost = String(post?.post_type || '').toLowerCase() === 'event';
 
     const loadComments = async ({ reset = false } = {}) => {
         if (!fetchComments) return;
@@ -308,12 +390,12 @@ export const PostCard = ({
                     </div>
                 </div>
                 <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
-                    {allowModeration ? (
+                    {allowModeration && !isEventPost ? (
                         <button type="button" className="ph-action-btn" onClick={() => onEdit?.(post)} data-testid={`ph-post-edit-${post.slug_token}`}>
                             <Pencil size={14} />
                         </button>
                     ) : null}
-                    {allowModeration ? (
+                    {allowModeration && !isEventPost ? (
                         <button type="button" className="ph-action-btn" onClick={() => onDelete?.(post)} data-testid={`ph-post-delete-${post.slug_token}`}>
                             <Trash2 size={14} />
                         </button>
@@ -365,6 +447,11 @@ export const PostCard = ({
                     <button type="button" className="ph-action-btn" onClick={() => onShare?.(post)} data-testid={`ph-share-${post.slug_token}`}>
                         <Share2 size={14} /> Share
                     </button>
+                    {isEventPost && post?.event?.slug ? (
+                        <button type="button" className="ph-action-btn ph-btn-accent" onClick={() => onExplore?.(post)} data-testid={`ph-explore-${post.slug_token}`}>
+                            <ExternalLink size={14} /> Explore
+                        </button>
+                    ) : null}
                 </div>
 
                 {commentsOpen ? (
@@ -535,6 +622,7 @@ const fileNameFromUrl = (url) => {
 };
 
 export const CommunityPostEditModal = ({ open, post, onClose, onSubmit, submitting }) => {
+    const MAX_POST_DESCRIPTION_LENGTH = 8000;
     const [description, setDescription] = useState('');
     const [existingAttachments, setExistingAttachments] = useState([]);
     const [newFiles, setNewFiles] = useState([]);
@@ -561,7 +649,7 @@ export const CommunityPostEditModal = ({ open, post, onClose, onSubmit, submitti
                     onSubmit={(event) => {
                         event.preventDefault();
                         onSubmit?.({
-                            description: description.trim(),
+                            description: description.trim().slice(0, MAX_POST_DESCRIPTION_LENGTH),
                             existingAttachments,
                             newFiles,
                         });

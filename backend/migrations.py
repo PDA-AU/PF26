@@ -6,7 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from models import PdaTeam, PdaUser, PdaAdmin
 from auth import get_password_hash
-from persohub_service import ensure_default_persohub_setup
+from persohub_service import ensure_default_persohub_setup, ensure_primary_communities, sync_persohub_event_posts
 
 TEAM_MAP: Dict[str, Tuple[str, str]] = {
     "Chairperson": ("Executive", "Chairperson"),
@@ -4178,8 +4178,105 @@ def ensure_persohub_owner_policy_refactor(engine):
             conn.execute(text("ALTER TABLE persohub_events ALTER COLUMN club_id DROP NOT NULL"))
 
 
+def ensure_persohub_primary_and_event_post_columns(engine):
+    with engine.begin() as conn:
+        if _table_exists(conn, "persohub_communities"):
+            conn.execute(
+                text(
+                    "ALTER TABLE persohub_communities "
+                    "ADD COLUMN IF NOT EXISTS is_primary BOOLEAN NOT NULL DEFAULT FALSE"
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    WITH ranked AS (
+                        SELECT
+                            id,
+                            club_id,
+                            is_primary,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY club_id
+                                ORDER BY
+                                    CASE WHEN is_primary THEN 0 ELSE 1 END,
+                                    CASE WHEN is_root THEN 0 ELSE 1 END,
+                                    CASE WHEN is_active THEN 0 ELSE 1 END,
+                                    id ASC
+                            ) AS rn
+                        FROM persohub_communities
+                        WHERE club_id IS NOT NULL
+                    )
+                    UPDATE persohub_communities pc
+                    SET is_primary = CASE WHEN ranked.rn = 1 THEN TRUE ELSE FALSE END
+                    FROM ranked
+                    WHERE ranked.id = pc.id
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_persohub_communities_primary_per_club "
+                    "ON persohub_communities(club_id) "
+                    "WHERE is_primary = TRUE AND club_id IS NOT NULL"
+                )
+            )
+
+        if _table_exists(conn, "persohub_posts"):
+            conn.execute(
+                text(
+                    "ALTER TABLE persohub_posts "
+                    "ADD COLUMN IF NOT EXISTS post_type VARCHAR(16) NOT NULL DEFAULT 'community'"
+                )
+            )
+            conn.execute(
+                text(
+                    "ALTER TABLE persohub_posts "
+                    "ADD COLUMN IF NOT EXISTS source_event_id INTEGER"
+                )
+            )
+            conn.execute(
+                text(
+                    "UPDATE persohub_posts "
+                    "SET post_type = 'community' "
+                    "WHERE post_type IS NULL OR btrim(post_type) = ''"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_persohub_posts_source_event_id "
+                    "ON persohub_posts(source_event_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_persohub_posts_post_type "
+                    "ON persohub_posts(post_type)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_persohub_posts_source_event_id "
+                    "ON persohub_posts(source_event_id) "
+                    "WHERE source_event_id IS NOT NULL"
+                )
+            )
+            conn.execute(text("ALTER TABLE persohub_posts DROP CONSTRAINT IF EXISTS persohub_posts_source_event_id_fkey"))
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE persohub_posts
+                    ADD CONSTRAINT persohub_posts_source_event_id_fkey
+                    FOREIGN KEY (source_event_id) REFERENCES persohub_events(id) ON DELETE CASCADE
+                    """
+                )
+            )
+
+
 def ensure_persohub_defaults(db: Session):
     ensure_default_persohub_setup(db)
+    ensure_primary_communities(db)
+    sync_persohub_event_posts(db)
+    db.commit()
 
 
 def ensure_badge_catalog_refactor(engine):

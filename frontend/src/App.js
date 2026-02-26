@@ -107,9 +107,12 @@ const PersohubEventAdminBaseRedirect = () => {
 };
 
 const ProtectedPersohubEventsRoute = ({ children }) => {
-    const { community, loading } = usePersohubAdminAuth();
+    const { community, loading, mode, activeCommunityId } = usePersohubAdminAuth();
 
     if (loading) {
+        return <LoadingState fullScreen />;
+    }
+    if (mode === 'community' && activeCommunityId && !community) {
         return <LoadingState fullScreen />;
     }
 
@@ -125,9 +128,12 @@ const ProtectedPersohubEventsRoute = ({ children }) => {
 };
 
 const ProtectedPersohubClubAdminRoute = ({ children }) => {
-    const { community, loading } = usePersohubAdminAuth();
+    const { community, loading, mode, activeCommunityId } = usePersohubAdminAuth();
 
     if (loading) {
+        return <LoadingState fullScreen />;
+    }
+    if (mode === 'community' && activeCommunityId && !community) {
         return <LoadingState fullScreen />;
     }
 
@@ -143,9 +149,12 @@ const ProtectedPersohubClubAdminRoute = ({ children }) => {
 };
 
 const ProtectedPersohubOwnerRoute = ({ children }) => {
-    const { community, loading } = usePersohubAdminAuth();
+    const { community, loading, mode, activeCommunityId } = usePersohubAdminAuth();
 
     if (loading) {
+        return <LoadingState fullScreen />;
+    }
+    if (mode === 'community' && activeCommunityId && !community) {
         return <LoadingState fullScreen />;
     }
 

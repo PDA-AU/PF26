@@ -231,7 +231,9 @@ export default function PersohubAdminCommunitiesPage() {
                                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                     <div>
                                         <h3 className="font-heading text-xl font-black">{community.name}</h3>
-                                        <p className="text-xs text-slate-500">@{community.profile_id} | Active: {community.is_active ? 'Yes' : 'No'}</p>
+                                        <p className="text-xs text-slate-500">
+                                            @{community.profile_id} | Active: {community.is_active ? 'Yes' : 'No'} | Default: {community.is_root ? 'Yes' : 'No'}
+                                        </p>
                                         <p className="mt-1 text-sm text-slate-600">Admins: {(community.admins || []).filter((item) => item.is_active).map((item) => item.name || item.regno || item.user_id).join(', ') || 'None'}</p>
                                     </div>
                                     <div className="flex flex-wrap gap-2">

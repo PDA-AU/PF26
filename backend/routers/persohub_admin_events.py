@@ -1,9 +1,10 @@
 import re
+import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from auth import verify_password
@@ -25,6 +26,7 @@ from models import (
     PersohubClub,
     PersohubCommunity,
     PersohubEvent,
+    PersohubHashtag,
     PersohubEventAttendance,
     PersohubEventInvite,
     PersohubEventLog,
@@ -38,6 +40,10 @@ from models import (
     PersohubEventTeam,
     PersohubEventTeamMember,
     PersohubPayment,
+    PersohubPost,
+    PersohubPostAttachment,
+    PersohubPostHashtag,
+    PersohubPostMention,
     PersohubSympo,
     PersohubSympoEvent,
 )
@@ -61,6 +67,7 @@ from security import (
     is_persohub_club_superadmin,
     require_persohub_community,
 )
+from persohub_service import generate_unique_post_slug, infer_attachment_kind, slugify_hashtag
 
 router = APIRouter()
 
@@ -192,6 +199,182 @@ def _serialize_event(event: PersohubEvent, sympo: Optional[PersohubSympo] = None
         created_at=event.created_at,
         updated_at=event.updated_at,
     )
+
+
+def _resolve_primary_community_for_club(db: Session, club_id: int) -> PersohubCommunity:
+    row = (
+        db.query(PersohubCommunity)
+        .filter(
+            PersohubCommunity.club_id == int(club_id),
+            PersohubCommunity.is_root == True,  # noqa: E712
+            PersohubCommunity.is_active == True,  # noqa: E712
+        )
+        .order_by(PersohubCommunity.id.asc())
+        .first()
+    )
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No active root community configured for this club",
+        )
+    return row
+
+
+def _parse_event_poster_assets(poster_url: Optional[str]) -> List[dict]:
+    raw = str(poster_url or "").strip()
+    if not raw:
+        return []
+    if raw.startswith("["):
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            parsed = []
+        assets = []
+        if isinstance(parsed, list):
+            for item in parsed:
+                if not isinstance(item, dict):
+                    continue
+                url = str(item.get("url") or item.get("src") or "").strip()
+                if not url:
+                    continue
+                assets.append(
+                    {
+                        "url": url,
+                        "aspect_ratio": str(item.get("aspect_ratio") or item.get("ratio") or "").strip() or None,
+                    }
+                )
+        return assets
+    return [{"url": raw, "aspect_ratio": None}]
+
+
+def _sync_post_hashtags_only(db: Session, post: PersohubPost) -> None:
+    raw_text = str(post.description or "")
+    hashtag_values = {
+        token.strip().lower()
+        for token in re.findall(r"(?<!\w)#([A-Za-z0-9_-]{1,80})", raw_text)
+        if str(token or "").strip()
+    }
+
+    existing_links = (
+        db.query(PersohubPostHashtag, PersohubHashtag)
+        .join(PersohubHashtag, PersohubPostHashtag.hashtag_id == PersohubHashtag.id)
+        .filter(PersohubPostHashtag.post_id == int(post.id))
+        .all()
+    )
+    existing = {tag.hashtag_text: (link, tag) for link, tag in existing_links}
+
+    for hashtag_text, (link, tag) in existing.items():
+        if hashtag_text in hashtag_values:
+            continue
+        db.delete(link)
+        tag.count = max(0, int(tag.count or 0) - 1)
+
+    for hashtag_text in sorted(hashtag_values):
+        if hashtag_text in existing:
+            continue
+        tag = db.query(PersohubHashtag).filter(PersohubHashtag.hashtag_text == hashtag_text).first()
+        if not tag:
+            tag = PersohubHashtag(hashtag_text=hashtag_text, count=0)
+            db.add(tag)
+            db.flush()
+        tag.count = int(tag.count or 0) + 1
+        db.add(PersohubPostHashtag(post_id=int(post.id), hashtag_id=int(tag.id)))
+
+
+def _build_event_post_description(event: PersohubEvent, sympo_name: Optional[str]) -> str:
+    event_tag = slugify_hashtag(event.title) or slugify_hashtag(event.slug)
+    sympo_tag = slugify_hashtag(sympo_name) if sympo_name else ""
+    tag_line = " ".join(f"#{item}" for item in [event_tag, sympo_tag] if item)
+    base_description = str(event.description or "").strip()
+    if not tag_line:
+        return base_description
+    if not base_description:
+        return tag_line
+    return f"{base_description}\n\n{tag_line}"
+
+
+def _sync_event_post(db: Session, event: PersohubEvent) -> None:
+    if not int(event.club_id or 0):
+        return
+    sympo = (
+        db.query(PersohubSympo)
+        .join(PersohubSympoEvent, PersohubSympoEvent.sympo_id == PersohubSympo.id)
+        .filter(PersohubSympoEvent.event_id == int(event.id))
+        .first()
+    )
+    primary_community = _resolve_primary_community_for_club(db, int(event.club_id))
+    description = _build_event_post_description(event, (sympo.name if sympo else None))
+    post = db.query(PersohubPost).filter(PersohubPost.source_event_id == int(event.id)).first()
+    if not post:
+        post = PersohubPost(
+            community_id=int(primary_community.id),
+            admin_id=int(primary_community.admin_id),
+            slug_token=generate_unique_post_slug(db),
+            post_type="event",
+            source_event_id=int(event.id),
+            description=description,
+            is_hidden=1 if bool(getattr(event, "is_visible", True)) else 0,
+        )
+        db.add(post)
+        db.flush()
+    else:
+        post.community_id = int(primary_community.id)
+        post.admin_id = int(primary_community.admin_id)
+        post.post_type = "event"
+        post.source_event_id = int(event.id)
+        post.description = description
+        post.is_hidden = 1 if bool(getattr(event, "is_visible", True)) else 0
+
+    db.query(PersohubPostAttachment).filter(PersohubPostAttachment.post_id == int(post.id)).delete(synchronize_session=False)
+    assets = _parse_event_poster_assets(event.poster_url)
+    for idx, asset in enumerate(assets):
+        url = str(asset.get("url") or "").strip()
+        if not url:
+            continue
+        kind = infer_attachment_kind(None, url)
+        if kind != "image":
+            continue
+        db.add(
+            PersohubPostAttachment(
+                post_id=int(post.id),
+                s3_url=url,
+                preview_image_urls=[],
+                mime_type=None,
+                attachment_kind="image",
+                size_bytes=None,
+                order_no=idx,
+            )
+        )
+    _sync_post_hashtags_only(db, post)
+    db.query(PersohubPostMention).filter(PersohubPostMention.post_id == int(post.id)).delete(synchronize_session=False)
+
+
+def _delete_event_post(db: Session, event_id: int) -> None:
+    post_ids = [
+        int(post_id)
+        for (post_id,) in (
+            db.query(PersohubPost.id)
+            .filter(PersohubPost.source_event_id == int(event_id))
+            .all()
+        )
+    ]
+    if not post_ids:
+        return
+    hashtag_usage = (
+        db.query(PersohubPostHashtag.hashtag_id, func.count(PersohubPostHashtag.id))
+        .filter(PersohubPostHashtag.post_id.in_(post_ids))
+        .group_by(PersohubPostHashtag.hashtag_id)
+        .all()
+    )
+    for hashtag_id, used_count in hashtag_usage:
+        tag = db.query(PersohubHashtag).filter(PersohubHashtag.id == int(hashtag_id)).first()
+        if not tag:
+            continue
+        tag.count = max(0, int(tag.count or 0) - int(used_count or 0))
+    db.query(PersohubPostMention).filter(PersohubPostMention.post_id.in_(post_ids)).delete(synchronize_session=False)
+    db.query(PersohubPostAttachment).filter(PersohubPostAttachment.post_id.in_(post_ids)).delete(synchronize_session=False)
+    db.query(PersohubPostHashtag).filter(PersohubPostHashtag.post_id.in_(post_ids)).delete(synchronize_session=False)
+    db.query(PersohubPost).filter(PersohubPost.id.in_(post_ids)).delete(synchronize_session=False)
 
 
 def _get_event_or_404(db: Session, slug: str, club_id: int) -> PersohubEvent:
@@ -611,6 +794,7 @@ def create_admin_event(
             )
         )
 
+    _sync_event_post(db, event)
     _upsert_policy_slug_for_club_admin_rows(db, club_id, event.slug)
     _log_persohub_event_action(
         db,
@@ -651,6 +835,11 @@ def update_admin_event(
         updates["template_option"] = _to_event_template(payload.template_option)
     if "participant_mode" in updates:
         updates["participant_mode"] = _to_participant_mode(payload.participant_mode)
+        if updates["participant_mode"] != event.participant_mode:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="participant_mode cannot be changed after event creation",
+            )
     if "round_mode" in updates:
         updates["round_mode"] = _to_round_mode(payload.round_mode)
     if "status" in updates:
@@ -698,6 +887,7 @@ def update_admin_event(
     for field, value in updates.items():
         setattr(event, field, value)
 
+    _sync_event_post(db, event)
     _log_persohub_event_action(
         db,
         community,
@@ -910,6 +1100,7 @@ def assign_admin_event_sympo(
         db.flush()
     if next_sympo:
         db.add(PersohubSympoEvent(sympo_id=next_sympo.id, event_id=event.id))
+    _sync_event_post(db, event)
 
     _log_persohub_event_action(
         db,
@@ -949,6 +1140,7 @@ def delete_admin_event(
     event = _get_event_or_404(db, slug, club_id)
     event_id = int(event.id)
     event_slug = str(event.slug)
+    event_name = str(event.title or "").strip() or event_slug
 
     team_ids = [
         int(row[0])
@@ -998,6 +1190,7 @@ def delete_admin_event(
     ).delete(synchronize_session=False)
 
     _remove_policy_slug_for_club_admin_rows(db, club_id, event_slug)
+    _delete_event_post(db, event_id)
     _log_persohub_event_action(
         db,
         community,
@@ -1006,10 +1199,10 @@ def delete_admin_event(
         path=request.url.path,
         event=None,
         event_slug=event_slug,
-        meta={"event_id": event_id, "slug": event_slug, "club_id": club_id},
+        meta={"event_id": event_id, "slug": event_slug, "event_name": event_name, "club_id": club_id},
         actor_user_id=get_persohub_actor_user_id(request),
     )
 
     db.delete(event)
     db.commit()
-    return {"message": "Event deleted"}
+    return {"message": "Event deleted", "event_name": event_name}

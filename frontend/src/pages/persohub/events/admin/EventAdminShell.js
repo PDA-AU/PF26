@@ -249,13 +249,13 @@ export default function EventAdminShell({
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="flex justify-between items-center h-16">
                         <div className="flex items-center gap-4">
-                            <Link to="/persohub/admin/persohub-events" className="flex items-center gap-2">
+                            <div className="flex items-center gap-2">
                                 <img src={persohubLogo} alt="Persohub logo" className="h-10 w-10 object-contain" />
                                 <div className="hidden md:block">
                                     <div className="font-heading font-black text-lg tracking-tight leading-none">{eventInfo.title}</div>
                                     <div className="text-xs opacity-90">{eventInfo.event_code}</div>
                                 </div>
-                            </Link>
+                            </div>
                             <span className="bg-accent text-black px-2 py-1 border-2 border-black text-xs font-bold uppercase">ADMIN</span>
                         </div>
                         <div className="flex items-center gap-4">

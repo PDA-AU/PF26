@@ -151,6 +151,48 @@ def _assert_club_exists(db: Session, club_id: Optional[int]) -> Optional[Persohu
     return club
 
 
+def _set_root_community(db: Session, club_id: int, community_id: int) -> None:
+    db.query(PersohubCommunity).filter(PersohubCommunity.club_id == int(club_id)).update(
+        {PersohubCommunity.is_root: False},
+        synchronize_session=False,
+    )
+    db.query(PersohubCommunity).filter(
+        PersohubCommunity.id == int(community_id),
+        PersohubCommunity.club_id == int(club_id),
+    ).update(
+        {PersohubCommunity.is_root: True},
+        synchronize_session=False,
+    )
+
+
+def _ensure_club_has_root(db: Session, club_id: int) -> None:
+    root_exists = (
+        db.query(PersohubCommunity.id)
+        .filter(
+            PersohubCommunity.club_id == int(club_id),
+            PersohubCommunity.is_root == True,  # noqa: E712
+        )
+        .first()
+    )
+    if root_exists:
+        return
+    candidate = (
+        db.query(PersohubCommunity.id)
+        .filter(PersohubCommunity.club_id == int(club_id), PersohubCommunity.is_active == True)  # noqa: E712
+        .order_by(PersohubCommunity.id.asc())
+        .first()
+    )
+    if not candidate:
+        candidate = (
+            db.query(PersohubCommunity.id)
+            .filter(PersohubCommunity.club_id == int(club_id))
+            .order_by(PersohubCommunity.id.asc())
+            .first()
+        )
+    if candidate:
+        _set_root_community(db, int(club_id), int(candidate[0]))
+
+
 def _normalize_requested_community_admins(
     payload_admins: Optional[List[dict]],
     fallback_admin_id: Optional[int],
@@ -814,6 +856,24 @@ def create_cc_club(
     club = PersohubClub(**payload.model_dump())
     db.add(club)
     try:
+        db.flush()
+        default_community = PersohubCommunity(
+            name=f"{club.name} Community",
+            profile_id=f"{club.profile_id}-community"[:64],
+            club_id=int(club.id),
+            admin_id=int(payload.owner_user_id),
+            logo_url=club.club_logo_url,
+            description=f"Official community for {club.name}",
+            is_active=True,
+            is_root=True,
+        )
+        dedupe = 2
+        while db.query(PersohubCommunity).filter(PersohubCommunity.profile_id == default_community.profile_id).first():
+            suffix = f"-{dedupe}"
+            base = f"{club.profile_id}-community"
+            default_community.profile_id = f"{base[:64 - len(suffix)]}{suffix}"
+            dedupe += 1
+        db.add(default_community)
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -989,6 +1049,11 @@ def create_cc_community(
 
     if db.query(PersohubCommunity).filter(PersohubCommunity.profile_id == payload.profile_id).first():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Community profile_id already exists")
+    if bool(payload.is_root) and not bool(payload.is_active):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Root community must be active.",
+        )
 
     community = PersohubCommunity(
         name=payload.name,
@@ -998,7 +1063,7 @@ def create_cc_community(
         logo_url=payload.logo_url,
         description=payload.description,
         is_active=payload.is_active,
-        is_root=False,
+        is_root=bool(payload.is_root),
     )
     db.add(community)
 
@@ -1011,6 +1076,10 @@ def create_cc_community(
             created_by_user_id=admin.id,
         )
         community.admin_id = int(resolved_admin_id)
+        if community.club_id and bool(payload.is_root):
+            _set_root_community(db, int(community.club_id), int(community.id))
+        elif community.club_id:
+            _ensure_club_has_root(db, int(community.club_id))
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -1045,9 +1114,27 @@ def update_cc_community(
     if not community:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Community not found")
 
+    previous_club_id = int(community.club_id or 0)
     updates = payload.model_dump(exclude_unset=True)
     requested_admins_payload = updates.pop("admins", None)
     requested_admin_id = updates.pop("admin_id", None)
+    requested_is_root = updates.pop("is_root", None)
+    if (
+        bool(getattr(community, "is_root", False))
+        and "is_active" in updates
+        and not bool(updates["is_active"])
+        and requested_is_root is not False
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Default root community cannot be set inactive.",
+        )
+    effective_is_active = bool(updates["is_active"]) if "is_active" in updates else bool(community.is_active)
+    if requested_is_root is True and not effective_is_active:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Root community must be active.",
+        )
 
     club = _assert_club_exists(db, updates.get("club_id", community.club_id))
 
@@ -1085,6 +1172,19 @@ def update_cc_community(
         )
         community.admin_id = int(resolved_admin_id)
 
+    current_club_id = int(community.club_id or 0)
+    if current_club_id > 0:
+        if requested_is_root is True:
+            _set_root_community(db, current_club_id, int(community.id))
+        elif requested_is_root is False:
+            community.is_root = False
+            db.flush()
+            _ensure_club_has_root(db, current_club_id)
+        else:
+            _ensure_club_has_root(db, current_club_id)
+    if previous_club_id > 0 and previous_club_id != current_club_id:
+        _ensure_club_has_root(db, previous_club_id)
+
     try:
         db.commit()
     except IntegrityError:
@@ -1121,6 +1221,11 @@ def delete_cc_community(
     community = db.query(PersohubCommunity).filter(PersohubCommunity.id == community_id).first()
     if not community:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Community not found")
+    if bool(getattr(community, "is_root", False)):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Default root community cannot be deleted directly. Delete the club to remove it.",
+        )
 
     deleted_counts = {
         "community_id": community.id,
@@ -1132,7 +1237,11 @@ def delete_cc_community(
         {PersohubEvent.community_id: None},
         synchronize_session=False,
     )
+    club_id = int(community.club_id or 0)
     db.delete(community)
+    db.flush()
+    if club_id > 0:
+        _ensure_club_has_primary(db, club_id)
     db.commit()
 
     log_admin_action(

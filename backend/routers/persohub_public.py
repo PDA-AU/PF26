@@ -27,6 +27,7 @@ from persohub_schemas import (
     PersohubCommentPageResponse,
     PersohubCommentResponse,
     PersohubFeedResponse,
+    PersohubFeedTypeEnum,
     PersohubPhaseGateStatus,
     PersohubPostResponse,
     PersohubPublicProfileResponse,
@@ -261,6 +262,7 @@ def toggle_follow_community(
 def get_feed(
     limit: int = Query(default=20, ge=1, le=100),
     cursor: Optional[str] = Query(default=None),
+    feed_type: PersohubFeedTypeEnum = Query(default=PersohubFeedTypeEnum.ALL),
     db: Session = Depends(get_db),
     user: Optional[PdaUser] = Depends(get_optional_pda_user),
 ):
@@ -268,6 +270,11 @@ def get_feed(
     offset = _parse_cursor_offset(cursor)
     posts: List[PersohubPost] = []
     total = 0
+    feed_filter_clause = None
+    if feed_type == PersohubFeedTypeEnum.EVENT:
+        feed_filter_clause = PersohubPost.post_type == "event"
+    elif feed_type == PersohubFeedTypeEnum.COMMUNITY:
+        feed_filter_clause = PersohubPost.post_type == "community"
 
     if user:
         followed_ids = [
@@ -278,25 +285,33 @@ def get_feed(
         ]
 
         if followed_ids:
-            followed_total = (
+            followed_total_query = (
                 db.query(func.count(PersohubPost.id))
                 .filter(PersohubPost.community_id.in_(followed_ids), PersohubPost.is_hidden == 1)
-                .scalar()
-            ) or 0
-            other_total = (
+            )
+            other_total_query = (
                 db.query(func.count(PersohubPost.id))
                 .filter(~PersohubPost.community_id.in_(followed_ids), PersohubPost.is_hidden == 1)
-                .scalar()
-            ) or 0
+            )
+            if feed_filter_clause is not None:
+                followed_total_query = followed_total_query.filter(feed_filter_clause)
+                other_total_query = other_total_query.filter(feed_filter_clause)
+            followed_total = followed_total_query.scalar() or 0
+            other_total = other_total_query.scalar() or 0
             total = int(followed_total + other_total)
 
             followed_offset = offset
             followed_limit = 0
             if followed_offset < followed_total:
                 followed_limit = min(limit, followed_total - followed_offset)
-                posts.extend(
+                followed_posts_query = (
                     db.query(PersohubPost)
                     .filter(PersohubPost.community_id.in_(followed_ids), PersohubPost.is_hidden == 1)
+                )
+                if feed_filter_clause is not None:
+                    followed_posts_query = followed_posts_query.filter(feed_filter_clause)
+                posts.extend(
+                    followed_posts_query
                     .order_by(PersohubPost.created_at.desc(), PersohubPost.id.desc())
                     .offset(followed_offset)
                     .limit(followed_limit)
@@ -306,29 +321,42 @@ def get_feed(
             remaining = max(0, limit - followed_limit)
             if remaining > 0:
                 other_offset = max(0, offset - followed_total)
-                posts.extend(
+                other_posts_query = (
                     db.query(PersohubPost)
                     .filter(~PersohubPost.community_id.in_(followed_ids), PersohubPost.is_hidden == 1)
+                )
+                if feed_filter_clause is not None:
+                    other_posts_query = other_posts_query.filter(feed_filter_clause)
+                posts.extend(
+                    other_posts_query
                     .order_by(PersohubPost.like_count.desc(), PersohubPost.created_at.desc(), PersohubPost.id.desc())
                     .offset(other_offset)
                     .limit(remaining)
                     .all()
                 )
         else:
-            total = int(db.query(func.count(PersohubPost.id)).filter(PersohubPost.is_hidden == 1).scalar() or 0)
+            total_query = db.query(func.count(PersohubPost.id)).filter(PersohubPost.is_hidden == 1)
+            posts_query = db.query(PersohubPost).filter(PersohubPost.is_hidden == 1)
+            if feed_filter_clause is not None:
+                total_query = total_query.filter(feed_filter_clause)
+                posts_query = posts_query.filter(feed_filter_clause)
+            total = int(total_query.scalar() or 0)
             posts = (
-                db.query(PersohubPost)
-                .filter(PersohubPost.is_hidden == 1)
+                posts_query
                 .order_by(PersohubPost.like_count.desc(), PersohubPost.created_at.desc(), PersohubPost.id.desc())
                 .offset(offset)
                 .limit(limit)
                 .all()
             )
     else:
-        total = int(db.query(func.count(PersohubPost.id)).filter(PersohubPost.is_hidden == 1).scalar() or 0)
+        total_query = db.query(func.count(PersohubPost.id)).filter(PersohubPost.is_hidden == 1)
+        posts_query = db.query(PersohubPost).filter(PersohubPost.is_hidden == 1)
+        if feed_filter_clause is not None:
+            total_query = total_query.filter(feed_filter_clause)
+            posts_query = posts_query.filter(feed_filter_clause)
+        total = int(total_query.scalar() or 0)
         posts = (
-            db.query(PersohubPost)
-            .filter(PersohubPost.is_hidden == 1)
+            posts_query
             .order_by(PersohubPost.like_count.desc(), PersohubPost.created_at.desc(), PersohubPost.id.desc())
             .offset(offset)
             .limit(limit)
@@ -650,11 +678,15 @@ def get_public_profile(
         profile_name=person.profile_name or "",
         name=person.name,
         regno=person.regno,
+        email=person.email,
         image_url=person.image_url,
         gender=person.gender,
         is_member=person.is_member,
         team=team.team if person.is_member and team else None,
         designation=team.designation if person.is_member and team else None,
+        instagram_url=person.instagram_url,
+        linkedin_url=person.linkedin_url,
+        github_url=person.github_url,
         badges=[
             {
                 "id": assignment.id,

@@ -162,6 +162,8 @@ def update_community_post(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
     if post.community_id != community.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot edit other community posts")
+    if str(getattr(post, "post_type", "community") or "community").lower() == "event":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Event-derived posts are read-only")
 
     if payload.description is not None:
         post.description = payload.description
@@ -185,6 +187,8 @@ def delete_community_post(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
     if post.community_id != community.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot delete other community posts")
+    if str(getattr(post, "post_type", "community") or "community").lower() == "event":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Event-derived posts are read-only")
 
     db.delete(post)
     db.commit()

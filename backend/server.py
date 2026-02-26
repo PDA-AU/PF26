@@ -61,6 +61,7 @@ from migrations import (
     ensure_persohub_admins_table,
     ensure_persohub_club_admins_table,
     ensure_persohub_owner_policy_refactor,
+    ensure_persohub_primary_and_event_post_columns,
     ensure_badge_catalog_refactor,
     ensure_persohub_defaults,
 )
@@ -188,6 +189,7 @@ async def startup_event():
     ensure_persohub_admins_table(engine)
     ensure_persohub_club_admins_table(engine)
     ensure_persohub_owner_policy_refactor(engine)
+    ensure_persohub_primary_and_event_post_columns(engine)
     ensure_badge_catalog_refactor(engine)
     ensure_pda_recruitment_tables(engine)
     ensure_system_config_recruit_url_column(engine)

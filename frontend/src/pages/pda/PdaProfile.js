@@ -725,6 +725,8 @@ export default function PdaProfile() {
     const profileAvatarSrc = normalizeProfileImageUrl(user.image_url) || defaultAvatarByGender;
     const persistedProfileImageUrl = normalizeProfileImageUrl(user.image_url);
     const removableProfileImagePreview = selectedProfileImagePreviewUrl || (removeProfileImageOnSave ? '' : persistedProfileImageUrl);
+    const publicProfileName = String(user.profile_name || '').trim();
+    const publicProfilePath = publicProfileName ? `/persohub/${encodeURIComponent(publicProfileName)}` : '';
     const displayDept = isEditing
         ? (formData.deptChoice === DEPARTMENT_OTHER ? formData.deptOther : formData.deptChoice)
         : normalizeDepartmentValue(user.dept);
@@ -757,6 +759,29 @@ export default function PdaProfile() {
                             </div>
                         </section>
                     ) : null}
+
+                    <section className="rounded-md border-4 border-black bg-[#C4B5FD] p-4 shadow-[8px_8px_0px_0px_#000000]">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="min-w-0">
+                                <p className="font-heading text-2xl font-black uppercase tracking-tight text-black sm:text-3xl md:text-4xl">
+                                    Public Profile
+                                </p>
+                            </div>
+                            {publicProfilePath ? (
+                                <Link to={publicProfilePath}>
+                                    <Button type="button" className={accentButtonClass}>
+                                        <ExternalLink className="mr-2 h-4 w-4" />
+                                        Go to Public Profile
+                                    </Button>
+                                </Link>
+                            ) : (
+                                <Button type="button" disabled className={neutralButtonClass}>
+                                    <ExternalLink className="mr-2 h-4 w-4" />
+                                    Set Profile Name
+                                </Button>
+                            )}
+                        </div>
+                    </section>
 
                     <section className={`${panelClass} overflow-hidden`}>
                         <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">

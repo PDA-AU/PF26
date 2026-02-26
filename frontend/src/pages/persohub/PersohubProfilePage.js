@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import QRCode from 'qrcode';
-import { ArrowLeft, QrCode, X } from 'lucide-react';
+import { ArrowLeft, QrCode, X, Mail, Instagram, Github, Linkedin } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useAuth } from '@/context/AuthContext';
@@ -14,7 +14,7 @@ import zynaAvatar from '@/assets/zyna.png';
 import { compressImageToWebp } from '@/utils/imageCompression';
 import { copyTextToClipboard } from '@/utils/clipboard';
 import { persohubApi } from '@/pages/persohub/api';
-import { CommunityPostEditModal, ConfirmModal, EmptyState, PostCard } from '@/pages/persohub/components';
+import { CommunityPostEditModal, ConfirmModal, EmptyState, PersohubMobileNav, PostCard } from '@/pages/persohub/components';
 import '@/pages/persohub/persohub.css';
 
 const normalizeProfileImageUrl = (value) => {
@@ -37,6 +37,7 @@ const extractInlineMentions = (description) => {
         ),
     );
 };
+const MAX_POST_DESCRIPTION_LENGTH = 8000;
 
 export default function PersohubProfilePage() {
     const { profileName } = useParams();
@@ -67,6 +68,22 @@ export default function PersohubProfilePage() {
     const [selectedBadge, setSelectedBadge] = useState(null);
 
     const isUserLoggedIn = Boolean(user);
+    const navigateToCommunities = useCallback(() => {
+        navigate('/persohub', { state: { mobileView: 'communities' } });
+    }, [navigate]);
+    const navigateToEventFeed = useCallback(() => {
+        navigate('/persohub', { state: { mobileView: 'feed', feedType: 'event' } });
+    }, [navigate]);
+    const navigateToCommunityFeed = useCallback(() => {
+        navigate('/persohub', { state: { mobileView: 'feed', feedType: 'community' } });
+    }, [navigate]);
+    const navigateToAccount = useCallback(() => {
+        if (isUserLoggedIn && user?.profile_name) {
+            navigate(`/persohub/${encodeURIComponent(user.profile_name)}`);
+            return;
+        }
+        navigate('/persohub', { state: { mobileView: 'account' } });
+    }, [isUserLoggedIn, navigate, user?.profile_name]);
 
     const loadProfile = useCallback(async () => {
         if (!profileName) return;
@@ -230,10 +247,11 @@ export default function PersohubProfilePage() {
                 mime_type: item.mime_type,
                 size_bytes: item.size_bytes,
             }));
-            const mentions = extractInlineMentions(payload.description);
+            const description = String(payload.description || '').trim().slice(0, MAX_POST_DESCRIPTION_LENGTH);
+            const mentions = extractInlineMentions(description);
 
             const updated = await persohubApi.updateCommunityPost(editingPost.slug_token, {
-                description: payload.description,
+                description,
                 mentions,
                 attachments: [...retained, ...uploadedAttachments],
             });
@@ -290,7 +308,7 @@ export default function PersohubProfilePage() {
 
     if (loading) {
         return (
-            <div className="min-h-screen bg-[#fffdf5] text-black flex flex-col">
+            <div className="ph-profile-page min-h-screen bg-[#fffdf5] text-black flex flex-col">
                 <PdaHeader />
                 <main className="relative isolate flex-1 overflow-hidden">
                     <div className="relative z-10 mx-auto w-full max-w-7xl space-y-6 px-4 py-10 sm:px-6 lg:px-8 lg:py-12">
@@ -304,6 +322,14 @@ export default function PersohubProfilePage() {
                         </section>
                     </div>
                 </main>
+                <PersohubMobileNav
+                    activeTab="account"
+                    isUserLoggedIn={isUserLoggedIn}
+                    onCommunities={navigateToCommunities}
+                    onEventFeed={navigateToEventFeed}
+                    onCommunityFeed={navigateToCommunityFeed}
+                    onAccount={navigateToAccount}
+                />
                 <PdaFooter />
             </div>
         );
@@ -321,7 +347,7 @@ export default function PersohubProfilePage() {
     const tileClass = 'rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo';
 
     return (
-        <div className="min-h-screen bg-[#fffdf5] text-black flex flex-col">
+        <div className="ph-profile-page min-h-screen bg-[#fffdf5] text-black flex flex-col">
             <PdaHeader />
             <main className="relative isolate flex-1 overflow-hidden">
                 <div className="pointer-events-none absolute inset-0 z-0">
@@ -432,11 +458,67 @@ export default function PersohubProfilePage() {
                                 </div>
                             </div>
                             {profile.profile_type === 'user' ? (
-                                <p className="mt-4 text-sm font-medium text-slate-700">
-                                    {profile.is_member ? 'PDA Member' : 'Public user'}
-                                    {profile.team ? ` · ${profile.team}` : ''}
-                                    {profile.designation ? ` · ${profile.designation}` : ''}
-                                </p>
+                                <div className="mt-4 space-y-2 text-sm font-medium text-slate-700">
+                                    <p>
+                                        {profile.is_member ? 'PDA Member' : 'Public user'}
+                                        {profile.team ? ` · ${profile.team}` : ''}
+                                        {profile.designation ? ` · ${profile.designation}` : ''}
+                                    </p>
+                                    {(profile.email || profile.instagram_url || profile.github_url || profile.linkedin_url) ? (
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            {profile.email ? (
+                                                <a
+                                                    href={`mailto:${profile.email}`}
+                                                    className="ph-action-btn"
+                                                    style={{ background: '#fde047', color: '#000000' }}
+                                                    title="Email"
+                                                    aria-label="Email"
+                                                >
+                                                    <Mail size={14} />
+                                                </a>
+                                            ) : null}
+                                            {profile.instagram_url ? (
+                                                <a
+                                                    href={profile.instagram_url}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="ph-action-btn"
+                                                    style={{ background: '#ec4899', color: '#ffffff' }}
+                                                    title="Instagram"
+                                                    aria-label="Instagram"
+                                                >
+                                                    <Instagram size={14} />
+                                                </a>
+                                            ) : null}
+                                            {profile.github_url ? (
+                                                <a
+                                                    href={profile.github_url}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="ph-action-btn"
+                                                    style={{ background: '#000000', color: '#ffffff' }}
+                                                    title="GitHub"
+                                                    aria-label="GitHub"
+                                                >
+                                                    <Github size={14} />
+                                                </a>
+                                            ) : null}
+                                            {profile.linkedin_url ? (
+                                                <a
+                                                    href={profile.linkedin_url}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="ph-action-btn"
+                                                    style={{ background: '#0a66c2', color: '#ffffff' }}
+                                                    title="LinkedIn"
+                                                    aria-label="LinkedIn"
+                                                >
+                                                    <Linkedin size={14} />
+                                                </a>
+                                            ) : null}
+                                        </div>
+                                    ) : null}
+                                </div>
                             ) : null}
                             {profile.profile_type === 'community' && profile.can_edit ? (
                                 <p className="mt-4 text-sm font-medium text-slate-700">Community admin mode enabled: posts are editable.</p>
@@ -531,6 +613,11 @@ export default function PersohubProfilePage() {
                                             likePending={pendingLikeSlugs.has(post.slug_token)}
                                             hidePending={pendingHideSlugs.has(post.slug_token)}
                                             onShare={setSharePost}
+                                            onExplore={(row) => {
+                                                const eventSlug = String(row?.event?.slug || '').trim();
+                                                if (!eventSlug) return;
+                                                navigate(`/persohub/events/${encodeURIComponent(eventSlug)}`);
+                                            }}
                                             onHashtagClick={(hashtag) => navigate(`/persohub?hashtag=${encodeURIComponent(hashtag)}`)}
                                             isUserLoggedIn={isUserLoggedIn}
                                             fetchComments={persohubApi.fetchComments}
@@ -559,6 +646,14 @@ export default function PersohubProfilePage() {
                     </section>
                 </div>
             </main>
+            <PersohubMobileNav
+                activeTab="account"
+                isUserLoggedIn={isUserLoggedIn}
+                onCommunities={navigateToCommunities}
+                onEventFeed={navigateToEventFeed}
+                onCommunityFeed={navigateToCommunityFeed}
+                onAccount={navigateToAccount}
+            />
             <PdaFooter />
 
             {sharePost ? (

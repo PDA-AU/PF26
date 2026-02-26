@@ -1,3 +1,4 @@
+import json
 import re
 import secrets
 from typing import List, Optional, Set
@@ -8,14 +9,23 @@ from sqlalchemy.orm import Session
 from models import (
     PdaTeam,
     PdaUser,
+    PersohubAdmin,
+    PersohubClubAdmin,
     PersohubClub,
     PersohubCommunity,
     PersohubCommunityFollow,
+    PersohubEvent,
+    PersohubHashtag,
     PersohubPost,
+    PersohubPostAttachment,
+    PersohubPostHashtag,
+    PersohubPostMention,
+    PersohubSympo,
+    PersohubSympoEvent,
 )
 
 PROFILE_RE = re.compile(r"[^a-z0-9_]+")
-HASHTAG_RE = re.compile(r"(?<!\w)#([A-Za-z0-9_]{1,80})")
+HASHTAG_RE = re.compile(r"(?<!\w)#([A-Za-z0-9_-]{1,80})")
 
 DEFAULT_PERSOHUB_COMMUNITIES = [
     {"name": "PDA Design Team", "profile_id": "designteam", "team": "Design"},
@@ -238,6 +248,257 @@ def ensure_user_follows_default_communities(
         if cid in existing:
             continue
         db.add(PersohubCommunityFollow(user_id=user_id, community_id=cid))
+
+
+def slugify_hashtag(value: Optional[str]) -> str:
+    raw = str(value or "").strip().lower()
+    raw = re.sub(r"[^a-z0-9-]+", "-", raw).strip("-")
+    raw = re.sub(r"-+", "-", raw)
+    if len(raw) > 80:
+        raw = raw[:80].rstrip("-")
+    return raw
+
+
+def _next_profile_id_from_club(club: PersohubClub) -> str:
+    base = slugify_hashtag(club.profile_id or club.name or f"club-{club.id}")
+    if not base:
+        base = f"club-{int(club.id)}"
+    if len(base) < 3:
+        base = f"{base}-club"
+    return base[:64]
+
+
+def _resolve_default_community_admin_user_id(db: Session, club_id: int, owner_user_id: Optional[int]) -> Optional[int]:
+    if owner_user_id:
+        owner_exists = db.query(PdaUser).filter(PdaUser.id == int(owner_user_id)).first()
+        if owner_exists:
+            return int(owner_exists.id)
+
+    superadmin_row = (
+        db.query(PersohubClubAdmin.user_id)
+        .filter(
+            PersohubClubAdmin.club_id == int(club_id),
+            PersohubClubAdmin.is_active == True,  # noqa: E712
+        )
+        .order_by(PersohubClubAdmin.id.asc())
+        .first()
+    )
+    if superadmin_row and superadmin_row[0]:
+        return int(superadmin_row[0])
+
+    first_user = db.query(PdaUser.id).order_by(PdaUser.id.asc()).first()
+    if first_user and first_user[0]:
+        return int(first_user[0])
+    return None
+
+
+def ensure_primary_communities(db: Session) -> None:
+    clubs = db.query(PersohubClub).order_by(PersohubClub.id.asc()).all()
+    for club in clubs:
+        club_id = int(club.id)
+        communities = (
+            db.query(PersohubCommunity)
+            .filter(PersohubCommunity.club_id == club_id)
+            .order_by(PersohubCommunity.id.asc())
+            .all()
+        )
+        if not communities:
+            admin_user_id = _resolve_default_community_admin_user_id(db, club_id, club.owner_user_id)
+            if not admin_user_id:
+                continue
+            candidate = _next_profile_id_from_club(club)
+            profile_id = candidate
+            dedupe = 2
+            while db.query(PersohubCommunity).filter(PersohubCommunity.profile_id == profile_id).first():
+                suffix = f"-{dedupe}"
+                profile_id = f"{candidate[:64 - len(suffix)]}{suffix}"
+                dedupe += 1
+            default_community = PersohubCommunity(
+                name=f"{club.name} Community",
+                profile_id=profile_id,
+                club_id=club_id,
+                admin_id=int(admin_user_id),
+                logo_url=club.club_logo_url,
+                description=f"Official community for {club.name}",
+                is_active=True,
+                is_root=True,
+            )
+            db.add(default_community)
+            db.flush()
+            communities = [default_community]
+        root_rows = [row for row in communities if bool(getattr(row, "is_root", False))]
+        if not root_rows:
+            keep_id = int(communities[0].id)
+            for row in communities:
+                row.is_root = int(row.id) == keep_id
+            continue
+        if len(root_rows) > 1:
+            keep_id = int(sorted(root_rows, key=lambda item: int(item.id))[0].id)
+            for row in communities:
+                row.is_root = int(row.id) == keep_id
+    db.flush()
+
+
+def _parse_event_poster_assets(poster_url: Optional[str]) -> List[dict]:
+    raw = str(poster_url or "").strip()
+    if not raw:
+        return []
+    if raw.startswith("["):
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            parsed = []
+        assets = []
+        if isinstance(parsed, list):
+            for item in parsed:
+                if not isinstance(item, dict):
+                    continue
+                url = str(item.get("url") or item.get("src") or "").strip()
+                if not url:
+                    continue
+                assets.append(
+                    {
+                        "url": url,
+                        "aspect_ratio": str(item.get("aspect_ratio") or item.get("ratio") or "").strip() or None,
+                    }
+                )
+        return assets
+    return [{"url": raw, "aspect_ratio": None}]
+
+
+def _sync_post_hashtags_only(db: Session, post: PersohubPost) -> None:
+    hashtag_values = set(extract_hashtags(post.description))
+
+    existing_links = (
+        db.query(PersohubPostHashtag, PersohubHashtag)
+        .join(PersohubHashtag, PersohubPostHashtag.hashtag_id == PersohubHashtag.id)
+        .filter(PersohubPostHashtag.post_id == post.id)
+        .all()
+    )
+    existing = {tag.hashtag_text: (link, tag) for link, tag in existing_links}
+
+    for hashtag_text, (link, tag) in existing.items():
+        if hashtag_text in hashtag_values:
+            continue
+        db.delete(link)
+        tag.count = max(0, int(tag.count or 0) - 1)
+
+    for hashtag_text in sorted(hashtag_values):
+        if hashtag_text in existing:
+            continue
+        tag = db.query(PersohubHashtag).filter(PersohubHashtag.hashtag_text == hashtag_text).first()
+        if not tag:
+            tag = PersohubHashtag(hashtag_text=hashtag_text, count=0)
+            db.add(tag)
+            db.flush()
+        tag.count = int(tag.count or 0) + 1
+        db.add(PersohubPostHashtag(post_id=post.id, hashtag_id=tag.id))
+
+
+def _build_event_post_description(event: PersohubEvent, sympo_name: Optional[str]) -> str:
+    event_tag = slugify_hashtag(event.title) or slugify_hashtag(event.slug)
+    sympo_tag = slugify_hashtag(sympo_name) if sympo_name else ""
+    tags = [item for item in [event_tag, sympo_tag] if item]
+    base_description = str(event.description or "").strip()
+    if not tags:
+        return base_description
+    tag_line = " ".join(f"#{tag}" for tag in tags)
+    if not base_description:
+        return tag_line
+    return f"{base_description}\n\n{tag_line}"
+
+
+def sync_persohub_event_posts(db: Session) -> None:
+    events = db.query(PersohubEvent).order_by(PersohubEvent.id.asc()).all()
+    sympo_map = {
+        int(event_id): int(sympo_id)
+        for sympo_id, event_id in (
+            db.query(PersohubSympoEvent.sympo_id, PersohubSympoEvent.event_id).all()
+        )
+    }
+    sympo_ids = sorted(set(sympo_map.values()))
+    sympo_name_map = {}
+    if sympo_ids:
+        sympos = db.query(PersohubSympo).filter(PersohubSympo.id.in_(sympo_ids)).all()
+        sympo_name_map = {int(sympo.id): str(sympo.name or "") for sympo in sympos}
+
+    for event in events:
+        club_id = int(event.club_id or 0)
+        if club_id <= 0:
+            continue
+        primary_community = (
+            db.query(PersohubCommunity)
+            .filter(
+                PersohubCommunity.club_id == club_id,
+                PersohubCommunity.is_root == True,  # noqa: E712
+                PersohubCommunity.is_active == True,  # noqa: E712
+            )
+            .order_by(PersohubCommunity.id.asc())
+            .first()
+        )
+        if not primary_community:
+            continue
+
+        sympo_name = sympo_name_map.get(sympo_map.get(int(event.id)))
+        description = _build_event_post_description(event, sympo_name)
+        post = db.query(PersohubPost).filter(PersohubPost.source_event_id == int(event.id)).first()
+        if not post:
+            admin_user_id = int(primary_community.admin_id or 0)
+            if admin_user_id <= 0:
+                membership = (
+                    db.query(PersohubAdmin.user_id)
+                    .filter(
+                        PersohubAdmin.community_id == int(primary_community.id),
+                        PersohubAdmin.is_active == True,  # noqa: E712
+                    )
+                    .order_by(PersohubAdmin.id.asc())
+                    .first()
+                )
+                admin_user_id = int(membership[0]) if membership and membership[0] else 0
+            if admin_user_id <= 0:
+                continue
+            post = PersohubPost(
+                community_id=int(primary_community.id),
+                admin_id=admin_user_id,
+                slug_token=generate_unique_post_slug(db),
+                post_type="event",
+                source_event_id=int(event.id),
+                is_hidden=1 if bool(getattr(event, "is_visible", True)) else 0,
+                description=description,
+            )
+            db.add(post)
+            db.flush()
+        else:
+            post.community_id = int(primary_community.id)
+            post.post_type = "event"
+            post.source_event_id = int(event.id)
+            post.is_hidden = 1 if bool(getattr(event, "is_visible", True)) else 0
+            post.description = description
+
+        poster_assets = _parse_event_poster_assets(event.poster_url)
+        db.query(PersohubPostAttachment).filter(PersohubPostAttachment.post_id == int(post.id)).delete()
+        for idx, asset in enumerate(poster_assets):
+            asset_url = str(asset.get("url") or "").strip()
+            if not asset_url:
+                continue
+            attachment_kind = infer_attachment_kind(None, asset_url)
+            if attachment_kind != "image":
+                continue
+            db.add(
+                PersohubPostAttachment(
+                    post_id=int(post.id),
+                    s3_url=asset_url,
+                    preview_image_urls=[],
+                    mime_type=None,
+                    attachment_kind="image",
+                    size_bytes=None,
+                    order_no=idx,
+                )
+            )
+
+        _sync_post_hashtags_only(db, post)
+        db.query(PersohubPostMention).filter(PersohubPostMention.post_id == int(post.id)).delete()
+    db.flush()
 
 
 def phase_1_schema_check(db: Session) -> dict:

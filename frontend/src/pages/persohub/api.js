@@ -64,9 +64,9 @@ export const persohubApi = {
     },
     parseApiError,
 
-    async fetchFeed(limit = 20, cursor = null) {
+    async fetchFeed(limit = 20, cursor = null, feedType = 'all') {
         const response = await axios.get(`${API}/persohub/feed`, {
-            params: { limit, ...(cursor ? { cursor } : {}) },
+            params: { limit, ...(cursor ? { cursor } : {}), ...(feedType ? { feed_type: feedType } : {}) },
             headers: { ...getPdaAuthHeader() },
         });
         return response.data;

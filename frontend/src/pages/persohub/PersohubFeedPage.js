@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { MessageCircle, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useAuth } from '@/context/AuthContext';
 import { usePersohubActor } from '@/context/PersohubActorContext';
 import PdaHeader from '@/components/layout/PdaHeader';
+import persohubLogo from '@/assets/persohub.png';
 import { compressImageToWebp } from '@/utils/imageCompression';
 import { copyTextToClipboard } from '@/utils/clipboard';
 import { persohubApi } from '@/pages/persohub/api';
@@ -14,6 +15,7 @@ import {
     CommunityListPanel,
     ConfirmModal,
     EmptyState,
+    PersohubMobileNav,
     PostCard,
     SearchSuggestionList,
 } from '@/pages/persohub/components';
@@ -23,6 +25,7 @@ const resetPostForm = {
     description: '',
     files: [],
 };
+const MAX_POST_DESCRIPTION_LENGTH = 8000;
 
 const extractInlineMentions = (description) => {
     const matches = String(description || '').match(/@([a-z0-9_]+)/gi) || [];
@@ -55,6 +58,7 @@ export default function PersohubFeedPage() {
     const [feedLoadingMore, setFeedLoadingMore] = useState(false);
     const [communities, setCommunities] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [feedType, setFeedType] = useState('event');
 
     const [search, setSearch] = useState('');
     const [searchItems, setSearchItems] = useState([]);
@@ -80,15 +84,46 @@ export default function PersohubFeedPage() {
     const [deleteSubmitting, setDeleteSubmitting] = useState(false);
     const [visibilityTargetPost, setVisibilityTargetPost] = useState(null);
     const [communityPickerOpen, setCommunityPickerOpen] = useState(false);
+    const [mobileView, setMobileView] = useState('feed');
+    const [isMobileViewport, setIsMobileViewport] = useState(() => (
+        typeof window !== 'undefined' ? window.matchMedia('(max-width: 1023px)').matches : false
+    ));
 
     const [activeHashtag, setActiveHashtag] = useState('');
     const feedSentinelRef = useRef(null);
 
     const isUserLoggedIn = Boolean(user);
+    const userFeedScope = user?.id ?? null;
+    const publicProfilePath = user?.profile_name
+        ? `/persohub/${encodeURIComponent(user.profile_name)}`
+        : '/profile';
+    const syncHashtagQueryInUrl = useCallback((hashtagValue) => {
+        const normalizedHashtag = String(hashtagValue || '').replace(/^#+/, '').trim();
+        const params = new URLSearchParams(location.search);
+        const existingHashtag = String(params.get('hashtag') || '').trim();
+
+        if (normalizedHashtag) {
+            if (existingHashtag === normalizedHashtag) return;
+            params.set('hashtag', normalizedHashtag);
+        } else {
+            if (!params.has('hashtag')) return;
+            params.delete('hashtag');
+        }
+
+        const searchText = params.toString();
+        navigate(
+            {
+                pathname: location.pathname,
+                search: searchText ? `?${searchText}` : '',
+            },
+            { replace: true },
+        );
+    }, [location.pathname, location.search, navigate]);
+
     const loadInitial = useCallback(async () => {
         setLoading(true);
         try {
-            const feedRes = await persohubApi.fetchFeed(100, null);
+            const feedRes = await persohubApi.fetchFeed(100, null, feedType);
             const nextPosts = feedRes.items || [];
             const nextCursor = feedRes.next_cursor || null;
             const nextHasMore = Boolean(feedRes.has_more);
@@ -101,7 +136,7 @@ export default function PersohubFeedPage() {
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [feedType]);
 
     const loadCommunities = useCallback(async () => {
         try {
@@ -112,18 +147,86 @@ export default function PersohubFeedPage() {
         }
     }, []);
 
+    const handleHashtagClick = useCallback(async (hashtag, options = {}) => {
+        const { syncSearchInput = true, syncUrl = true } = options;
+        const normalizedHashtag = String(hashtag || '').replace(/^#+/, '').trim();
+        if (!normalizedHashtag) return;
+        try {
+            const response = await persohubApi.fetchHashtagPosts(normalizedHashtag);
+            setPosts(response.items || []);
+            setFeedCursor(response.next_cursor || null);
+            setFeedHasMore(Boolean(response.has_more));
+            setActiveHashtag(normalizedHashtag);
+            if (syncSearchInput) {
+                setSearch(`#${normalizedHashtag}`);
+            }
+            if (syncUrl) {
+                syncHashtagQueryInUrl(normalizedHashtag);
+            }
+            setSearchOpen(false);
+        } catch (error) {
+            toast.error(persohubApi.parseApiError(error, 'Failed to load hashtag posts'));
+        }
+    }, [syncHashtagQueryInUrl]);
+
     useEffect(() => {
         loadInitial();
         loadCommunities();
-    }, [loadInitial, loadCommunities]);
+    }, [loadInitial, loadCommunities, userFeedScope]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return undefined;
+        const media = window.matchMedia('(max-width: 1023px)');
+        const handleViewportChange = (event) => {
+            setIsMobileViewport(Boolean(event.matches));
+        };
+        setIsMobileViewport(Boolean(media.matches));
+        if (typeof media.addEventListener === 'function') {
+            media.addEventListener('change', handleViewportChange);
+            return () => media.removeEventListener('change', handleViewportChange);
+        }
+        media.addListener(handleViewportChange);
+        return () => media.removeListener(handleViewportChange);
+    }, []);
+
+    useEffect(() => {
+        const state = location.state && typeof location.state === 'object' ? location.state : null;
+        if (!state) return;
+        let consumed = false;
+
+        const requestedView = String(state.mobileView || '').trim().toLowerCase();
+        if (requestedView && ['feed', 'communities', 'account'].includes(requestedView)) {
+            setMobileView(requestedView);
+            if (requestedView === 'account' && !isUserLoggedIn) {
+                setMode('user');
+                setUserLoginExpanded(true);
+            }
+            consumed = true;
+        }
+
+        const requestedFeedType = String(state.feedType || '').trim().toLowerCase();
+        if (requestedFeedType && ['event', 'community'].includes(requestedFeedType)) {
+            setFeedType(requestedFeedType);
+            consumed = true;
+        }
+
+        if (!consumed) return;
+        navigate(
+            {
+                pathname: location.pathname,
+                search: location.search,
+            },
+            { replace: true, state: null },
+        );
+    }, [location.pathname, location.search, location.state, navigate, isUserLoggedIn, setMode]);
 
     useEffect(() => {
         const params = new URLSearchParams(location.search);
         const hashtag = String(params.get('hashtag') || '').trim();
         if (!hashtag) return;
         setSearch(`#${hashtag}`);
-        handleHashtagClick(hashtag, { syncSearchInput: false });
-    }, [location.search]);
+        handleHashtagClick(hashtag, { syncSearchInput: false, syncUrl: false });
+    }, [location.search, handleHashtagClick]);
 
     useEffect(() => {
         const q = search.trim();
@@ -132,6 +235,7 @@ export default function PersohubFeedPage() {
             setSearchOpen(false);
             if (activeHashtag) {
                 setActiveHashtag('');
+                syncHashtagQueryInUrl('');
                 loadInitial();
             }
             return;
@@ -143,6 +247,7 @@ export default function PersohubFeedPage() {
             if (!hashtag) {
                 if (activeHashtag) {
                     setActiveHashtag('');
+                    syncHashtagQueryInUrl('');
                     loadInitial();
                 }
                 return;
@@ -154,6 +259,7 @@ export default function PersohubFeedPage() {
         }
         if (activeHashtag) {
             setActiveHashtag('');
+            syncHashtagQueryInUrl('');
             loadInitial();
         }
         const timer = setTimeout(async () => {
@@ -167,7 +273,7 @@ export default function PersohubFeedPage() {
             }
         }, 220);
         return () => clearTimeout(timer);
-    }, [activeHashtag, loadInitial, search]);
+    }, [activeHashtag, handleHashtagClick, loadInitial, search, syncHashtagQueryInUrl]);
 
     const patchPost = (nextPost) => {
         setPosts((prev) => prev.map((item) => (item.slug_token === nextPost.slug_token ? nextPost : item)));
@@ -209,31 +315,12 @@ export default function PersohubFeedPage() {
         return created;
     };
 
-    const handleHashtagClick = async (hashtag, options = {}) => {
-        const { syncSearchInput = true } = options;
-        const normalizedHashtag = String(hashtag || '').replace(/^#+/, '').trim();
-        if (!normalizedHashtag) return;
-        try {
-            const response = await persohubApi.fetchHashtagPosts(normalizedHashtag);
-            setPosts(response.items || []);
-            setFeedCursor(response.next_cursor || null);
-            setFeedHasMore(Boolean(response.has_more));
-            setActiveHashtag(normalizedHashtag);
-            if (syncSearchInput) {
-                setSearch(`#${normalizedHashtag}`);
-            }
-            setSearchOpen(false);
-        } catch (error) {
-            toast.error(persohubApi.parseApiError(error, 'Failed to load hashtag posts'));
-        }
-    };
-
     const handleLoadMoreFeed = useCallback(async () => {
         if (!feedHasMore || !feedCursor || feedLoadingMoreRef.current) return;
         feedLoadingMoreRef.current = true;
         setFeedLoadingMore(true);
         try {
-            const response = await persohubApi.fetchFeed(25, feedCursor);
+            const response = await persohubApi.fetchFeed(25, feedCursor, feedType);
             const incoming = response.items || [];
             setPosts((prev) => {
                 const seen = new Set(prev.map((item) => item.slug_token));
@@ -251,7 +338,22 @@ export default function PersohubFeedPage() {
             feedLoadingMoreRef.current = false;
             setFeedLoadingMore(false);
         }
-    }, [feedCursor, feedHasMore]);
+    }, [feedCursor, feedHasMore, feedType]);
+
+    const handleFeedTypeChange = (nextType) => {
+        const normalized = String(nextType || '').trim().toLowerCase();
+        if (!['event', 'community'].includes(normalized)) return;
+        setMobileView('feed');
+        if (normalized === feedType) return;
+        setFeedType(normalized);
+        if (activeHashtag) {
+            setActiveHashtag('');
+            syncHashtagQueryInUrl('');
+        }
+        setSearch('');
+        setSearchItems([]);
+        setSearchOpen(false);
+    };
 
     useEffect(() => {
         if (loading || activeHashtag || !feedHasMore || !feedCursor || feedLoadingMore) return;
@@ -276,6 +378,11 @@ export default function PersohubFeedPage() {
     }, [activeHashtag, feedCursor, feedHasMore, feedLoadingMore, handleLoadMoreFeed, loading]);
 
     const handleShare = (post) => setSharePost(post);
+    const handleExplore = (post) => {
+        const eventSlug = String(post?.event?.slug || '').trim();
+        if (!eventSlug) return;
+        navigate(`/persohub/events/${encodeURIComponent(eventSlug)}`);
+    };
 
     const handleSelectSuggestion = (item) => {
         setSearch('');
@@ -314,20 +421,60 @@ export default function PersohubFeedPage() {
         }
     };
 
-    const handleInlineUserLogin = async (event) => {
+    const handleInlineUserLogin = async (event, options = {}) => {
+        const { redirectToPublicProfile = false } = options;
         event.preventDefault();
         if (userLoginLoading) return;
         setUserLoginLoading(true);
         try {
-            await login(userLoginForm.regno.trim(), userLoginForm.password);
+            const loginResponse = await login(userLoginForm.regno.trim(), userLoginForm.password);
             setUserLoginExpanded(false);
+            setMobileView('feed');
+            setMode('user');
             setUserLoginForm({ regno: '', password: '' });
             toast.success('Logged in');
+            if (redirectToPublicProfile) {
+                const loggedInProfileName = String(loginResponse?.user?.profile_name || '').trim();
+                const nextPublicProfilePath = loggedInProfileName
+                    ? `/persohub/${encodeURIComponent(loggedInProfileName)}`
+                    : publicProfilePath;
+                navigate(nextPublicProfilePath);
+            }
         } catch (error) {
             toast.error(persohubApi.parseApiError(error, 'Login failed'));
         } finally {
             setUserLoginLoading(false);
         }
+    };
+
+    const handleMobileCommunityTab = () => {
+        setMobileView((prev) => (prev === 'communities' ? 'feed' : 'communities'));
+    };
+
+    const handleMobileAccountTab = () => {
+        if (!isUserLoggedIn) {
+            setMode('user');
+            setUserLoginExpanded(true);
+            setMobileView((prev) => (prev === 'account' ? 'feed' : 'account'));
+            return;
+        }
+
+        if (mode === 'user') {
+            navigate(publicProfilePath);
+            return;
+        }
+
+        const communityProfileId = String(
+            resolvedCommunity?.profile_id
+            || switchableCommunities?.[0]?.profile_id
+            || '',
+        ).trim();
+
+        if (communityProfileId) {
+            navigate(`/persohub/${encodeURIComponent(communityProfileId)}`);
+            return;
+        }
+        setMobileView((prev) => (prev === 'account' ? 'feed' : 'account'));
     };
 
     const handlePostFormFileChange = (event) => {
@@ -354,10 +501,11 @@ export default function PersohubFeedPage() {
                 uploadedAttachments.push(attachment);
             }
 
-            const mentions = extractInlineMentions(postForm.description);
+            const description = String(postForm.description || '').trim().slice(0, MAX_POST_DESCRIPTION_LENGTH);
+            const mentions = extractInlineMentions(description);
 
             const created = await persohubApi.createCommunityPost({
-                description: postForm.description.trim(),
+                description,
                 mentions,
                 attachments: uploadedAttachments,
             });
@@ -451,10 +599,11 @@ export default function PersohubFeedPage() {
                 mime_type: item.mime_type,
                 size_bytes: item.size_bytes,
             }));
-            const mentions = extractInlineMentions(payload.description);
+            const description = String(payload.description || '').trim().slice(0, MAX_POST_DESCRIPTION_LENGTH);
+            const mentions = extractInlineMentions(description);
 
             const updated = await persohubApi.updateCommunityPost(editingPost.slug_token, {
-                description: payload.description,
+                description,
                 mentions,
                 attachments: [...retained, ...uploadedAttachments],
             });
@@ -468,6 +617,105 @@ export default function PersohubFeedPage() {
             setEditSubmitting(false);
         }
     };
+
+    const renderAccountModePanel = ({ mobile = false } = {}) => (
+        <section
+            className="ph-card ph-side-card"
+            style={mobile ? undefined : { marginBottom: '0.8rem' }}
+            data-testid={mobile ? 'ph-mobile-account-panel' : 'ph-community-auth-panel'}
+        >
+            <h3 style={{ marginTop: 0, marginBottom: '0.45rem' }}>Account Mode</h3>
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                <button type="button" className={`ph-btn ${mode === 'user' ? 'ph-btn-primary' : ''}`} onClick={handleUserModeClick}>User</button>
+                <button type="button" className={`ph-btn ${mode === 'community' ? 'ph-btn-primary' : ''}`} onClick={() => setMode('community')} disabled={!canUseCommunityMode}>Community</button>
+            </div>
+
+            {!isUserLoggedIn && userLoginExpanded ? (
+                <form onSubmit={handleInlineUserLogin} style={{ marginBottom: '0.55rem' }}>
+                    <label className="ph-muted">Register Number</label>
+                    <input
+                        className="ph-input"
+                        value={userLoginForm.regno}
+                        onChange={(event) => setUserLoginForm((prev) => ({ ...prev, regno: event.target.value }))}
+                        required
+                    />
+                    <label className="ph-muted">Password</label>
+                    <input
+                        className="ph-input"
+                        type="password"
+                        value={userLoginForm.password}
+                        onChange={(event) => setUserLoginForm((prev) => ({ ...prev, password: event.target.value }))}
+                        required
+                    />
+                    <button type="submit" className="ph-btn ph-btn-primary" style={{ marginTop: '0.5rem' }} disabled={userLoginLoading}>
+                        {userLoginLoading ? 'Logging in...' : 'Login'}
+                    </button>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.6rem', marginTop: '0.45rem', flexWrap: 'wrap' }}>
+                        <p className="ph-muted" style={{ margin: 0 }}>
+                            No account?{' '}
+                            <a href="https://pdamit.in/signup" target="_blank" rel="noreferrer" className="ph-link transition-colors hover:text-[#c99612]">
+                                Register now
+                            </a>
+                        </p>
+                        <Link to="/forgot-password" className="ph-link">Forgot password?</Link>
+                    </div>
+                </form>
+            ) : null}
+
+            {isUserLoggedIn ? (
+                <button
+                    type="button"
+                    className="ph-btn"
+                    style={{ marginBottom: '0.5rem' }}
+                    onClick={() => {
+                        if (mode === 'user') {
+                            navigate(publicProfilePath);
+                            return;
+                        }
+                        const communityProfileId = String(resolvedCommunity?.profile_id || '').trim();
+                        if (communityProfileId) {
+                            navigate(`/persohub/${encodeURIComponent(communityProfileId)}`);
+                            return;
+                        }
+                        navigate(publicProfilePath);
+                    }}
+                >
+                    {mode === 'user' ? 'View Public Profile' : 'View Community Profile'}
+                </button>
+            ) : null}
+
+            {mode === 'community' ? (
+                canUseCommunityMode ? (
+                    <>
+                        <label className="ph-muted">Active Community</label>
+                        <button
+                            type="button"
+                            className="ph-input"
+                            style={{ textAlign: 'left', cursor: 'pointer' }}
+                            onClick={() => setCommunityPickerOpen(true)}
+                        >
+                            {resolvedCommunity
+                                ? `${resolvedCommunity.name} (@${resolvedCommunity.profile_id})`
+                                : 'Choose active community'}
+                        </button>
+                        <p className="ph-muted" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
+                            Acting as <strong>@{resolvedCommunity?.profile_id || '—'}</strong>
+                        </p>
+                    </>
+                ) : (
+                    <p className="ph-muted" style={{ marginBottom: 0 }}>No community admin access available.</p>
+                )
+            ) : (
+                <p className="ph-muted" style={{ marginBottom: 0 }}>User mode: likes, comments, follows are enabled.</p>
+            )}
+        </section>
+    );
+
+    const mobileActiveTab = mobileView === 'communities'
+        ? 'communities'
+        : (mobileView === 'account'
+            ? 'account'
+            : (feedType === 'community' ? 'community' : 'event'));
 
     return (
         <div className="persohub-page ph-feed-page">
@@ -483,112 +731,146 @@ export default function PersohubFeedPage() {
                     </aside>
 
                     <main className="ph-col ph-col-main">
-                        <section className="ph-search-wrap ph-search-wrap-plain">
-                            <input
-                                type="text"
-                                className="ph-search"
-                                placeholder="Search profile, community, hashtag (#tag)"
-                                value={search}
-                                onChange={(event) => setSearch(event.target.value)}
-                                data-testid="ph-search-input"
+                        {mobileView === 'communities' ? (
+                            <CommunityListPanel
+                                communities={communities}
+                                onToggleFollow={handleToggleFollow}
+                                isLoggedIn={isUserLoggedIn}
                             />
-                            <SearchSuggestionList open={searchOpen} items={searchItems} onSelect={handleSelectSuggestion} />
-                        </section>
-
-                        {loading ? (
-                            <EmptyState title="Loading feed" subtitle="Fetching community posts..." />
-                        ) : null}
-
-                        {!loading && posts.length === 0 ? (
-                            <EmptyState title="No posts yet" subtitle="Communities can start posting once they log in." />
-                        ) : null}
-
-                        {!loading && posts.length > 0 ? (
-                            <div className="ph-feed">
-                                {posts.map((post) => (
-                                    <PostCard
-                                        key={post.slug_token}
-                                        post={post}
-                                        onLike={handleLike}
-                                        likePending={pendingLikeSlugs.has(post.slug_token)}
-                                        hidePending={pendingHideSlugs.has(post.slug_token)}
-                                        onShare={handleShare}
-                                        onHashtagClick={handleHashtagClick}
-                                        isUserLoggedIn={isUserLoggedIn}
-                                        fetchComments={persohubApi.fetchComments}
-                                        createComment={handleCreateComment}
-                                        allowModeration={canModeratePost(post)}
-                                        onDelete={handleDeletePost}
-                                        onEdit={handleEditPost}
-                                        onHide={handleHidePost}
+                        ) : mobileView === 'account' ? (
+                            !isUserLoggedIn ? (
+                                <div className="mx-auto w-full max-w-xl">
+                                    <section className="rounded-md border-4 border-black bg-white p-6 shadow-[8px_8px_0px_0px_#000000] sm:p-8">
+                                        <div className="mb-4 flex justify-center">
+                                            <img src={persohubLogo} alt="Persohub logo" className="h-16 w-16 object-contain sm:h-20 sm:w-20" />
+                                        </div>
+                                        <p className="font-mono text-xs font-bold uppercase tracking-[0.2em] text-[#8B5CF6]">PDA Login</p>
+                                        <h3 className="mt-2 font-heading text-3xl font-black uppercase tracking-tight">Account Mode</h3>
+                                        <p className="mt-2 text-sm font-medium text-slate-700">
+                                            Login to use User mode, react to posts, and access your public profile.
+                                        </p>
+                                        <form className="mt-6" onSubmit={(event) => handleInlineUserLogin(event, { redirectToPublicProfile: true })}>
+                                            <label className="ph-muted">Register Number</label>
+                                            <input
+                                                className="ph-input"
+                                                value={userLoginForm.regno}
+                                                onChange={(event) => setUserLoginForm((prev) => ({ ...prev, regno: event.target.value }))}
+                                                required
+                                            />
+                                            <label className="ph-muted">Password</label>
+                                            <input
+                                                className="ph-input"
+                                                type="password"
+                                                value={userLoginForm.password}
+                                                onChange={(event) => setUserLoginForm((prev) => ({ ...prev, password: event.target.value }))}
+                                                required
+                                            />
+                                            <button
+                                                type="submit"
+                                                className="mt-3 inline-flex w-full items-center justify-center rounded-md border-2 border-black bg-[#8B5CF6] px-4 py-3 text-xs font-bold uppercase tracking-[0.14em] text-white shadow-neo transition-[background-color,transform,box-shadow] duration-150 hover:bg-[#7C3AED] hover:-translate-x-[1px] hover:-translate-y-[1px] hover:shadow-[6px_6px_0px_0px_#000000] disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-x-0 disabled:hover:translate-y-0 disabled:hover:shadow-neo"
+                                                disabled={userLoginLoading}
+                                            >
+                                                {userLoginLoading ? 'Logging in...' : 'Login'}
+                                            </button>
+                                        </form>
+                                        <div className="mt-4">
+                                            <Link
+                                                to="/signup"
+                                                className="inline-flex w-full items-center justify-center rounded-md border-2 border-black bg-[#C4B5FD] px-4 py-3 text-xs font-bold uppercase tracking-[0.14em] text-black shadow-neo transition-[transform,box-shadow] duration-150 hover:-translate-x-[1px] hover:-translate-y-[1px] hover:shadow-[6px_6px_0px_0px_#000000]"
+                                            >
+                                                Create Account
+                                            </Link>
+                                        </div>
+                                        <div className="mt-4 text-right">
+                                            <Link
+                                                to="/forgot-password"
+                                                className="text-xs font-bold uppercase tracking-[0.1em] text-[#8B5CF6] transition-[color] duration-150 hover:text-black"
+                                            >
+                                                Forgot Password?
+                                            </Link>
+                                        </div>
+                                    </section>
+                                </div>
+                            ) : (
+                                renderAccountModePanel({ mobile: true })
+                            )
+                        ) : (
+                            <>
+                                <section className="ph-search-wrap ph-search-wrap-plain">
+                                    <input
+                                        type="text"
+                                        className="ph-search"
+                                        placeholder="Search profile, community, hashtag (#tag)"
+                                        value={search}
+                                        onChange={(event) => setSearch(event.target.value)}
+                                        data-testid="ph-search-input"
                                     />
-                                ))}
-                                {!activeHashtag && feedHasMore ? <div ref={feedSentinelRef} className="ph-feed-sentinel" aria-hidden="true" /> : null}
-                                {!activeHashtag && feedLoadingMore ? <p className="ph-feed-status">Loading more posts...</p> : null}
-                                {!activeHashtag && !feedHasMore ? <p className="ph-feed-status">You are all caught up.</p> : null}
-                            </div>
-                        ) : null}
+                                    <SearchSuggestionList open={searchOpen} items={searchItems} onSelect={handleSelectSuggestion} />
+                                </section>
+
+                                {loading ? (
+                                    <EmptyState
+                                        title="Loading feed"
+                                        subtitle={feedType === 'event' ? 'Fetching event posts...' : 'Fetching community posts...'}
+                                    />
+                                ) : null}
+
+                                {!loading && posts.length === 0 ? (
+                                    <EmptyState title="No posts yet" subtitle="Communities can start posting once they log in." />
+                                ) : null}
+
+                                {!loading && posts.length > 0 ? (
+                                    <div className="ph-feed">
+                                        {posts.map((post) => (
+                                            <PostCard
+                                                key={post.slug_token}
+                                                post={post}
+                                                onLike={handleLike}
+                                                likePending={pendingLikeSlugs.has(post.slug_token)}
+                                                hidePending={pendingHideSlugs.has(post.slug_token)}
+                                                onShare={handleShare}
+                                                onExplore={handleExplore}
+                                                onHashtagClick={handleHashtagClick}
+                                                isUserLoggedIn={isUserLoggedIn}
+                                                fetchComments={persohubApi.fetchComments}
+                                                createComment={handleCreateComment}
+                                                allowModeration={canModeratePost(post)}
+                                                onDelete={handleDeletePost}
+                                                onEdit={handleEditPost}
+                                                onHide={handleHidePost}
+                                            />
+                                        ))}
+                                        {!activeHashtag && feedHasMore ? <div ref={feedSentinelRef} className="ph-feed-sentinel" aria-hidden="true" /> : null}
+                                        {!activeHashtag && feedLoadingMore ? <p className="ph-feed-status">Loading more posts...</p> : null}
+                                        {!activeHashtag && !feedHasMore ? <p className="ph-feed-status">You are all caught up.</p> : null}
+                                    </div>
+                                ) : null}
+                            </>
+                        )}
                     </main>
 
                     <aside className="ph-col ph-col-right">
-                        <div className="ph-card ph-side-card" style={{ marginBottom: '0.8rem' }} data-testid="ph-community-auth-panel">
-                            <h3 style={{ marginTop: 0, marginBottom: '0.45rem' }}>Account Mode</h3>
-                            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                                <button type="button" className={`ph-btn ${mode === 'user' ? 'ph-btn-primary' : ''}`} onClick={handleUserModeClick}>User</button>
-                                <button type="button" className={`ph-btn ${mode === 'community' ? 'ph-btn-primary' : ''}`} onClick={() => setMode('community')} disabled={!canUseCommunityMode}>Community</button>
+                        {renderAccountModePanel()}
+                        <div className="ph-card ph-side-card ph-feed-type-panel" data-testid="ph-feed-type-panel">
+                            <img src={persohubLogo} alt="Persohub logo" className="ph-feed-type-logo" />
+                            <div className="ph-feed-type-actions">
+                                <button
+                                    type="button"
+                                    className={`ph-btn ${feedType === 'event' ? 'ph-btn-primary' : ''}`}
+                                    onClick={() => handleFeedTypeChange('event')}
+                                    data-testid="ph-feed-type-event"
+                                >
+                                    Event Feed
+                                </button>
+                                <button
+                                    type="button"
+                                    className={`ph-btn ${feedType === 'community' ? 'ph-btn-primary' : ''}`}
+                                    onClick={() => handleFeedTypeChange('community')}
+                                    data-testid="ph-feed-type-community"
+                                >
+                                    Community Feed
+                                </button>
                             </div>
-                            {!isUserLoggedIn && userLoginExpanded ? (
-                                <form onSubmit={handleInlineUserLogin} style={{ marginBottom: '0.55rem' }}>
-                                    <label className="ph-muted">Register Number</label>
-                                    <input
-                                        className="ph-input"
-                                        value={userLoginForm.regno}
-                                        onChange={(event) => setUserLoginForm((prev) => ({ ...prev, regno: event.target.value }))}
-                                        required
-                                    />
-                                    <label className="ph-muted">Password</label>
-                                    <input
-                                        className="ph-input"
-                                        type="password"
-                                        value={userLoginForm.password}
-                                        onChange={(event) => setUserLoginForm((prev) => ({ ...prev, password: event.target.value }))}
-                                        required
-                                    />
-                                    <button type="submit" className="ph-btn ph-btn-primary" style={{ marginTop: '0.5rem' }} disabled={userLoginLoading}>
-                                        {userLoginLoading ? 'Logging in...' : 'Login'}
-                                    </button>
-                                    <p className="ph-muted" style={{ marginTop: '0.45rem', marginBottom: 0 }}>
-                                        No account?{' '}
-                                        <a href="https://pdamit.in/signup" target="_blank" rel="noreferrer" className="ph-link transition-colors hover:text-[#c99612]">
-                                            Register now
-                                        </a>
-                                    </p>
-                                </form>
-                            ) : null}
-                            {mode === 'community' ? (
-                                canUseCommunityMode ? (
-                                    <>
-                                        <label className="ph-muted">Active Community</label>
-                                        <button
-                                            type="button"
-                                            className="ph-input"
-                                            style={{ textAlign: 'left', cursor: 'pointer' }}
-                                            onClick={() => setCommunityPickerOpen(true)}
-                                        >
-                                            {resolvedCommunity
-                                                ? `${resolvedCommunity.name} (@${resolvedCommunity.profile_id})`
-                                                : 'Choose active community'}
-                                        </button>
-                                        <p className="ph-muted" style={{ marginTop: '0.5rem', marginBottom: 0 }}>
-                                            Acting as <strong>@{resolvedCommunity?.profile_id || '—'}</strong>
-                                        </p>
-                                    </>
-                                ) : (
-                                    <p className="ph-muted" style={{ marginBottom: 0 }}>No community admin access available.</p>
-                                )
-                            ) : (
-                                <p className="ph-muted" style={{ marginBottom: 0 }}>User mode: likes, comments, follows are enabled.</p>
-                            )}
                         </div>
                     </aside>
                 </div>
@@ -605,6 +887,17 @@ export default function PersohubFeedPage() {
                     <Plus size={24} style={{ margin: 'auto' }} />
                 </button>
             ) : null}
+
+            <PersohubMobileNav
+                visible={isMobileViewport}
+                activeTab={mobileActiveTab}
+                isUserLoggedIn={isUserLoggedIn}
+                onCommunities={handleMobileCommunityTab}
+                onEventFeed={() => handleFeedTypeChange('event')}
+                onCommunityFeed={() => handleFeedTypeChange('community')}
+                onAccount={handleMobileAccountTab}
+                ariaLabel="Persohub mobile feed navigation"
+            />
 
             {postModalOpen ? (
                 <div className="ph-modal-overlay" role="dialog" aria-modal="true">

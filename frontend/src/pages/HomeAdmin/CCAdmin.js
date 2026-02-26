@@ -33,6 +33,7 @@ const EMPTY_COMMUNITY = {
     logo_url: '',
     description: '',
     is_active: true,
+    is_root: false,
 };
 
 const EMPTY_SYMPO = {
@@ -81,7 +82,7 @@ const normalizeCommunityPayload = (form, isCreate) => {
         logo_url: form.logo_url.trim() || null,
         description: form.description.trim() || null,
         is_active: Boolean(form.is_active),
-        is_root: false,
+        is_root: Boolean(form.is_root),
     };
     if (isCreate) {
         payload.profile_id = form.profile_id.trim().toLowerCase();
@@ -360,6 +361,7 @@ export default function CCAdmin() {
             logo_url: community.logo_url || '',
             description: community.description || '',
             is_active: Boolean(community.is_active),
+            is_root: Boolean(community.is_root),
         } : {
             ...EMPTY_COMMUNITY,
             admins: [{ row_id: `new-${makeAdminRowId()}`, user_id: '', is_active: true }],
@@ -674,6 +676,7 @@ export default function CCAdmin() {
                                                     <p className="text-xs text-slate-500">Club: {community.club_name || '—'}</p>
                                                     <p className="text-xs text-slate-500">Admins: {adminSummary || '—'}</p>
                                                     <p className="text-xs text-slate-500">Active: {community.is_active ? 'Yes' : 'No'}</p>
+                                                    <p className="text-xs text-slate-500">Root: {community.is_root ? 'Yes' : 'No'}</p>
                                                 </>
                                             );
                                         })()}
@@ -1052,6 +1055,10 @@ export default function CCAdmin() {
                         <label className="flex items-center gap-2 text-sm">
                             <input type="checkbox" checked={communityForm.is_active} onChange={(e) => setCommunityForm((p) => ({ ...p, is_active: e.target.checked }))} />
                             Active
+                        </label>
+                        <label className="flex items-center gap-2 text-sm">
+                            <input type="checkbox" checked={communityForm.is_root} onChange={(e) => setCommunityForm((p) => ({ ...p, is_root: e.target.checked }))} />
+                            Root Community
                         </label>
                         <div className="flex justify-end gap-2">
                             <Button type="button" variant="outline" onClick={() => setCommunityModalOpen(false)}>Cancel</Button>

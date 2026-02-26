@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
+import QRCode from 'qrcode';
 import { toast } from 'sonner';
 import {
     Users,
@@ -14,10 +15,12 @@ import {
     Eye,
     EyeOff,
     ArrowLeft,
+    QrCode,
 } from 'lucide-react';
 
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import EventAdminShell, { useEventAdminShell } from './EventAdminShell';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -36,6 +39,10 @@ function DashboardContent() {
     const [loading, setLoading] = useState(true);
     const [actionLoading, setActionLoading] = useState(false);
     const [hoveredDepartment, setHoveredDepartment] = useState(null);
+    const [eventQrOpen, setEventQrOpen] = useState(false);
+    const [eventQrLoading, setEventQrLoading] = useState(false);
+    const [eventQrImageUrl, setEventQrImageUrl] = useState('');
+    const [eventPublicUrl, setEventPublicUrl] = useState('');
 
     const getErrorMessage = (error, fallback) => (
         error?.response?.data?.detail || error?.response?.data?.message || fallback
@@ -219,6 +226,54 @@ function DashboardContent() {
         }
     };
 
+    const handleOpenEventQr = async () => {
+        const slug = String(eventInfo?.slug || eventSlug || '').trim();
+        if (!slug) {
+            toast.error('Event slug unavailable');
+            return;
+        }
+        setEventQrLoading(true);
+        try {
+            const url = `${window.location.origin}/events/${encodeURIComponent(slug)}`;
+            const dataUrl = await QRCode.toDataURL(url, {
+                width: 360,
+                margin: 1,
+                color: {
+                    dark: '#000000',
+                    light: '#FFFFFF',
+                },
+            });
+            setEventPublicUrl(url);
+            setEventQrImageUrl(dataUrl);
+            setEventQrOpen(true);
+        } catch {
+            toast.error('Failed to generate event QR');
+        } finally {
+            setEventQrLoading(false);
+        }
+    };
+
+    const handleDownloadEventQr = () => {
+        if (!eventQrImageUrl) return;
+        const slug = String(eventInfo?.slug || eventSlug || 'event').trim() || 'event';
+        const anchor = document.createElement('a');
+        anchor.href = eventQrImageUrl;
+        anchor.download = `${slug}_event_qr.png`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+    };
+
+    const handleCopyEventUrl = async () => {
+        if (!eventPublicUrl) return;
+        try {
+            await navigator.clipboard.writeText(eventPublicUrl);
+            toast.success('Event link copied');
+        } catch {
+            toast.error('Failed to copy event link');
+        }
+    };
+
     if (loading) {
         return (
             <div className="neo-card animate-pulse">
@@ -293,6 +348,18 @@ function DashboardContent() {
                         ) : (
                             <><Eye className="w-4 h-4 sm:w-5 sm:h-5 mr-2" /> Show Event</>
                         )}
+                    </Button>
+                </div>
+            </div>
+
+            <div className="neo-card mb-8">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                    <div>
+                        <h3 className="font-heading font-bold text-lg sm:text-xl">Event QR</h3>
+                        <p className="text-sm text-gray-600">Generate a QR that opens this event page directly.</p>
+                    </div>
+                    <Button onClick={handleOpenEventQr} variant="outline" className="border-2 border-black shadow-neo">
+                        <QrCode className="w-4 h-4 mr-2" /> {eventQrLoading ? 'Generating QR...' : 'View Event QR'}
                     </Button>
                 </div>
             </div>
@@ -536,6 +603,34 @@ function DashboardContent() {
                     <div className="stat-label">Active Avg Score</div>
                 </div>
             </div>
+
+            <Dialog open={eventQrOpen} onOpenChange={setEventQrOpen}>
+                <DialogContent className="max-h-[calc(100vh-2rem)] overflow-x-hidden overflow-y-auto border-4 border-black bg-white">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading text-2xl font-black uppercase tracking-tight">
+                            Event QR
+                        </DialogTitle>
+                    </DialogHeader>
+                    <p className="text-sm font-medium text-slate-700">Share this QR to open this event page directly.</p>
+                    <div className="flex justify-center py-2">
+                        {eventQrImageUrl ? (
+                            <img src={eventQrImageUrl} alt="Event QR" className="h-72 w-72 max-w-full border-2 border-black bg-white p-2" />
+                        ) : (
+                            <p className="text-sm font-medium text-slate-600">Unable to render QR.</p>
+                        )}
+                    </div>
+                    <p className="text-[11px] font-medium text-slate-500 break-all">{eventPublicUrl}</p>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                        <Button type="button" variant="outline" onClick={handleCopyEventUrl} className="border-2 border-black shadow-neo">
+                            Copy Link
+                        </Button>
+                        <Button type="button" onClick={handleDownloadEventQr} disabled={!eventQrImageUrl} className="bg-primary text-white border-2 border-black shadow-neo">
+                            <Download className="mr-2 h-4 w-4" />
+                            Download QR
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
         </>
     );
 }

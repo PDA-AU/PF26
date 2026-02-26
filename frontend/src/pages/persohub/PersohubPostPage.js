@@ -86,6 +86,11 @@ export default function PersohubPostPage() {
                         onLike={handleLike}
                         likePending={likePending}
                         onShare={() => setShareOpen(true)}
+                        onExplore={(row) => {
+                            const eventSlug = String(row?.event?.slug || '').trim();
+                            if (!eventSlug) return;
+                            navigate(`/persohub/events/${encodeURIComponent(eventSlug)}`);
+                        }}
                         onHashtagClick={(hashtag) => navigate(`/persohub?hashtag=${encodeURIComponent(hashtag)}`)}
                         isUserLoggedIn={isUserLoggedIn}
                         fetchComments={persohubApi.fetchComments}

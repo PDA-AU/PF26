@@ -129,7 +129,8 @@ function EventFormFields({
     posterAssets,
     setPosterAssets,
     posterUploadRatio,
-    setPosterUploadRatio
+    setPosterUploadRatio,
+    lockParticipantMode = false,
 }) {
     return (
         <>
@@ -267,13 +268,16 @@ function EventFormFields({
             </div>
             <div>
                 <Label>Participant Mode</Label>
-                <Select value={form.participant_mode} onValueChange={(value) => setForm((prev) => ({ ...prev, participant_mode: value }))}>
+                <Select value={form.participant_mode} onValueChange={(value) => setForm((prev) => ({ ...prev, participant_mode: value }))} disabled={lockParticipantMode}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                         <SelectItem value="individual">Individual</SelectItem>
                         <SelectItem value="team">Team</SelectItem>
                     </SelectContent>
                 </Select>
+                {lockParticipantMode ? (
+                    <p className="mt-1 text-[11px] text-slate-500">Participant mode is locked after event creation.</p>
+                ) : null}
             </div>
             <div>
                 <Label>Open For</Label>
@@ -524,6 +528,7 @@ export default function AdminEvents() {
                             setPosterAssets={setPosterAssets}
                             posterUploadRatio={posterUploadRatio}
                             setPosterUploadRatio={setPosterUploadRatio}
+                            lockParticipantMode={false}
                         />
                         <div className="md:col-span-2 flex justify-end">
                             <Button type="submit" className="bg-[#f6c347] text-black hover:bg-[#ffd16b]" disabled={saving || uploadingPoster}>
@@ -639,6 +644,7 @@ export default function AdminEvents() {
                             setPosterAssets={setEditPosterAssets}
                             posterUploadRatio={editPosterUploadRatio}
                             setPosterUploadRatio={setEditPosterUploadRatio}
+                            lockParticipantMode
                         />
                         <div className="md:col-span-2 flex justify-end gap-2">
                             <Button type="button" variant="outline" className="border-black/20" onClick={() => closeEditDialog()} disabled={savingEdit || uploadingEditPoster}>

@@ -222,6 +222,12 @@ class PersohubAdminRoundModeEnum(str, Enum):
     MULTI = "multi"
 
 
+class PersohubFeedTypeEnum(str, Enum):
+    ALL = "all"
+    EVENT = "event"
+    COMMUNITY = "community"
+
+
 class PersohubAdminEventStatusEnum(str, Enum):
     OPEN = "open"
     CLOSED = "closed"
@@ -707,6 +713,7 @@ class PersohubAdminCommunityManageResponse(BaseModel):
     logo_url: Optional[str] = None
     description: Optional[str] = None
     is_active: bool
+    is_root: bool = False
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -916,6 +923,13 @@ class PersohubCommentResponse(BaseModel):
     created_at: datetime
 
 
+class PersohubPostEventInfo(BaseModel):
+    id: int
+    slug: str
+    title: str
+    explore_url: str
+
+
 class PersohubPostResponse(BaseModel):
     id: int
     slug_token: str
@@ -923,6 +937,7 @@ class PersohubPostResponse(BaseModel):
     is_hidden: int = 1
     created_at: datetime
     updated_at: Optional[datetime] = None
+    post_type: Literal["community", "event"] = "community"
     like_count: int
     comment_count: int
     is_liked: bool = False
@@ -930,6 +945,7 @@ class PersohubPostResponse(BaseModel):
     attachments: List[PersohubAttachmentResponse] = Field(default_factory=list)
     hashtags: List[str] = Field(default_factory=list)
     mentions: List[PersohubMentionResponse] = Field(default_factory=list)
+    event: Optional[PersohubPostEventInfo] = None
     share_url: str
 
 
@@ -970,12 +986,16 @@ class PersohubPublicProfileResponse(BaseModel):
     profile_name: str
     name: str
     regno: Optional[str] = None
+    email: Optional[str] = None
     image_url: Optional[str] = None
     gender: Optional[str] = None
     about: Optional[str] = None
     is_member: Optional[bool] = None
     team: Optional[str] = None
     designation: Optional[str] = None
+    instagram_url: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    github_url: Optional[str] = None
     follower_count: Optional[int] = None
     badges: List[PersohubBadgeResponse] = Field(default_factory=list)
     community: Optional[PersohubCommunityCard] = None

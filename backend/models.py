@@ -940,6 +940,7 @@ class PersohubCommunity(Base):
     description = Column(Text, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
     is_root = Column(Boolean, nullable=False, default=False)
+    is_primary = Column(Boolean, nullable=False, default=False, server_default="false")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -996,6 +997,8 @@ class PersohubPost(Base):
     community_id = Column(Integer, ForeignKey("persohub_communities.id", ondelete="CASCADE"), nullable=False, index=True)
     admin_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     slug_token = Column(String(64), unique=True, nullable=False, index=True)
+    post_type = Column(String(16), nullable=False, default="community", server_default="community")
+    source_event_id = Column(Integer, ForeignKey("persohub_events.id", ondelete="CASCADE"), nullable=True, unique=True, index=True)
     description = Column(Text, nullable=True)
     is_hidden = Column(Integer, nullable=False, default=1, server_default="1")
     like_count = Column(Integer, nullable=False, default=0)

@@ -11,7 +11,7 @@ from sqlalchemy import func, text, or_
 from auth import create_access_token
 from database import get_db
 from emailer import send_email_async
-from badge_service import count_event_badges, get_user_achievements
+from badge_service import count_event_badges, get_user_achievements, delete_badges_for_persohub_event_team
 from models import (
     PdaUser,
     PersohubEvent,
@@ -1238,6 +1238,137 @@ def invite_to_team(
         details = f"You were added to team {team.team_name} ({team.team_code}) for {event.title}."
         _send_registration_email(target, event, details)
     return {"message": "Team member added"}
+
+
+@router.delete("/persohub/persohub-events/{slug}/team/leave")
+def leave_team(
+    slug: str,
+    user: PdaUser = Depends(require_pda_user),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    _ensure_event_visible_for_public_access(event)
+    if event.participant_mode != PersohubEventParticipantMode.TEAM:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This event is not a team event")
+
+    team = _get_user_team_for_event(db, event.id, user.id)
+    if not team:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+    if int(team.team_lead_user_id) == int(user.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Team leader cannot leave. Delete team instead.")
+
+    membership = (
+        db.query(PersohubEventTeamMember)
+        .filter(PersohubEventTeamMember.team_id == team.id, PersohubEventTeamMember.user_id == user.id)
+        .first()
+    )
+    if not membership:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Membership not found")
+
+    db.delete(membership)
+    db.query(PersohubEventInvite).filter(
+        PersohubEventInvite.event_id == event.id,
+        PersohubEventInvite.team_id == team.id,
+        PersohubEventInvite.invited_user_id == user.id,
+    ).delete(synchronize_session=False)
+    db.commit()
+    return {"message": "Left team successfully"}
+
+
+@router.delete("/persohub/persohub-events/{slug}/team/members/{member_user_id}")
+def remove_team_member(
+    slug: str,
+    member_user_id: int,
+    user: PdaUser = Depends(require_pda_user),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    _ensure_event_visible_for_public_access(event)
+    if event.participant_mode != PersohubEventParticipantMode.TEAM:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This event is not a team event")
+
+    team = _get_user_team_for_event(db, event.id, user.id)
+    if not team:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+    if int(team.team_lead_user_id) != int(user.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only team leader can remove members")
+    if int(member_user_id) == int(user.id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Leader cannot remove self")
+
+    membership = (
+        db.query(PersohubEventTeamMember)
+        .filter(PersohubEventTeamMember.team_id == team.id, PersohubEventTeamMember.user_id == int(member_user_id))
+        .first()
+    )
+    if not membership:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found in your team")
+    if str(membership.role or "").strip().lower() == "leader":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot remove team leader")
+
+    db.delete(membership)
+    db.query(PersohubEventInvite).filter(
+        PersohubEventInvite.event_id == event.id,
+        PersohubEventInvite.team_id == team.id,
+        PersohubEventInvite.invited_user_id == int(member_user_id),
+    ).delete(synchronize_session=False)
+    db.commit()
+    return {"message": "Team member removed"}
+
+
+@router.delete("/persohub/persohub-events/{slug}/team")
+def delete_my_team(
+    slug: str,
+    user: PdaUser = Depends(require_pda_user),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    _ensure_event_visible_for_public_access(event)
+    if event.participant_mode != PersohubEventParticipantMode.TEAM:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This event is not a team event")
+
+    team = _get_user_team_for_event(db, event.id, user.id)
+    if not team:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+    if int(team.team_lead_user_id) != int(user.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only team leader can delete team")
+
+    score_rows = db.query(PersohubEventScore).filter(
+        PersohubEventScore.event_id == event.id,
+        PersohubEventScore.team_id == team.id,
+    ).count()
+    if score_rows > 0:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Team cannot be deleted after scoring has started")
+
+    db.query(PersohubEventInvite).filter(
+        PersohubEventInvite.event_id == event.id,
+        PersohubEventInvite.team_id == team.id,
+    ).delete(synchronize_session=False)
+    delete_badges_for_persohub_event_team(db, event.id, team.id)
+    db.query(PersohubEventAttendance).filter(
+        PersohubEventAttendance.event_id == event.id,
+        PersohubEventAttendance.team_id == team.id,
+    ).delete(synchronize_session=False)
+    db.query(PersohubEventRoundSubmission).filter(
+        PersohubEventRoundSubmission.event_id == event.id,
+        PersohubEventRoundSubmission.team_id == team.id,
+    ).delete(synchronize_session=False)
+    db.query(PersohubEventRoundPanelAssignment).filter(
+        PersohubEventRoundPanelAssignment.event_id == event.id,
+        PersohubEventRoundPanelAssignment.team_id == team.id,
+    ).delete(synchronize_session=False)
+    db.query(PersohubEventRegistration).filter(
+        PersohubEventRegistration.event_id == event.id,
+        PersohubEventRegistration.team_id == team.id,
+    ).delete(synchronize_session=False)
+    db.query(PersohubEventTeamMember).filter(
+        PersohubEventTeamMember.team_id == team.id,
+    ).delete(synchronize_session=False)
+    db.query(PersohubEventTeam).filter(
+        PersohubEventTeam.event_id == event.id,
+        PersohubEventTeam.id == team.id,
+    ).delete(synchronize_session=False)
+    db.commit()
+    return {"message": "Team removed"}
 
 
 @router.get("/persohub/persohub-events/{slug}/qr", response_model=PersohubManagedQrResponse)

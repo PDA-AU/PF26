@@ -1042,6 +1042,11 @@ def update_managed_event(
         updates["template_option"] = _to_event_template(payload.template_option)
     if "participant_mode" in updates:
         updates["participant_mode"] = _to_participant_mode(payload.participant_mode)
+        if updates["participant_mode"] != event.participant_mode:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="participant_mode cannot be changed after event creation",
+            )
     if "round_mode" in updates:
         updates["round_mode"] = _to_round_mode(payload.round_mode)
     if "status" in updates:

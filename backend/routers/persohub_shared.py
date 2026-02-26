@@ -10,6 +10,7 @@ from models import (
     PersohubClub,
     PersohubCommunity,
     PersohubCommunityFollow,
+    PersohubEvent,
     PersohubHashtag,
     PersohubPost,
     PersohubPostAttachment,
@@ -23,6 +24,7 @@ from persohub_schemas import (
     PersohubAttachmentResponse,
     PersohubCommunityCard,
     PersohubMentionResponse,
+    PersohubPostEventInfo,
     PersohubPostResponse,
 )
 from persohub_service import extract_hashtags, infer_attachment_kind
@@ -288,12 +290,43 @@ def build_post_responses_bulk(
             )
         }
 
+    live_like_counts: Dict[int, int] = {}
+    like_count_rows = (
+        db.query(PersohubPostLike.post_id, func.count(PersohubPostLike.id))
+        .filter(PersohubPostLike.post_id.in_(post_ids))
+        .group_by(PersohubPostLike.post_id)
+        .all()
+    )
+    for post_id, count in like_count_rows:
+        live_like_counts[int(post_id)] = int(count or 0)
+
+    live_comment_counts: Dict[int, int] = {}
+    comment_count_rows = (
+        db.query(PersohubPostComment.post_id, func.count(PersohubPostComment.id))
+        .filter(PersohubPostComment.post_id.in_(post_ids))
+        .group_by(PersohubPostComment.post_id)
+        .all()
+    )
+    for post_id, count in comment_count_rows:
+        live_comment_counts[int(post_id)] = int(count or 0)
+
+    events_by_id: Dict[int, PersohubEvent] = {}
+    source_event_ids = [int(post.source_event_id) for post in post_list if getattr(post, "source_event_id", None)]
+    if source_event_ids:
+        event_rows = db.query(PersohubEvent).filter(PersohubEvent.id.in_(source_event_ids)).all()
+        events_by_id = {int(item.id): item for item in event_rows}
+
     responses: List[PersohubPostResponse] = []
     for post in post_list:
         community_card = community_cards.get(post.community_id)
         if not community_card:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post community not found")
         attachments = attachments_by_post.get(post.id, [])
+        post_type = str(getattr(post, "post_type", "community") or "community").strip().lower()
+        if post_type not in {"community", "event"}:
+            post_type = "community"
+        source_event_id = int(post.source_event_id) if getattr(post, "source_event_id", None) else None
+        source_event = events_by_id.get(source_event_id) if source_event_id else None
         responses.append(
             PersohubPostResponse(
                 id=post.id,
@@ -302,8 +335,9 @@ def build_post_responses_bulk(
                 is_hidden=int(post.is_hidden or 0),
                 created_at=post.created_at,
                 updated_at=post.updated_at,
-                like_count=int(post.like_count or 0),
-                comment_count=int(post.comment_count or 0),
+                post_type=post_type,
+                like_count=live_like_counts.get(int(post.id), 0),
+                comment_count=live_comment_counts.get(int(post.id), 0),
                 is_liked=post.id in liked_post_ids,
                 community=community_card,
                 attachments=[
@@ -323,6 +357,16 @@ def build_post_responses_bulk(
                 ],
                 hashtags=hashtags_by_post.get(post.id, []),
                 mentions=mentions_by_post.get(post.id, []),
+                event=(
+                    PersohubPostEventInfo(
+                        id=int(source_event.id),
+                        slug=str(source_event.slug),
+                        title=str(source_event.title or ""),
+                        explore_url=f"/persohub/events/{source_event.slug}",
+                    )
+                    if source_event
+                    else None
+                ),
                 share_url=f"{_frontend_base_url()}/persohub/p/{post.slug_token}",
             )
         )

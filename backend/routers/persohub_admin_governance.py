@@ -131,6 +131,7 @@ def _build_community_response(db: Session, community: PersohubCommunity) -> Pers
         logo_url=(str(community.logo_url or "") or None),
         description=(str(community.description or "") or None),
         is_active=bool(community.is_active),
+        is_root=bool(getattr(community, "is_root", False)),
         created_at=community.created_at,
         updated_at=community.updated_at,
     )
@@ -356,6 +357,11 @@ def update_owner_community(
 
     updates = payload.model_dump(exclude_unset=True)
     admins_payload = updates.pop("admins", None)
+    if bool(getattr(row, "is_root", False)) and "is_active" in updates and not bool(updates["is_active"]):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Default root community cannot be set inactive.",
+        )
 
     for field in ["name", "logo_url", "description", "is_active"]:
         if field in updates:
@@ -387,6 +393,11 @@ def delete_owner_community(
     row = db.query(PersohubCommunity).filter(PersohubCommunity.id == community_id).first()
     if not row or int(row.club_id or 0) != int(club_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Community not found")
+    if bool(getattr(row, "is_root", False)):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Default root community cannot be deleted directly. Delete the club to remove it.",
+        )
 
     detached_events = int(
         db.query(PersohubEvent)
@@ -482,6 +493,8 @@ def delete_owner_community(
     }
 
     db.delete(row)
+    db.flush()
+    _ensure_club_has_primary(db, club_id)
     db.commit()
     return {"message": "Community deleted", "deleted_counts": deleted_counts}
 

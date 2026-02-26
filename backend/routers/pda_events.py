@@ -11,7 +11,7 @@ from sqlalchemy import func, text, or_
 from auth import create_access_token
 from database import get_db
 from emailer import send_email_async
-from badge_service import count_event_badges, get_user_achievements
+from badge_service import count_event_badges, get_user_achievements, delete_badges_for_pda_event_team
 from models import (
     PdaUser,
     PdaEvent,
@@ -891,6 +891,137 @@ def invite_to_team(
         details = f"You were added to team {team.team_name} ({team.team_code}) for {event.title}."
         _send_registration_email(target, event, details)
     return {"message": "Team member added"}
+
+
+@router.delete("/pda/events/{slug}/team/leave")
+def leave_team(
+    slug: str,
+    user: PdaUser = Depends(require_pda_user),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    _ensure_event_visible_for_public_access(event)
+    if event.participant_mode != PdaEventParticipantMode.TEAM:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This event is not a team event")
+
+    team = _get_user_team_for_event(db, event.id, user.id)
+    if not team:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+    if int(team.team_lead_user_id) == int(user.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Team leader cannot leave. Delete team instead.")
+
+    membership = (
+        db.query(PdaEventTeamMember)
+        .filter(PdaEventTeamMember.team_id == team.id, PdaEventTeamMember.user_id == user.id)
+        .first()
+    )
+    if not membership:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Membership not found")
+
+    db.delete(membership)
+    db.query(PdaEventInvite).filter(
+        PdaEventInvite.event_id == event.id,
+        PdaEventInvite.team_id == team.id,
+        PdaEventInvite.invited_user_id == user.id,
+    ).delete(synchronize_session=False)
+    db.commit()
+    return {"message": "Left team successfully"}
+
+
+@router.delete("/pda/events/{slug}/team/members/{member_user_id}")
+def remove_team_member(
+    slug: str,
+    member_user_id: int,
+    user: PdaUser = Depends(require_pda_user),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    _ensure_event_visible_for_public_access(event)
+    if event.participant_mode != PdaEventParticipantMode.TEAM:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This event is not a team event")
+
+    team = _get_user_team_for_event(db, event.id, user.id)
+    if not team:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+    if int(team.team_lead_user_id) != int(user.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only team leader can remove members")
+    if int(member_user_id) == int(user.id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Leader cannot remove self")
+
+    membership = (
+        db.query(PdaEventTeamMember)
+        .filter(PdaEventTeamMember.team_id == team.id, PdaEventTeamMember.user_id == int(member_user_id))
+        .first()
+    )
+    if not membership:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found in your team")
+    if str(membership.role or "").strip().lower() == "leader":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot remove team leader")
+
+    db.delete(membership)
+    db.query(PdaEventInvite).filter(
+        PdaEventInvite.event_id == event.id,
+        PdaEventInvite.team_id == team.id,
+        PdaEventInvite.invited_user_id == int(member_user_id),
+    ).delete(synchronize_session=False)
+    db.commit()
+    return {"message": "Team member removed"}
+
+
+@router.delete("/pda/events/{slug}/team")
+def delete_my_team(
+    slug: str,
+    user: PdaUser = Depends(require_pda_user),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    _ensure_event_visible_for_public_access(event)
+    if event.participant_mode != PdaEventParticipantMode.TEAM:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This event is not a team event")
+
+    team = _get_user_team_for_event(db, event.id, user.id)
+    if not team:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+    if int(team.team_lead_user_id) != int(user.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only team leader can delete team")
+
+    score_rows = db.query(PdaEventScore).filter(
+        PdaEventScore.event_id == event.id,
+        PdaEventScore.team_id == team.id,
+    ).count()
+    if score_rows > 0:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Team cannot be deleted after scoring has started")
+
+    db.query(PdaEventInvite).filter(
+        PdaEventInvite.event_id == event.id,
+        PdaEventInvite.team_id == team.id,
+    ).delete(synchronize_session=False)
+    delete_badges_for_pda_event_team(db, event.id, team.id)
+    db.query(PdaEventAttendance).filter(
+        PdaEventAttendance.event_id == event.id,
+        PdaEventAttendance.team_id == team.id,
+    ).delete(synchronize_session=False)
+    db.query(PdaEventRoundSubmission).filter(
+        PdaEventRoundSubmission.event_id == event.id,
+        PdaEventRoundSubmission.team_id == team.id,
+    ).delete(synchronize_session=False)
+    db.query(PdaEventRoundPanelAssignment).filter(
+        PdaEventRoundPanelAssignment.event_id == event.id,
+        PdaEventRoundPanelAssignment.team_id == team.id,
+    ).delete(synchronize_session=False)
+    db.query(PdaEventRegistration).filter(
+        PdaEventRegistration.event_id == event.id,
+        PdaEventRegistration.team_id == team.id,
+    ).delete(synchronize_session=False)
+    db.query(PdaEventTeamMember).filter(
+        PdaEventTeamMember.team_id == team.id,
+    ).delete(synchronize_session=False)
+    db.query(PdaEventTeam).filter(
+        PdaEventTeam.event_id == event.id,
+        PdaEventTeam.id == team.id,
+    ).delete(synchronize_session=False)
+    db.commit()
+    return {"message": "Team removed"}
 
 
 @router.get("/pda/events/{slug}/qr", response_model=PdaManagedQrResponse)

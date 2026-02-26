@@ -191,6 +191,32 @@
     padding: 0.9rem;
 }
 
+.ph-feed-type-panel {
+    display: grid;
+    gap: 0.8rem;
+    justify-items: center;
+}
+
+.ph-feed-type-logo {
+    width: min(220px, 100%);
+    height: auto;
+    object-fit: contain;
+}
+
+.ph-feed-type-actions {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 0.1rem 0.1rem 0.2rem;
+}
+
+.ph-feed-type-actions .ph-btn {
+    width: 100%;
+    justify-content: center;
+    margin: 0;
+}
+
 .ph-feed {
     display: grid;
     gap: 1rem;
@@ -884,6 +910,22 @@
     height: 1px;
 }
 
+.ph-mobile-bottom-nav {
+    display: none;
+}
+
+.ph-mobile-sheet {
+    width: min(96vw, 520px);
+}
+
+.ph-mobile-panel-zone {
+    display: none;
+}
+
+.ph-mobile-hide {
+    display: none;
+}
+
 @media (min-width: 1024px) {
     .ph-feed-page .ph-grid-sections {
         grid-template-columns: minmax(240px, 0.9fr) minmax(0, 1.9fr) minmax(250px, 1fr);
@@ -904,13 +946,75 @@
 @media (max-width: 1023px) {
     .ph-feed-page .ph-grid-sections {
         gap: 0.65rem;
+        grid-template-columns: minmax(0, 1fr);
     }
 
     .ph-feed-page .ph-col-left,
     .ph-feed-page .ph-col-right {
-        position: static;
-        max-height: none;
-        overflow: visible;
+        display: none;
+    }
+
+    .ph-feed-page .ph-col-main {
+        grid-column: 1;
+    }
+
+    .ph-feed-page .ph-shell {
+        padding-bottom: 5.7rem;
+    }
+
+    .ph-feed-page .ph-floating {
+        bottom: 5.4rem;
+    }
+
+    .ph-mobile-bottom-nav {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 60;
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        padding: 0.55rem 0.6rem calc(0.55rem + env(safe-area-inset-bottom));
+        border-top: 1px solid #000;
+        background: #fffdf0;
+        box-shadow: 0 -2px 0 #000;
+    }
+
+    .ph-mobile-nav-icon-row {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.35rem;
+    }
+
+    .ph-mobile-tab-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 2.6rem;
+        padding: 0.25rem 0.1rem;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        color: #6b7280;
+        box-shadow: none;
+    }
+
+    .ph-mobile-tab-btn.is-active {
+        color: #111827;
+    }
+
+    .ph-mobile-feed-zone,
+    .ph-mobile-panel-zone {
+        display: block;
+    }
+
+    .ph-mobile-hide {
+        display: none;
+    }
+
+    .ph-profile-page main {
+        padding-bottom: 5.7rem;
     }
 }
 
