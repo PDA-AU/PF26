@@ -276,6 +276,16 @@ def get_feed(
     elif feed_type == PersohubFeedTypeEnum.COMMUNITY:
         feed_filter_clause = PersohubPost.post_type == "community"
 
+    # Event feed ranking:
+    # 1) Followed communities first, newest first.
+    # 2) Then remaining posts by likes, then recency.
+    if feed_type == PersohubFeedTypeEnum.EVENT:
+        followed_ordering = (PersohubPost.created_at.desc(), PersohubPost.like_count.desc(), PersohubPost.id.desc())
+        other_ordering = (PersohubPost.like_count.desc(), PersohubPost.created_at.desc(), PersohubPost.id.desc())
+    else:
+        followed_ordering = (PersohubPost.created_at.desc(), PersohubPost.id.desc())
+        other_ordering = (PersohubPost.like_count.desc(), PersohubPost.created_at.desc(), PersohubPost.id.desc())
+
     if user:
         followed_ids = [
             cid
@@ -312,7 +322,7 @@ def get_feed(
                     followed_posts_query = followed_posts_query.filter(feed_filter_clause)
                 posts.extend(
                     followed_posts_query
-                    .order_by(PersohubPost.created_at.desc(), PersohubPost.id.desc())
+                    .order_by(*followed_ordering)
                     .offset(followed_offset)
                     .limit(followed_limit)
                     .all()
@@ -329,7 +339,7 @@ def get_feed(
                     other_posts_query = other_posts_query.filter(feed_filter_clause)
                 posts.extend(
                     other_posts_query
-                    .order_by(PersohubPost.like_count.desc(), PersohubPost.created_at.desc(), PersohubPost.id.desc())
+                    .order_by(*other_ordering)
                     .offset(other_offset)
                     .limit(remaining)
                     .all()
@@ -343,7 +353,7 @@ def get_feed(
             total = int(total_query.scalar() or 0)
             posts = (
                 posts_query
-                .order_by(PersohubPost.like_count.desc(), PersohubPost.created_at.desc(), PersohubPost.id.desc())
+                .order_by(*other_ordering)
                 .offset(offset)
                 .limit(limit)
                 .all()
@@ -357,7 +367,7 @@ def get_feed(
         total = int(total_query.scalar() or 0)
         posts = (
             posts_query
-            .order_by(PersohubPost.like_count.desc(), PersohubPost.created_at.desc(), PersohubPost.id.desc())
+            .order_by(*other_ordering)
             .offset(offset)
             .limit(limit)
             .all()
