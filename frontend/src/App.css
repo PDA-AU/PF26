@@ -308,3 +308,32 @@
         animation: none;
     }
 }
+
+/* Persohub Event Dashboard overflow safety */
+.ph-event-dashboard,
+.ph-event-dashboard main {
+    overflow-x: hidden;
+}
+
+.ph-event-dashboard h1,
+.ph-event-dashboard h2,
+.ph-event-dashboard h3,
+.ph-event-dashboard h4,
+.ph-event-dashboard p,
+.ph-event-dashboard span,
+.ph-event-dashboard a,
+.ph-event-dashboard label {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.ph-event-dashboard button {
+    white-space: normal;
+}
+
+.ph-event-dashboard img,
+.ph-event-dashboard video,
+.ph-event-dashboard canvas {
+    max-width: 100%;
+    height: auto;
+}

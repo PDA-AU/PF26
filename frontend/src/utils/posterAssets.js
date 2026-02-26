@@ -1,6 +1,27 @@
-export const POSTER_ASPECT_RATIOS = ['1:1', '2:1', '4:5', '5:4'];
+export const POSTER_ASPECT_RATIOS = ['1:1', '2:1', '4:5', '5:4', 'A4-portrait', 'A4-landscape'];
+
+export const POSTER_ASPECT_RATIO_LABELS = {
+    '1:1': '1:1',
+    '2:1': '2:1',
+    '4:5': '4:5',
+    '5:4': '5:4',
+    'A4-portrait': 'A4 (Portrait)',
+    'A4-landscape': 'A4 (Landscape)',
+};
 
 const asString = (value) => String(value || '').trim();
+
+export const posterAspectRatioToCss = (aspectRatio) => {
+    const ratio = asString(aspectRatio);
+    if (!ratio) return '4 / 5';
+    if (ratio === 'A4-portrait') return '1 / 1.41421356';
+    if (ratio === 'A4-landscape') return '1.41421356 / 1';
+    if (/^\d+:\d+$/.test(ratio)) {
+        const [width, height] = ratio.split(':');
+        return `${width} / ${height}`;
+    }
+    return '4 / 5';
+};
 
 export const resolvePosterUrl = (url) => {
     const value = asString(url);

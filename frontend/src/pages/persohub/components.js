@@ -360,10 +360,19 @@ export const PostCard = ({
     ].filter(Boolean)));
     const matchedEventTag = eventTagCandidates.find((candidate) => allHashtags.includes(candidate)) || eventTagCandidates[0] || '';
     const sympoTag = allHashtags.find((tag) => tag && tag !== matchedEventTag) || '';
-    const compactDescription = [matchedEventTag, sympoTag]
-        .filter(Boolean)
+    const compactHashtags = Array.from(new Set([
+        matchedEventTag,
+        sympoTag,
+        ...allHashtags,
+    ].filter(Boolean)));
+    const compactDescription = compactHashtags
         .map((tag) => `#${tag}`)
         .join(' ');
+    const hasFullDescription = Boolean(String(post.description || '').trim());
+    const shouldShowCompactPreview = Boolean(shouldUseCompactEventMobile && !expanded);
+    const renderedDescription = shouldShowCompactPreview
+        ? compactDescription
+        : (expanded ? (post.description || '') : visibleText);
     const canEditDeletePost = Boolean(allowModeration && (!isEventPost || allowEventPostModeration));
     const showInlineModeration = Boolean(allowModeration && !isMobileViewport);
     const showMobileModerationMenu = Boolean(allowModeration && isMobileViewport);
@@ -479,13 +488,42 @@ export const PostCard = ({
 
                 <div className={`ph-desc ${shouldUseCompactEventMobile ? 'ph-desc-mobile-event-compact' : ''}`}>
                     <ParsedDescription
-                        description={shouldUseCompactEventMobile ? compactDescription : visibleText}
+                        description={renderedDescription}
                         onHashtagClick={onHashtagClick}
                     />
+                    {shouldUseCompactEventMobile && !expanded && hasFullDescription ? (
+                        <span
+                            role="button"
+                            tabIndex={0}
+                            className="ph-muted"
+                            onClick={() => setExpanded(true)}
+                            onKeyDown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault();
+                                    setExpanded(true);
+                                }
+                            }}
+                            style={{ cursor: 'pointer', textDecoration: 'underline' }}
+                        >
+                            Read more
+                        </span>
+                    ) : null}
                     {!shouldUseCompactEventMobile && showReadMore ? (
-                        <button type="button" className="ph-action-btn" onClick={() => setExpanded((prev) => !prev)}>
-                            {expanded ? 'Show less' : 'Read more'}
-                        </button>
+                        <span
+                            role="button"
+                            tabIndex={0}
+                            className="ph-muted"
+                            onClick={() => setExpanded((prev) => !prev)}
+                            onKeyDown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault();
+                                    setExpanded((prev) => !prev);
+                                }
+                            }}
+                            style={{ cursor: 'pointer', textDecoration: 'underline' }}
+                        >
+                            {expanded ? 'Read less' : 'Read more'}
+                        </span>
                     ) : null}
                 </div>
 

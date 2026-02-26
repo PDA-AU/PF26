@@ -35,7 +35,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Textarea } from '@/components/ui/textarea';
 import ParsedDescription from '@/components/common/ParsedDescription';
 import PosterCarousel from '@/components/common/PosterCarousel';
-import { parsePosterAssets, resolvePosterUrl } from '@/utils/posterAssets';
+import { parsePosterAssets, posterAspectRatioToCss, resolvePosterUrl } from '@/utils/posterAssets';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -195,7 +195,7 @@ const parseSeatCapacityValue = (value) => {
     return parsed;
 };
 
-const EVENT_POSTER_RATIO_PRIORITY = ['4:5', '5:4', '1:1', '2:1'];
+const EVENT_POSTER_RATIO_PRIORITY = ['A4-portrait', 'A4-landscape', '4:5', '5:4', '1:1', '2:1'];
 
 const sortPosterAssetsByPriority = (assets = []) => {
     const rank = new Map(EVENT_POSTER_RATIO_PRIORITY.map((ratio, index) => [ratio, index]));
@@ -390,6 +390,10 @@ export default function EventDashboard() {
     const eventPosterAssets = useMemo(
         () => sortPosterAssetsByPriority(parsePosterAssets(eventInfo?.poster_url)),
         [eventInfo?.poster_url]
+    );
+    const eventPosterAspectRatio = useMemo(
+        () => posterAspectRatioToCss(eventPosterAssets[0]?.aspect_ratio),
+        [eventPosterAssets]
     );
     const whatsappUrl = useMemo(() => {
         const value = String(eventInfo?.whatsapp_url || '').trim();
@@ -1132,9 +1136,9 @@ export default function EventDashboard() {
 
     if (loading && !eventInfo) {
         return (
-            <div className="min-h-screen bg-[#fffdf5] flex flex-col">
+            <div className="ph-event-dashboard min-h-screen bg-[#fffdf5] flex flex-col overflow-x-hidden">
                 <PdaHeader />
-                <main className="mx-auto w-full max-w-7xl flex-1 min-h-screen px-4 py-8 sm:px-6 lg:px-8">
+                <main className="mx-auto w-full max-w-7xl flex-1 min-h-screen overflow-x-hidden px-4 py-8 sm:px-6 lg:px-8">
                     <div className="neo-card animate-pulse">
                         <p className="font-heading text-xl font-bold">Loading event dashboard...</p>
                     </div>
@@ -1146,9 +1150,9 @@ export default function EventDashboard() {
 
     if (!eventInfo) {
         return (
-            <div className="min-h-screen bg-[#fffdf5] flex flex-col">
+            <div className="ph-event-dashboard min-h-screen bg-[#fffdf5] flex flex-col overflow-x-hidden">
                 <PdaHeader />
-                <main className="mx-auto w-full max-w-7xl flex-1 min-h-screen px-4 py-8 sm:px-6 lg:px-8">
+                <main className="mx-auto w-full max-w-7xl flex-1 min-h-screen overflow-x-hidden px-4 py-8 sm:px-6 lg:px-8">
                     <div className="rounded-md border-4 border-black bg-white p-6 shadow-[8px_8px_0px_0px_#000000]">
                         <h1 className="font-heading text-3xl font-black uppercase tracking-tight">Event not found</h1>
                         <p className="mt-2 text-sm font-medium text-slate-700">This event does not exist or is unavailable.</p>
@@ -1167,9 +1171,9 @@ export default function EventDashboard() {
     }
 
     return (
-        <div className="min-h-screen bg-[#fffdf5] flex flex-col">
+        <div className="ph-event-dashboard min-h-screen bg-[#fffdf5] flex flex-col overflow-x-hidden">
             <PdaHeader />
-            <main className="mx-auto w-full max-w-7xl flex-1 min-h-screen px-4 py-8 sm:px-6 lg:px-8">
+            <main className="mx-auto w-full max-w-7xl flex-1 min-h-screen overflow-x-hidden px-4 py-8 sm:px-6 lg:px-8">
                 <section className="mt-6 rounded-md border-4 border-black bg-white p-2 shadow-[8px_8px_0px_0px_#000000]">
                     <div className="flex flex-wrap gap-2">
                         <Link to={infoPath} className="flex-1 min-w-[180px]">
@@ -1199,7 +1203,7 @@ export default function EventDashboard() {
                             <div className="p-6 sm:p-8">
                                 <p className="font-mono text-xs font-bold uppercase tracking-[0.2em] text-[#8B5CF6]">{eventInfo.event_code}</p>
                                 <div className="mt-2 flex min-w-0 flex-wrap items-center gap-3">
-                                    <h1 className="font-heading text-4xl font-black uppercase tracking-tight sm:text-5xl">{eventInfo.title}</h1>
+                                    <h1 className="break-words font-heading text-4xl font-black uppercase tracking-tight sm:text-5xl">{eventInfo.title}</h1>
                                     <span className="rounded-md border-2 border-black bg-white px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] shadow-neo">
                                         {eventInfo.status}
                                     </span>
@@ -1218,7 +1222,7 @@ export default function EventDashboard() {
                                                 }
                                                 setRegistrationDialogOpen(true);
                                             }}
-                                            className={`max-w-full border-2 border-black shadow-neo ${
+                                            className={`h-auto max-w-full whitespace-normal border-2 border-black py-2 text-left shadow-neo ${
                                                 isPendingRegistration
                                                     ? 'bg-amber-200 text-amber-900 cursor-not-allowed'
                                                     : (isRegistered
@@ -1227,7 +1231,7 @@ export default function EventDashboard() {
                                             }`}
                                             disabled={isRegistered}
                                         >
-                                            <span className="max-w-[14rem] truncate sm:max-w-[18rem]">{registrationCtaLabel}</span>
+                                            <span className="break-words">{registrationCtaLabel}</span>
                                         </Button>
                                     ) : null}
                                 </div>
@@ -1285,10 +1289,10 @@ export default function EventDashboard() {
                                         <a href={whatsappUrl} target="_blank" rel="noreferrer" className="inline-block max-w-full">
                                             <Button
                                                 data-testid="event-overview-whatsapp-button"
-                                                className="max-w-full border-2 border-black bg-[#DC2626] text-white shadow-neo hover:bg-[#B91C1C]"
+                                                className="h-auto max-w-full whitespace-normal border-2 border-black bg-[#DC2626] py-2 text-left text-white shadow-neo hover:bg-[#B91C1C]"
                                             >
                                                 <ExternalLink className="mr-2 h-4 w-4 shrink-0" />
-                                                <span className="max-w-[12rem] truncate sm:max-w-[20rem]">{externalUrlLabel}</span>
+                                                <span className="break-words">{externalUrlLabel}</span>
                                             </Button>
                                         </a>
                                     </div>
@@ -1296,17 +1300,17 @@ export default function EventDashboard() {
                                 <div className="mt-3">
                                     <Button
                                         data-testid="event-overview-view-event-slug-qr-button"
-                                        className="max-w-full border-2 border-black bg-[#11131a] text-white shadow-neo hover:bg-[#1f2330]"
+                                        className="h-auto max-w-full whitespace-normal border-2 border-black bg-[#11131a] py-2 text-left text-white shadow-neo hover:bg-[#1f2330]"
                                         onClick={loadEventQr}
                                         disabled={slugQrLoading}
                                     >
                                         <QrCode className="mr-2 h-4 w-4 shrink-0" />
-                                        <span className="truncate">{slugQrLoading ? 'Generating QR...' : 'View Event QR'}</span>
+                                        <span className="break-words">{slugQrLoading ? 'Generating QR...' : 'View Event QR'}</span>
                                     </Button>
                                 </div>
                             </div>
                             <div className="border-t-4 border-black bg-[#11131a] lg:self-start lg:border-l-4 lg:border-t-0">
-                                <div className="relative aspect-[4/5] w-full">
+                                <div className="relative w-full" style={{ aspectRatio: eventPosterAspectRatio }}>
                                     {eventPosterAssets.length ? (
                                         <PosterCarousel
                                             assets={eventPosterAssets}
@@ -2463,13 +2467,20 @@ export default function EventDashboard() {
                                                 ) : null}
                                             </div>
                                             {showRoundDescriptionToggle ? (
-                                                <button
-                                                    type="button"
-                                                    className="mt-3 text-sm font-bold text-blue-700 underline underline-offset-2"
+                                                <span
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    className="mt-3 inline-block text-sm font-bold text-blue-700 underline underline-offset-2"
                                                     onClick={() => setIsRoundDescriptionExpanded((prev) => !prev)}
+                                                    onKeyDown={(event) => {
+                                                        if (event.key === 'Enter' || event.key === ' ') {
+                                                            event.preventDefault();
+                                                            setIsRoundDescriptionExpanded((prev) => !prev);
+                                                        }
+                                                    }}
                                                 >
                                                     {isRoundDescriptionExpanded ? 'Read less' : 'Read more'}
-                                                </button>
+                                                </span>
                                             ) : null}
                                         </div>
                                         {String(selectedRound?.external_url || '').trim() ? (

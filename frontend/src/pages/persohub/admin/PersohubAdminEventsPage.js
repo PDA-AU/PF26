@@ -19,6 +19,7 @@ import {
     parsePosterAssets,
     pickPosterAssetByRatio,
     POSTER_ASPECT_RATIOS,
+    POSTER_ASPECT_RATIO_LABELS,
     resolvePosterUrl,
     serializePosterAssets,
 } from '@/utils/posterAssets';
@@ -161,6 +162,214 @@ const normalizeEventTimeValue = (value) => {
     return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 };
 
+const parseDateParts = (value) => {
+    const normalized = normalizeEventDateValue(value);
+    const match = String(normalized || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return { year: '', month: '', day: '' };
+    return {
+        year: match[1],
+        month: match[2],
+        day: match[3],
+    };
+};
+
+const daysInMonth = (year, month) => {
+    const y = Number(year);
+    const m = Number(month);
+    if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) return 31;
+    return new Date(y, m, 0).getDate();
+};
+
+const MONTH_OPTIONS = [
+    { value: '01', label: 'Jan' },
+    { value: '02', label: 'Feb' },
+    { value: '03', label: 'Mar' },
+    { value: '04', label: 'Apr' },
+    { value: '05', label: 'May' },
+    { value: '06', label: 'Jun' },
+    { value: '07', label: 'Jul' },
+    { value: '08', label: 'Aug' },
+    { value: '09', label: 'Sep' },
+    { value: '10', label: 'Oct' },
+    { value: '11', label: 'Nov' },
+    { value: '12', label: 'Dec' },
+];
+
+const YEAR_OPTIONS = (() => {
+    const base = new Date().getFullYear();
+    return Array.from({ length: 16 }, (_, idx) => String(base - 4 + idx));
+})();
+
+const parseTimeParts = (value) => {
+    const normalized = normalizeEventTimeValue(value);
+    const match = String(normalized || '').match(/^(\d{2}):(\d{2})$/);
+    if (!match) return { hour12: '', minute: '', meridiem: '' };
+    const hour24 = Number(match[1]);
+    const minute = match[2];
+    const meridiem = hour24 >= 12 ? 'PM' : 'AM';
+    const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+    return { hour12: String(hour12).padStart(2, '0'), minute, meridiem };
+};
+
+function CustomDatePicker({ value, onChange }) {
+    const initial = parseDateParts(value);
+    const [year, setYear] = useState(initial.year);
+    const [month, setMonth] = useState(initial.month);
+    const [day, setDay] = useState(initial.day);
+
+    useEffect(() => {
+        const parsed = parseDateParts(value);
+        setYear(parsed.year);
+        setMonth(parsed.month);
+        setDay(parsed.day);
+    }, [value]);
+
+    useEffect(() => {
+        if (!year || !month) return;
+        const maxDay = daysInMonth(year, month);
+        if (day && Number(day) > maxDay) {
+            setDay(String(maxDay).padStart(2, '0'));
+        }
+    }, [year, month, day]);
+
+    const maxDay = daysInMonth(year || YEAR_OPTIONS[0], month || '01');
+    const dayOptions = Array.from({ length: maxDay }, (_, idx) => String(idx + 1).padStart(2, '0'));
+
+    const pushValue = (nextYear, nextMonth, nextDay) => {
+        if (nextYear && nextMonth && nextDay) {
+            onChange(`${nextYear}-${nextMonth}-${nextDay}`);
+            return;
+        }
+        onChange('');
+    };
+
+    return (
+        <div className="grid grid-cols-3 gap-2">
+            <select
+                value={year}
+                onChange={(e) => {
+                    const next = e.target.value;
+                    setYear(next);
+                    pushValue(next, month, day);
+                }}
+                className="h-10 rounded-md border border-black/10 bg-white px-3 text-sm"
+            >
+                <option value="">Year</option>
+                {YEAR_OPTIONS.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                ))}
+            </select>
+            <select
+                value={month}
+                onChange={(e) => {
+                    const next = e.target.value;
+                    setMonth(next);
+                    pushValue(year, next, day);
+                }}
+                className="h-10 rounded-md border border-black/10 bg-white px-3 text-sm"
+            >
+                <option value="">Month</option>
+                {MONTH_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+            </select>
+            <select
+                value={day}
+                onChange={(e) => {
+                    const next = e.target.value;
+                    setDay(next);
+                    pushValue(year, month, next);
+                }}
+                className="h-10 rounded-md border border-black/10 bg-white px-3 text-sm"
+            >
+                <option value="">Day</option>
+                {dayOptions.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                ))}
+            </select>
+        </div>
+    );
+}
+
+function CustomTimePicker({ value, onChange }) {
+    const initial = parseTimeParts(value);
+    const [hour12, setHour12] = useState(initial.hour12);
+    const [minute, setMinute] = useState(initial.minute);
+    const [meridiem, setMeridiem] = useState(initial.meridiem);
+
+    useEffect(() => {
+        const parsed = parseTimeParts(value);
+        setHour12(parsed.hour12);
+        setMinute(parsed.minute);
+        setMeridiem(parsed.meridiem);
+    }, [value]);
+
+    const pushValue = (nextHour12, nextMinute, nextMeridiem) => {
+        if (!nextHour12 || !nextMinute || !nextMeridiem) {
+            onChange('');
+            return;
+        }
+        const hour = Number(nextHour12);
+        const min = Number(nextMinute);
+        if (!Number.isFinite(hour) || !Number.isFinite(min)) {
+            onChange('');
+            return;
+        }
+        let hour24 = hour % 12;
+        if (String(nextMeridiem).toUpperCase() === 'PM') hour24 += 12;
+        onChange(`${String(hour24).padStart(2, '0')}:${String(min).padStart(2, '0')}`);
+    };
+
+    const hourOptions = Array.from({ length: 12 }, (_, idx) => String(idx + 1).padStart(2, '0'));
+    const minuteOptions = Array.from({ length: 60 }, (_, idx) => String(idx).padStart(2, '0'));
+
+    return (
+        <div className="grid grid-cols-3 gap-2">
+            <select
+                value={hour12}
+                onChange={(e) => {
+                    const next = e.target.value;
+                    setHour12(next);
+                    pushValue(next, minute, meridiem);
+                }}
+                className="h-10 rounded-md border border-black/10 bg-white px-3 text-sm"
+            >
+                <option value="">Hour</option>
+                {hourOptions.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                ))}
+            </select>
+            <select
+                value={minute}
+                onChange={(e) => {
+                    const next = e.target.value;
+                    setMinute(next);
+                    pushValue(hour12, next, meridiem);
+                }}
+                className="h-10 rounded-md border border-black/10 bg-white px-3 text-sm"
+            >
+                <option value="">Min</option>
+                {minuteOptions.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                ))}
+            </select>
+            <select
+                value={meridiem}
+                onChange={(e) => {
+                    const next = e.target.value;
+                    setMeridiem(next);
+                    pushValue(hour12, minute, next);
+                }}
+                className="h-10 rounded-md border border-black/10 bg-white px-3 text-sm"
+            >
+                <option value="">AM/PM</option>
+                <option value="AM">AM</option>
+                <option value="PM">PM</option>
+            </select>
+        </div>
+    );
+}
+
 const toEventForm = (eventRow = {}) => ({
     title: eventRow.title || '',
     description: eventRow.description || '',
@@ -237,7 +446,7 @@ const buildEventPayload = (formState, posterUrl) => ({
 
 const getCardPosterSrc = (rawPosterUrl) => {
     const assets = parsePosterAssets(rawPosterUrl);
-    const preferred = pickPosterAssetByRatio(assets, ['4:5', '5:4', '1:1', '2:1']);
+    const preferred = pickPosterAssetByRatio(assets, ['A4-portrait', 'A4-landscape', '4:5', '5:4', '1:1', '2:1']);
     return resolvePosterUrl(preferred?.url);
 };
 
@@ -285,10 +494,9 @@ function EventFormFields({
             <div>
                 <Label>Start Date</Label>
                 <div className="mt-1 flex items-center gap-2">
-                    <Input
-                        type="date"
+                    <CustomDatePicker
                         value={form.start_date}
-                        onChange={(e) => setForm((prev) => ({ ...prev, start_date: normalizeEventDateValue(e.target.value) }))}
+                        onChange={(value) => setForm((prev) => ({ ...prev, start_date: normalizeEventDateValue(value) }))}
                     />
                     <Button
                         type="button"
@@ -304,10 +512,9 @@ function EventFormFields({
             <div>
                 <Label>End Date</Label>
                 <div className="mt-1 flex items-center gap-2">
-                    <Input
-                        type="date"
+                    <CustomDatePicker
                         value={form.end_date}
-                        onChange={(e) => setForm((prev) => ({ ...prev, end_date: normalizeEventDateValue(e.target.value) }))}
+                        onChange={(value) => setForm((prev) => ({ ...prev, end_date: normalizeEventDateValue(value) }))}
                     />
                     <Button
                         type="button"
@@ -323,10 +530,9 @@ function EventFormFields({
             <div>
                 <Label>Time</Label>
                 <div className="mt-1 flex items-center gap-2">
-                    <Input
-                        type="time"
+                    <CustomTimePicker
                         value={form.event_time}
-                        onChange={(e) => setForm((prev) => ({ ...prev, event_time: normalizeEventTimeValue(e.target.value) }))}
+                        onChange={(value) => setForm((prev) => ({ ...prev, event_time: normalizeEventTimeValue(value) }))}
                     />
                     <Button
                         type="button"
@@ -360,7 +566,9 @@ function EventFormFields({
                         className="h-10 w-full rounded-md border border-black/10 bg-white px-3 text-sm"
                     >
                         {POSTER_ASPECT_RATIOS.map((ratio) => (
-                            <option key={ratio} value={ratio}>{ratio}</option>
+                            <option key={ratio} value={ratio}>
+                                {POSTER_ASPECT_RATIO_LABELS[ratio] || ratio}
+                            </option>
                         ))}
                     </select>
                     <Input
@@ -394,7 +602,7 @@ function EventFormFields({
                             <div key={asset.id} className="rounded-xl border border-black/10 bg-[#fffdf7] p-3">
                                 <div className="mb-2 flex items-center justify-between gap-2">
                                     <span className="rounded-full border border-black/10 bg-white px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.08em]">
-                                        {asset.aspect_ratio}
+                                        {POSTER_ASPECT_RATIO_LABELS[asset.aspect_ratio] || asset.aspect_ratio}
                                     </span>
                                     <Button
                                         type="button"
@@ -1042,13 +1250,20 @@ export default function PersohubAdminEventsPage() {
                                         ) : null}
                                     </div>
                                     {canToggle ? (
-                                        <button
-                                            type="button"
-                                            className="mt-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 hover:text-slate-800"
+                                        <span
+                                            role="button"
+                                            tabIndex={0}
+                                            className="mt-2 inline-block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 underline underline-offset-2 hover:text-slate-800"
                                             onClick={() => setExpandedDescriptions((prev) => ({ ...prev, [eventRow.id]: !isExpanded }))}
+                                            onKeyDown={(event) => {
+                                                if (event.key === 'Enter' || event.key === ' ') {
+                                                    event.preventDefault();
+                                                    setExpandedDescriptions((prev) => ({ ...prev, [eventRow.id]: !isExpanded }));
+                                                }
+                                            }}
                                         >
                                             {isExpanded ? 'Read less' : 'Read more'}
-                                        </button>
+                                        </span>
                                     ) : null}
                                     <p className="mt-2 text-xs font-medium text-slate-500">
                                         Start: {formatDateLabel(eventRow.start_date)} · End: {formatDateLabel(eventRow.end_date)} · Time: {formatTimeLabel(eventRow.event_time)}

@@ -7,6 +7,15 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic import model_validator
 
+POSTER_ASSET_ALLOWED_ASPECT_RATIOS = {
+    "1:1",
+    "2:1",
+    "4:5",
+    "5:4",
+    "A4-portrait",
+    "A4-landscape",
+}
+
 
 class PersohubRefreshRequest(BaseModel):
     refresh_token: str
@@ -159,6 +168,11 @@ def _normalize_optional_http_url_or_assets_json(
             normalized_asset = {"url": normalized_url}
             aspect_ratio = str(asset.get("aspect_ratio") or asset.get("ratio") or "").strip()
             if aspect_ratio:
+                if aspect_ratio not in POSTER_ASSET_ALLOWED_ASPECT_RATIOS:
+                    allowed = ", ".join(sorted(POSTER_ASSET_ALLOWED_ASPECT_RATIOS))
+                    raise ValueError(
+                        f"{field_name}[{index}].aspect_ratio must be one of: {allowed}"
+                    )
                 normalized_asset["aspect_ratio"] = aspect_ratio
             normalized_assets.append(normalized_asset)
         return json.dumps(normalized_assets, separators=(",", ":"))
