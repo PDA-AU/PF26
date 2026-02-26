@@ -71,7 +71,7 @@ _ALLOWED_REVEAL_VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime"]
 
 def _club_events_access_status(club: PersohubClub) -> str:
     profile_id = str(getattr(club, "profile_id", "") or "").strip().lower()
-    if profile_id == "pda":
+    if profile_id == "pda-mit":
         return "approved"
     raw = str(getattr(club, "persohub_events_access_status", "") or "").strip().lower()
     if raw in {"pending", "approved", "rejected"}:
@@ -84,7 +84,7 @@ def _club_events_access_approved(club: PersohubClub) -> bool:
 
 
 def _event_access_status(event: PersohubEvent, club: Optional[PersohubClub]) -> str:
-    if str(getattr(club, "profile_id", "") or "").strip().lower() == "pda":
+    if str(getattr(club, "profile_id", "") or "").strip().lower() == "pda-mit":
         return "approved"
     raw = str(getattr(event, "persohub_access_status", "") or "").strip().lower()
     if raw in {"pending", "approved", "rejected"}:
@@ -886,7 +886,7 @@ def create_cc_club(
 
     club_payload = payload.model_dump()
     club_profile_id = str(club_payload.get("profile_id") or "").strip().lower()
-    club_payload["persohub_events_access_status"] = "approved" if club_profile_id == "pda" else "rejected"
+    club_payload["persohub_events_access_status"] = "approved" if club_profile_id == "pda-mit" else "rejected"
     club = PersohubClub(**club_payload)
     db.add(club)
     try:
@@ -956,12 +956,12 @@ def update_cc_club(
     for key, value in updates.items():
         setattr(club, key, value)
 
-    if "profile_id" in updates and str(club.profile_id or "").strip().lower() == "pda":
+    if "profile_id" in updates and str(club.profile_id or "").strip().lower() == "pda-mit":
         club.persohub_events_access_status = "approved"
         club.persohub_events_access_reviewed_at = datetime.now(timezone.utc)
         club.persohub_events_access_reviewed_by_user_id = int(admin.id)
         if not club.persohub_events_access_review_note:
-            club.persohub_events_access_review_note = "PDA club exemption auto-approved"
+            club.persohub_events_access_review_note = "PDA-MIT club exemption auto-approved"
 
     try:
         db.commit()
@@ -1022,8 +1022,8 @@ def reject_cc_club_persohub_events_access(
     club = db.query(PersohubClub).filter(PersohubClub.id == club_id).first()
     if not club:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Club not found")
-    if str(club.profile_id or "").strip().lower() == "pda":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PDA club is always approved")
+    if str(club.profile_id or "").strip().lower() == "pda-mit":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PDA-MIT club is always approved")
     previous_status = _club_events_access_status(club)
     note = str(payload.note or "").strip() or None
     club.persohub_events_access_status = "rejected"
@@ -1701,8 +1701,8 @@ def reject_cc_event_access(
     if not event:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Persohub event not found")
     club = db.query(PersohubClub).filter(PersohubClub.id == event.club_id).first() if event.club_id else None
-    if str(getattr(club, "profile_id", "") or "").strip().lower() == "pda":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PDA events are always approved")
+    if str(getattr(club, "profile_id", "") or "").strip().lower() == "pda-mit":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PDA-MIT events are always approved")
     previous_status = _event_access_status(event, club)
     event.persohub_access_status = "rejected"
     event.persohub_access_reviewed_at = datetime.now(timezone.utc)

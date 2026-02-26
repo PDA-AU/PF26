@@ -172,7 +172,7 @@ def ensure_default_persohub_setup(db: Session) -> None:
         db.add(club)
         db.flush()
     else:
-        if str(getattr(club, "profile_id", "") or "").strip().lower() == "pda":
+        if str(getattr(club, "profile_id", "") or "").strip().lower() == "pda-mit":
             club.persohub_events_access_status = "approved"
 
     # Reserve default community profile ids by reassigning conflicting user profile names.

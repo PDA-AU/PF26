@@ -243,7 +243,7 @@ def is_persohub_club_events_access_approved(club: Optional[PersohubClub]) -> boo
     if not club:
         return False
     profile_id = str(getattr(club, "profile_id", "") or "").strip().lower()
-    if profile_id == "pda":
+    if profile_id == "pda-mit":
         return True
     raw = str(getattr(club, "persohub_events_access_status", "") or "").strip().lower()
     return raw == "approved"
@@ -253,7 +253,7 @@ def get_persohub_club_events_access_status(club: Optional[PersohubClub]) -> str:
     if not club:
         return "rejected"
     profile_id = str(getattr(club, "profile_id", "") or "").strip().lower()
-    if profile_id == "pda":
+    if profile_id == "pda-mit":
         return "approved"
     raw = str(getattr(club, "persohub_events_access_status", "") or "").strip().lower()
     if raw in {"pending", "approved", "rejected"}:
@@ -265,7 +265,7 @@ def get_persohub_event_access_status(event: Optional[PersohubEvent], club: Optio
     if not event:
         return "rejected"
     profile_id = str(getattr(club, "profile_id", "") or "").strip().lower()
-    if profile_id == "pda":
+    if profile_id == "pda-mit":
         return "approved"
     raw = str(getattr(event, "persohub_access_status", "") or "").strip().lower()
     if raw in {"pending", "approved", "rejected"}:

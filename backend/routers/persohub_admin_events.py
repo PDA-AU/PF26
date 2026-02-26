@@ -168,7 +168,7 @@ def _serialize_event(
     club_profile_id: Optional[str] = None,
 ) -> PersohubAdminEventResponse:
     event_access_status = str(getattr(event, "persohub_access_status", "") or "").strip().lower()
-    if str(club_profile_id or "").strip().lower() == "pda":
+    if str(club_profile_id or "").strip().lower() == "pda-mit":
         event_access_status = "approved"
     if event_access_status not in {"pending", "approved", "rejected"}:
         event_access_status = "rejected"
@@ -661,7 +661,7 @@ def _remove_policy_slug_for_club_admin_rows(db: Session, club_id: int, slug: str
 
 
 def _event_access_status(event: PersohubEvent, club: Optional[PersohubClub]) -> str:
-    if str(getattr(club, "profile_id", "") or "").strip().lower() == "pda":
+    if str(getattr(club, "profile_id", "") or "").strip().lower() == "pda-mit":
         return "approved"
     raw = str(getattr(event, "persohub_access_status", "") or "").strip().lower()
     if raw in {"pending", "approved", "rejected"}:
@@ -851,7 +851,7 @@ def create_admin_event(
         int(payload.seat_capacity) if payload.seat_capacity is not None else None
     )
     club = db.query(PersohubClub).filter(PersohubClub.id == club_id).first()
-    access_status = "approved" if str(getattr(club, "profile_id", "") or "").strip().lower() == "pda" else "rejected"
+    access_status = "approved" if str(getattr(club, "profile_id", "") or "").strip().lower() == "pda-mit" else "rejected"
 
     event = PersohubEvent(
         slug=_next_slug(db, payload.title),

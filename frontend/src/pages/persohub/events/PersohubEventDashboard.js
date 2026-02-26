@@ -386,7 +386,7 @@ export default function EventDashboard() {
         () => getEventDateLabel(eventInfo?.start_date, eventInfo?.end_date),
         [eventInfo?.start_date, eventInfo?.end_date]
     );
-    const showParticipantDashboardTab = Boolean(participantPath);
+    const showParticipantDashboardTab = Boolean(participantPath) && !registrationBlockedByApproval;
     const eventPosterAssets = useMemo(
         () => sortPosterAssetsByPriority(parsePosterAssets(eventInfo?.poster_url)),
         [eventInfo?.poster_url]
@@ -1160,6 +1160,10 @@ export default function EventDashboard() {
                 <PdaFooter />
             </div>
         );
+    }
+
+    if (isParticipantRoute && isParticipantOwner && registrationBlockedByApproval) {
+        return <Navigate to={infoPath} replace />;
     }
 
     return (

@@ -1983,7 +1983,7 @@ def ensure_persohub_event_tables(engine):
                 """
                 UPDATE persohub_events
                 SET persohub_access_status = CASE
-                    WHEN lower(btrim(COALESCE(pc.profile_id, ''))) = 'pda' THEN 'approved'
+                    WHEN lower(btrim(COALESCE(pc.profile_id, ''))) = 'pda-mit' THEN 'approved'
                     WHEN lower(btrim(COALESCE(persohub_events.persohub_access_status, ''))) IN ('pending', 'approved', 'rejected')
                         THEN lower(btrim(persohub_events.persohub_access_status))
                     ELSE 'rejected'
@@ -3518,7 +3518,7 @@ def ensure_persohub_tables(engine):
                 """
                 UPDATE persohub_clubs
                 SET persohub_events_access_status = CASE
-                    WHEN lower(btrim(COALESCE(profile_id, ''))) = 'pda' THEN 'approved'
+                    WHEN lower(btrim(COALESCE(profile_id, ''))) = 'pda-mit' THEN 'approved'
                     WHEN lower(btrim(COALESCE(persohub_events_access_status, ''))) IN ('pending', 'approved', 'rejected')
                         THEN lower(btrim(persohub_events_access_status))
                     ELSE 'rejected'
