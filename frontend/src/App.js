@@ -290,6 +290,7 @@ function AppRoutes() {
                     <PersohubEventAdminLogsPage />
                 </ProtectedPersohubEventsRoute>
             } />
+            <Route path="/persohub/events/personasync" element={<Navigate to="/persohub?hashtag=PERSONASYNC" replace />} />
             <Route path="/persohub/events/:eventSlug" element={<PersohubEventDashboard />} />
             <Route path="/persohub/events/:eventSlug/:profileName" element={<PersohubEventDashboard />} />
             <Route path="/persohub/:profileName" element={<PersohubProfilePage />} />

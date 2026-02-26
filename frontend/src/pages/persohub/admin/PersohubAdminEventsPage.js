@@ -87,6 +87,80 @@ const parseSeatCapacity = (value) => {
     return parsed;
 };
 
+const normalizeEventDateValue = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    const asIso = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (asIso) {
+        const year = Number(asIso[1]);
+        const month = Number(asIso[2]);
+        const day = Number(asIso[3]);
+        const candidate = new Date(Date.UTC(year, month - 1, day));
+        if (
+            candidate.getUTCFullYear() === year
+            && candidate.getUTCMonth() + 1 === month
+            && candidate.getUTCDate() === day
+        ) {
+            return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        }
+        return raw;
+    }
+
+    const asSlash = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+    if (!asSlash) return raw;
+
+    const first = Number(asSlash[1]);
+    const second = Number(asSlash[2]);
+    const year = Number(asSlash[3]);
+    const candidates = [];
+
+    // Prefer MM/DD/YYYY (Safari / US input fallback), then DD/MM/YYYY if needed.
+    candidates.push({ month: first, day: second });
+    candidates.push({ month: second, day: first });
+
+    for (const item of candidates) {
+        const { month, day } = item;
+        const candidate = new Date(Date.UTC(year, month - 1, day));
+        if (
+            candidate.getUTCFullYear() === year
+            && candidate.getUTCMonth() + 1 === month
+            && candidate.getUTCDate() === day
+        ) {
+            return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        }
+    }
+    return raw;
+};
+
+const normalizeEventTimeValue = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const amPmMatch = raw.match(/^(\d{1,2}):(\d{1,2})\s*([AaPp][Mm])$/);
+    if (amPmMatch) {
+        let hours = Number(amPmMatch[1]);
+        const minutes = Number(amPmMatch[2]);
+        const meridiem = String(amPmMatch[3] || '').toUpperCase();
+        if (!Number.isFinite(hours) || !Number.isFinite(minutes) || hours < 1 || hours > 12 || minutes < 0 || minutes > 59) {
+            return raw;
+        }
+        if (meridiem === 'AM') {
+            if (hours === 12) hours = 0;
+        } else if (hours < 12) {
+            hours += 12;
+        }
+        return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+    }
+    const match = raw.match(/^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/);
+    if (!match) return raw;
+    const hours = Number(match[1]);
+    const minutes = Number(match[2]);
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+        return raw;
+    }
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+};
+
 const toEventForm = (eventRow = {}) => ({
     title: eventRow.title || '',
     description: eventRow.description || '',
@@ -130,9 +204,9 @@ const formatTimeLabel = (value) => {
 const buildEventPayload = (formState, posterUrl) => ({
     title: formState.title.trim(),
     description: formState.description?.trim() || '',
-    start_date: formState.start_date || null,
-    end_date: formState.end_date || null,
-    event_time: formState.event_time || null,
+    start_date: normalizeEventDateValue(formState.start_date) || null,
+    end_date: normalizeEventDateValue(formState.end_date) || null,
+    event_time: normalizeEventTimeValue(formState.event_time) || null,
     poster_url: posterUrl,
     whatsapp_url: formState.whatsapp_url?.trim() || null,
     external_url_name: formState.external_url_name?.trim() || 'Click To Register',
@@ -211,7 +285,11 @@ function EventFormFields({
             <div>
                 <Label>Start Date</Label>
                 <div className="mt-1 flex items-center gap-2">
-                    <Input type="date" value={form.start_date} onChange={(e) => setForm((prev) => ({ ...prev, start_date: e.target.value }))} />
+                    <Input
+                        type="date"
+                        value={form.start_date}
+                        onChange={(e) => setForm((prev) => ({ ...prev, start_date: normalizeEventDateValue(e.target.value) }))}
+                    />
                     <Button
                         type="button"
                         variant="outline"
@@ -226,7 +304,11 @@ function EventFormFields({
             <div>
                 <Label>End Date</Label>
                 <div className="mt-1 flex items-center gap-2">
-                    <Input type="date" value={form.end_date} onChange={(e) => setForm((prev) => ({ ...prev, end_date: e.target.value }))} />
+                    <Input
+                        type="date"
+                        value={form.end_date}
+                        onChange={(e) => setForm((prev) => ({ ...prev, end_date: normalizeEventDateValue(e.target.value) }))}
+                    />
                     <Button
                         type="button"
                         variant="outline"
@@ -241,7 +323,11 @@ function EventFormFields({
             <div>
                 <Label>Time</Label>
                 <div className="mt-1 flex items-center gap-2">
-                    <Input type="time" value={form.event_time} onChange={(e) => setForm((prev) => ({ ...prev, event_time: e.target.value }))} />
+                    <Input
+                        type="time"
+                        value={form.event_time}
+                        onChange={(e) => setForm((prev) => ({ ...prev, event_time: normalizeEventTimeValue(e.target.value) }))}
+                    />
                     <Button
                         type="button"
                         variant="outline"
@@ -621,7 +707,9 @@ export default function PersohubAdminEventsPage() {
     }, [fetchParityEnabled]);
 
     const validateDateRange = (formState) => {
-        if (formState.start_date && formState.end_date && formState.start_date > formState.end_date) {
+        const normalizedStart = normalizeEventDateValue(formState.start_date);
+        const normalizedEnd = normalizeEventDateValue(formState.end_date);
+        if (normalizedStart && normalizedEnd && normalizedStart > normalizedEnd) {
             toast.error('Start date cannot be after end date');
             return false;
         }

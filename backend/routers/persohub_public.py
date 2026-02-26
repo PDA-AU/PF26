@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, or_
+from sqlalchemy import DateTime, cast, func, or_
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -278,15 +278,15 @@ def get_feed(
     elif feed_type == PersohubFeedTypeEnum.COMMUNITY:
         feed_filter_clause = PersohubPost.post_type == "community"
 
-    # Event feed ranking:
-    # 1) Followed communities first, newest first.
-    # 2) Then remaining posts by likes, then recency.
-    if feed_type == PersohubFeedTypeEnum.EVENT:
-        followed_ordering = (PersohubPost.created_at.desc(), PersohubPost.like_count.desc(), PersohubPost.id.desc())
-        other_ordering = (PersohubPost.like_count.desc(), PersohubPost.created_at.desc(), PersohubPost.id.desc())
-    else:
-        followed_ordering = (PersohubPost.created_at.desc(), PersohubPost.id.desc())
-        other_ordering = (PersohubPost.like_count.desc(), PersohubPost.created_at.desc(), PersohubPost.id.desc())
+    event_start_date_expr = (
+        db.query(PersohubEvent.start_date)
+        .filter(PersohubEvent.id == PersohubPost.source_event_id)
+        .correlate(PersohubPost)
+        .scalar_subquery()
+    )
+    effective_sort_datetime = func.coalesce(cast(event_start_date_expr, DateTime), PersohubPost.created_at)
+    followed_ordering = (effective_sort_datetime.asc(), PersohubPost.created_at.asc(), PersohubPost.id.asc())
+    other_ordering = (effective_sort_datetime.asc(), PersohubPost.created_at.asc(), PersohubPost.id.asc())
 
     if user:
         followed_ids = [
