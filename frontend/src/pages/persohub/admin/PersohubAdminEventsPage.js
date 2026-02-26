@@ -210,15 +210,48 @@ function EventFormFields({
             </div>
             <div>
                 <Label>Start Date</Label>
-                <Input type="date" value={form.start_date} onChange={(e) => setForm((prev) => ({ ...prev, start_date: e.target.value }))} />
+                <div className="mt-1 flex items-center gap-2">
+                    <Input type="date" value={form.start_date} onChange={(e) => setForm((prev) => ({ ...prev, start_date: e.target.value }))} />
+                    <Button
+                        type="button"
+                        variant="outline"
+                        className="border-black/20"
+                        onClick={() => setForm((prev) => ({ ...prev, start_date: '' }))}
+                        disabled={!form.start_date}
+                    >
+                        Clear
+                    </Button>
+                </div>
             </div>
             <div>
                 <Label>End Date</Label>
-                <Input type="date" value={form.end_date} onChange={(e) => setForm((prev) => ({ ...prev, end_date: e.target.value }))} />
+                <div className="mt-1 flex items-center gap-2">
+                    <Input type="date" value={form.end_date} onChange={(e) => setForm((prev) => ({ ...prev, end_date: e.target.value }))} />
+                    <Button
+                        type="button"
+                        variant="outline"
+                        className="border-black/20"
+                        onClick={() => setForm((prev) => ({ ...prev, end_date: '' }))}
+                        disabled={!form.end_date}
+                    >
+                        Clear
+                    </Button>
+                </div>
             </div>
             <div>
                 <Label>Time</Label>
-                <Input type="time" value={form.event_time} onChange={(e) => setForm((prev) => ({ ...prev, event_time: e.target.value }))} />
+                <div className="mt-1 flex items-center gap-2">
+                    <Input type="time" value={form.event_time} onChange={(e) => setForm((prev) => ({ ...prev, event_time: e.target.value }))} />
+                    <Button
+                        type="button"
+                        variant="outline"
+                        className="border-black/20"
+                        onClick={() => setForm((prev) => ({ ...prev, event_time: '' }))}
+                        disabled={!form.event_time}
+                    >
+                        Clear
+                    </Button>
+                </div>
             </div>
             <div>
                 <Label>Sympo</Label>
