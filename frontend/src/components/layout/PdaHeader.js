@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { LogOut, Menu, Sparkles, User, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import pdaLogo from '@/assets/pda-logo.png';
@@ -24,6 +24,7 @@ export default function PdaHeader() {
         setActiveCommunityId,
     } = usePersohubActor();
     const location = useLocation();
+    const navigate = useNavigate();
     const [menuOpen, setMenuOpen] = useState(false);
     const [communityPickerOpen, setCommunityPickerOpen] = useState(false);
     const isPersohubRoute = location.pathname.startsWith('/persohub');
@@ -248,6 +249,8 @@ export default function PdaHeader() {
                                             onClick={() => {
                                                 setActiveCommunityId(Number(item.id));
                                                 setCommunityPickerOpen(false);
+                                                setMenuOpen(false);
+                                                navigate(`/persohub/${encodeURIComponent(String(item.profile_id || '').trim())}`);
                                             }}
                                             className={`${baseNavClass} w-full justify-between ${isSelected ? 'bg-[#FDE047]' : 'bg-white'}`}
                                         >

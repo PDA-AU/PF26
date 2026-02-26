@@ -19,6 +19,8 @@ export const ccAdminApi = {
 
     listPersohubEventOptions: (headers, params = {}) => axios.get(`${API}/pda-admin/cc/options/persohub-events`, { headers, params }),
     assignPersohubEventSympo: (eventId, payload, headers) => axios.put(`${API}/pda-admin/cc/persohub-events/${eventId}/sympo`, payload, { headers }),
+    approvePersohubEventAccess: (eventId, payload, headers) => axios.post(`${API}/pda-admin/cc/persohub-events/${eventId}/access/approve`, payload || {}, { headers }),
+    rejectPersohubEventAccess: (eventId, payload, headers) => axios.post(`${API}/pda-admin/cc/persohub-events/${eventId}/access/reject`, payload || {}, { headers }),
     listPersohubPayments: (headers, params = {}) => axios.get(`${API}/pda-admin/cc/payments`, { headers, params }),
     confirmPersohubPayment: (paymentId, payload, headers) => axios.post(`${API}/pda-admin/cc/payments/${paymentId}/confirm`, payload, { headers }),
     declinePersohubPayment: (paymentId, payload, headers) => axios.post(`${API}/pda-admin/cc/payments/${paymentId}/decline`, payload, { headers }),

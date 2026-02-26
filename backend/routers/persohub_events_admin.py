@@ -905,6 +905,8 @@ def create_managed_event(
     round_count = payload.round_count
     if payload.round_mode == PersohubEventRoundMode.SINGLE:
         round_count = 1
+    club = db.query(PersohubClub).filter(PersohubClub.id == int(community.club_id or 0)).first()
+    access_status = "approved" if str(getattr(club, "profile_id", "") or "").strip().lower() == "pda" else "rejected"
 
     new_event = PersohubEvent(
         slug=_next_slug(db, payload.title),
@@ -926,6 +928,7 @@ def create_managed_event(
         round_count=round_count,
         team_min_size=payload.team_min_size,
         team_max_size=payload.team_max_size,
+        persohub_access_status=access_status,
         is_visible=True,
         registration_open=True,
         open_for=_to_event_open_for(payload.open_for),

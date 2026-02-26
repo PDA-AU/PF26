@@ -167,9 +167,13 @@ def ensure_default_persohub_setup(db: Session) -> None:
             profile_id="pda",
             club_url="https://pda.mitindia.edu",
             club_logo_url=None,
+            persohub_events_access_status="approved",
         )
         db.add(club)
         db.flush()
+    else:
+        if str(getattr(club, "profile_id", "") or "").strip().lower() == "pda":
+            club.persohub_events_access_status = "approved"
 
     # Reserve default community profile ids by reassigning conflicting user profile names.
     for item in DEFAULT_PERSOHUB_COMMUNITIES:

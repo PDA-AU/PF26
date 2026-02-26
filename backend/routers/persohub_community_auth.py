@@ -20,6 +20,8 @@ from persohub_schemas import (
 )
 from security import (
     can_access_persohub_events,
+    get_persohub_club_events_access_status,
+    is_persohub_club_events_access_approved,
     get_persohub_actor_policy,
     get_persohub_actor_role,
     get_persohub_actor_user_id,
@@ -103,6 +105,9 @@ def _build_community_auth_response(
     is_owner: bool,
     is_club_superadmin: bool,
     can_access_events: bool,
+    persohub_events_access_status: str,
+    persohub_events_access_approved: bool,
+    persohub_events_access_review_note: Optional[str],
     event_policy: Optional[dict],
 ) -> PersohubCommunityAuthResponse:
     club = db.query(PersohubClub).filter(PersohubClub.id == community.club_id).first() if community.club_id else None
@@ -128,6 +133,12 @@ def _build_community_auth_response(
         is_club_owner=bool(is_owner),
         is_club_superadmin=bool(is_club_superadmin),
         can_access_events=bool(can_access_events),
+        persohub_events_access_status=(
+            "approved" if str(persohub_events_access_status or "").strip().lower() == "approved"
+            else ("pending" if str(persohub_events_access_status or "").strip().lower() == "pending" else "rejected")
+        ),
+        persohub_events_access_approved=bool(persohub_events_access_approved),
+        persohub_events_access_review_note=(str(persohub_events_access_review_note or "").strip() or None),
         event_policy=_normalize_events_policy(event_policy),
         is_root=bool(community.is_root),
     )
@@ -148,6 +159,8 @@ def _club_options_for_user(db: Session, user_id: int) -> List[PersohubAdminClubO
                 "club": club,
                 "role": "owner",
                 "can_access_events": True,
+                "persohub_events_access_status": get_persohub_club_events_access_status(club),
+                "persohub_events_access_approved": is_persohub_club_events_access_approved(club),
             }
 
     owned = (
@@ -161,6 +174,8 @@ def _club_options_for_user(db: Session, user_id: int) -> List[PersohubAdminClubO
             "club": club,
             "role": "owner",
             "can_access_events": True,
+            "persohub_events_access_status": get_persohub_club_events_access_status(club),
+            "persohub_events_access_approved": is_persohub_club_events_access_approved(club),
         }
 
     club_superadmin_rows = (
@@ -181,6 +196,8 @@ def _club_options_for_user(db: Session, user_id: int) -> List[PersohubAdminClubO
             "club": club,
             "role": "superadmin",
             "can_access_events": True,
+            "persohub_events_access_status": get_persohub_club_events_access_status(club),
+            "persohub_events_access_approved": is_persohub_club_events_access_approved(club),
         }
 
     delegated_rows = (
@@ -205,6 +222,8 @@ def _club_options_for_user(db: Session, user_id: int) -> List[PersohubAdminClubO
                 "club": club,
                 "role": "admin",
                 "can_access_events": False,
+                "persohub_events_access_status": get_persohub_club_events_access_status(club),
+                "persohub_events_access_approved": is_persohub_club_events_access_approved(club),
             }
 
     for club_id, rows in policy_rows_by_club.items():
@@ -224,6 +243,12 @@ def _club_options_for_user(db: Session, user_id: int) -> List[PersohubAdminClubO
                 club_profile_id=str(club.profile_id or "") or None,
                 role=("owner" if option["role"] == "owner" else ("superadmin" if option["role"] == "superadmin" else "admin")),
                 can_access_events=bool(option["can_access_events"]),
+                persohub_events_access_status=(
+                    "approved" if bool(option.get("persohub_events_access_approved")) else (
+                        "pending" if str(option.get("persohub_events_access_status") or "").strip().lower() == "pending" else "rejected"
+                    )
+                ),
+                persohub_events_access_approved=bool(option.get("persohub_events_access_approved")),
             )
         )
     return result
@@ -310,6 +335,8 @@ def _resolve_club_admin_context(
 
     merged_policy = _merge_admin_policy([row[0] for row in memberships])
     can_access_events = bool(is_owner or is_pda_superadmin or is_club_superadmin or any(bool(value) for value in merged_policy["events"].values()))
+    events_access_status = get_persohub_club_events_access_status(club)
+    events_access_approved = is_persohub_club_events_access_approved(club)
 
     return {
         "club": club,
@@ -318,6 +345,9 @@ def _resolve_club_admin_context(
         "is_club_superadmin": bool(is_club_superadmin and not (is_owner or is_pda_superadmin)),
         "event_policy": merged_policy,
         "can_access_events": can_access_events,
+        "persohub_events_access_status": events_access_status,
+        "persohub_events_access_approved": bool(events_access_approved),
+        "persohub_events_access_review_note": (str(getattr(club, "persohub_events_access_review_note", "") or "").strip() or None),
     }
 
 
@@ -389,6 +419,9 @@ def persohub_session_options(
                     is_owner=is_owner,
                     is_club_superadmin=is_club_superadmin,
                     can_access_events=can_access_events,
+                    persohub_events_access_status=str(context.get("persohub_events_access_status") or "rejected"),
+                    persohub_events_access_approved=bool(context.get("persohub_events_access_approved")),
+                    persohub_events_access_review_note=(str(context.get("persohub_events_access_review_note") or "").strip() or None),
                     event_policy=event_policy,
                 )
             )
@@ -433,6 +466,9 @@ def persohub_session_active_community(
         is_owner=bool(context["is_owner"]),
         is_club_superadmin=bool(context["is_club_superadmin"]),
         can_access_events=bool(context["can_access_events"]),
+        persohub_events_access_status=str(context.get("persohub_events_access_status") or "rejected"),
+        persohub_events_access_approved=bool(context.get("persohub_events_access_approved")),
+        persohub_events_access_review_note=(str(context.get("persohub_events_access_review_note") or "").strip() or None),
         event_policy=context["event_policy"],
     )
 

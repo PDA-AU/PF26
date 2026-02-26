@@ -31,6 +31,9 @@ class PersohubCommunityAuthResponse(BaseModel):
     is_club_owner: bool = False
     is_club_superadmin: bool = False
     can_access_events: bool = False
+    persohub_events_access_status: Literal["pending", "approved", "rejected"] = "rejected"
+    persohub_events_access_approved: bool = False
+    persohub_events_access_review_note: Optional[str] = None
     event_policy: dict = Field(default_factory=lambda: {"events": {}})
     is_root: bool = False
 
@@ -66,6 +69,8 @@ class PersohubAdminClubOption(BaseModel):
     club_profile_id: Optional[str] = None
     role: Literal["owner", "superadmin", "admin"]
     can_access_events: bool = False
+    persohub_events_access_status: Literal["pending", "approved", "rejected"] = "rejected"
+    persohub_events_access_approved: bool = False
 
 
 class PersohubAdminLoginResponse(BaseModel):
@@ -439,6 +444,9 @@ class PersohubAdminEventResponse(BaseModel):
     team_min_size: Optional[int] = None
     team_max_size: Optional[int] = None
     registration_fee: Optional[PersohubRegistrationFeeConfig] = None
+    persohub_access_status: Literal["pending", "approved", "rejected"] = "rejected"
+    persohub_access_approved: bool = False
+    persohub_access_review_note: Optional[str] = None
     seat_availability_enabled: bool = False
     seat_capacity: Optional[int] = None
     is_visible: bool = True
@@ -997,6 +1005,7 @@ class PersohubPublicProfileResponse(BaseModel):
     linkedin_url: Optional[str] = None
     github_url: Optional[str] = None
     follower_count: Optional[int] = None
+    registered_events_count: Optional[int] = None
     badges: List[PersohubBadgeResponse] = Field(default_factory=list)
     community: Optional[PersohubCommunityCard] = None
     posts: List[PersohubPostResponse] = Field(default_factory=list)

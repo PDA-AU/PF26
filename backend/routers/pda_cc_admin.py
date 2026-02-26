@@ -42,6 +42,7 @@ from schemas import (
     CcPersohubPaymentConfirmRequest,
     CcPersohubPaymentDeclineRequest,
     CcPersohubPaymentReviewListItem,
+    CcPersohubEventsAccessReviewRequest,
     CcCommunityResponse,
     CcCommunityUpdateRequest,
     CcDeleteSummaryResponse,
@@ -68,6 +69,33 @@ _ALLOWED_LOGO_TYPES = ["image/png", "image/jpeg", "image/webp"]
 _ALLOWED_REVEAL_VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime"]
 
 
+def _club_events_access_status(club: PersohubClub) -> str:
+    profile_id = str(getattr(club, "profile_id", "") or "").strip().lower()
+    if profile_id == "pda":
+        return "approved"
+    raw = str(getattr(club, "persohub_events_access_status", "") or "").strip().lower()
+    if raw in {"pending", "approved", "rejected"}:
+        return raw
+    return "rejected"
+
+
+def _club_events_access_approved(club: PersohubClub) -> bool:
+    return _club_events_access_status(club) == "approved"
+
+
+def _event_access_status(event: PersohubEvent, club: Optional[PersohubClub]) -> str:
+    if str(getattr(club, "profile_id", "") or "").strip().lower() == "pda":
+        return "approved"
+    raw = str(getattr(event, "persohub_access_status", "") or "").strip().lower()
+    if raw in {"pending", "approved", "rejected"}:
+        return raw
+    return "rejected"
+
+
+def _event_access_approved(event: PersohubEvent, club: Optional[PersohubClub]) -> bool:
+    return _event_access_status(event, club) == "approved"
+
+
 def _build_club_response(db: Session, club: PersohubClub) -> CcClubResponse:
     linked_community_count = int(
         db.query(PersohubCommunity)
@@ -85,6 +113,9 @@ def _build_club_response(db: Session, club: PersohubClub) -> CcClubResponse:
         club_description=club.club_description,
         payment_url_image=club.payment_url_image,
         payment_id=club.payment_id,
+        persohub_events_access_status=_club_events_access_status(club),
+        persohub_events_access_approved=_club_events_access_approved(club),
+        persohub_events_access_review_note=(str(getattr(club, "persohub_events_access_review_note", "") or "").strip() or None),
         owner_user_id=(int(club.owner_user_id) if club.owner_user_id else None),
         owner_name=(str(owner.name or "") or None) if owner else None,
         owner_regno=(str(owner.regno or "") or None) if owner else None,
@@ -853,7 +884,10 @@ def create_cc_club(
     if db.query(PersohubClub).filter(PersohubClub.profile_id == payload.profile_id).first():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Club profile_id already exists")
 
-    club = PersohubClub(**payload.model_dump())
+    club_payload = payload.model_dump()
+    club_profile_id = str(club_payload.get("profile_id") or "").strip().lower()
+    club_payload["persohub_events_access_status"] = "approved" if club_profile_id == "pda" else "rejected"
+    club = PersohubClub(**club_payload)
     db.add(club)
     try:
         db.flush()
@@ -922,6 +956,13 @@ def update_cc_club(
     for key, value in updates.items():
         setattr(club, key, value)
 
+    if "profile_id" in updates and str(club.profile_id or "").strip().lower() == "pda":
+        club.persohub_events_access_status = "approved"
+        club.persohub_events_access_reviewed_at = datetime.now(timezone.utc)
+        club.persohub_events_access_reviewed_by_user_id = int(admin.id)
+        if not club.persohub_events_access_review_note:
+            club.persohub_events_access_review_note = "PDA club exemption auto-approved"
+
     try:
         db.commit()
     except IntegrityError:
@@ -936,6 +977,68 @@ def update_cc_club(
         request.method if request else None,
         request.url.path if request else None,
         {"club_id": club.id, "updated_fields": sorted(list(updates.keys()))},
+    )
+    return _build_club_response(db, club)
+
+
+@router.post("/pda-admin/cc/clubs/{club_id}/persohub-events/access/approve", response_model=CcClubResponse)
+def approve_cc_club_persohub_events_access(
+    club_id: int,
+    payload: CcPersohubEventsAccessReviewRequest,
+    admin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    club = db.query(PersohubClub).filter(PersohubClub.id == club_id).first()
+    if not club:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Club not found")
+    previous_status = _club_events_access_status(club)
+    note = str(payload.note or "").strip() or None
+    club.persohub_events_access_status = "approved"
+    club.persohub_events_access_reviewed_at = datetime.now(timezone.utc)
+    club.persohub_events_access_reviewed_by_user_id = int(admin.id)
+    club.persohub_events_access_review_note = note
+    db.commit()
+    db.refresh(club)
+    log_admin_action(
+        db,
+        admin,
+        "Approve Persohub events access",
+        request.method if request else None,
+        request.url.path if request else None,
+        {"club_id": club.id, "previous_status": previous_status, "next_status": "approved"},
+    )
+    return _build_club_response(db, club)
+
+
+@router.post("/pda-admin/cc/clubs/{club_id}/persohub-events/access/reject", response_model=CcClubResponse)
+def reject_cc_club_persohub_events_access(
+    club_id: int,
+    payload: CcPersohubEventsAccessReviewRequest,
+    admin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    club = db.query(PersohubClub).filter(PersohubClub.id == club_id).first()
+    if not club:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Club not found")
+    if str(club.profile_id or "").strip().lower() == "pda":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PDA club is always approved")
+    previous_status = _club_events_access_status(club)
+    note = str(payload.note or "").strip() or None
+    club.persohub_events_access_status = "rejected"
+    club.persohub_events_access_reviewed_at = datetime.now(timezone.utc)
+    club.persohub_events_access_reviewed_by_user_id = int(admin.id)
+    club.persohub_events_access_review_note = note
+    db.commit()
+    db.refresh(club)
+    log_admin_action(
+        db,
+        admin,
+        "Reject Persohub events access",
+        request.method if request else None,
+        request.url.path if request else None,
+        {"club_id": club.id, "previous_status": previous_status, "next_status": "rejected"},
     )
     return _build_club_response(db, club)
 
@@ -1474,6 +1577,9 @@ def list_cc_persohub_event_options(
             community_name=(community.name if community else None),
             sympo_id=(sympo.id if sympo else None),
             sympo_name=(sympo.name if sympo else None),
+            persohub_access_status=_event_access_status(event, club),
+            persohub_access_approved=_event_access_approved(event, club),
+            persohub_access_review_note=(str(getattr(event, "persohub_access_review_note", "") or "").strip() or None),
         )
         for event, community, club, _mapping, sympo in rows
     ]
@@ -1533,6 +1639,102 @@ def assign_cc_event_sympo(
         sympo_id=(next_sympo.id if next_sympo else None),
         sympo_name=(next_sympo.name if next_sympo else None),
         message=("Event unassigned from sympo" if next_sympo is None else "Event mapped to sympo"),
+    )
+
+
+@router.post("/pda-admin/cc/persohub-events/{event_id}/access/approve", response_model=CcPersohubEventOption)
+def approve_cc_event_access(
+    event_id: int,
+    payload: CcPersohubEventsAccessReviewRequest,
+    admin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    event = db.query(PersohubEvent).filter(PersohubEvent.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Persohub event not found")
+    club = db.query(PersohubClub).filter(PersohubClub.id == event.club_id).first() if event.club_id else None
+    previous_status = _event_access_status(event, club)
+    event.persohub_access_status = "approved"
+    event.persohub_access_reviewed_at = datetime.now(timezone.utc)
+    event.persohub_access_reviewed_by_user_id = int(admin.id)
+    event.persohub_access_review_note = (str(payload.note or "").strip() or None)
+    db.commit()
+    db.refresh(event)
+    log_admin_action(
+        db,
+        admin,
+        "Approve Persohub event access",
+        request.method if request else None,
+        request.url.path if request else None,
+        {"event_id": event_id, "previous_status": previous_status, "next_status": "approved"},
+    )
+    community = db.query(PersohubCommunity).filter(PersohubCommunity.id == event.community_id).first() if event.community_id else None
+    sympo_link = db.query(PersohubSympoEvent).filter(PersohubSympoEvent.event_id == event.id).first()
+    sympo = db.query(PersohubSympo).filter(PersohubSympo.id == sympo_link.sympo_id).first() if sympo_link else None
+    return CcPersohubEventOption(
+        id=event.id,
+        slug=event.slug,
+        event_code=event.event_code,
+        title=event.title,
+        club_id=(club.id if club else event.club_id),
+        club_name=(club.name if club else None),
+        community_id=(community.id if community else None),
+        community_name=(community.name if community else None),
+        sympo_id=(sympo.id if sympo else None),
+        sympo_name=(sympo.name if sympo else None),
+        persohub_access_status=_event_access_status(event, club),
+        persohub_access_approved=_event_access_approved(event, club),
+        persohub_access_review_note=(str(getattr(event, "persohub_access_review_note", "") or "").strip() or None),
+    )
+
+
+@router.post("/pda-admin/cc/persohub-events/{event_id}/access/reject", response_model=CcPersohubEventOption)
+def reject_cc_event_access(
+    event_id: int,
+    payload: CcPersohubEventsAccessReviewRequest,
+    admin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    event = db.query(PersohubEvent).filter(PersohubEvent.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Persohub event not found")
+    club = db.query(PersohubClub).filter(PersohubClub.id == event.club_id).first() if event.club_id else None
+    if str(getattr(club, "profile_id", "") or "").strip().lower() == "pda":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PDA events are always approved")
+    previous_status = _event_access_status(event, club)
+    event.persohub_access_status = "rejected"
+    event.persohub_access_reviewed_at = datetime.now(timezone.utc)
+    event.persohub_access_reviewed_by_user_id = int(admin.id)
+    event.persohub_access_review_note = (str(payload.note or "").strip() or None)
+    db.commit()
+    db.refresh(event)
+    log_admin_action(
+        db,
+        admin,
+        "Reject Persohub event access",
+        request.method if request else None,
+        request.url.path if request else None,
+        {"event_id": event_id, "previous_status": previous_status, "next_status": "rejected"},
+    )
+    community = db.query(PersohubCommunity).filter(PersohubCommunity.id == event.community_id).first() if event.community_id else None
+    sympo_link = db.query(PersohubSympoEvent).filter(PersohubSympoEvent.event_id == event.id).first()
+    sympo = db.query(PersohubSympo).filter(PersohubSympo.id == sympo_link.sympo_id).first() if sympo_link else None
+    return CcPersohubEventOption(
+        id=event.id,
+        slug=event.slug,
+        event_code=event.event_code,
+        title=event.title,
+        club_id=(club.id if club else event.club_id),
+        club_name=(club.name if club else None),
+        community_id=(community.id if community else None),
+        community_name=(community.name if community else None),
+        sympo_id=(sympo.id if sympo else None),
+        sympo_name=(sympo.name if sympo else None),
+        persohub_access_status=_event_access_status(event, club),
+        persohub_access_approved=_event_access_approved(event, club),
+        persohub_access_review_note=(str(getattr(event, "persohub_access_review_note", "") or "").strip() or None),
     )
 
 

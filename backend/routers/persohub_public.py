@@ -7,8 +7,10 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import (
     PersohubEvent,
+    PersohubEventRegistration,
     PersohubSympo,
     PersohubSympoEvent,
+    PdaEventRegistrationStatus,
     PdaTeam,
     PdaUser,
     PersohubClub,
@@ -667,6 +669,15 @@ def get_public_profile(
 
     team = db.query(PdaTeam).filter(PdaTeam.user_id == person.id).first()
     badges_rows = get_user_badge_assignments(db, person.id, limit=50)
+    registered_events_count = int(
+        db.query(func.count(func.distinct(PersohubEventRegistration.event_id)))
+        .filter(
+            PersohubEventRegistration.user_id == person.id,
+            PersohubEventRegistration.status == PdaEventRegistrationStatus.ACTIVE,
+        )
+        .scalar()
+        or 0
+    )
     mentioned_posts_query = (
         db.query(PersohubPost)
         .join(PersohubPostMention, PersohubPostMention.post_id == PersohubPost.id)
@@ -697,6 +708,7 @@ def get_public_profile(
         instagram_url=person.instagram_url,
         linkedin_url=person.linkedin_url,
         github_url=person.github_url,
+        registered_events_count=registered_events_count,
         badges=[
             {
                 "id": assignment.id,

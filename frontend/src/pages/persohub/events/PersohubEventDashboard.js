@@ -310,6 +310,12 @@ export default function EventDashboard() {
     const isRegistered = Boolean(dashboard?.is_registered);
     const hasTeam = Boolean(dashboard?.team_code);
     const registrationOpen = Boolean(eventInfo?.registration_open);
+    const registrationAvailable = Boolean(
+        dashboard?.registration_available
+        ?? eventInfo?.registration_available
+        ?? eventInfo?.registration_open
+    );
+    const registrationBlockedByApproval = Boolean(registrationOpen && !registrationAvailable);
     const confirmationMatches = registerConfirmed;
     const registrationStatus = String(dashboard?.registration_status || (isRegistered ? 'active' : 'not_registered')).toLowerCase();
     const paymentStatus = String(dashboard?.payment_status || 'none').toLowerCase();
@@ -333,7 +339,7 @@ export default function EventDashboard() {
         Boolean(isLoggedIn)
         && Boolean(paymentRequired)
         && payableAmount > 0
-        && Boolean(registrationOpen)
+        && Boolean(registrationAvailable)
         && (!isTeamEvent || isLeader)
     );
     const registrationCtaLabel = isPendingRegistration
@@ -575,7 +581,7 @@ export default function EventDashboard() {
 
     const postAuthOpenRegistration = async (authHeaderOverride) => {
         const result = await fetchData({ authHeaderOverride });
-        if (registrationOpen && !Boolean(result?.is_registered)) {
+        if (registrationAvailable && !Boolean(result?.is_registered)) {
             setRegistrationDialogOpen(true);
         }
     };
@@ -682,7 +688,7 @@ export default function EventDashboard() {
     };
 
     const registerIndividual = async () => {
-        if (!confirmationMatches || !eventInfo || !registrationOpen) return;
+        if (!confirmationMatches || !eventInfo || !registrationAvailable) return;
         if (paymentRequired && payableAmount > 0) {
             closeRegistrationDialog(true);
             setPaymentModalOpen(true);
@@ -707,7 +713,7 @@ export default function EventDashboard() {
 
     const createTeam = async (e) => {
         e.preventDefault();
-        if (!confirmationMatches || !registrationOpen) return;
+        if (!confirmationMatches || !registrationAvailable) return;
         setCreatingTeam(true);
         try {
             await axios.post(`${API}/persohub/persohub-events/${eventSlug}/teams/create`, { team_name: teamName }, { headers: getAuthHeader() });
@@ -735,7 +741,7 @@ export default function EventDashboard() {
 
     const joinTeam = async (e) => {
         e.preventDefault();
-        if (!confirmationMatches || !registrationOpen) return;
+        if (!confirmationMatches || !registrationAvailable) return;
         setJoiningTeam(true);
         try {
             await axios.post(`${API}/persohub/persohub-events/${eventSlug}/teams/join`, { team_code: teamCode }, { headers: getAuthHeader() });
@@ -1193,7 +1199,7 @@ export default function EventDashboard() {
                                     <span className="rounded-md border-2 border-black bg-white px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] shadow-neo">
                                         {eventInfo.status}
                                     </span>
-                                    {registrationOpen ? (
+                                    {registrationAvailable ? (
                                         <Button
                                             data-testid="event-overview-register-button"
                                             onClick={() => {
@@ -1501,15 +1507,20 @@ export default function EventDashboard() {
                                             }
                                             setRegistrationDialogOpen(true);
                                         }}
-                                        disabled={!registrationOpen || (isTeamEvent && hasTeam && paymentRequired && payableAmount > 0 && !isLeader)}
+                                        disabled={!registrationAvailable || (isTeamEvent && hasTeam && paymentRequired && payableAmount > 0 && !isLeader)}
                                     >
                                         <UserPlus className="mr-2 h-4 w-4" />
-                                        {!registrationOpen
-                                            ? 'Registration Closed'
+                                        {!registrationAvailable
+                                            ? (registrationBlockedByApproval ? 'Approval Pending' : 'Registration Closed')
                                             : (isTeamEvent && hasTeam && paymentRequired && payableAmount > 0
                                                 ? (isLeader ? 'Submit Payment Proof' : 'Waiting for Leader')
                                                 : 'Register for Event')}
                                     </Button>
+                                    {registrationBlockedByApproval ? (
+                                        <p className="mt-2 text-xs font-semibold text-slate-600">
+                                            Registration will open after C&C approves this event.
+                                        </p>
+                                    ) : null}
                                 </div>
                             </section>
                         ) : null}
@@ -2198,7 +2209,7 @@ export default function EventDashboard() {
                                     data-testid="event-register-confirm-button"
                                     className="border-2 border-black bg-[#FDE047] text-black shadow-neo"
                                     onClick={registerIndividual}
-                                    disabled={!confirmationMatches || registering || !registrationOpen}
+                                    disabled={!confirmationMatches || registering || !registrationAvailable}
                                 >
                                     {paymentRequired && payableAmount > 0
                                         ? 'Proceed to Payment'
@@ -2224,7 +2235,7 @@ export default function EventDashboard() {
                                                 type="submit"
                                                 data-testid="event-register-create-team-button"
                                                 className="mt-3 w-full border-2 border-black bg-[#8B5CF6] text-white shadow-neo"
-                                                disabled={creatingTeam || !registrationOpen}
+                                                disabled={creatingTeam || !registrationAvailable}
                                             >
                                                 <Users className="mr-2 h-4 w-4" />
                                                 {creatingTeam ? 'Creating...' : 'Create Team'}
@@ -2247,7 +2258,7 @@ export default function EventDashboard() {
                                                 type="submit"
                                                 data-testid="event-register-join-team-button"
                                                 className="mt-3 w-full border-2 border-black bg-[#FDE047] text-black shadow-neo"
-                                                disabled={joiningTeam || !registrationOpen}
+                                                disabled={joiningTeam || !registrationAvailable}
                                             >
                                                 {joiningTeam ? 'Joining...' : 'Join Team'}
                                             </Button>

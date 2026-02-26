@@ -125,6 +125,13 @@ export const persohubAdminApi = {
         return response.data;
     },
 
+    async requestPersohubEventAccess(slug) {
+        const response = await axios.post(`${API}/persohub/admin/persohub-events/${slug}/access-request`, {}, {
+            headers: { ...getCombinedAuthHeader() },
+        });
+        return response.data;
+    },
+
     async updatePersohubEvent(slug, payload) {
         const response = await axios.put(`${API}/persohub/admin/persohub-events/${slug}`, payload, {
             headers: { ...getCombinedAuthHeader() },

@@ -66,6 +66,9 @@ export default function PersohubProfilePage() {
     const [profileAvatarSrc, setProfileAvatarSrc] = useState('https://placehold.co/80x80?text=PDA');
     const [badgeModalOpen, setBadgeModalOpen] = useState(false);
     const [selectedBadge, setSelectedBadge] = useState(null);
+    const [isMobileViewport, setIsMobileViewport] = useState(() => (
+        typeof window !== 'undefined' ? window.matchMedia('(max-width: 1023px)').matches : false
+    ));
 
     const isUserLoggedIn = Boolean(user);
     const navigateToCommunities = useCallback(() => {
@@ -130,6 +133,21 @@ export default function PersohubProfilePage() {
     useEffect(() => {
         loadProfile();
     }, [loadProfile]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return undefined;
+        const media = window.matchMedia('(max-width: 1023px)');
+        const handleViewportChange = (event) => {
+            setIsMobileViewport(Boolean(event.matches));
+        };
+        setIsMobileViewport(Boolean(media.matches));
+        if (typeof media.addEventListener === 'function') {
+            media.addEventListener('change', handleViewportChange);
+            return () => media.removeEventListener('change', handleViewportChange);
+        }
+        media.addListener(handleViewportChange);
+        return () => media.removeListener(handleViewportChange);
+    }, []);
 
     useEffect(() => {
         const fallback = 'https://placehold.co/80x80?text=PDA';
@@ -343,6 +361,7 @@ export default function PersohubProfilePage() {
     const profileBadges = profile.badges || [];
     const totalLikes = profilePosts.reduce((sum, post) => sum + Number(post?.like_count || 0), 0);
     const totalComments = profilePosts.reduce((sum, post) => sum + Number(post?.comment_count || 0), 0);
+    const registeredEventsCount = Number(profile?.registered_events_count || 0);
     const panelClass = 'rounded-md border-4 border-black bg-white p-6 shadow-[8px_8px_0px_0px_#000000]';
 
     return (
@@ -437,14 +456,23 @@ export default function PersohubProfilePage() {
                                     <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">Posts</p>
                                     <p className="mt-1 font-heading text-2xl font-black">{profilePosts.length}</p>
                                 </div>
-                                <div className="rounded-md border-2 border-black bg-[#fffdf0] px-3 py-2 shadow-neo">
-                                    <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">Total Likes</p>
-                                    <p className="mt-1 font-heading text-2xl font-black">{totalLikes}</p>
-                                </div>
-                                <div className="rounded-md border-2 border-black bg-[#fffdf0] px-3 py-2 shadow-neo">
-                                    <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">Total Comments</p>
-                                    <p className="mt-1 font-heading text-2xl font-black">{totalComments}</p>
-                                </div>
+                                {profile.profile_type === 'user' ? (
+                                    <div className="rounded-md border-2 border-black bg-[#fffdf0] px-3 py-2 shadow-neo">
+                                        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">Registered Events</p>
+                                        <p className="mt-1 font-heading text-2xl font-black">{registeredEventsCount}</p>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div className="rounded-md border-2 border-black bg-[#fffdf0] px-3 py-2 shadow-neo">
+                                            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">Total Likes</p>
+                                            <p className="mt-1 font-heading text-2xl font-black">{totalLikes}</p>
+                                        </div>
+                                        <div className="rounded-md border-2 border-black bg-[#fffdf0] px-3 py-2 shadow-neo">
+                                            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">Total Comments</p>
+                                            <p className="mt-1 font-heading text-2xl font-black">{totalComments}</p>
+                                        </div>
+                                    </>
+                                )}
                                 <div className="rounded-md border-2 border-black bg-[#fffdf0] px-3 py-2 shadow-neo">
                                     <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">
                                         {profile.profile_type === 'community' ? 'Followers' : 'Badges'}
@@ -567,7 +595,7 @@ export default function PersohubProfilePage() {
                         ) : null}
                     </section>
 
-                    <section className={panelClass}>
+                    <section className="ph-profile-timeline-section">
                         <div className="flex flex-wrap items-center justify-between gap-3">
                             <h2 className="font-heading text-3xl font-black uppercase tracking-tight">Public Timeline</h2>
                             <span className="rounded-md border-2 border-black bg-[#FDE047] px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] shadow-neo">
@@ -602,6 +630,7 @@ export default function PersohubProfilePage() {
                                             onDelete={handleDeletePost}
                                             onEdit={handleEditPost}
                                             onHide={handleTogglePostVisibility}
+                                            compactEventMobile={isMobileViewport}
                                         />
                                     ))}
                                 </div>

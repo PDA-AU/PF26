@@ -862,7 +862,7 @@ export default function PdaProfile() {
                     </section>
 
                     <section className={ENABLE_PROFILE_ACHIEVEMENTS_AND_CERTIFICATES ? 'grid gap-6 lg:grid-cols-[1.1fr_0.9fr]' : 'grid gap-6'}>
-                        <div className={panelClass}>
+                        <div className={`${panelClass} min-w-0`}>
                             <div className="flex flex-wrap items-center justify-between gap-3">
                                 <h2 className="font-heading text-3xl font-black uppercase tracking-tight">My Events</h2>
                                 <span className="rounded-md border-2 border-black bg-[#FDE047] px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] shadow-neo">
@@ -879,20 +879,20 @@ export default function PdaProfile() {
                             ) : (
                                 <div className="mt-4 max-h-[360px] space-y-3 overflow-y-auto pr-1">
                                     {sortedMyEvents.map((row) => (
-                                        <div key={`${row.event?.slug}-${row.entity_type}-${row.entity_id}`} className="rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
+                                        <div key={`${row.event?.slug}-${row.entity_type}-${row.entity_id}`} className="min-w-0 rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
                                             <div className="flex flex-wrap items-start justify-between gap-3">
-                                                <div>
+                                                <div className="min-w-0">
                                                     <p className="font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">
                                                         {row.event?.event_code || 'Event'}
                                                     </p>
-                                                    <h3 className="mt-1 font-heading text-xl font-black uppercase tracking-tight">
+                                                    <h3 className="mt-1 break-words font-heading text-xl font-black uppercase leading-tight tracking-tight">
                                                         {row.event?.title || 'Untitled Event'}
                                                     </h3>
-                                                    <p className="mt-1 text-xs font-medium uppercase tracking-[0.1em] text-slate-700">
+                                                    <p className="mt-1 break-words text-xs font-medium uppercase tracking-[0.1em] text-slate-700">
                                                         {row.event?.participant_mode} {row.event?.template_option ? `· ${row.event.template_option}` : ''}
                                                     </p>
                                                 </div>
-                                                <span className={`rounded-md border-2 border-black px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] shadow-neo ${row.event?.status === 'open' ? 'bg-[#4ADE80] text-black' : 'bg-[#11131a] text-[#FDE047]'}`}>
+                                                <span className={`shrink-0 rounded-md border-2 border-black px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] shadow-neo ${row.event?.status === 'open' ? 'bg-[#4ADE80] text-black' : 'bg-[#11131a] text-[#FDE047]'}`}>
                                                     {row.event?.status || 'unknown'}
                                                 </span>
                                             </div>
@@ -901,9 +901,10 @@ export default function PdaProfile() {
                                                 {row.event?.status === 'open' ? (
                                                     <a
                                                         href={`/event/${row.event.slug}`}
+                                                        className="w-full sm:w-auto"
                                                         data-testid={`pda-profile-open-dashboard-${row.event?.slug || 'event'}`}
                                                     >
-                                                        <Button type="button" className={neutralButtonClass}>
+                                                        <Button type="button" className={`${neutralButtonClass} w-full sm:w-auto`}>
                                                             Open Dashboard
                                                             <ExternalLink className="ml-2 h-4 w-4" />
                                                         </Button>
@@ -915,7 +916,7 @@ export default function PdaProfile() {
                                                         onClick={() => handleDownloadCertificate(row.event.slug)}
                                                         disabled={certificateLoadingSlug === row.event.slug}
                                                         data-testid={`pda-profile-download-certificate-${row.event?.slug || 'event'}`}
-                                                        className={accentButtonClass}
+                                                        className={`${accentButtonClass} w-full sm:w-auto`}
                                                     >
                                                         <Download className="mr-2 h-4 w-4" />
                                                         {certificateLoadingSlug === row.event.slug ? 'Generating...' : 'Download Certificate'}
@@ -929,7 +930,7 @@ export default function PdaProfile() {
                         </div>
 
                         {ENABLE_PROFILE_ACHIEVEMENTS_AND_CERTIFICATES ? (
-                            <div className={panelClass}>
+                            <div className={`${panelClass} min-w-0`}>
                                 <div className="flex items-center justify-between gap-3">
                                     <h2 className="font-heading text-3xl font-black uppercase tracking-tight">Achievements</h2>
                                     <Award className="h-6 w-6 text-[#8B5CF6]" />
@@ -945,7 +946,7 @@ export default function PdaProfile() {
                                         {achievements.map((achievement, index) => (
                                             <div
                                                 key={`${achievement.assignment_id || achievement.event_slug}-${achievement.badge_title}-${index}`}
-                                                className="cursor-pointer rounded-md border-2 border-black bg-[#fffdf0] p-2 shadow-neo transition-transform duration-100 hover:-translate-x-[1px] hover:-translate-y-[1px] aspect-square grid grid-rows-[1fr_auto] gap-2"
+                                                className="min-w-0 cursor-pointer rounded-md border-2 border-black bg-[#fffdf0] p-2 shadow-neo transition-transform duration-100 hover:-translate-x-[1px] hover:-translate-y-[1px] aspect-square grid grid-rows-[1fr_auto] gap-2"
                                                 role="button"
                                                 tabIndex={0}
                                                 onClick={() => handleOpenBadgeModal(achievement)}
@@ -966,9 +967,9 @@ export default function PdaProfile() {
                                                         </div>
                                                     )}
                                                 </div>
-                                                <div>
-                                                    <p className="font-heading text-sm font-black uppercase tracking-tight text-black">{achievement.badge_title}</p>
-                                                    <p className="mt-1 font-mono text-[10px] font-bold uppercase tracking-[0.08em] text-slate-700">
+                                                <div className="min-w-0">
+                                                    <p className="break-words font-heading text-sm font-black uppercase tracking-tight text-black">{achievement.badge_title}</p>
+                                                    <p className="mt-1 break-words font-mono text-[10px] font-bold uppercase tracking-[0.08em] text-slate-700">
                                                         {[achievement.badge_place, achievement.event_title].filter(Boolean).join(' · ') || 'Achievement'}
                                                     </p>
                                                 </div>

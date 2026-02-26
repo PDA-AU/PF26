@@ -55,7 +55,11 @@ from schemas import (
     PersohubManagedTeamMemberResponse,
     PersohubManagedTeamResponse,
 )
-from security import require_pda_user, require_persohub_events_parity_enabled
+from security import (
+    is_persohub_event_access_approved,
+    require_pda_user,
+    require_persohub_events_parity_enabled,
+)
 from utils import _generate_presigned_put_url
 
 router = APIRouter(dependencies=[Depends(require_persohub_events_parity_enabled)])
@@ -287,7 +291,21 @@ def _submission_payload(
     )
 
 
-def _ensure_registration_open_for_registration_actions(event: PersohubEvent) -> None:
+def _event_access_approved(db: Session, event: PersohubEvent) -> bool:
+    club = db.query(PersohubClub).filter(PersohubClub.id == int(event.club_id or 0)).first() if event.club_id else None
+    return bool(is_persohub_event_access_approved(event, club))
+
+
+def _registration_available(db: Session, event: PersohubEvent) -> bool:
+    return bool(getattr(event, "registration_open", True)) and _event_access_approved(db, event)
+
+
+def _ensure_registration_open_for_registration_actions(db: Session, event: PersohubEvent) -> None:
+    if not _event_access_approved(db, event):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Registration unavailable until C&C approves this event",
+        )
     if not bool(getattr(event, "registration_open", True)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Registration is closed")
 
@@ -487,13 +505,21 @@ def list_ongoing_events(db: Session = Depends(get_db)):
         .order_by(PersohubEvent.created_at.desc())
         .all()
     )
-    return [PersohubManagedEventResponse.model_validate(event) for event in events]
+    payloads = []
+    for event in events:
+        payload = PersohubManagedEventResponse.model_validate(event)
+        payloads.append(payload.model_copy(update={"registration_available": _registration_available(db, event)}))
+    return payloads
 
 
 @router.get("/persohub/persohub-events/all", response_model=List[PersohubManagedEventResponse])
 def list_all_managed_events(db: Session = Depends(get_db)):
     events = db.query(PersohubEvent).filter(PersohubEvent.is_visible == True).order_by(PersohubEvent.created_at.desc()).all()  # noqa: E712
-    return [PersohubManagedEventResponse.model_validate(event) for event in events]
+    payloads = []
+    for event in events:
+        payload = PersohubManagedEventResponse.model_validate(event)
+        payloads.append(payload.model_copy(update={"registration_available": _registration_available(db, event)}))
+    return payloads
 
 
 @router.get("/persohub/persohub-events/{slug}", response_model=PersohubManagedEventResponse)
@@ -501,10 +527,12 @@ def get_event(slug: str, db: Session = Depends(get_db)):
     event = _get_event_or_404(db, slug)
     _ensure_event_visible_for_public_access(event)
     payload = PersohubManagedEventResponse.model_validate(event)
+    registration_available = _registration_available(db, event)
     seat_availability_enabled = bool(getattr(event, "seat_availability_enabled", False))
     if not seat_availability_enabled:
         return payload.model_copy(
             update={
+                "registration_available": registration_available,
                 "seat_availability_enabled": False,
                 "seat_capacity": None,
                 "seats_occupied": None,
@@ -524,6 +552,7 @@ def get_event(slug: str, db: Session = Depends(get_db)):
     seats_left = max(seat_capacity - seats_occupied, 0)
     return payload.model_copy(
         update={
+            "registration_available": registration_available,
             "seat_availability_enabled": True,
             "seat_capacity": seat_capacity,
             "seats_occupied": seats_occupied,
@@ -831,9 +860,13 @@ def get_event_dashboard(
     registration_status = _registration_status_for_dashboard(registration)
     payment_status = _payment_status_from_row(payment_row, payment_required)
     payment_config = _club_payment_config(db, event)
+    registration_available = _registration_available(db, event)
+    event_payload = PersohubManagedEventResponse.model_validate(event).model_copy(
+        update={"registration_available": registration_available}
+    )
 
     return PersohubManagedEventDashboard(
-        event=PersohubManagedEventResponse.model_validate(event),
+        event=event_payload,
         is_registered=bool(registration),
         registration_status=registration_status,
         payment_status=payment_status,
@@ -848,6 +881,7 @@ def get_event_dashboard(
         team_members=members_payload,
         rounds_count=rounds_count,
         badges_count=badges_count,
+        registration_available=registration_available,
     )
 
 
@@ -860,7 +894,7 @@ def register_individual_event(
 ):
     event = _get_event_or_404(db, slug)
     _ensure_event_visible_for_public_access(event)
-    _ensure_registration_open_for_registration_actions(event)
+    _ensure_registration_open_for_registration_actions(db, event)
     _ensure_user_eligible_for_event(event, user)
     if event.participant_mode != PersohubEventParticipantMode.INDIVIDUAL:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Use team registration for this event")
@@ -912,7 +946,7 @@ def presign_payment_proof_upload(
 ):
     event = _get_event_or_404(db, slug)
     _ensure_event_visible_for_public_access(event)
-    _ensure_registration_open_for_registration_actions(event)
+    _ensure_registration_open_for_registration_actions(db, event)
     _ensure_user_eligible_for_event(event, user)
 
     team = None
@@ -957,7 +991,7 @@ def submit_event_payment(
 ):
     event = _get_event_or_404(db, slug)
     _ensure_event_visible_for_public_access(event)
-    _ensure_registration_open_for_registration_actions(event)
+    _ensure_registration_open_for_registration_actions(db, event)
     _ensure_user_eligible_for_event(event, user)
 
     team = None
@@ -1057,7 +1091,7 @@ def create_team(
 ):
     event = _get_event_or_404(db, slug)
     _ensure_event_visible_for_public_access(event)
-    _ensure_registration_open_for_registration_actions(event)
+    _ensure_registration_open_for_registration_actions(db, event)
     _ensure_user_eligible_for_event(event, user)
     if event.participant_mode != PersohubEventParticipantMode.TEAM:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This event is not a team event")
@@ -1109,7 +1143,7 @@ def join_team(
 ):
     event = _get_event_or_404(db, slug)
     _ensure_event_visible_for_public_access(event)
-    _ensure_registration_open_for_registration_actions(event)
+    _ensure_registration_open_for_registration_actions(db, event)
     _ensure_user_eligible_for_event(event, user)
     if event.participant_mode != PersohubEventParticipantMode.TEAM:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This event is not a team event")

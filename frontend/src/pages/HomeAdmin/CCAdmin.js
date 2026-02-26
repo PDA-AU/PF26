@@ -114,6 +114,7 @@ export default function CCAdmin() {
     const [eventsPage, setEventsPage] = useState(1);
     const [eventsTotalCount, setEventsTotalCount] = useState(0);
     const [assigningEventId, setAssigningEventId] = useState(null);
+    const [reviewingEventAccessId, setReviewingEventAccessId] = useState(null);
     const [eventSympoDrafts, setEventSympoDrafts] = useState({});
 
     const [clubModalOpen, setClubModalOpen] = useState(false);
@@ -433,6 +434,23 @@ export default function CCAdmin() {
             toast.error(parseApiError(error, 'Failed to update event mapping'));
         } finally {
             setAssigningEventId(null);
+        }
+    };
+
+    const reviewEventAccess = async (eventRow, nextStatus) => {
+        if (!eventRow?.id || reviewingEventAccessId) return;
+        setReviewingEventAccessId(eventRow.id);
+        try {
+            const apiCall = nextStatus === 'approved'
+                ? ccAdminApi.approvePersohubEventAccess(eventRow.id, {}, headers)
+                : ccAdminApi.rejectPersohubEventAccess(eventRow.id, {}, headers);
+            const response = await apiCall;
+            toast.success(response?.data?.persohub_access_status === 'approved' ? 'Event access approved' : 'Event access rejected');
+            await refreshData();
+        } catch (error) {
+            toast.error(parseApiError(error, 'Failed to update event access'));
+        } finally {
+            setReviewingEventAccessId(null);
         }
     };
 
@@ -763,6 +781,7 @@ export default function CCAdmin() {
                                         <th className="px-3 py-2 text-left">Title</th>
                                         <th className="px-3 py-2 text-left">Code / Slug</th>
                                         <th className="px-3 py-2 text-left">Community</th>
+                                        <th className="px-3 py-2 text-left">Access</th>
                                         <th className="px-3 py-2 text-right">Add to symp</th>
                                     </tr>
                                 </thead>
@@ -778,6 +797,35 @@ export default function CCAdmin() {
                                                     <div>{event.slug}</div>
                                                 </td>
                                                 <td className="px-3 py-2">{event.community_name}</td>
+                                                <td className="px-3 py-2">
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <span className={`rounded-md border px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] ${
+                                                            event.persohub_access_approved
+                                                                ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                                                                : (event.persohub_access_status === 'pending'
+                                                                    ? 'border-amber-300 bg-amber-50 text-amber-700'
+                                                                    : 'border-red-300 bg-red-50 text-red-700')
+                                                        }`}>
+                                                            {event.persohub_access_status || 'rejected'}
+                                                        </span>
+                                                        <Button
+                                                            size="sm"
+                                                            variant="outline"
+                                                            disabled={reviewingEventAccessId === event.id || event.persohub_access_status === 'approved'}
+                                                            onClick={() => reviewEventAccess(event, 'approved')}
+                                                        >
+                                                            Approve
+                                                        </Button>
+                                                        <Button
+                                                            size="sm"
+                                                            variant="outline"
+                                                            disabled={reviewingEventAccessId === event.id || event.persohub_access_status === 'rejected'}
+                                                            onClick={() => reviewEventAccess(event, 'rejected')}
+                                                        >
+                                                            Reject
+                                                        </Button>
+                                                    </div>
+                                                </td>
                                                 <td className="px-3 py-2">
                                                     <div className="flex items-center justify-end gap-2">
                                                         <span className="text-xs text-slate-500">{event.sympo_name || 'Standalone'}</span>
@@ -819,8 +867,27 @@ export default function CCAdmin() {
                                         <p className="font-semibold">{event.title}</p>
                                         <p className="text-xs text-slate-500">{event.event_code} · {event.slug}</p>
                                         <p className="text-xs text-slate-500">Community: {event.community_name}</p>
+                                        <p className="text-xs text-slate-500">Access: {event.persohub_access_status || 'rejected'}</p>
                                         <p className="text-xs text-slate-500">Add to symp: {event.sympo_name || 'Standalone'}</p>
                                         <div className="mt-3 space-y-2">
+                                            <div className="flex gap-2">
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    disabled={reviewingEventAccessId === event.id || event.persohub_access_status === 'approved'}
+                                                    onClick={() => reviewEventAccess(event, 'approved')}
+                                                >
+                                                    Approve
+                                                </Button>
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    disabled={reviewingEventAccessId === event.id || event.persohub_access_status === 'rejected'}
+                                                    onClick={() => reviewEventAccess(event, 'rejected')}
+                                                >
+                                                    Reject
+                                                </Button>
+                                            </div>
                                             <Select
                                                 value={draftValue}
                                                 onValueChange={(value) => setEventSympoDrafts((prev) => ({ ...prev, [event.id]: value }))}

@@ -1959,6 +1959,12 @@ def ensure_persohub_event_tables(engine):
         conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS registration_open BOOLEAN NOT NULL DEFAULT TRUE"))
         conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS open_for VARCHAR(8) NOT NULL DEFAULT 'MIT'"))
         conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS registration_fee JSONB"))
+        conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS persohub_access_status VARCHAR(16) NOT NULL DEFAULT 'rejected'"))
+        conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS persohub_access_requested_at TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS persohub_access_requested_by_user_id INTEGER"))
+        conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS persohub_access_reviewed_at TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS persohub_access_reviewed_by_user_id INTEGER"))
+        conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS persohub_access_review_note TEXT"))
         conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS seat_availability_enabled BOOLEAN NOT NULL DEFAULT FALSE"))
         conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS seat_capacity INTEGER"))
         conn.execute(
@@ -1969,6 +1975,21 @@ def ensure_persohub_event_tables(engine):
                     WHEN upper(btrim(COALESCE(open_for, ''))) = 'ALL' THEN 'ALL'
                     ELSE 'MIT'
                 END
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                UPDATE persohub_events
+                SET persohub_access_status = CASE
+                    WHEN lower(btrim(COALESCE(pc.profile_id, ''))) = 'pda' THEN 'approved'
+                    WHEN lower(btrim(COALESCE(persohub_events.persohub_access_status, ''))) IN ('pending', 'approved', 'rejected')
+                        THEN lower(btrim(persohub_events.persohub_access_status))
+                    ELSE 'rejected'
+                END
+                FROM persohub_clubs pc
+                WHERE pc.id = persohub_events.club_id
                 """
             )
         )
@@ -3481,6 +3502,30 @@ def ensure_persohub_tables(engine):
         conn.execute(text("ALTER TABLE persohub_clubs ADD COLUMN IF NOT EXISTS club_description TEXT"))
         conn.execute(text("ALTER TABLE persohub_clubs ADD COLUMN IF NOT EXISTS payment_url_image VARCHAR(800)"))
         conn.execute(text("ALTER TABLE persohub_clubs ADD COLUMN IF NOT EXISTS payment_id VARCHAR(120)"))
+        conn.execute(
+            text(
+                "ALTER TABLE persohub_clubs "
+                "ADD COLUMN IF NOT EXISTS persohub_events_access_status VARCHAR(16) NOT NULL DEFAULT 'rejected'"
+            )
+        )
+        conn.execute(text("ALTER TABLE persohub_clubs ADD COLUMN IF NOT EXISTS persohub_events_access_requested_at TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE persohub_clubs ADD COLUMN IF NOT EXISTS persohub_events_access_requested_by_user_id INTEGER"))
+        conn.execute(text("ALTER TABLE persohub_clubs ADD COLUMN IF NOT EXISTS persohub_events_access_reviewed_at TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE persohub_clubs ADD COLUMN IF NOT EXISTS persohub_events_access_reviewed_by_user_id INTEGER"))
+        conn.execute(text("ALTER TABLE persohub_clubs ADD COLUMN IF NOT EXISTS persohub_events_access_review_note TEXT"))
+        conn.execute(
+            text(
+                """
+                UPDATE persohub_clubs
+                SET persohub_events_access_status = CASE
+                    WHEN lower(btrim(COALESCE(profile_id, ''))) = 'pda' THEN 'approved'
+                    WHEN lower(btrim(COALESCE(persohub_events_access_status, ''))) IN ('pending', 'approved', 'rejected')
+                        THEN lower(btrim(persohub_events_access_status))
+                    ELSE 'rejected'
+                END
+                """
+            )
+        )
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_clubs_owner_user_id ON persohub_clubs(owner_user_id)"))
 
         conn.execute(

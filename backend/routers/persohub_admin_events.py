@@ -161,7 +161,18 @@ def _ensure_events_policy_shape(policy: Optional[dict]) -> dict:
     return safe
 
 
-def _serialize_event(event: PersohubEvent, sympo: Optional[PersohubSympo] = None) -> PersohubAdminEventResponse:
+def _serialize_event(
+    event: PersohubEvent,
+    sympo: Optional[PersohubSympo] = None,
+    *,
+    club_profile_id: Optional[str] = None,
+) -> PersohubAdminEventResponse:
+    event_access_status = str(getattr(event, "persohub_access_status", "") or "").strip().lower()
+    if str(club_profile_id or "").strip().lower() == "pda":
+        event_access_status = "approved"
+    if event_access_status not in {"pending", "approved", "rejected"}:
+        event_access_status = "rejected"
+    event_access_approved = event_access_status == "approved"
     seat_availability_enabled = bool(getattr(event, "seat_availability_enabled", False))
     seat_capacity = int(event.seat_capacity) if event.seat_capacity is not None else None
     if seat_availability_enabled and (seat_capacity is None or seat_capacity < 1):
@@ -189,6 +200,9 @@ def _serialize_event(event: PersohubEvent, sympo: Optional[PersohubSympo] = None
         team_min_size=event.team_min_size,
         team_max_size=event.team_max_size,
         registration_fee=event.registration_fee,
+        persohub_access_status=event_access_status,
+        persohub_access_approved=bool(event_access_approved),
+        persohub_access_review_note=(str(getattr(event, "persohub_access_review_note", "") or "").strip() or None),
         seat_availability_enabled=seat_availability_enabled,
         seat_capacity=seat_capacity,
         is_visible=bool(event.is_visible),
@@ -646,6 +660,19 @@ def _remove_policy_slug_for_club_admin_rows(db: Session, club_id: int, slug: str
             row.policy = policy
 
 
+def _event_access_status(event: PersohubEvent, club: Optional[PersohubClub]) -> str:
+    if str(getattr(club, "profile_id", "") or "").strip().lower() == "pda":
+        return "approved"
+    raw = str(getattr(event, "persohub_access_status", "") or "").strip().lower()
+    if raw in {"pending", "approved", "rejected"}:
+        return raw
+    return "rejected"
+
+
+def _event_access_approved(event: PersohubEvent, club: Optional[PersohubClub]) -> bool:
+    return _event_access_status(event, club) == "approved"
+
+
 @router.get("/persohub/admin/persohub-events", response_model=List[PersohubAdminEventResponse])
 def list_admin_events(
     request: Request,
@@ -660,6 +687,8 @@ def list_admin_events(
     _assert_can_access_events(request)
 
     club_id = _resolve_actor_club_id(request, community)
+    club = db.query(PersohubClub).filter(PersohubClub.id == club_id).first()
+    club_profile_id = str(getattr(club, "profile_id", "") or "").strip().lower() if club else None
     query = (
         db.query(PersohubEvent, PersohubSympo)
         .outerjoin(PersohubSympoEvent, PersohubSympoEvent.event_id == PersohubEvent.id)
@@ -696,7 +725,7 @@ def list_admin_events(
     response.headers["X-Total-Count"] = str(total_count)
     response.headers["X-Page"] = str(page)
     response.headers["X-Page-Size"] = str(page_size)
-    return [_serialize_event(event, sympo) for event, sympo in rows]
+    return [_serialize_event(event, sympo, club_profile_id=club_profile_id) for event, sympo in rows]
 
 
 @router.get("/persohub/admin/persohub-sympo-options", response_model=List[PersohubAdminSympoOption])
@@ -722,6 +751,77 @@ def list_admin_sympo_options(
         )
         for sympo, club in rows
     ]
+
+
+@router.post("/persohub/admin/persohub-events/{slug}/access-request")
+def request_persohub_event_access(
+    slug: str,
+    request: Request,
+    community: PersohubCommunity = Depends(require_persohub_community),
+    db: Session = Depends(get_db),
+):
+    _assert_persohub_admin_token(request)
+    _assert_owner_or_superadmin(request)
+
+    club_id = _resolve_actor_club_id(request, community)
+    club = db.query(PersohubClub).filter(PersohubClub.id == club_id).first()
+    if not club:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Club not found")
+    event = db.query(PersohubEvent).filter(PersohubEvent.slug == slug, PersohubEvent.club_id == club_id).first()
+    if not event:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+
+    previous_status = _event_access_status(event, club)
+    if _event_access_approved(event, club):
+        return {
+            "event_id": int(event.id),
+            "event_slug": str(event.slug),
+            "status": "approved",
+            "approved": True,
+            "message": "Event already has Persohub access",
+            "requested_at": event.persohub_access_requested_at,
+        }
+
+    now = datetime.now(timezone.utc)
+    actor_user_id = int(get_persohub_actor_user_id(request) or 0) or None
+    event.persohub_access_status = "pending"
+    event.persohub_access_requested_at = now
+    event.persohub_access_requested_by_user_id = actor_user_id
+    event.persohub_access_reviewed_at = None
+    event.persohub_access_reviewed_by_user_id = None
+    event.persohub_access_review_note = None
+    db.commit()
+    db.refresh(event)
+
+    admin_register_number, admin_name, actor_id = _actor_log_identity(db, request)
+    db.add(
+        AdminLog(
+            admin_id=actor_id if actor_id > 0 else 0,
+            admin_register_number=admin_register_number,
+            admin_name=admin_name,
+            action="request_persohub_event_access",
+            method=request.method,
+            path=request.url.path,
+            meta={
+                "club_id": int(club.id),
+                "event_id": int(event.id),
+                "event_slug": str(event.slug),
+                "previous_status": previous_status,
+                "next_status": "pending",
+            },
+        )
+    )
+    db.commit()
+
+    return {
+        "club_id": int(club.id),
+        "event_id": int(event.id),
+        "event_slug": str(event.slug),
+        "status": "pending",
+        "approved": False,
+        "message": "Persohub event access request submitted to C&C",
+        "requested_at": event.persohub_access_requested_at,
+    }
 
 
 @router.post("/persohub/admin/persohub-events", response_model=PersohubAdminEventResponse)
@@ -750,6 +850,8 @@ def create_admin_event(
     seat_capacity = int(payload.seat_capacity or 100) if seat_availability_enabled else (
         int(payload.seat_capacity) if payload.seat_capacity is not None else None
     )
+    club = db.query(PersohubClub).filter(PersohubClub.id == club_id).first()
+    access_status = "approved" if str(getattr(club, "profile_id", "") or "").strip().lower() == "pda" else "rejected"
 
     event = PersohubEvent(
         slug=_next_slug(db, payload.title),
@@ -773,6 +875,7 @@ def create_admin_event(
         team_min_size=team_min_size,
         team_max_size=team_max_size,
         registration_fee=(payload.registration_fee.model_dump() if payload.registration_fee else None),
+        persohub_access_status=access_status,
         seat_availability_enabled=seat_availability_enabled,
         seat_capacity=seat_capacity,
         is_visible=True,
@@ -809,7 +912,7 @@ def create_admin_event(
 
     db.commit()
     db.refresh(event)
-    return _serialize_event(event)
+    return _serialize_event(event, club_profile_id=(str(getattr(club, "profile_id", "") or "").strip().lower() if club else None))
 
 
 @router.put("/persohub/admin/persohub-events/{slug}", response_model=PersohubAdminEventResponse)
@@ -901,7 +1004,8 @@ def update_admin_event(
 
     db.commit()
     db.refresh(event)
-    return _serialize_event(event)
+    club = db.query(PersohubClub).filter(PersohubClub.id == int(event.club_id or 0)).first() if event.club_id else None
+    return _serialize_event(event, club_profile_id=(str(getattr(club, "profile_id", "") or "").strip().lower() if club else None))
 
 
 @router.get("/persohub/admin/payments", response_model=List[PersohubAdminPaymentReviewListItem])

@@ -239,6 +239,55 @@ def can_access_persohub_events(request: Optional[Request] = None) -> bool:
     return bool(getattr(getattr(request, "state", None), "persohub_can_access_events", False))
 
 
+def is_persohub_club_events_access_approved(club: Optional[PersohubClub]) -> bool:
+    if not club:
+        return False
+    profile_id = str(getattr(club, "profile_id", "") or "").strip().lower()
+    if profile_id == "pda":
+        return True
+    raw = str(getattr(club, "persohub_events_access_status", "") or "").strip().lower()
+    return raw == "approved"
+
+
+def get_persohub_club_events_access_status(club: Optional[PersohubClub]) -> str:
+    if not club:
+        return "rejected"
+    profile_id = str(getattr(club, "profile_id", "") or "").strip().lower()
+    if profile_id == "pda":
+        return "approved"
+    raw = str(getattr(club, "persohub_events_access_status", "") or "").strip().lower()
+    if raw in {"pending", "approved", "rejected"}:
+        return raw
+    return "rejected"
+
+
+def get_persohub_event_access_status(event: Optional[PersohubEvent], club: Optional[PersohubClub] = None) -> str:
+    if not event:
+        return "rejected"
+    profile_id = str(getattr(club, "profile_id", "") or "").strip().lower()
+    if profile_id == "pda":
+        return "approved"
+    raw = str(getattr(event, "persohub_access_status", "") or "").strip().lower()
+    if raw in {"pending", "approved", "rejected"}:
+        return raw
+    return "rejected"
+
+
+def is_persohub_event_access_approved(event: Optional[PersohubEvent], club: Optional[PersohubClub] = None) -> bool:
+    return get_persohub_event_access_status(event, club) == "approved"
+
+
+def get_persohub_actor_events_access_status(request: Optional[Request] = None) -> str:
+    raw = str(getattr(getattr(request, "state", None), "persohub_events_access_status", "") or "").strip().lower()
+    if raw in {"pending", "approved", "rejected"}:
+        return raw
+    return "rejected"
+
+
+def is_persohub_actor_events_access_approved(request: Optional[Request] = None) -> bool:
+    return bool(getattr(getattr(request, "state", None), "persohub_events_access_approved", False))
+
+
 def require_persohub_community(
     request: Request,
     user: PdaUser = Depends(get_current_pda_user),
@@ -291,6 +340,8 @@ def require_persohub_community(
     actor_club_id = resolved_club_id
     event_policy = _merge_persohub_admin_policy([row[0] for row in membership_rows])
     can_access_events = bool(is_club_owner or is_club_superadmin_user or any(bool(value) for value in event_policy["events"].values()))
+    events_access_status = get_persohub_club_events_access_status(club)
+    events_access_approved = is_persohub_club_events_access_approved(club)
 
     request.state.persohub_actor_user_id = actor_user_id
     request.state.persohub_actor_role = actor_role
@@ -300,6 +351,9 @@ def require_persohub_community(
     request.state.persohub_is_club_superadmin = bool(is_club_superadmin_user)
     request.state.persohub_event_policy = _normalize_persohub_event_policy(event_policy)
     request.state.persohub_can_access_events = bool(can_access_events)
+    request.state.persohub_events_access_status = events_access_status
+    request.state.persohub_events_access_approved = bool(events_access_approved)
+    request.state.persohub_events_access_review_note = (str(getattr(club, "persohub_events_access_review_note", "") or "").strip() or None)
     request.state.persohub_token_user_type = "pda"
     return community
 
@@ -342,6 +396,9 @@ def require_persohub_event_admin(
         actor_club_id = get_persohub_actor_club_id(request) or int(community.club_id or 0)
         if actor_club_id <= 0 or not event or int(event.club_id or 0) != int(actor_club_id):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+        club = db.query(PersohubClub).filter(PersohubClub.id == int(event.club_id or 0)).first()
+        if not is_persohub_event_access_approved(event, club):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Event access pending C&C approval")
         if not (is_persohub_club_owner(request) or is_persohub_club_superadmin(request)):
             policy = get_persohub_actor_policy(request)
             if not _can_access_event_policy(policy, event_slug):
@@ -369,6 +426,9 @@ def get_persohub_admin_context(
         "is_club_owner": bool(is_owner),
         "is_club_superadmin": bool(is_club_super),
         "can_access_events": bool(is_owner or is_club_super or can_access_persohub_events(request)),
+        "persohub_events_access_status": get_persohub_actor_events_access_status(request),
+        "persohub_events_access_approved": bool(is_persohub_actor_events_access_approved(request)),
+        "persohub_events_access_review_note": (str(getattr(request.state, "persohub_events_access_review_note", "") or "").strip() or None),
     }
 
 

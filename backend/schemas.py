@@ -753,12 +753,29 @@ class CcClubResponse(BaseModel):
     club_description: Optional[str] = None
     payment_url_image: Optional[str] = None
     payment_id: Optional[str] = None
+    persohub_events_access_status: Literal["pending", "approved", "rejected"] = "rejected"
+    persohub_events_access_approved: bool = False
+    persohub_events_access_review_note: Optional[str] = None
     owner_user_id: Optional[int] = None
     owner_name: Optional[str] = None
     owner_regno: Optional[str] = None
     linked_community_count: int = 0
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+
+class CcPersohubEventsAccessReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    note: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("note", mode="before")
+    @classmethod
+    def normalize_note(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
 
 
 class CcCommunityAdminMemberInput(BaseModel):
@@ -1110,6 +1127,9 @@ class CcPersohubEventOption(BaseModel):
     community_name: Optional[str] = None
     sympo_id: Optional[int] = None
     sympo_name: Optional[str] = None
+    persohub_access_status: Literal["pending", "approved", "rejected"] = "rejected"
+    persohub_access_approved: bool = False
+    persohub_access_review_note: Optional[str] = None
 
 
 class CcPersohubEventSympoAssignRequest(BaseModel):
@@ -2480,6 +2500,7 @@ class PersohubManagedEventResponse(BaseModel):
     team_max_size: Optional[int] = None
     is_visible: bool = True
     registration_open: bool = True
+    registration_available: bool = True
     open_for: PersohubManagedEventOpenForEnum = PersohubManagedEventOpenForEnum.MIT
     registration_fee: Optional[PersohubRegistrationFeeConfig] = None
     seat_availability_enabled: bool = False
@@ -2509,6 +2530,7 @@ class PersohubManagedEventDashboard(BaseModel):
     team_members: List[Dict[str, Any]] = Field(default_factory=list)
     rounds_count: int = 0
     badges_count: int = 0
+    registration_available: bool = True
 
 
 class PersohubEventPaymentPresignRequest(BaseModel):

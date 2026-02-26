@@ -343,11 +343,29 @@ export const PostCard = ({
     const isEventPost = String(post?.post_type || '').toLowerCase() === 'event';
     const hasPosterAttachment = (post?.attachments || []).some((item) => String(item?.attachment_kind || '').toLowerCase() === 'image');
     const shouldUseCompactEventMobile = Boolean(compactEventMobile && isEventPost && hasPosterAttachment);
-    const compactHashtags = Array.isArray(post?.hashtags)
-        ? post.hashtags.filter((value) => String(value || '').trim())
+    const allHashtags = Array.isArray(post?.hashtags)
+        ? post.hashtags.map((value) => String(value || '').trim().toLowerCase()).filter(Boolean)
         : [];
+    const slugifyTag = (value) => String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .replace(/-+/g, '-');
+    const eventTagCandidates = Array.from(new Set([
+        slugifyTag(post?.event?.title),
+        slugifyTag(post?.event?.slug),
+        String(post?.event?.slug || '').trim().toLowerCase(),
+    ].filter(Boolean)));
+    const matchedEventTag = eventTagCandidates.find((candidate) => allHashtags.includes(candidate)) || eventTagCandidates[0] || '';
+    const sympoTag = allHashtags.find((tag) => tag && tag !== matchedEventTag) || '';
+    const compactDescription = [matchedEventTag, sympoTag]
+        .filter(Boolean)
+        .map((tag) => `#${tag}`)
+        .join(' ');
     const showInlineModeration = Boolean(allowModeration && !isMobileViewport);
     const showMobileModerationMenu = Boolean(allowModeration && isMobileViewport);
+    const communityProfileId = String(post?.community?.profile_id || '').trim().toLowerCase();
 
     const loadComments = async ({ reset = false } = {}) => {
         if (!fetchComments) return;
@@ -414,7 +432,7 @@ export const PostCard = ({
                         <Link to={`/persohub/${post.community.profile_id}`} className="ph-community-name">
                             {post.community.name}
                         </Link>
-                        <div className="ph-community-handle">@{post.community.profile_id} · {formatRelativeTime(post.created_at)}</div>
+                        <div className="ph-community-handle">@{communityProfileId || post.community.profile_id} · {formatRelativeTime(post.created_at)}</div>
                     </div>
                 </div>
                 <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
@@ -459,7 +477,7 @@ export const PostCard = ({
 
                 <div className={`ph-desc ${shouldUseCompactEventMobile ? 'ph-desc-mobile-event-compact' : ''}`}>
                     <ParsedDescription
-                        description={shouldUseCompactEventMobile ? (post.description || '') : visibleText}
+                        description={shouldUseCompactEventMobile ? compactDescription : visibleText}
                         onHashtagClick={onHashtagClick}
                     />
                     {!shouldUseCompactEventMobile && showReadMore ? (
@@ -469,95 +487,76 @@ export const PostCard = ({
                     ) : null}
                 </div>
 
-                {shouldUseCompactEventMobile && compactHashtags.length > 0 ? (
-                    <div className="ph-compact-hashtag-row">
-                        {compactHashtags.map((tag) => (
-                            <button
-                                key={`${post.slug_token}-${tag}`}
-                                type="button"
-                                className="ph-compact-hashtag-chip"
-                                onClick={() => onHashtagClick?.(tag)}
-                            >
-                                #{tag}
-                            </button>
-                        ))}
-                    </div>
-                ) : null}
+                <div className="ph-post-actions">
+                    <button
+                        type="button"
+                        className="ph-action-btn ph-like-btn"
+                        onClick={() => onLike?.(post.slug_token)}
+                        disabled={!isUserLoggedIn || likePending}
+                        aria-busy={likePending}
+                        data-testid={`ph-like-${post.slug_token}`}
+                    >
+                        <Heart size={14} className={`ph-like-heart ${post.is_liked ? 'ph-like-heart-on' : ''}`} /> {post.like_count}
+                    </button>
+                    <button type="button" className="ph-action-btn" onClick={handleToggleComments} data-testid={`ph-comments-toggle-${post.slug_token}`}>
+                        <MessageCircle size={14} /> {post.comment_count}
+                    </button>
+                    <button type="button" className="ph-action-btn" onClick={() => onShare?.(post)} data-testid={`ph-share-${post.slug_token}`}>
+                        <Share2 size={14} /> Share
+                    </button>
+                    {isEventPost && post?.event?.slug ? (
+                        <button type="button" className="ph-action-btn ph-btn-accent" onClick={() => onExplore?.(post)} data-testid={`ph-explore-${post.slug_token}`}>
+                            <ExternalLink size={14} /> Explore
+                        </button>
+                    ) : null}
+                </div>
 
-                {!shouldUseCompactEventMobile ? (
-                    <>
-                        <div className="ph-post-actions">
-                            <button
-                                type="button"
-                                className="ph-action-btn ph-like-btn"
-                                onClick={() => onLike?.(post.slug_token)}
-                                disabled={!isUserLoggedIn || likePending}
-                                aria-busy={likePending}
-                                data-testid={`ph-like-${post.slug_token}`}
-                            >
-                                <Heart size={14} className={`ph-like-heart ${post.is_liked ? 'ph-like-heart-on' : ''}`} /> {post.like_count}
-                            </button>
-                            <button type="button" className="ph-action-btn" onClick={handleToggleComments} data-testid={`ph-comments-toggle-${post.slug_token}`}>
-                                <MessageCircle size={14} /> {post.comment_count}
-                            </button>
-                            <button type="button" className="ph-action-btn" onClick={() => onShare?.(post)} data-testid={`ph-share-${post.slug_token}`}>
-                                <Share2 size={14} /> Share
-                            </button>
-                            {isEventPost && post?.event?.slug ? (
-                                <button type="button" className="ph-action-btn ph-btn-accent" onClick={() => onExplore?.(post)} data-testid={`ph-explore-${post.slug_token}`}>
-                                    <ExternalLink size={14} /> Explore
+                {commentsOpen ? (
+                    <div className="ph-comments" data-testid={`ph-comments-${post.slug_token}`}>
+                        {isUserLoggedIn ? (
+                            <form onSubmit={handleCommentSubmit} className="ph-comment-input-row">
+                                <input
+                                    className="ph-comment-input"
+                                    value={commentText}
+                                    onChange={(event) => setCommentText(event.target.value)}
+                                    placeholder="Write a comment"
+                                    data-testid={`ph-comment-input-${post.slug_token}`}
+                                />
+                                <button type="submit" className="ph-btn ph-btn-accent" disabled={commentSubmitting}>
+                                    {commentSubmitting ? 'Posting...' : 'Post'}
                                 </button>
-                            ) : null}
-                        </div>
+                            </form>
+                        ) : (
+                            <p className="ph-muted">Login as PDA user to comment.</p>
+                        )}
 
-                        {commentsOpen ? (
-                            <div className="ph-comments" data-testid={`ph-comments-${post.slug_token}`}>
-                                {isUserLoggedIn ? (
-                                    <form onSubmit={handleCommentSubmit} className="ph-comment-input-row">
-                                        <input
-                                            className="ph-comment-input"
-                                            value={commentText}
-                                            onChange={(event) => setCommentText(event.target.value)}
-                                            placeholder="Write a comment"
-                                            data-testid={`ph-comment-input-${post.slug_token}`}
-                                        />
-                                        <button type="submit" className="ph-btn ph-btn-accent" disabled={commentSubmitting}>
-                                            {commentSubmitting ? 'Posting...' : 'Post'}
-                                        </button>
-                                    </form>
+                        {commentsLoading ? <p className="ph-muted">Loading comments...</p> : null}
+                        {!commentsLoading && comments.length === 0 ? <p className="ph-muted">No comments yet</p> : null}
+                        {comments.map((comment) => (
+                            <div key={comment.id} className="ph-comment">
+                                {comment.profile_name ? (
+                                    <Link to={`/persohub/${comment.profile_name}`} style={{ fontWeight: 700, fontSize: '0.83rem', textDecoration: 'none', color: 'inherit' }}>
+                                        @{comment.profile_name}
+                                    </Link>
                                 ) : (
-                                    <p className="ph-muted">Login as PDA user to comment.</p>
-                                )}
-
-                                {commentsLoading ? <p className="ph-muted">Loading comments...</p> : null}
-                                {!commentsLoading && comments.length === 0 ? <p className="ph-muted">No comments yet</p> : null}
-                                {comments.map((comment) => (
-                                    <div key={comment.id} className="ph-comment">
-                                        {comment.profile_name ? (
-                                            <Link to={`/persohub/${comment.profile_name}`} style={{ fontWeight: 700, fontSize: '0.83rem', textDecoration: 'none', color: 'inherit' }}>
-                                                @{comment.profile_name}
-                                            </Link>
-                                        ) : (
-                                            <div style={{ fontWeight: 700, fontSize: '0.83rem' }}>
-                                                @user
-                                            </div>
-                                        )}
-                                        <div style={{ fontSize: '0.88rem' }}>{comment.comment_text}</div>
+                                    <div style={{ fontWeight: 700, fontSize: '0.83rem' }}>
+                                        @user
                                     </div>
-                                ))}
-                                {!commentsLoading && commentsHasMore ? (
-                                    <button
-                                        type="button"
-                                        className="ph-btn"
-                                        onClick={() => loadComments({ reset: false })}
-                                        disabled={commentsLoadingMore}
-                                    >
-                                        {commentsLoadingMore ? 'Loading...' : 'Load more comments'}
-                                    </button>
-                                ) : null}
+                                )}
+                                <div style={{ fontSize: '0.88rem' }}>{comment.comment_text}</div>
                             </div>
+                        ))}
+                        {!commentsLoading && commentsHasMore ? (
+                            <button
+                                type="button"
+                                className="ph-btn"
+                                onClick={() => loadComments({ reset: false })}
+                                disabled={commentsLoadingMore}
+                            >
+                                {commentsLoadingMore ? 'Loading...' : 'Load more comments'}
+                            </button>
                         ) : null}
-                    </>
+                    </div>
                 ) : null}
             </div>
 

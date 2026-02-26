@@ -487,6 +487,7 @@ export default function PersohubAdminEventsPage() {
     const [sympoOptions, setSympoOptions] = useState([]);
     const [eventSympoDrafts, setEventSympoDrafts] = useState({});
     const [assigningSympoSlug, setAssigningSympoSlug] = useState('');
+    const [requestingAccessSlug, setRequestingAccessSlug] = useState('');
     const [query, setQuery] = useState('');
     const [queryDebounced, setQueryDebounced] = useState('');
     const [page, setPage] = useState(1);
@@ -786,6 +787,20 @@ export default function PersohubAdminEventsPage() {
         }
     };
 
+    const requestEventAccess = async (eventRow) => {
+        if (!canMutate || requestingAccessSlug) return;
+        setRequestingAccessSlug(eventRow.slug);
+        try {
+            const response = await persohubAdminApi.requestPersohubEventAccess(eventRow.slug);
+            toast.success(response?.message || 'Access request submitted');
+            fetchEvents();
+        } catch (error) {
+            toast.error(persohubAdminApi.parseApiError(error, 'Failed to submit access request'));
+        } finally {
+            setRequestingAccessSlug('');
+        }
+    };
+
     if (!canAccessEvents) {
         return (
             <PersohubAdminLayout
@@ -884,6 +899,17 @@ export default function PersohubAdminEventsPage() {
                                             {eventRow.status}
                                         </span>
                                     </div>
+                                    <div className="mt-2">
+                                        <span className={`rounded-md border px-2 py-1 text-[10px] font-bold uppercase tracking-[0.15em] ${
+                                            eventRow.persohub_access_approved
+                                                ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                                                : (eventRow.persohub_access_status === 'pending'
+                                                    ? 'border-amber-300 bg-amber-50 text-amber-700'
+                                                    : 'border-red-300 bg-red-50 text-red-700')
+                                        }`}>
+                                            Access {eventRow.persohub_access_status || 'rejected'}
+                                        </span>
+                                    </div>
                                     <div className={`relative mt-3 space-y-2 text-sm text-slate-600 ${shouldClamp ? 'max-h-24 overflow-hidden' : ''}`}>
                                         <ParsedDescription
                                             description={eventRow.description}
@@ -955,11 +981,23 @@ export default function PersohubAdminEventsPage() {
 
                                     {canMutate ? (
                                         <div className="mt-4 flex flex-wrap gap-2">
-                                            {parityEnabled ? (
+                                            {parityEnabled && Boolean(eventRow.persohub_access_approved) ? (
                                                 <Button asChild className="bg-[#11131a] text-white hover:bg-[#1f2330]">
                                                     <Link to={`/persohub/admin/persohub-events/${eventRow.slug}/dashboard`}>
                                                         Manage Event
                                                     </Link>
+                                                </Button>
+                                            ) : null}
+                                            {!Boolean(eventRow.persohub_access_approved) ? (
+                                                <Button
+                                                    variant="outline"
+                                                    className="border-black/20"
+                                                    onClick={() => requestEventAccess(eventRow)}
+                                                    disabled={requestingAccessSlug === eventRow.slug || eventRow.persohub_access_status === 'pending'}
+                                                >
+                                                    {eventRow.persohub_access_status === 'pending'
+                                                        ? 'Access Requested'
+                                                        : (requestingAccessSlug === eventRow.slug ? 'Requesting...' : 'Request Persohub Access')}
                                                 </Button>
                                             ) : null}
                                             <Button variant="outline" className="border-black/20" onClick={() => openEditDialog(eventRow)}>
@@ -977,6 +1015,13 @@ export default function PersohubAdminEventsPage() {
                                             </Button>
                                         </div>
                                     ) : null}
+                                    <div className="mt-3">
+                                        <Button asChild variant="outline" className="border-black/20">
+                                            <Link to={`/persohub/events/${eventRow.slug}`}>
+                                                Go to Persohub Feed
+                                            </Link>
+                                        </Button>
+                                    </div>
                                 </div>
                             );
                         })}
