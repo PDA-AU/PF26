@@ -327,7 +327,6 @@ def _seed_event_bundle(
                     db.add(
                         PersohubEventAttendance(
                             event_id=event.id,
-                            round_id=round_row.id,
                             entity_type=PdaEventEntityType.TEAM,
                             team_id=team.id,
                             is_present=True,
@@ -427,7 +426,6 @@ def _seed_event_bundle(
                     db.add(
                         PersohubEventAttendance(
                             event_id=event.id,
-                            round_id=round_row.id,
                             entity_type=PdaEventEntityType.USER,
                             user_id=user.id,
                             is_present=True,

@@ -219,7 +219,6 @@ def ensure_attendance(db, event_id: int, round_id: int, entity_type: PdaEventEnt
         db.query(PdaEventAttendance)
         .filter(
             PdaEventAttendance.event_id == event_id,
-            PdaEventAttendance.round_id == round_id,
             PdaEventAttendance.entity_type == entity_type,
             PdaEventAttendance.user_id == user_id,
             PdaEventAttendance.team_id == team_id,
@@ -232,7 +231,6 @@ def ensure_attendance(db, event_id: int, round_id: int, entity_type: PdaEventEnt
         return row
     row = PdaEventAttendance(
         event_id=event_id,
-        round_id=round_id,
         entity_type=entity_type,
         user_id=user_id,
         team_id=team_id,

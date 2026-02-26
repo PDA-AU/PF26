@@ -220,7 +220,6 @@ def seed_mock_data(
                     db.add(
                         PdaEventAttendance(
                             event_id=event.id,
-                            round_id=first_round.id,
                             entity_type=PdaEventEntityType.TEAM,
                             team_id=team.id,
                             is_present=present,
@@ -290,7 +289,6 @@ def seed_mock_data(
                     db.add(
                         PdaEventAttendance(
                             event_id=event.id,
-                            round_id=first_round.id,
                             entity_type=PdaEventEntityType.USER,
                             user_id=user.id,
                             is_present=present,

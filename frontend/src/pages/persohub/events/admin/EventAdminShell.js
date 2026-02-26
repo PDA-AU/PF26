@@ -102,13 +102,17 @@ export default function EventAdminShell({
         if (eventInfo?.participant_mode === 'team') return 'Teams';
         return 'Participants';
     }, [eventInfo?.participant_mode]);
+    const hideRoundsAndLeaderboard = useMemo(
+        () => eventInfo?.event_type === 'attendance_only' && eventInfo?.round_mode === 'single',
+        [eventInfo?.event_type, eventInfo?.round_mode]
+    );
 
     const navItems = [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, to: `/persohub/admin/persohub-events/${eventSlug}/dashboard` },
         { id: 'attendance', label: 'Attendance', icon: Camera, to: `/persohub/admin/persohub-events/${eventSlug}/attendance` },
-        { id: 'rounds', label: 'Rounds', icon: Calendar, to: `/persohub/admin/persohub-events/${eventSlug}/rounds` },
+        ...(hideRoundsAndLeaderboard ? [] : [{ id: 'rounds', label: 'Rounds', icon: Calendar, to: `/persohub/admin/persohub-events/${eventSlug}/rounds` }]),
         { id: 'participants', label: participantTabLabel, icon: Users, to: `/persohub/admin/persohub-events/${eventSlug}/participants` },
-        { id: 'leaderboard', label: 'Leaderboard', icon: Trophy, to: `/persohub/admin/persohub-events/${eventSlug}/leaderboard` },
+        ...(hideRoundsAndLeaderboard ? [] : [{ id: 'leaderboard', label: 'Leaderboard', icon: Trophy, to: `/persohub/admin/persohub-events/${eventSlug}/leaderboard` }]),
         { id: 'email', label: 'Email', icon: Mail, to: `/persohub/admin/persohub-events/${eventSlug}/email` },
         { id: 'badges', label: 'Badges', icon: Award, to: `/persohub/admin/persohub-events/${eventSlug}/badges` },
         { id: 'logs', label: 'Logs', icon: ListChecks, to: `/persohub/admin/persohub-events/${eventSlug}/logs` },

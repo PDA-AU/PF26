@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios';
 import jsQR from 'jsqr';
 import { toast } from 'sonner';
-import { Camera, ChevronLeft, ChevronRight, Save, Search } from 'lucide-react';
+import { Camera, ChevronLeft, ChevronRight, Download, Save, Search } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -95,6 +95,8 @@ const normalizeRoundState = (value) => String(value || '').trim().toLowerCase();
 const EDITABLE_ROUND_STATES = new Set(['active']);
 const READ_ONLY_ROUND_STATES = new Set(['completed', 'reveal']);
 const VISIBLE_ROUND_STATES = new Set([...EDITABLE_ROUND_STATES, ...READ_ONLY_ROUND_STATES]);
+const ATTENDANCE_LEVEL_ENTRY = 'entry';
+const ATTENDANCE_LEVEL_ROUND = 'round';
 
 function AttendanceContent() {
     const { getAuthHeader } = usePersohubAdminAuth();
@@ -106,6 +108,7 @@ function AttendanceContent() {
     const [rows, setRows] = useState([]);
     const [rounds, setRounds] = useState([]);
     const [attendanceRoundId, setAttendanceRoundId] = useState('');
+    const [attendanceLevel, setAttendanceLevel] = useState(ATTENDANCE_LEVEL_ROUND);
     const [search, setSearch] = useState('');
     const [scanToken, setScanToken] = useState('');
     const [loading, setLoading] = useState(true);
@@ -117,6 +120,11 @@ function AttendanceContent() {
     const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false);
     const [pendingNavAction, setPendingNavAction] = useState(null);
     const [highlightedRowKey, setHighlightedRowKey] = useState('');
+    const [exportDialogOpen, setExportDialogOpen] = useState(false);
+    const [exportFormat, setExportFormat] = useState('csv');
+    const [exportLevel, setExportLevel] = useState(ATTENDANCE_LEVEL_ROUND);
+    const [exportRoundId, setExportRoundId] = useState('');
+    const [exporting, setExporting] = useState(false);
     const cameraRef = useRef(null);
     const streamRef = useRef(null);
     const detectorTimerRef = useRef(null);
@@ -141,6 +149,11 @@ function AttendanceContent() {
     const isSelectedRoundEditable = EDITABLE_ROUND_STATES.has(normalizeRoundState(selectedRound?.state));
     const isSelectedRoundReadOnly = READ_ONLY_ROUND_STATES.has(normalizeRoundState(selectedRound?.state));
     const hasManageableRoundSelection = attendanceRounds.length > 0;
+    const effectiveAttendanceLevel = attendanceLevel === ATTENDANCE_LEVEL_ROUND && !hasManageableRoundSelection
+        ? ATTENDANCE_LEVEL_ENTRY
+        : attendanceLevel;
+    const isRoundLevelSelected = effectiveAttendanceLevel === ATTENDANCE_LEVEL_ROUND;
+    const canEditCurrentLevel = isRoundLevelSelected ? isSelectedRoundEditable : true;
 
     const fetchRounds = useCallback(async () => {
         try {
@@ -172,7 +185,7 @@ function AttendanceContent() {
     }, [attendanceRoundId, eventSlug, getAuthHeader]);
 
     const fetchAttendance = useCallback(async () => {
-        if (!attendanceRoundId) {
+        if (isRoundLevelSelected && !attendanceRoundId) {
             setRows([]);
             setPresenceDraft({});
             setLoading(false);
@@ -182,7 +195,7 @@ function AttendanceContent() {
         try {
             const response = await axios.get(`${API}/persohub/admin/persohub-events/${eventSlug}/attendance`, {
                 headers: getAuthHeader(),
-                params: { round_id: Number(attendanceRoundId) },
+                params: isRoundLevelSelected ? { round_id: Number(attendanceRoundId) } : {},
             });
             setRows(response.data || []);
             setPresenceDraft({});
@@ -193,7 +206,7 @@ function AttendanceContent() {
         } finally {
             setLoading(false);
         }
-    }, [attendanceRoundId, eventSlug, getAuthHeader]);
+    }, [attendanceRoundId, eventSlug, getAuthHeader, isRoundLevelSelected]);
 
     useEffect(() => {
         const onUndoApplied = (event) => {
@@ -214,7 +227,7 @@ function AttendanceContent() {
     }, [fetchAttendance]);
 
     function markFromToken(rawToken) {
-        if (!isSelectedRoundEditable) return;
+        if (!canEditCurrentLevel) return;
         const token = String(rawToken || '').trim();
         if (!token) return;
         const decoded = decodeAttendanceTokenPayload(token);
@@ -470,7 +483,7 @@ function AttendanceContent() {
 
     useEffect(() => {
         setCurrentPage(1);
-    }, [attendanceRoundId, pageSize, search]);
+    }, [attendanceRoundId, pageSize, search, effectiveAttendanceLevel]);
 
     useEffect(() => {
         if (currentPage > totalPages) {
@@ -487,7 +500,7 @@ function AttendanceContent() {
     }, [presenceDraft]);
 
     const handlePresenceChange = useCallback((row, checked) => {
-        if (!isSelectedRoundEditable) return;
+        if (!canEditCurrentLevel) return;
         const key = `${row.entity_type}-${row.entity_id}`;
         const nextValue = checked === true;
         const originalValue = Boolean(rowPresenceMap[key]);
@@ -505,13 +518,13 @@ function AttendanceContent() {
             });
             return next;
         });
-    }, [isSelectedRoundEditable, pushLocalUndo, rowPresenceMap]);
+    }, [canEditCurrentLevel, pushLocalUndo, rowPresenceMap]);
 
     const areAllPageRowsChecked = pagedRows.length > 0 && pagedRows.every((row) => getPresentValue(row));
     const hasSomePageRowsChecked = pagedRows.some((row) => getPresentValue(row));
 
     const handleToggleAllCurrentPage = useCallback((checked) => {
-        if (!isSelectedRoundEditable) return;
+        if (!canEditCurrentLevel) return;
         const nextValue = checked === true;
         setPresenceDraft((prev) => {
             const previousSnapshot = { ...prev };
@@ -531,7 +544,7 @@ function AttendanceContent() {
             });
             return next;
         });
-    }, [isSelectedRoundEditable, pagedRows, pushLocalUndo, rowPresenceMap]);
+    }, [canEditCurrentLevel, pagedRows, pushLocalUndo, rowPresenceMap]);
 
     const dirtyCount = Object.keys(presenceDraft).length;
 
@@ -540,6 +553,11 @@ function AttendanceContent() {
         if (action.type === 'round') {
             setPresenceDraft({});
             setAttendanceRoundId(action.value);
+            return;
+        }
+        if (action.type === 'level') {
+            setPresenceDraft({});
+            setAttendanceLevel(action.value);
             return;
         }
         if (action.type === 'page') {
@@ -569,9 +587,14 @@ function AttendanceContent() {
         if (nextRoundId === attendanceRoundId) return;
         requestNavigation({ type: 'round', value: nextRoundId });
     }, [attendanceRoundId, requestNavigation]);
+    const handleAttendanceLevelChange = useCallback((value) => {
+        const nextLevel = value === ATTENDANCE_LEVEL_ENTRY ? ATTENDANCE_LEVEL_ENTRY : ATTENDANCE_LEVEL_ROUND;
+        if (nextLevel === attendanceLevel) return;
+        requestNavigation({ type: 'level', value: nextLevel });
+    }, [attendanceLevel, requestNavigation]);
 
     const saveAttendanceChanges = useCallback(async () => {
-        if (!isSelectedRoundEditable) return;
+        if (!canEditCurrentLevel) return;
         if (!dirtyCount) return;
         setSavingChanges(true);
         try {
@@ -592,7 +615,7 @@ function AttendanceContent() {
                         entity_type: row.entity_type,
                         user_id: row.entity_type === 'user' ? row.entity_id : null,
                         team_id: row.entity_type === 'team' ? row.entity_id : null,
-                        round_id: Number(attendanceRoundId),
+                        round_id: isRoundLevelSelected ? Number(attendanceRoundId) : null,
                         is_present: Boolean(presenceDraft[key]),
                     }, { headers: getAuthHeader() });
                 })
@@ -612,7 +635,7 @@ function AttendanceContent() {
                         label: 'Undo attendance save',
                         command: {
                             type: 'attendance_restore',
-                            round_id: Number(attendanceRoundId),
+                            round_id: isRoundLevelSelected ? Number(attendanceRoundId) : null,
                             entries: restoredForSucceeded,
                         },
                     });
@@ -628,13 +651,13 @@ function AttendanceContent() {
         } finally {
             setSavingChanges(false);
         }
-    }, [attendanceRoundId, dirtyCount, eventSlug, fetchAttendance, getAuthHeader, isSelectedRoundEditable, presenceDraft, pushSavedUndo, rowPresenceMap, rows]);
+    }, [attendanceRoundId, canEditCurrentLevel, dirtyCount, eventSlug, fetchAttendance, getAuthHeader, isRoundLevelSelected, presenceDraft, pushSavedUndo, rowPresenceMap, rows]);
 
     useEffect(() => {
-        if (isScanning && !isSelectedRoundEditable) {
+        if (isScanning && !canEditCurrentLevel) {
             stopScanner();
         }
-    }, [isScanning, isSelectedRoundEditable]);
+    }, [canEditCurrentLevel, isScanning]);
 
     const handlePageSizeChange = (value) => {
         const nextSize = Number.parseInt(value, 10);
@@ -652,14 +675,68 @@ function AttendanceContent() {
         if (currentPage === totalPages) return;
         requestNavigation({ type: 'page', value: Math.min(totalPages, currentPage + 1) });
     };
+    const handleOpenExportDialog = () => {
+        setExportLevel(isRoundLevelSelected ? ATTENDANCE_LEVEL_ROUND : ATTENDANCE_LEVEL_ENTRY);
+        setExportRoundId(attendanceRoundId || (attendanceRounds[0] ? String(attendanceRounds[0].id) : ''));
+        setExportDialogOpen(true);
+    };
+    const handleExportAttendance = async () => {
+        const selectedLevel = exportLevel === ATTENDANCE_LEVEL_ENTRY ? ATTENDANCE_LEVEL_ENTRY : ATTENDANCE_LEVEL_ROUND;
+        if (selectedLevel === ATTENDANCE_LEVEL_ROUND && !exportRoundId) {
+            toast.error('Select a round to export');
+            return;
+        }
+        setExporting(true);
+        try {
+            const params = {
+                format: exportFormat === 'xlsx' ? 'xlsx' : 'csv',
+                level: selectedLevel,
+                round_id: selectedLevel === ATTENDANCE_LEVEL_ROUND ? Number(exportRoundId) : undefined,
+                search: String(search || '').trim() || undefined,
+            };
+            const response = await axios.get(`${API}/persohub/admin/persohub-events/${eventSlug}/export/attendance`, {
+                headers: getAuthHeader(),
+                params,
+                responseType: 'blob',
+            });
+            const blob = new Blob([response.data], {
+                type: exportFormat === 'xlsx'
+                    ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                    : 'text/csv',
+            });
+            const url = window.URL.createObjectURL(blob);
+            const anchor = document.createElement('a');
+            anchor.href = url;
+            anchor.download = `attendance_${selectedLevel}.${exportFormat}`;
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+            window.URL.revokeObjectURL(url);
+            setExportDialogOpen(false);
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to export attendance'));
+        } finally {
+            setExporting(false);
+        }
+    };
 
     return (
         <>
             <div className="neo-card mb-6">
                 <div className="flex flex-wrap items-end gap-3">
                     <div>
+                        <Label>Attendance Level</Label>
+                        <Select value={effectiveAttendanceLevel} onValueChange={handleAttendanceLevelChange}>
+                            <SelectTrigger className="w-[220px] neo-input"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value={ATTENDANCE_LEVEL_ROUND} disabled={!hasManageableRoundSelection}>Round Level</SelectItem>
+                                <SelectItem value={ATTENDANCE_LEVEL_ENTRY}>Entry Level</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div>
                         <Label>Round</Label>
-                        <Select value={attendanceRoundId} onValueChange={handleRoundChange} disabled={!hasManageableRoundSelection}>
+                        <Select value={attendanceRoundId} onValueChange={handleRoundChange} disabled={!hasManageableRoundSelection || !isRoundLevelSelected}>
                             <SelectTrigger className="w-[260px] neo-input"><SelectValue /></SelectTrigger>
                             <SelectContent>
                                 {attendanceRounds.map((round) => (
@@ -668,20 +745,24 @@ function AttendanceContent() {
                             </SelectContent>
                         </Select>
                     </div>
-                    <Button onClick={fetchAttendance} disabled={!attendanceRoundId}>Refresh</Button>
-                    <Button variant="outline" className="border-black/20" onClick={startScanner} disabled={!attendanceRoundId || !isSelectedRoundEditable}>
+                    <Button onClick={fetchAttendance} disabled={isRoundLevelSelected && !attendanceRoundId}>Refresh</Button>
+                    <Button variant="outline" className="border-black/20" onClick={startScanner} disabled={(isRoundLevelSelected && !attendanceRoundId) || !canEditCurrentLevel}>
                         <Camera className="mr-2 h-4 w-4" /> Scan QR
                     </Button>
-                    <Button variant="outline" className="border-black/20" onClick={() => qrImageInputRef.current?.click()} disabled={!attendanceRoundId || !isSelectedRoundEditable}>
+                    <Button variant="outline" className="border-black/20" onClick={() => qrImageInputRef.current?.click()} disabled={(isRoundLevelSelected && !attendanceRoundId) || !canEditCurrentLevel}>
                         Upload QR Image
                     </Button>
                     <Button
                         onClick={saveAttendanceChanges}
-                        disabled={!attendanceRoundId || !isSelectedRoundEditable || !dirtyCount || savingChanges}
+                        disabled={(isRoundLevelSelected && !attendanceRoundId) || !canEditCurrentLevel || !dirtyCount || savingChanges}
                         className="bg-primary text-white border-2 border-black shadow-neo"
                     >
                         <Save className="mr-2 h-4 w-4" />
                         {savingChanges ? 'Saving...' : `Save${dirtyCount ? ` (${dirtyCount})` : ''}`}
+                    </Button>
+                    <Button variant="outline" className="border-black/20" onClick={handleOpenExportDialog}>
+                        <Download className="mr-2 h-4 w-4" />
+                        Export
                     </Button>
                     {isScanning ? (
                         <Button variant="outline" className="border-red-400 text-red-600" onClick={stopScanner}>Stop</Button>
@@ -711,10 +792,10 @@ function AttendanceContent() {
                     </div>
                 ) : null}
                 <div className="mt-3 flex gap-2">
-                    <Input value={scanToken} onChange={(e) => setScanToken(e.target.value)} placeholder="Manual token input" disabled={!attendanceRoundId || !isSelectedRoundEditable} />
-                    <Button onClick={() => markFromToken(scanToken)} disabled={!attendanceRoundId || !isSelectedRoundEditable}>Mark Locally</Button>
+                    <Input value={scanToken} onChange={(e) => setScanToken(e.target.value)} placeholder="Manual token input" disabled={(isRoundLevelSelected && !attendanceRoundId) || !canEditCurrentLevel} />
+                    <Button onClick={() => markFromToken(scanToken)} disabled={(isRoundLevelSelected && !attendanceRoundId) || !canEditCurrentLevel}>Mark Locally</Button>
                 </div>
-                {isSelectedRoundReadOnly ? (
+                {isRoundLevelSelected && isSelectedRoundReadOnly ? (
                     <p className="mt-3 text-sm font-medium text-amber-700">
                         Round is completed/reveal. Attendance is view-only.
                     </p>
@@ -726,7 +807,7 @@ function AttendanceContent() {
                     <div className="loading-spinner mx-auto"></div>
                     <p className="mt-4">Loading attendance...</p>
                 </div>
-            ) : !attendanceRoundId ? (
+            ) : isRoundLevelSelected && !attendanceRoundId ? (
                 <div className="neo-card text-center py-12">
                     <p className="mt-1 text-slate-600">No active/completed/reveal rounds available for attendance.</p>
                 </div>
@@ -745,7 +826,7 @@ function AttendanceContent() {
                                         <Checkbox
                                             checked={areAllPageRowsChecked ? true : (hasSomePageRowsChecked ? 'indeterminate' : false)}
                                             onCheckedChange={handleToggleAllCurrentPage}
-                                            disabled={!isSelectedRoundEditable}
+                                            disabled={!canEditCurrentLevel}
                                         />
                                     </div>
                                 </th>
@@ -767,7 +848,7 @@ function AttendanceContent() {
                                         <Checkbox
                                             checked={getPresentValue(row)}
                                             onCheckedChange={(checked) => handlePresenceChange(row, checked)}
-                                            disabled={!isSelectedRoundEditable}
+                                            disabled={!canEditCurrentLevel}
                                         />
                                             </td>
                                         </tr>
@@ -856,6 +937,58 @@ function AttendanceContent() {
                                 }}
                             >
                                 Continue
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
+                <DialogContent className="border-4 border-black bg-white">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading text-xl font-black">Export Attendance</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                        <div>
+                            <Label>Format</Label>
+                            <Select value={exportFormat} onValueChange={setExportFormat}>
+                                <SelectTrigger className="neo-input"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="csv">CSV</SelectItem>
+                                    <SelectItem value="xlsx">XLSX</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div>
+                            <Label>Level</Label>
+                            <Select value={exportLevel} onValueChange={setExportLevel}>
+                                <SelectTrigger className="neo-input"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value={ATTENDANCE_LEVEL_ROUND} disabled={!hasManageableRoundSelection}>Round Level</SelectItem>
+                                    <SelectItem value={ATTENDANCE_LEVEL_ENTRY}>Entry Level</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        {exportLevel === ATTENDANCE_LEVEL_ROUND ? (
+                            <div>
+                                <Label>Round</Label>
+                                <Select value={exportRoundId} onValueChange={setExportRoundId}>
+                                    <SelectTrigger className="neo-input"><SelectValue placeholder="Select round" /></SelectTrigger>
+                                    <SelectContent>
+                                        {attendanceRounds.map((round) => (
+                                            <SelectItem key={round.id} value={String(round.id)}>Round {round.round_no}: {round.name}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        ) : null}
+                        <p className="text-xs text-slate-600">Export uses current search filter.</p>
+                        <div className="flex justify-end gap-2">
+                            <Button type="button" variant="outline" className="border-2 border-black shadow-neo" onClick={() => setExportDialogOpen(false)}>
+                                Cancel
+                            </Button>
+                            <Button type="button" className="border-2 border-black bg-[#FDE047] text-black shadow-neo" onClick={handleExportAttendance} disabled={exporting}>
+                                {exporting ? 'Exporting...' : 'Download'}
                             </Button>
                         </div>
                     </div>

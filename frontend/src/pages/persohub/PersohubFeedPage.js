@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { MessageCircle, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -14,7 +14,6 @@ import {
     CommunityListPanel,
     ConfirmModal,
     EmptyState,
-    FeaturedRail,
     PostCard,
     SearchSuggestionList,
 } from '@/pages/persohub/components';
@@ -169,10 +168,6 @@ export default function PersohubFeedPage() {
         }, 220);
         return () => clearTimeout(timer);
     }, [activeHashtag, loadInitial, search]);
-
-    const featuredPosts = useMemo(() => {
-        return [...posts].sort((a, b) => (b.like_count || 0) - (a.like_count || 0)).slice(0, 6);
-    }, [posts]);
 
     const patchPost = (nextPost) => {
         setPosts((prev) => prev.map((item) => (item.slug_token === nextPost.slug_token ? nextPost : item)));
@@ -595,7 +590,6 @@ export default function PersohubFeedPage() {
                                 <p className="ph-muted" style={{ marginBottom: 0 }}>User mode: likes, comments, follows are enabled.</p>
                             )}
                         </div>
-                        <FeaturedRail posts={featuredPosts} />
                     </aside>
                 </div>
             </div>

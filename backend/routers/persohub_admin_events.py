@@ -975,7 +975,6 @@ def delete_admin_event(
         db.query(PersohubEventRoundPanel).filter(PersohubEventRoundPanel.round_id.in_(round_ids)).delete(synchronize_session=False)
         db.query(PersohubEventScore).filter(PersohubEventScore.round_id.in_(round_ids)).delete(synchronize_session=False)
         db.query(PersohubEventRoundSubmission).filter(PersohubEventRoundSubmission.round_id.in_(round_ids)).delete(synchronize_session=False)
-        db.query(PersohubEventAttendance).filter(PersohubEventAttendance.round_id.in_(round_ids)).delete(synchronize_session=False)
 
     db.query(PersohubEventInvite).filter(PersohubEventInvite.event_id == event_id).delete(synchronize_session=False)
     delete_badges_for_persohub_event(db, event_id)

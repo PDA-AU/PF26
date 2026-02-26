@@ -1089,7 +1089,6 @@ def delete_managed_event(
         db.query(PersohubEventRoundPanel).filter(PersohubEventRoundPanel.round_id.in_(round_ids)).delete(synchronize_session=False)
         db.query(PersohubEventScore).filter(PersohubEventScore.round_id.in_(round_ids)).delete(synchronize_session=False)
         db.query(PersohubEventRoundSubmission).filter(PersohubEventRoundSubmission.round_id.in_(round_ids)).delete(synchronize_session=False)
-        db.query(PersohubEventAttendance).filter(PersohubEventAttendance.round_id.in_(round_ids)).delete(synchronize_session=False)
 
     db.query(PersohubEventInvite).filter(PersohubEventInvite.event_id == event_id).delete(synchronize_session=False)
     delete_badges_for_persohub_event(db, event_id)
@@ -1217,10 +1216,7 @@ def event_dashboard(
     registrations = db.query(PersohubEventRegistration).filter(PersohubEventRegistration.event_id == event.id).count()
     round_rows = db.query(PersohubEventRound).filter(PersohubEventRound.event_id == event.id).order_by(PersohubEventRound.round_no.asc()).all()
     rounds = len(round_rows)
-    attendance_present = db.query(PersohubEventAttendance).filter(
-        PersohubEventAttendance.event_id == event.id,
-        PersohubEventAttendance.is_present == True,  # noqa: E712
-    ).count()
+    attendance_present = 0
     scores = db.query(PersohubEventScore).filter(PersohubEventScore.event_id == event.id).count()
     badges = count_event_badges(db, platform="persohub", event_id=event.id)
     active_count = db.query(PersohubEventRegistration).filter(
@@ -1239,6 +1235,82 @@ def event_dashboard(
     batch_distribution: Dict[str, int] = {}
     leaderboard_scores: List[float] = []
     entities = _registered_entities(db, event)
+    user_ids = [int(item["entity_id"]) for item in entities if str(item.get("entity_type")) == "user"]
+    team_ids = [int(item["entity_id"]) for item in entities if str(item.get("entity_type")) == "team"]
+    round_metrics: Dict[Tuple[str, int], Dict[str, int]] = {}
+    if user_ids:
+        user_rows = (
+            db.query(
+                PersohubEventScore.user_id.label("entity_id"),
+                func.count(PersohubEventScore.id).label("row_count"),
+                func.count(PersohubEventScore.id).filter(PersohubEventScore.is_present == True).label("present_count"),  # noqa: E712
+            )
+            .filter(
+                PersohubEventScore.event_id == event.id,
+                PersohubEventScore.entity_type == PersohubEventEntityType.USER,
+                PersohubEventScore.user_id.in_(user_ids),
+            )
+            .group_by(PersohubEventScore.user_id)
+            .all()
+        )
+        for row in user_rows:
+            if row.entity_id is not None:
+                round_metrics[("user", int(row.entity_id))] = {
+                    "row_count": int(row.row_count or 0),
+                    "present_count": int(row.present_count or 0),
+                }
+    if team_ids:
+        team_rows = (
+            db.query(
+                PersohubEventScore.team_id.label("entity_id"),
+                func.count(PersohubEventScore.id).label("row_count"),
+                func.count(PersohubEventScore.id).filter(PersohubEventScore.is_present == True).label("present_count"),  # noqa: E712
+            )
+            .filter(
+                PersohubEventScore.event_id == event.id,
+                PersohubEventScore.entity_type == PersohubEventEntityType.TEAM,
+                PersohubEventScore.team_id.in_(team_ids),
+            )
+            .group_by(PersohubEventScore.team_id)
+            .all()
+        )
+        for row in team_rows:
+            if row.entity_id is not None:
+                round_metrics[("team", int(row.entity_id))] = {
+                    "row_count": int(row.row_count or 0),
+                    "present_count": int(row.present_count or 0),
+                }
+    entry_present_keys = set()
+    if user_ids:
+        user_present_rows = db.query(PersohubEventAttendance.user_id).filter(
+            PersohubEventAttendance.event_id == event.id,
+            PersohubEventAttendance.entity_type == PersohubEventEntityType.USER,
+            PersohubEventAttendance.is_present == True,  # noqa: E712
+            PersohubEventAttendance.user_id.in_(user_ids),
+        ).all()
+        entry_present_keys.update(("user", int(row.user_id)) for row in user_present_rows if row.user_id is not None)
+    if team_ids:
+        team_present_rows = db.query(PersohubEventAttendance.team_id).filter(
+            PersohubEventAttendance.event_id == event.id,
+            PersohubEventAttendance.entity_type == PersohubEventEntityType.TEAM,
+            PersohubEventAttendance.is_present == True,  # noqa: E712
+            PersohubEventAttendance.team_id.in_(team_ids),
+        ).all()
+        entry_present_keys.update(("team", int(row.team_id)) for row in team_present_rows if row.team_id is not None)
+    attendance_present = sum(
+        1
+        for item in entities
+        if (
+            (
+                round_metrics.get((str(item.get("entity_type")), int(item.get("entity_id"))), {}).get("row_count", 0) > 0
+                and round_metrics.get((str(item.get("entity_type")), int(item.get("entity_id"))), {}).get("present_count", 0) > 0
+            )
+            or (
+                round_metrics.get((str(item.get("entity_type")), int(item.get("entity_id"))), {}).get("row_count", 0) == 0
+                and (str(item.get("entity_type")), int(item.get("entity_id"))) in entry_present_keys
+            )
+        )
+    )
     active_entities = [item for item in entities if _status_is_active(item.get("status"))]
 
     if event.participant_mode == PersohubEventParticipantMode.INDIVIDUAL:
@@ -1976,32 +2048,50 @@ def delete_team_with_cascade(
 @router.get("/persohub/admin/persohub-events/{slug}/attendance")
 def event_attendance(
     slug: str,
-    round_id: int = Query(...),
+    round_id: Optional[int] = Query(None),
     _: PdaUser = Depends(require_persohub_event_admin),
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
-    _get_event_round_or_404(db, event.id, round_id)
     entities = _registered_entities(db, event)
-    rows = db.query(PersohubEventAttendance).filter(
-        PersohubEventAttendance.event_id == event.id,
-        PersohubEventAttendance.round_id == round_id,
-    ).all()
+    level = "entry"
+    rows = []
+    score_rows = []
+    if round_id is not None:
+        _get_event_round_or_404(db, event.id, int(round_id))
+        level = "round"
+        score_rows = db.query(PersohubEventScore).filter(
+            PersohubEventScore.event_id == event.id,
+            PersohubEventScore.round_id == int(round_id),
+        ).all()
+    else:
+        rows = db.query(PersohubEventAttendance).filter(
+            PersohubEventAttendance.event_id == event.id,
+        ).all()
     row_map = {}
-    for row in rows:
-        key = ("user", row.user_id) if row.user_id else ("team", row.team_id)
-        row_map[key] = row
+    if level == "round":
+        for row in score_rows:
+            key = ("user", row.user_id) if row.user_id else ("team", row.team_id)
+            row_map[key] = row
+    else:
+        for row in rows:
+            key = ("user", row.user_id) if row.user_id else ("team", row.team_id)
+            row_map[key] = row
     results = []
     for entity in entities:
         key = (entity["entity_type"], entity["entity_id"])
         row = row_map.get(key)
+        marked_at = None
+        if row:
+            marked_at_raw = getattr(row, "marked_at", None) or getattr(row, "updated_at", None) or getattr(row, "created_at", None)
+            marked_at = marked_at_raw.isoformat() if marked_at_raw else None
         results.append(
             {
                 **entity,
-                "attendance_id": row.id if row else None,
-                "round_id": row.round_id if row else round_id,
+                "attendance_id": row.id if (row and level == "entry") else None,
+                "round_id": int(round_id) if round_id is not None else None,
                 "is_present": bool(row.is_present) if row else False,
-                "marked_at": row.marked_at.isoformat() if row and row.marked_at else None,
+                "marked_at": marked_at,
             }
         )
     return results
@@ -2015,36 +2105,57 @@ def mark_attendance(
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
-    if payload.round_id is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="round_id is required")
-    _get_event_round_or_404(db, event.id, int(payload.round_id))
+    if payload.round_id is not None:
+        _get_event_round_or_404(db, event.id, int(payload.round_id))
     entity_type = PersohubEventEntityType.USER if payload.entity_type.value == "user" else PersohubEventEntityType.TEAM
     if entity_type == PersohubEventEntityType.USER and not payload.user_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user_id required for user attendance")
     if entity_type == PersohubEventEntityType.TEAM and not payload.team_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="team_id required for team attendance")
-
-    row = db.query(PersohubEventAttendance).filter(
-        PersohubEventAttendance.event_id == event.id,
-        PersohubEventAttendance.round_id == payload.round_id,
-        PersohubEventAttendance.entity_type == entity_type,
-        PersohubEventAttendance.user_id == payload.user_id,
-        PersohubEventAttendance.team_id == payload.team_id,
-    ).first()
-    if row:
-        row.is_present = payload.is_present
-        row.marked_by_user_id = admin.id
+    level = "round" if payload.round_id is not None else "entry"
+    if level == "round":
+        row = db.query(PersohubEventScore).filter(
+            PersohubEventScore.event_id == event.id,
+            PersohubEventScore.round_id == int(payload.round_id),
+            PersohubEventScore.entity_type == entity_type,
+            PersohubEventScore.user_id == payload.user_id,
+            PersohubEventScore.team_id == payload.team_id,
+        ).first()
+        if row:
+            row.is_present = bool(payload.is_present)
+        else:
+            row = PersohubEventScore(
+                event_id=event.id,
+                round_id=int(payload.round_id),
+                entity_type=entity_type,
+                user_id=payload.user_id,
+                team_id=payload.team_id,
+                criteria_scores={},
+                total_score=0,
+                normalized_score=0,
+                is_present=bool(payload.is_present),
+            )
+            db.add(row)
     else:
-        row = PersohubEventAttendance(
-            event_id=event.id,
-            round_id=payload.round_id,
-            entity_type=entity_type,
-            user_id=payload.user_id,
-            team_id=payload.team_id,
-            is_present=payload.is_present,
-            marked_by_user_id=admin.id,
-        )
-        db.add(row)
+        row = db.query(PersohubEventAttendance).filter(
+            PersohubEventAttendance.event_id == event.id,
+            PersohubEventAttendance.entity_type == entity_type,
+            PersohubEventAttendance.user_id == payload.user_id,
+            PersohubEventAttendance.team_id == payload.team_id,
+        ).first()
+        if row:
+            row.is_present = bool(payload.is_present)
+            row.marked_by_user_id = admin.id
+        else:
+            row = PersohubEventAttendance(
+                event_id=event.id,
+                entity_type=entity_type,
+                user_id=payload.user_id,
+                team_id=payload.team_id,
+                is_present=bool(payload.is_present),
+                marked_by_user_id=admin.id,
+            )
+            db.add(row)
     db.commit()
     _log_event_admin_action(
         db,
@@ -2059,6 +2170,7 @@ def mark_attendance(
             "team_id": payload.team_id,
             "round_id": payload.round_id,
             "is_present": bool(payload.is_present),
+            "level": level,
         },
     )
     return {"message": "Attendance updated"}
@@ -2072,9 +2184,8 @@ def scan_attendance(
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
-    if payload.round_id is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="round_id is required")
-    _get_event_round_or_404(db, event.id, int(payload.round_id))
+    if payload.round_id is not None:
+        _get_event_round_or_404(db, event.id, int(payload.round_id))
     decoded = decode_token(payload.token)
     if decoded.get("qr") != "persohub_event_attendance" or decoded.get("event_slug") != event.slug:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid QR token")
@@ -2095,7 +2206,7 @@ def scan_attendance(
         "scan_persohub_event_attendance",
         method="POST",
         path=f"/persohub/admin/persohub-events/{slug}/attendance/scan",
-        meta={"round_id": payload.round_id, "entity_type": entity_type, "entity_id": entity_id},
+        meta={"round_id": payload.round_id, "entity_type": entity_type, "entity_id": entity_id, "level": ("round" if payload.round_id is not None else "entry")},
     )
     return response
 
@@ -3352,14 +3463,6 @@ def round_participants(
     for row in score_rows:
         key = ("user", row.user_id) if row.user_id else ("team", row.team_id)
         score_map[key] = row
-    attendance_rows = db.query(PersohubEventAttendance).filter(
-        PersohubEventAttendance.event_id == event.id,
-        PersohubEventAttendance.round_id == round_id,
-    ).all()
-    attendance_map = {}
-    for row in attendance_rows:
-        key = ("user", row.user_id) if row.user_id else ("team", row.team_id)
-        attendance_map[key] = row
     submission_rows = db.query(PersohubEventRoundSubmission).filter(
         PersohubEventRoundSubmission.event_id == event.id,
         PersohubEventRoundSubmission.round_id == round_id,
@@ -3372,12 +3475,11 @@ def round_participants(
     for entity in entities:
         key = (entity["entity_type"], entity["entity_id"])
         row = score_map.get(key)
-        attendance_row = attendance_map.get(key)
         submission_row = submission_map.get(key)
         panel_assignment = assignment_map.get(_panel_entity_key(entity.get("entity_type"), int(entity.get("entity_id"))))
         panel_row = panel_map.get(int(panel_assignment.panel_id)) if panel_assignment and panel_assignment.panel_id is not None else None
         panel_id = int(panel_assignment.panel_id) if panel_assignment and panel_assignment.panel_id is not None else None
-        is_present = bool(attendance_row.is_present) if attendance_row else (bool(row.is_present) if row else False)
+        is_present = bool(row.is_present) if row else False
         payload = {
             **entity,
             "score_id": row.id if row else None,
@@ -3610,8 +3712,6 @@ def save_scores(
     reg_team_map: Dict[int, PersohubEventRegistration] = {}
     score_user_map: Dict[int, PersohubEventScore] = {}
     score_team_map: Dict[int, PersohubEventScore] = {}
-    attendance_user_map: Dict[int, PersohubEventAttendance] = {}
-    attendance_team_map: Dict[int, PersohubEventAttendance] = {}
 
     if user_ids:
         reg_user_map = {
@@ -3630,16 +3730,6 @@ def save_scores(
                 PersohubEventScore.round_id == round_id,
                 PersohubEventScore.entity_type == PersohubEventEntityType.USER,
                 PersohubEventScore.user_id.in_(user_ids),
-            ).all()
-            if row.user_id is not None
-        }
-        attendance_user_map = {
-            int(row.user_id): row
-            for row in db.query(PersohubEventAttendance).filter(
-                PersohubEventAttendance.event_id == event.id,
-                PersohubEventAttendance.round_id == round_id,
-                PersohubEventAttendance.entity_type == PersohubEventEntityType.USER,
-                PersohubEventAttendance.user_id.in_(user_ids),
             ).all()
             if row.user_id is not None
         }
@@ -3664,16 +3754,6 @@ def save_scores(
             ).all()
             if row.team_id is not None
         }
-        attendance_team_map = {
-            int(row.team_id): row
-            for row in db.query(PersohubEventAttendance).filter(
-                PersohubEventAttendance.event_id == event.id,
-                PersohubEventAttendance.round_id == round_id,
-                PersohubEventAttendance.entity_type == PersohubEventEntityType.TEAM,
-                PersohubEventAttendance.team_id.in_(team_ids),
-            ).all()
-            if row.team_id is not None
-        }
 
     for entry, entity_type, user_id, team_id in parsed_entries:
         is_user = entity_type == PersohubEventEntityType.USER
@@ -3689,8 +3769,6 @@ def save_scores(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{label} {value} is eliminated")
 
         score_row = score_user_map.get(entity_id_value) if is_user else score_team_map.get(entity_id_value)
-        attendance_row = attendance_user_map.get(entity_id_value) if is_user else attendance_team_map.get(entity_id_value)
-
         raw_scores = entry.criteria_scores if isinstance(entry.criteria_scores, dict) else {}
         meta_scores: Dict[str, Any] = {}
         raw_feedback = raw_scores.get("__judge_feedback")
@@ -3737,24 +3815,6 @@ def save_scores(
             else:
                 score_team_map[entity_id_value] = score_row
 
-        if attendance_row:
-            attendance_row.is_present = bool(entry.is_present)
-            attendance_row.marked_by_user_id = admin.id
-        else:
-            attendance_row = PersohubEventAttendance(
-                event_id=event.id,
-                round_id=round_id,
-                entity_type=entity_type,
-                user_id=user_id,
-                team_id=team_id,
-                is_present=bool(entry.is_present),
-                marked_by_user_id=admin.id,
-            )
-            db.add(attendance_row)
-            if is_user:
-                attendance_user_map[entity_id_value] = attendance_row
-            else:
-                attendance_team_map[entity_id_value] = attendance_row
     _recompute_round_normalized_scores(db, event, round_row)
     db.commit()
     _log_event_admin_action(
@@ -4056,29 +4116,6 @@ def import_scores(
                 )
             )
 
-        attendance_row = db.query(PersohubEventAttendance).filter(
-            PersohubEventAttendance.event_id == event.id,
-            PersohubEventAttendance.round_id == round_id,
-            PersohubEventAttendance.entity_type == entity_type,
-            PersohubEventAttendance.user_id == user_id,
-            PersohubEventAttendance.team_id == team_id,
-        ).first()
-        if attendance_row:
-            attendance_row.is_present = item["is_present"]
-            attendance_row.marked_by_user_id = admin.id
-        else:
-            db.add(
-                PersohubEventAttendance(
-                    event_id=event.id,
-                    round_id=round_id,
-                    entity_type=entity_type,
-                    user_id=user_id,
-                    team_id=team_id,
-                    is_present=item["is_present"],
-                    marked_by_user_id=admin.id,
-                )
-            )
-
     _recompute_round_normalized_scores(db, event, round_row)
     db.commit()
     _log_event_admin_action(
@@ -4321,24 +4358,8 @@ def event_leaderboard(
                 .group_by(PersohubEventScore.user_id)
                 .all()
             )
-            attendance_rows = (
-                db.query(
-                    PersohubEventAttendance.user_id.label("entity_id"),
-                    func.count(PersohubEventAttendance.id).label("attendance_count"),
-                )
-                .filter(
-                    PersohubEventAttendance.event_id == event.id,
-                    PersohubEventAttendance.entity_type == PersohubEventEntityType.USER,
-                    PersohubEventAttendance.is_present == True,  # noqa: E712
-                    PersohubEventAttendance.user_id.in_(entity_ids),
-                    PersohubEventAttendance.round_id.in_(effective_round_ids),
-                )
-                .group_by(PersohubEventAttendance.user_id)
-                .all()
-            )
         else:
             score_rows = []
-            attendance_rows = []
         score_map = {
             int(row.entity_id): {
                 "cumulative_score": float(row.cumulative_score or 0.0),
@@ -4347,12 +4368,6 @@ def event_leaderboard(
             for row in score_rows
             if row.entity_id is not None
         }
-        attendance_map = {
-            int(row.entity_id): int(row.attendance_count or 0)
-            for row in attendance_rows
-            if row.entity_id is not None
-        }
-
         for entity in entities:
             user_id = int(entity["entity_id"])
             score_info = score_map.get(user_id, {"cumulative_score": 0.0, "rounds_participated": 0})
@@ -4362,7 +4377,7 @@ def event_leaderboard(
                     "participant_id": user_id,
                     "register_number": entity.get("regno_or_code"),
                     "cumulative_score": float(score_info["cumulative_score"]),
-                    "attendance_count": int(attendance_map.get(user_id, 0)),
+                    "attendance_count": int(score_info["rounds_participated"]),
                     "rounds_participated": int(score_info["rounds_participated"]),
                 }
             )
@@ -4420,24 +4435,8 @@ def event_leaderboard(
                 .group_by(PersohubEventScore.team_id)
                 .all()
             )
-            attendance_rows = (
-                db.query(
-                    PersohubEventAttendance.team_id.label("entity_id"),
-                    func.count(PersohubEventAttendance.id).label("attendance_count"),
-                )
-                .filter(
-                    PersohubEventAttendance.event_id == event.id,
-                    PersohubEventAttendance.entity_type == PersohubEventEntityType.TEAM,
-                    PersohubEventAttendance.is_present == True,  # noqa: E712
-                    PersohubEventAttendance.team_id.in_(entity_ids),
-                    PersohubEventAttendance.round_id.in_(effective_round_ids),
-                )
-                .group_by(PersohubEventAttendance.team_id)
-                .all()
-            )
         else:
             score_rows = []
-            attendance_rows = []
         score_map = {
             int(row.entity_id): {
                 "cumulative_score": float(row.cumulative_score or 0.0),
@@ -4446,12 +4445,6 @@ def event_leaderboard(
             for row in score_rows
             if row.entity_id is not None
         }
-        attendance_map = {
-            int(row.entity_id): int(row.attendance_count or 0)
-            for row in attendance_rows
-            if row.entity_id is not None
-        }
-
         for entity in entities:
             team_id = int(entity["entity_id"])
             score_info = score_map.get(team_id, {"cumulative_score": 0.0, "rounds_participated": 0})
@@ -4459,7 +4452,7 @@ def event_leaderboard(
                 {
                     **entity,
                     "cumulative_score": float(score_info["cumulative_score"]),
-                    "attendance_count": int(attendance_map.get(team_id, 0)),
+                    "attendance_count": int(score_info["rounds_participated"]),
                     "rounds_participated": int(score_info["rounds_participated"]),
                 }
             )
@@ -5194,6 +5187,90 @@ def export_participants(
         content = _export_to_csv(headers, rows)
         media_type = "text/csv"
         filename = f"{event.event_code}_participants.csv"
+    return StreamingResponse(io.BytesIO(content), media_type=media_type, headers={"Content-Disposition": f"attachment; filename={filename}"})
+
+
+@router.get("/persohub/admin/persohub-events/{slug}/export/attendance")
+def export_attendance(
+    slug: str,
+    format: str = Query("csv"),
+    level: str = Query("round"),
+    round_id: Optional[int] = Query(None),
+    search: Optional[str] = Query(None),
+    _: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    normalized_level = str(level or "round").strip().lower()
+    if normalized_level not in {"entry", "round"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="level must be entry or round")
+    if normalized_level == "round":
+        if round_id is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="round_id is required for round export")
+        _get_event_round_or_404(db, event.id, int(round_id))
+
+    entities = _registered_entities(db, event)
+    needle = str(search or "").strip().lower()
+    if needle:
+        entities = [
+            row for row in entities
+            if needle in " ".join([
+                str(row.get("name") or ""),
+                str(row.get("regno_or_code") or ""),
+                str(row.get("email") or ""),
+                str(row.get("department") or ""),
+                str(row.get("entity_type") or ""),
+            ]).lower()
+        ]
+
+    row_map = {}
+    if normalized_level == "round":
+        score_rows = db.query(PersohubEventScore).filter(
+            PersohubEventScore.event_id == event.id,
+            PersohubEventScore.round_id == int(round_id),
+        ).all()
+        for row in score_rows:
+            key = ("user", row.user_id) if row.user_id else ("team", row.team_id)
+            row_map[key] = row
+    else:
+        attendance_rows = db.query(PersohubEventAttendance).filter(
+            PersohubEventAttendance.event_id == event.id,
+        ).all()
+        for row in attendance_rows:
+            key = ("user", row.user_id) if row.user_id else ("team", row.team_id)
+            row_map[key] = row
+
+    headers = ["Si.No", "Type", "Name", "Code", "Email", "Department", "Present", "Marked At", "Level", "Round"]
+    rows: List[List[object]] = []
+    for index, entity in enumerate(entities, start=1):
+        key = (entity["entity_type"], entity["entity_id"])
+        source_row = row_map.get(key)
+        marked_at_raw = (
+            getattr(source_row, "marked_at", None)
+            or getattr(source_row, "updated_at", None)
+            or getattr(source_row, "created_at", None)
+        ) if source_row else None
+        rows.append([
+            index,
+            entity.get("entity_type"),
+            entity.get("name"),
+            entity.get("regno_or_code"),
+            entity.get("email"),
+            entity.get("department"),
+            bool(source_row.is_present) if source_row else False,
+            marked_at_raw.isoformat() if marked_at_raw else "",
+            normalized_level,
+            int(round_id) if normalized_level == "round" else "",
+        ])
+
+    if format == "xlsx":
+        content = _export_to_xlsx(headers, rows)
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        filename = f"{event.event_code}_attendance_{normalized_level}.xlsx"
+    else:
+        content = _export_to_csv(headers, rows)
+        media_type = "text/csv"
+        filename = f"{event.event_code}_attendance_{normalized_level}.csv"
     return StreamingResponse(io.BytesIO(content), media_type=media_type, headers={"Content-Disposition": f"attachment; filename={filename}"})
 
 

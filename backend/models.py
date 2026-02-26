@@ -464,7 +464,6 @@ class PdaEventAttendance(Base):
     __table_args__ = (
         UniqueConstraint(
             "event_id",
-            "round_id",
             "entity_type",
             "user_id",
             "team_id",
@@ -474,7 +473,6 @@ class PdaEventAttendance(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     event_id = Column(Integer, ForeignKey("pda_events.id"), nullable=False, index=True)
-    round_id = Column(Integer, ForeignKey("pda_event_rounds.id"), nullable=True, index=True)
     entity_type = Column(SQLEnum(PdaEventEntityType), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     team_id = Column(Integer, ForeignKey("pda_event_teams.id"), nullable=True, index=True)
@@ -822,7 +820,6 @@ class PersohubEventAttendance(Base):
     __table_args__ = (
         UniqueConstraint(
             "event_id",
-            "round_id",
             "entity_type",
             "user_id",
             "team_id",
@@ -832,7 +829,6 @@ class PersohubEventAttendance(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     event_id = Column(Integer, ForeignKey("persohub_events.id"), nullable=False, index=True)
-    round_id = Column(Integer, ForeignKey("persohub_event_rounds.id"), nullable=True, index=True)
     entity_type = Column(SQLEnum(PdaEventEntityType), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     team_id = Column(Integer, ForeignKey("persohub_event_teams.id"), nullable=True, index=True)

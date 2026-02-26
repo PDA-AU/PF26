@@ -2183,14 +2183,13 @@ def ensure_persohub_event_tables(engine):
                 CREATE TABLE IF NOT EXISTS persohub_event_attendance (
                     id SERIAL PRIMARY KEY,
                     event_id INTEGER NOT NULL REFERENCES persohub_events(id) ON DELETE CASCADE,
-                    round_id INTEGER REFERENCES persohub_event_rounds(id) ON DELETE CASCADE,
                     entity_type VARCHAR(10) NOT NULL,
                     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
                     team_id INTEGER REFERENCES persohub_event_teams(id) ON DELETE CASCADE,
                     is_present BOOLEAN NOT NULL DEFAULT FALSE,
                     marked_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
                     marked_at TIMESTAMPTZ DEFAULT now(),
-                    CONSTRAINT uq_persohub_event_attendance_entity UNIQUE (event_id, round_id, entity_type, user_id, team_id)
+                    CONSTRAINT uq_persohub_event_attendance_entity UNIQUE (event_id, entity_type, user_id, team_id)
                 )
                 """
             )
@@ -2302,7 +2301,6 @@ def ensure_persohub_event_tables(engine):
             )
         )
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_event_team_members_team_user ON persohub_event_team_members(team_id, user_id)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_persohub_event_attendance_event_round ON persohub_event_attendance(event_id, round_id)"))
         conn.execute(
             text(
                 "CREATE INDEX IF NOT EXISTS idx_persohub_event_attendance_event_entity_user_present "
@@ -3091,7 +3089,183 @@ def enforce_pda_event_entity_uniqueness_once(engine):
             )
 
         if _table_exists(conn, "pda_event_attendance"):
+            attendance_has_round = _column_exists(conn, "pda_event_attendance", "round_id")
             # Keep latest row by id per logical entity key.
+            if attendance_has_round:
+                conn.execute(
+                    text(
+                        """
+                        WITH ranked AS (
+                            SELECT
+                                id,
+                                ROW_NUMBER() OVER (
+                                    PARTITION BY event_id, round_id, entity_type, user_id
+                                    ORDER BY id DESC
+                                ) AS rn
+                            FROM pda_event_attendance
+                            WHERE entity_type = 'USER' AND user_id IS NOT NULL
+                        )
+                        DELETE FROM pda_event_attendance a
+                        USING ranked r
+                        WHERE a.id = r.id
+                          AND r.rn > 1
+                        """
+                    )
+                )
+                conn.execute(
+                    text(
+                        """
+                        WITH ranked AS (
+                            SELECT
+                                id,
+                                ROW_NUMBER() OVER (
+                                    PARTITION BY event_id, round_id, entity_type, team_id
+                                    ORDER BY id DESC
+                                ) AS rn
+                            FROM pda_event_attendance
+                            WHERE entity_type = 'TEAM' AND team_id IS NOT NULL
+                        )
+                        DELETE FROM pda_event_attendance a
+                        USING ranked r
+                        WHERE a.id = r.id
+                          AND r.rn > 1
+                        """
+                    )
+                )
+            else:
+                conn.execute(
+                    text(
+                        """
+                        WITH ranked AS (
+                            SELECT
+                                id,
+                                ROW_NUMBER() OVER (
+                                    PARTITION BY event_id, entity_type, user_id
+                                    ORDER BY id DESC
+                                ) AS rn
+                            FROM pda_event_attendance
+                            WHERE entity_type = 'USER' AND user_id IS NOT NULL
+                        )
+                        DELETE FROM pda_event_attendance a
+                        USING ranked r
+                        WHERE a.id = r.id
+                          AND r.rn > 1
+                        """
+                    )
+                )
+                conn.execute(
+                    text(
+                        """
+                        WITH ranked AS (
+                            SELECT
+                                id,
+                                ROW_NUMBER() OVER (
+                                    PARTITION BY event_id, entity_type, team_id
+                                    ORDER BY id DESC
+                                ) AS rn
+                            FROM pda_event_attendance
+                            WHERE entity_type = 'TEAM' AND team_id IS NOT NULL
+                        )
+                        DELETE FROM pda_event_attendance a
+                        USING ranked r
+                        WHERE a.id = r.id
+                          AND r.rn > 1
+                        """
+                    )
+                )
+            if _constraint_exists(conn, "pda_event_attendance", "uq_pda_event_attendance_entity"):
+                conn.execute(text("ALTER TABLE pda_event_attendance DROP CONSTRAINT uq_pda_event_attendance_entity"))
+            conn.execute(
+                text(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_pda_event_attendance_entity_user
+                    ON pda_event_attendance(event_id, user_id)
+                    WHERE entity_type = 'USER' AND user_id IS NOT NULL
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_pda_event_attendance_entity_team
+                    ON pda_event_attendance(event_id, team_id)
+                    WHERE entity_type = 'TEAM' AND team_id IS NOT NULL
+                    """
+                )
+            )
+
+        conn.execute(
+            text(
+                """
+                INSERT INTO system_config (key, value)
+                VALUES (:key, 'done')
+                ON CONFLICT (key) DO UPDATE SET value = 'done'
+                """
+            ),
+            {"key": marker_key},
+        )
+
+
+def migrate_event_attendance_to_entry_scope_once(engine):
+    marker_key = "migration_event_attendance_entry_scope_v1"
+    with engine.begin() as conn:
+        if not _table_exists(conn, "system_config"):
+            return
+
+        marker_exists = bool(
+            conn.execute(
+                text("SELECT 1 FROM system_config WHERE key = :key"),
+                {"key": marker_key},
+            ).fetchone()
+        )
+        if marker_exists:
+            return
+
+        if _table_exists(conn, "pda_event_attendance") and _column_exists(conn, "pda_event_attendance", "round_id"):
+            conn.execute(
+                text(
+                    """
+                    UPDATE pda_event_scores s
+                    SET is_present = a.is_present
+                    FROM pda_event_attendance a
+                    WHERE a.round_id IS NOT NULL
+                      AND a.event_id = s.event_id
+                      AND a.round_id = s.round_id
+                      AND a.entity_type = s.entity_type
+                      AND (
+                        (a.entity_type = 'USER' AND a.user_id IS NOT NULL AND a.user_id = s.user_id)
+                        OR
+                        (a.entity_type = 'TEAM' AND a.team_id IS NOT NULL AND a.team_id = s.team_id)
+                      )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO pda_event_scores (
+                        event_id, round_id, entity_type, user_id, team_id,
+                        criteria_scores, total_score, normalized_score, is_present
+                    )
+                    SELECT
+                        a.event_id, a.round_id, a.entity_type, a.user_id, a.team_id,
+                        '{}'::jsonb, 0, 0, a.is_present
+                    FROM pda_event_attendance a
+                    LEFT JOIN pda_event_scores s
+                      ON s.event_id = a.event_id
+                     AND s.round_id = a.round_id
+                     AND s.entity_type = a.entity_type
+                     AND (
+                        (a.entity_type = 'USER' AND a.user_id IS NOT NULL AND s.user_id = a.user_id)
+                        OR
+                        (a.entity_type = 'TEAM' AND a.team_id IS NOT NULL AND s.team_id = a.team_id)
+                     )
+                    WHERE a.round_id IS NOT NULL
+                      AND s.id IS NULL
+                    """
+                )
+            )
+            conn.execute(text("DELETE FROM pda_event_attendance WHERE round_id IS NOT NULL"))
             conn.execute(
                 text(
                     """
@@ -3099,7 +3273,7 @@ def enforce_pda_event_entity_uniqueness_once(engine):
                         SELECT
                             id,
                             ROW_NUMBER() OVER (
-                                PARTITION BY event_id, round_id, entity_type, user_id
+                                PARTITION BY event_id, entity_type, user_id
                                 ORDER BY id DESC
                             ) AS rn
                         FROM pda_event_attendance
@@ -3119,7 +3293,7 @@ def enforce_pda_event_entity_uniqueness_once(engine):
                         SELECT
                             id,
                             ROW_NUMBER() OVER (
-                                PARTITION BY event_id, round_id, entity_type, team_id
+                                PARTITION BY event_id, entity_type, team_id
                                 ORDER BY id DESC
                             ) AS rn
                         FROM pda_event_attendance
@@ -3132,13 +3306,17 @@ def enforce_pda_event_entity_uniqueness_once(engine):
                     """
                 )
             )
+            conn.execute(text("DROP INDEX IF EXISTS idx_pda_event_attendance_event_round"))
+            conn.execute(text("DROP INDEX IF EXISTS uq_pda_event_attendance_entity_user"))
+            conn.execute(text("DROP INDEX IF EXISTS uq_pda_event_attendance_entity_team"))
             if _constraint_exists(conn, "pda_event_attendance", "uq_pda_event_attendance_entity"):
                 conn.execute(text("ALTER TABLE pda_event_attendance DROP CONSTRAINT uq_pda_event_attendance_entity"))
+            conn.execute(text("ALTER TABLE pda_event_attendance DROP COLUMN IF EXISTS round_id"))
             conn.execute(
                 text(
                     """
                     CREATE UNIQUE INDEX IF NOT EXISTS uq_pda_event_attendance_entity_user
-                    ON pda_event_attendance(event_id, round_id, user_id)
+                    ON pda_event_attendance(event_id, user_id)
                     WHERE entity_type = 'USER' AND user_id IS NOT NULL
                     """
                 )
@@ -3147,7 +3325,117 @@ def enforce_pda_event_entity_uniqueness_once(engine):
                 text(
                     """
                     CREATE UNIQUE INDEX IF NOT EXISTS uq_pda_event_attendance_entity_team
-                    ON pda_event_attendance(event_id, round_id, team_id)
+                    ON pda_event_attendance(event_id, team_id)
+                    WHERE entity_type = 'TEAM' AND team_id IS NOT NULL
+                    """
+                )
+            )
+
+        if _table_exists(conn, "persohub_event_attendance") and _column_exists(conn, "persohub_event_attendance", "round_id"):
+            conn.execute(
+                text(
+                    """
+                    UPDATE persohub_event_scores s
+                    SET is_present = a.is_present
+                    FROM persohub_event_attendance a
+                    WHERE a.round_id IS NOT NULL
+                      AND a.event_id = s.event_id
+                      AND a.round_id = s.round_id
+                      AND a.entity_type = s.entity_type
+                      AND (
+                        (a.entity_type = 'USER' AND a.user_id IS NOT NULL AND a.user_id = s.user_id)
+                        OR
+                        (a.entity_type = 'TEAM' AND a.team_id IS NOT NULL AND a.team_id = s.team_id)
+                      )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO persohub_event_scores (
+                        event_id, round_id, entity_type, user_id, team_id,
+                        criteria_scores, total_score, normalized_score, is_present
+                    )
+                    SELECT
+                        a.event_id, a.round_id, a.entity_type, a.user_id, a.team_id,
+                        '{}'::jsonb, 0, 0, a.is_present
+                    FROM persohub_event_attendance a
+                    LEFT JOIN persohub_event_scores s
+                      ON s.event_id = a.event_id
+                     AND s.round_id = a.round_id
+                     AND s.entity_type = a.entity_type
+                     AND (
+                        (a.entity_type = 'USER' AND a.user_id IS NOT NULL AND s.user_id = a.user_id)
+                        OR
+                        (a.entity_type = 'TEAM' AND a.team_id IS NOT NULL AND s.team_id = a.team_id)
+                     )
+                    WHERE a.round_id IS NOT NULL
+                      AND s.id IS NULL
+                    """
+                )
+            )
+            conn.execute(text("DELETE FROM persohub_event_attendance WHERE round_id IS NOT NULL"))
+            conn.execute(
+                text(
+                    """
+                    WITH ranked AS (
+                        SELECT
+                            id,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY event_id, entity_type, user_id
+                                ORDER BY id DESC
+                            ) AS rn
+                        FROM persohub_event_attendance
+                        WHERE entity_type = 'USER' AND user_id IS NOT NULL
+                    )
+                    DELETE FROM persohub_event_attendance a
+                    USING ranked r
+                    WHERE a.id = r.id
+                      AND r.rn > 1
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    WITH ranked AS (
+                        SELECT
+                            id,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY event_id, entity_type, team_id
+                                ORDER BY id DESC
+                            ) AS rn
+                        FROM persohub_event_attendance
+                        WHERE entity_type = 'TEAM' AND team_id IS NOT NULL
+                    )
+                    DELETE FROM persohub_event_attendance a
+                    USING ranked r
+                    WHERE a.id = r.id
+                      AND r.rn > 1
+                    """
+                )
+            )
+            conn.execute(text("DROP INDEX IF EXISTS idx_persohub_event_attendance_event_round"))
+            conn.execute(text("DROP INDEX IF EXISTS uq_persohub_event_attendance_entity_user"))
+            conn.execute(text("DROP INDEX IF EXISTS uq_persohub_event_attendance_entity_team"))
+            if _constraint_exists(conn, "persohub_event_attendance", "uq_persohub_event_attendance_entity"):
+                conn.execute(text("ALTER TABLE persohub_event_attendance DROP CONSTRAINT uq_persohub_event_attendance_entity"))
+            conn.execute(text("ALTER TABLE persohub_event_attendance DROP COLUMN IF EXISTS round_id"))
+            conn.execute(
+                text(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_persohub_event_attendance_entity_user
+                    ON persohub_event_attendance(event_id, user_id)
+                    WHERE entity_type = 'USER' AND user_id IS NOT NULL
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_persohub_event_attendance_entity_team
+                    ON persohub_event_attendance(event_id, team_id)
                     WHERE entity_type = 'TEAM' AND team_id IS NOT NULL
                     """
                 )

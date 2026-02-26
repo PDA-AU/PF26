@@ -618,6 +618,10 @@ function ScoringContent() {
         });
         return map;
     }, [round?.is_frozen, rows]);
+    const freezePresentZeroCount = useMemo(
+        () => rows.filter((row) => row.is_present && Number(getTotalScore(row) || 0) <= 0).length,
+        [rows, getTotalScore]
+    );
 
     const scoreModalRow = useMemo(() => {
         if (!scoreModalEntity) return null;
@@ -1784,6 +1788,11 @@ function ScoringContent() {
                                         <p className="text-gray-600">
                                             This action freezes scores for this round. Shortlisting is handled from the leaderboard.
                                         </p>
+                                        {freezePresentZeroCount > 0 ? (
+                                            <div className="rounded-md border-2 border-orange-300 bg-orange-50 px-3 py-2 text-sm text-orange-900">
+                                                Warning: {freezePresentZeroCount} present participant(s) currently have zero score.
+                                            </div>
+                                        ) : null}
                                         <div className="flex gap-2">
                                             <Button onClick={() => setFreezeDialogOpen(false)} variant="outline" className="flex-1 border-2 border-black">Cancel</Button>
                                             <Button onClick={freezeRound} className="flex-1 bg-orange-500 text-white border-2 border-black">

@@ -2051,13 +2051,13 @@ class PdaManagedAttendanceMarkRequest(BaseModel):
     entity_type: PdaManagedEntityTypeEnum
     user_id: Optional[int] = None
     team_id: Optional[int] = None
-    round_id: int
+    round_id: Optional[int] = None
     is_present: bool = True
 
 
 class PdaManagedAttendanceScanRequest(BaseModel):
     token: str
-    round_id: int
+    round_id: Optional[int] = None
 
 
 class PdaManagedAttendanceResponse(BaseModel):

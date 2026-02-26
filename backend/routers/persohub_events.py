@@ -105,6 +105,47 @@ def _next_event_referral_code(db: Session, event_id: int) -> str:
     return candidate
 
 
+def _resolve_attendance_metrics(
+    db: Session,
+    event_id: int,
+    *,
+    user_id: Optional[int] = None,
+    team_id: Optional[int] = None,
+) -> Tuple[int, bool]:
+    """Round-level attendance in score table wins; fallback to entry-level attendance rows."""
+    round_query = db.query(PersohubEventScore).filter(
+        PersohubEventScore.event_id == event_id,
+    )
+    if user_id is not None:
+        round_query = round_query.filter(PersohubEventScore.user_id == user_id)
+    else:
+        round_query = round_query.filter(PersohubEventScore.team_id == team_id)
+    total_round_rows = round_query.count()
+    if total_round_rows > 0:
+        present_round_count = (
+            round_query
+            .filter(PersohubEventScore.is_present == True)  # noqa: E712
+            .with_entities(func.count(func.distinct(PersohubEventScore.round_id)))
+            .scalar()
+            or 0
+        )
+        return int(present_round_count), bool(present_round_count > 0)
+
+    entry_query = db.query(PersohubEventAttendance).filter(
+        PersohubEventAttendance.event_id == event_id,
+    )
+    if user_id is not None:
+        entry_query = entry_query.filter(PersohubEventAttendance.user_id == user_id)
+    else:
+        entry_query = entry_query.filter(PersohubEventAttendance.team_id == team_id)
+    present_entry_count = (
+        entry_query
+        .filter(PersohubEventAttendance.is_present == True)  # noqa: E712
+        .count()
+    )
+    return int(present_entry_count), bool(present_entry_count > 0)
+
+
 def _build_team_response(db: Session, team: PersohubEventTeam) -> PersohubManagedTeamResponse:
     members = (
         db.query(PersohubEventTeamMember, PdaUser)
@@ -1270,15 +1311,12 @@ def my_events(user: PdaUser = Depends(require_pda_user), db: Session = Depends(g
             continue
         seen.add(key)
 
-        attendance_query = db.query(func.count(PersohubEventAttendance.id)).filter(
-            PersohubEventAttendance.event_id == event.id,
-            PersohubEventAttendance.is_present == True,  # noqa: E712
+        attendance_count, _ = _resolve_attendance_metrics(
+            db,
+            event.id,
+            user_id=reg.user_id,
+            team_id=reg.team_id,
         )
-        if reg.user_id:
-            attendance_query = attendance_query.filter(PersohubEventAttendance.user_id == reg.user_id)
-        else:
-            attendance_query = attendance_query.filter(PersohubEventAttendance.team_id == reg.team_id)
-        attendance_count = attendance_query.scalar() or 0
 
         cumulative_score = 0.0
         if reg.user_id:
@@ -1528,15 +1566,12 @@ def get_certificate(
     if not registration:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration not found")
 
-    attendance_query = db.query(PersohubEventAttendance).filter(
-        PersohubEventAttendance.event_id == event.id,
-        PersohubEventAttendance.is_present == True  # noqa: E712
+    _, attended = _resolve_attendance_metrics(
+        db,
+        event.id,
+        user_id=registration.user_id,
+        team_id=registration.team_id,
     )
-    if registration.user_id:
-        attendance_query = attendance_query.filter(PersohubEventAttendance.user_id == registration.user_id)
-    else:
-        attendance_query = attendance_query.filter(PersohubEventAttendance.team_id == registration.team_id)
-    attended = attendance_query.first() is not None
     reg_status = str(registration.status.value if hasattr(registration.status, "value") else registration.status or "").strip().lower()
     eligible = bool(event.status == PersohubEventStatus.CLOSED and attended and reg_status == "active")
     text = None
