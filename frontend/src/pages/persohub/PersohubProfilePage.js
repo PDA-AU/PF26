@@ -71,6 +71,8 @@ export default function PersohubProfilePage() {
     ));
 
     const isUserLoggedIn = Boolean(user);
+    const isGlobalFeedSuperadmin = Boolean(user && user.is_superadmin);
+    const canModerateProfilePosts = Boolean(profile?.can_edit || isGlobalFeedSuperadmin);
     const navigateToCommunities = useCallback(() => {
         navigate('/persohub', { state: { mobileView: 'communities' } });
     }, [navigate]);
@@ -626,7 +628,8 @@ export default function PersohubProfilePage() {
                                             isUserLoggedIn={isUserLoggedIn}
                                             fetchComments={persohubApi.fetchComments}
                                             createComment={handleCreateComment}
-                                            allowModeration={Boolean(profile.can_edit)}
+                                            allowModeration={canModerateProfilePosts}
+                                            allowEventPostModeration={isGlobalFeedSuperadmin}
                                             onDelete={handleDeletePost}
                                             onEdit={handleEditPost}
                                             onHide={handleTogglePostVisibility}

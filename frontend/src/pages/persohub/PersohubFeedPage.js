@@ -96,7 +96,6 @@ export default function PersohubFeedPage() {
     const isGlobalFeedSuperadmin = Boolean(
         user
         && user.is_superadmin
-        && String(user.regno || '').trim() === '0000000000'
     );
     const userFeedScope = user?.id ?? null;
     const publicProfilePath = user?.profile_name

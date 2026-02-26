@@ -54,11 +54,7 @@ PDF_PREVIEW_RENDER_SCALE = 1.5
 
 
 def _is_global_feed_superadmin(user: PdaUser) -> bool:
-    return bool(
-        user
-        and bool(getattr(user, "is_superadmin", False))
-        and str(getattr(user, "regno", "") or "").strip() == "0000000000"
-    )
+    return bool(user and bool(getattr(user, "is_superadmin", False)))
 
 
 def _validate_content_type(content_type: str) -> None:
