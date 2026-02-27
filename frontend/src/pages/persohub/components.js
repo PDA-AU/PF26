@@ -486,26 +486,28 @@ export const PostCard = ({
             <div className="ph-post-body">
                 <AttachmentCarousel attachments={post.attachments} />
 
-                <div className={`ph-desc ${shouldUseCompactEventMobile ? 'ph-desc-mobile-event-compact' : ''}`}>
-                    <ParsedDescription
-                        description={renderedDescription}
-                        onHashtagClick={onHashtagClick}
-                    />
-                    {shouldUseCompactEventMobile && !expanded && hasFullDescription ? (
+                <div className="ph-desc">
+                    <div className={shouldShowCompactPreview ? 'ph-desc-mobile-event-compact' : ''}>
+                        <ParsedDescription
+                            description={renderedDescription}
+                            onHashtagClick={onHashtagClick}
+                        />
+                    </div>
+                    {shouldUseCompactEventMobile && hasFullDescription ? (
                         <span
                             role="button"
                             tabIndex={0}
                             className="ph-muted"
-                            onClick={() => setExpanded(true)}
+                            onClick={() => setExpanded((prev) => !prev)}
                             onKeyDown={(event) => {
                                 if (event.key === 'Enter' || event.key === ' ') {
                                     event.preventDefault();
-                                    setExpanded(true);
+                                    setExpanded((prev) => !prev);
                                 }
                             }}
                             style={{ cursor: 'pointer', textDecoration: 'underline' }}
                         >
-                            Read more
+                            {expanded ? 'Read less' : 'Read more'}
                         </span>
                     ) : null}
                     {!shouldUseCompactEventMobile && showReadMore ? (
