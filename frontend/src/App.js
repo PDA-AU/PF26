@@ -106,7 +106,7 @@ const ProtectedPersohubEventsRoute = ({ children }) => {
         return <Navigate to="/persohub/admin" replace />;
     }
 
-    if (!community.is_club_owner && !community.is_club_superadmin) {
+    if (!community.can_access_events) {
         return <Navigate to="/persohub/admin" replace />;
     }
 

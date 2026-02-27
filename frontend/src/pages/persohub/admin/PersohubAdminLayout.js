@@ -266,11 +266,12 @@ export default function PersohubAdminLayout({ children, title = 'Persohub Admin'
     const isOwner = Boolean(community?.is_club_owner);
     const isClubSuperadmin = Boolean(community?.is_club_superadmin);
     const canAccessClubAdminPanel = isOwner || isClubSuperadmin;
+    const canAccessEvents = Boolean(community?.can_access_events);
     const navItems = [
         ...(canAccessClubAdminPanel ? [{ id: 'profile', label: 'Profile', path: '/persohub/admin/profile' }] : []),
         ...(canAccessClubAdminPanel ? [{ id: 'communities', label: 'Communities', path: '/persohub/admin/communities' }] : []),
         ...(canAccessClubAdminPanel ? [{ id: 'payments', label: 'Payments', path: '/persohub/admin/payments' }] : []),
-        ...(canAccessClubAdminPanel ? [{ id: 'events', label: 'Events', path: '/persohub/admin/persohub-events' }] : []),
+        ...(canAccessEvents ? [{ id: 'events', label: 'Events', path: '/persohub/admin/persohub-events' }] : []),
         ...(isOwner ? [{ id: 'policies', label: 'Policies', path: '/persohub/admin/policies' }] : []),
     ];
 

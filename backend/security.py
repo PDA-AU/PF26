@@ -331,15 +331,17 @@ def require_persohub_community(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Community admin access revoked")
     if not is_club_owner and not is_club_superadmin_user and int(community.id) not in membership_community_ids:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Community admin access revoked")
+    event_policy = _merge_persohub_admin_policy([row[0] for row in membership_rows])
+    can_access_events = bool(is_club_owner or is_club_superadmin_user or any(bool(value) for value in event_policy["events"].values()))
     path = str(getattr(request.url, "path", "") or "")
     if path.startswith("/api/persohub/admin/") and not (is_club_owner or is_club_superadmin_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Club admin access required")
+        is_events_admin_path = path.startswith("/api/persohub/admin/persohub-events")
+        if not (is_events_admin_path and can_access_events):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Club admin access required")
 
     actor_user_id = user_id
     actor_role = "owner" if is_club_owner else ("superadmin" if is_club_superadmin_user else "admin")
     actor_club_id = resolved_club_id
-    event_policy = _merge_persohub_admin_policy([row[0] for row in membership_rows])
-    can_access_events = bool(is_club_owner or is_club_superadmin_user or any(bool(value) for value in event_policy["events"].values()))
     events_access_status = get_persohub_club_events_access_status(club)
     events_access_approved = is_persohub_club_events_access_approved(club)
 

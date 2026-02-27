@@ -11,7 +11,11 @@ export default function PersohubAdminEntryPage() {
 
     useEffect(() => {
         if (!loading && community) {
-            navigate('/persohub/admin/profile', { replace: true });
+            if (community.is_club_owner || community.is_club_superadmin) {
+                navigate('/persohub/admin/profile', { replace: true });
+                return;
+            }
+            navigate('/persohub/admin/persohub-events', { replace: true });
         }
     }, [community, loading, navigate]);
 

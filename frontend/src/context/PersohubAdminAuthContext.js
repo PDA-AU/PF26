@@ -19,12 +19,14 @@ export function PersohubAdminAuthProvider({ children }) {
         loadSwitchOptions,
         getPersohubActorHeader,
     } = usePersohubActor();
-    const ownerCommunities = useMemo(
-        () => (switchableCommunities || []).filter((item) => Boolean(item?.is_club_owner || item?.is_club_superadmin)),
+    const adminCommunities = useMemo(
+        () => (switchableCommunities || []).filter((item) => Boolean(item?.is_club_owner || item?.is_club_superadmin || item?.can_access_events)),
         [switchableCommunities],
     );
-    const adminCommunity = (mode === 'community' && (resolvedCommunity?.is_club_owner || resolvedCommunity?.is_club_superadmin)) ? resolvedCommunity : null;
-    const adminCanUseCommunityMode = ownerCommunities.length > 0;
+    const adminCommunity = (mode === 'community' && (resolvedCommunity?.is_club_owner || resolvedCommunity?.is_club_superadmin || resolvedCommunity?.can_access_events))
+        ? resolvedCommunity
+        : null;
+    const adminCanUseCommunityMode = adminCommunities.length > 0;
 
     const logout = useCallback(() => {
         pdaLogout();
@@ -50,7 +52,7 @@ export function PersohubAdminAuthProvider({ children }) {
         },
         pendingSelectionToken: '',
         availableClubs: [],
-        availableCommunities: ownerCommunities,
+        availableCommunities: adminCommunities,
         getAuthHeader: getMergedAuthHeader,
         reloadSession: loadSwitchOptions,
         clearSelection: () => {},
@@ -58,7 +60,7 @@ export function PersohubAdminAuthProvider({ children }) {
         setMode,
         activeCommunityId,
         setActiveCommunityId,
-        switchableCommunities: ownerCommunities,
+        switchableCommunities: adminCommunities,
         canUseCommunityMode: adminCanUseCommunityMode,
     }), [
         activeCommunityId,
@@ -70,7 +72,7 @@ export function PersohubAdminAuthProvider({ children }) {
         loadSwitchOptions,
         logout,
         mode,
-        ownerCommunities,
+        adminCommunities,
         setActiveCommunityId,
         setMode,
     ]);
