@@ -1292,8 +1292,12 @@ export default function EventDashboard() {
                                             <p className="text-xs font-black uppercase tracking-[0.12em] text-slate-700">
                                                 Seats Availability
                                             </p>
-                                            <span className="rounded-md border border-black bg-[#FDE047] px-2 py-1 text-[11px] font-black uppercase tracking-[0.08em] text-black">
-                                                {seatsLeft} seats left
+                                            <span
+                                                className={`rounded-md border border-black px-2 py-1 text-[11px] font-black uppercase tracking-[0.08em] ${
+                                                    seatsLeft <= 0 ? 'bg-[#fecaca] text-[#7f1d1d]' : 'bg-[#FDE047] text-black'
+                                                }`}
+                                            >
+                                                {seatsLeft <= 0 ? 'Seats filled' : `${seatsLeft} seats left`}
                                             </span>
                                         </div>
                                         <div className="mt-3 h-3 w-full overflow-hidden rounded-full border border-black bg-[#f8fafc]">

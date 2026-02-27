@@ -298,8 +298,30 @@ def _event_access_approved(db: Session, event: PersohubEvent) -> bool:
     return bool(is_persohub_event_access_approved(event, club))
 
 
+def _event_seats_left(db: Session, event: PersohubEvent) -> Optional[int]:
+    if not bool(getattr(event, "seat_availability_enabled", False)):
+        return None
+    seat_capacity = int(getattr(event, "seat_capacity", 0) or 100)
+    if seat_capacity < 1:
+        seat_capacity = 100
+    seats_occupied = int(
+        db.query(func.count(PersohubEventRegistration.id))
+        .filter(PersohubEventRegistration.event_id == event.id)
+        .scalar()
+        or 0
+    )
+    return max(seat_capacity - seats_occupied, 0)
+
+
 def _registration_available(db: Session, event: PersohubEvent) -> bool:
-    return bool(getattr(event, "registration_open", True)) and _event_access_approved(db, event)
+    if not bool(getattr(event, "registration_open", True)):
+        return False
+    if not _event_access_approved(db, event):
+        return False
+    seats_left = _event_seats_left(db, event)
+    if seats_left is not None and seats_left <= 0:
+        return False
+    return True
 
 
 def _ensure_registration_open_for_registration_actions(db: Session, event: PersohubEvent) -> None:
@@ -310,6 +332,9 @@ def _ensure_registration_open_for_registration_actions(db: Session, event: Perso
         )
     if not bool(getattr(event, "registration_open", True)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Registration is closed")
+    seats_left = _event_seats_left(db, event)
+    if seats_left is not None and seats_left <= 0:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Registration is full")
 
 
 def _is_event_open_for_all(event: PersohubEvent) -> bool:
