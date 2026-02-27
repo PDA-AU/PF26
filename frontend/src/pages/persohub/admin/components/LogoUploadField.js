@@ -49,16 +49,16 @@ export default function LogoUploadField({
         <div className="space-y-2">
             <Label htmlFor={id}>{label}</Label>
             <div className="flex flex-col gap-2 sm:flex-row">
-                <Input
-                    id={id}
-                    value={value || ''}
-                    onChange={(event) => {
-                        if (!allowManualEntry) return;
-                        onChange(event.target.value);
-                    }}
-                    placeholder="https://..."
-                    readOnly={!allowManualEntry}
-                />
+                {allowManualEntry ? (
+                    <Input
+                        id={id}
+                        value={value || ''}
+                        onChange={(event) => {
+                            onChange(event.target.value);
+                        }}
+                        placeholder="https://..."
+                    />
+                ) : null}
                 <Button
                     type="button"
                     variant="outline"

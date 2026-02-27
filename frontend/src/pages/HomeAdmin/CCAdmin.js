@@ -934,14 +934,16 @@ export default function CCAdmin() {
                             <Input value={clubForm.profile_id} onChange={(e) => setClubForm((p) => ({ ...p, profile_id: e.target.value }))} required />
                         </div>
                         <div className="grid gap-2">
-                            <Label>Logo URL</Label>
-                            <Input value={clubForm.club_logo_url} onChange={(e) => setClubForm((p) => ({ ...p, club_logo_url: e.target.value }))} />
+                            <Label>Club Logo</Label>
                             <Input
                                 type="file"
                                 accept="image/png,image/jpeg,image/webp"
                                 onChange={(e) => handleLogoUpload(e.target.files?.[0], (url) => setClubForm((p) => ({ ...p, club_logo_url: url })))}
                                 disabled={uploadingField === 'logo'}
                             />
+                            {clubForm.club_logo_url ? (
+                                <p className="text-xs text-slate-500 break-all">{clubForm.club_logo_url}</p>
+                            ) : null}
                         </div>
                         <div className="grid gap-2">
                             <Label>Club URL</Label>

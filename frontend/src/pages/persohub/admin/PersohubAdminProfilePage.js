@@ -95,7 +95,6 @@ export default function PersohubAdminProfilePage() {
         if (!profile?.club) return [];
         return [
             { label: 'Name', value: profile.club.name },
-            { label: 'Logo URL', value: profile.club.club_logo_url },
             { label: 'Tagline', value: profile.club.club_tagline },
             { label: 'Website', value: profile.club.club_url },
             { label: 'Payment QR URL', value: profile.club.payment_url_image },
@@ -159,11 +158,12 @@ export default function PersohubAdminProfilePage() {
 
                 <LogoUploadField
                     id="club-logo-url"
-                    label="Club Logo URL"
+                    label="Club Logo"
                     value={clubForm.club_logo_url}
                     onChange={(value) => setClubForm((prev) => ({ ...prev, club_logo_url: value }))}
                     onUploadFile={(file) => persohubAdminApi.uploadProfileImage(file)}
                     parseApiError={persohubAdminApi.parseApiError}
+                    allowManualEntry={false}
                 />
 
                 <div className="space-y-2">
