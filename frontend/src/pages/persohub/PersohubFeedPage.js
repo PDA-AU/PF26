@@ -26,6 +26,30 @@ const resetPostForm = {
     files: [],
 };
 const MAX_POST_DESCRIPTION_LENGTH = 8000;
+const FEED_TYPE_STORAGE_KEY = 'persohub.feed.type';
+
+const normalizeFeedType = (value) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    return normalized === 'community' ? 'community' : 'event';
+};
+
+const getInitialFeedType = () => {
+    if (typeof window === 'undefined') return 'event';
+    try {
+        const params = new URLSearchParams(window.location.search || '');
+        const fromQuery = String(params.get('feed') || params.get('feedType') || '').trim().toLowerCase();
+        if (fromQuery === 'event' || fromQuery === 'community') {
+            return fromQuery;
+        }
+        const fromStorage = String(window.localStorage.getItem(FEED_TYPE_STORAGE_KEY) || '').trim().toLowerCase();
+        if (fromStorage === 'event' || fromStorage === 'community') {
+            return fromStorage;
+        }
+    } catch {
+        return 'event';
+    }
+    return 'event';
+};
 
 const extractInlineMentions = (description) => {
     const matches = String(description || '').match(/@([a-z0-9_]+)/gi) || [];
@@ -58,7 +82,7 @@ export default function PersohubFeedPage() {
     const [feedLoadingMore, setFeedLoadingMore] = useState(false);
     const [communities, setCommunities] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [feedType, setFeedType] = useState('event');
+    const [feedType, setFeedType] = useState(getInitialFeedType);
 
     const [search, setSearch] = useState('');
     const [searchItems, setSearchItems] = useState([]);
@@ -80,6 +104,8 @@ export default function PersohubFeedPage() {
     const pendingLikeSlugsRef = useRef(new Set());
     const pendingHideSlugsRef = useRef(new Set());
     const feedLoadingMoreRef = useRef(false);
+    const searchInputRef = useRef(null);
+    const lastScrollYRef = useRef(0);
     const [deleteTargetPost, setDeleteTargetPost] = useState(null);
     const [deleteSubmitting, setDeleteSubmitting] = useState(false);
     const [visibilityTargetPost, setVisibilityTargetPost] = useState(null);
@@ -90,6 +116,7 @@ export default function PersohubFeedPage() {
     ));
 
     const [activeHashtag, setActiveHashtag] = useState('');
+    const [searchBarVisible, setSearchBarVisible] = useState(true);
     const feedSentinelRef = useRef(null);
 
     const isUserLoggedIn = Boolean(user);
@@ -179,6 +206,15 @@ export default function PersohubFeedPage() {
     }, [loadInitial, loadCommunities, userFeedScope]);
 
     useEffect(() => {
+        if (typeof window === 'undefined') return;
+        try {
+            window.localStorage.setItem(FEED_TYPE_STORAGE_KEY, normalizeFeedType(feedType));
+        } catch {
+            // no-op
+        }
+    }, [feedType]);
+
+    useEffect(() => {
         if (typeof window === 'undefined') return undefined;
         const media = window.matchMedia('(max-width: 1023px)');
         const handleViewportChange = (event) => {
@@ -192,6 +228,30 @@ export default function PersohubFeedPage() {
         media.addListener(handleViewportChange);
         return () => media.removeListener(handleViewportChange);
     }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return undefined;
+        if (!isMobileViewport) {
+            setSearchBarVisible(true);
+            return undefined;
+        }
+        lastScrollYRef.current = Math.max(0, window.scrollY || window.pageYOffset || 0);
+        const handleScroll = () => {
+            const currentY = Math.max(0, window.scrollY || window.pageYOffset || 0);
+            const delta = currentY - lastScrollYRef.current;
+            if (currentY <= 24) {
+                setSearchBarVisible(true);
+            } else if (delta > 6) {
+                setSearchBarVisible(false);
+                setSearchOpen(false);
+            } else if (delta < -6) {
+                setSearchBarVisible(true);
+            }
+            lastScrollYRef.current = currentY;
+        };
+        window.addEventListener('scroll', handleScroll, { passive: true });
+        return () => window.removeEventListener('scroll', handleScroll);
+    }, [isMobileViewport]);
 
     useEffect(() => {
         const state = location.state && typeof location.state === 'object' ? location.state : null;
@@ -246,18 +306,25 @@ export default function PersohubFeedPage() {
         }
         if (q.startsWith('#')) {
             const hashtag = q.replace(/^#+/, '').trim();
-            setSearchItems([]);
-            setSearchOpen(false);
             if (!hashtag) {
-                if (activeHashtag) {
-                    setActiveHashtag('');
-                    syncHashtagQueryInUrl('');
-                    loadInitial();
-                }
+                setSearchItems([]);
+                setSearchOpen(false);
                 return;
             }
-            const timer = setTimeout(() => {
-                handleHashtagClick(hashtag, { syncSearchInput: false });
+            if (activeHashtag && hashtag.toLowerCase() === String(activeHashtag).toLowerCase()) {
+                setSearchItems([]);
+                setSearchOpen(false);
+                return;
+            }
+            const timer = setTimeout(async () => {
+                try {
+                    const response = await persohubApi.searchSuggestions(q);
+                    setSearchItems(response.items || []);
+                    setSearchOpen(true);
+                } catch {
+                    setSearchItems([]);
+                    setSearchOpen(false);
+                }
             }, 220);
             return () => clearTimeout(timer);
         }
@@ -277,7 +344,7 @@ export default function PersohubFeedPage() {
             }
         }, 220);
         return () => clearTimeout(timer);
-    }, [activeHashtag, handleHashtagClick, loadInitial, search, syncHashtagQueryInUrl]);
+    }, [activeHashtag, loadInitial, search, syncHashtagQueryInUrl]);
 
     const patchPost = (nextPost) => {
         setPosts((prev) => prev.map((item) => (item.slug_token === nextPost.slug_token ? nextPost : item)));
@@ -399,6 +466,31 @@ export default function PersohubFeedPage() {
         }
         navigate(`/persohub/${item.profile_name}`);
     };
+
+    const handleSearchSubmit = useCallback(() => {
+        const q = String(search || '').trim();
+        if (!q) {
+            setSearchItems([]);
+            setSearchOpen(false);
+            if (activeHashtag) {
+                setActiveHashtag('');
+                syncHashtagQueryInUrl('');
+                loadInitial();
+            }
+            return;
+        }
+        if (q.startsWith('#')) {
+            const hashtag = q.replace(/^#+/, '').trim();
+            if (!hashtag) {
+                setSearchItems([]);
+                setSearchOpen(false);
+                return;
+            }
+            setSearchItems([]);
+            setSearchOpen(false);
+            handleHashtagClick(hashtag, { syncSearchInput: false });
+        }
+    }, [activeHashtag, handleHashtagClick, loadInitial, search, syncHashtagQueryInUrl]);
 
     const handleToggleFollow = async (profileId) => {
         if (!isUserLoggedIn) {
@@ -809,15 +901,39 @@ export default function PersohubFeedPage() {
                             )
                         ) : (
                             <>
-                                <section className="ph-search-wrap ph-search-wrap-plain">
+                                <section
+                                    className={`ph-search-wrap ph-search-wrap-plain ${searchBarVisible ? 'ph-search-wrap-visible' : 'ph-search-wrap-hidden'}`}
+                                >
                                     <input
+                                        ref={searchInputRef}
                                         type="text"
-                                        className="ph-search"
+                                        className={`ph-search ${search ? 'ph-search-has-clear' : ''}`}
                                         placeholder="Search profile, community, hashtag (#tag)"
                                         value={search}
                                         onChange={(event) => setSearch(event.target.value)}
+                                        onKeyDown={(event) => {
+                                            if (event.key !== 'Enter') return;
+                                            event.preventDefault();
+                                            handleSearchSubmit();
+                                        }}
                                         data-testid="ph-search-input"
                                     />
+                                    {search ? (
+                                        <button
+                                            type="button"
+                                            className="ph-search-clear"
+                                            aria-label="Clear search"
+                                            onClick={() => {
+                                                setSearch('');
+                                                setSearchItems([]);
+                                                setSearchOpen(false);
+                                                setSearchBarVisible(true);
+                                                searchInputRef.current?.focus();
+                                            }}
+                                        >
+                                            <X size={14} />
+                                        </button>
+                                    ) : null}
                                     <SearchSuggestionList open={searchOpen} items={searchItems} onSelect={handleSelectSuggestion} />
                                 </section>
 

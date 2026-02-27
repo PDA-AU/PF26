@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
     CalendarDays,
@@ -18,6 +18,13 @@ import {
     EyeOff,
     ExternalLink,
     MoreVertical,
+    Maximize2,
+    Minimize2,
+    Music2,
+    Pause,
+    Play,
+    Volume2,
+    VolumeX,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import ParsedDescription from '@/components/common/ParsedDescription';
@@ -177,52 +184,658 @@ export const PersohubMobileNav = ({
     );
 };
 
-export const AttachmentCarousel = ({ attachments }) => {
-    const inputAttachments = attachments || [];
-    const hasImageAttachment = inputAttachments.some((entry) => entry?.attachment_kind === 'image');
-    const audioAttachments = inputAttachments.filter((entry) => entry?.attachment_kind === 'audio');
-    const shouldUseImageAsAudioCover = hasImageAttachment && audioAttachments.length > 0;
-    const visibleAttachments = shouldUseImageAsAudioCover
-        ? inputAttachments.filter((entry) => entry?.attachment_kind !== 'audio')
-        : inputAttachments;
+const mediaPlayerRegistry = new Map();
+let activeMediaPlayerId = null;
 
-    const [index, setIndex] = useState(0);
-    const total = visibleAttachments.length || 0;
-    const item = total ? visibleAttachments[index] : null;
+const registerMediaPlayer = (playerId, controls) => {
+    if (!playerId || !controls) return;
+    mediaPlayerRegistry.set(playerId, controls);
+};
+
+const unregisterMediaPlayer = (playerId) => {
+    if (!playerId) return;
+    mediaPlayerRegistry.delete(playerId);
+    if (activeMediaPlayerId === playerId) {
+        activeMediaPlayerId = null;
+    }
+};
+
+const requestMediaStart = (playerId) => {
+    if (!playerId) return;
+    if (activeMediaPlayerId && activeMediaPlayerId !== playerId) {
+        const controls = mediaPlayerRegistry.get(activeMediaPlayerId);
+        if (controls?.pause) controls.pause();
+    }
+    activeMediaPlayerId = playerId;
+};
+
+const notifyMediaPause = (playerId) => {
+    if (activeMediaPlayerId === playerId) {
+        activeMediaPlayerId = null;
+    }
+};
+
+const sortAttachmentsByOrder = (attachments) => {
+    return [...(attachments || [])].sort((left, right) => {
+        const leftOrder = Number.isFinite(Number(left?.order_no)) ? Number(left.order_no) : Number.MAX_SAFE_INTEGER;
+        const rightOrder = Number.isFinite(Number(right?.order_no)) ? Number(right.order_no) : Number.MAX_SAFE_INTEGER;
+        if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+        return String(left?.id || left?.s3_url || '').localeCompare(String(right?.id || right?.s3_url || ''));
+    });
+};
+
+const formatAudioTime = (seconds) => {
+    const value = Number(seconds);
+    if (!Number.isFinite(value) || value < 0) return '--:--';
+    const total = Math.floor(value);
+    const mins = Math.floor(total / 60);
+    const secs = total % 60;
+    return `${mins}:${String(secs).padStart(2, '0')}`;
+};
+
+const clampPercent = (value) => {
+    if (!Number.isFinite(value)) return 0;
+    return Math.min(100, Math.max(0, value));
+};
+
+const buildTimelineGradient = ({
+    playedPercent,
+    bufferedPercent,
+    playedColor,
+    bufferedColor,
+    baseColor,
+}) => {
+    const played = clampPercent(playedPercent);
+    const buffered = clampPercent(Math.max(bufferedPercent, played));
+    return `linear-gradient(90deg, ${playedColor} 0%, ${playedColor} ${played}%, ${bufferedColor} ${played}%, ${bufferedColor} ${buffered}%, ${baseColor} ${buffered}%, ${baseColor} 100%)`;
+};
+
+const resolveAudioTitle = (post) => {
+    const eventTitle = String(post?.event?.title || '').trim();
+    if (eventTitle) return eventTitle;
+    const firstLine = String(post?.description || '')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .find(Boolean);
+    return firstLine || 'Persohub Audio';
+};
+
+const resolveAudioSubtitle = (post) => {
+    const profileId = String(post?.community?.profile_id || '').trim();
+    if (profileId) return `@${profileId}`;
+    const communityName = String(post?.community?.name || '').trim();
+    return communityName || '@persohub';
+};
+
+const PLAYBACK_RATES = [1, 1.25, 1.5, 2];
+const VIDEO_PLAYBACK_RATES = [0.5, 1, 1.25, 1.5, 2];
+
+const PersohubAudioPlayer = ({
+    src,
+    coverUrl = '',
+    title = 'Persohub Audio',
+    subtitle = '@persohub',
+    playerId,
+}) => {
+    const audioRef = useRef(null);
+    const isSeekingRef = useRef(false);
+    const [isReady, setIsReady] = useState(false);
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [currentTime, setCurrentTime] = useState(0);
+    const [duration, setDuration] = useState(0);
+    const [buffered, setBuffered] = useState(0);
+    const [playbackRate, setPlaybackRate] = useState(1);
+    const [isSeeking, setIsSeeking] = useState(false);
+    const [isMuted, setIsMuted] = useState(false);
+    const [hasError, setHasError] = useState(false);
 
     useEffect(() => {
-        if (index < total) return;
+        registerMediaPlayer(playerId, {
+            pause: () => {
+                if (audioRef.current && !audioRef.current.paused) audioRef.current.pause();
+            },
+        });
+        return () => unregisterMediaPlayer(playerId);
+    }, [playerId]);
+
+    useEffect(() => {
+        const audio = audioRef.current;
+        if (!audio) return;
+        audio.playbackRate = playbackRate;
+    }, [playbackRate]);
+
+    const sliderMax = Number.isFinite(duration) && duration > 0 ? duration : 0;
+    const playedPercent = sliderMax > 0 ? Math.min(100, Math.max(0, (currentTime / sliderMax) * 100)) : 0;
+    const bufferedPercent = sliderMax > 0 ? Math.min(100, Math.max(0, (buffered / sliderMax) * 100)) : 0;
+    const progressGradient = buildTimelineGradient({
+        playedPercent,
+        bufferedPercent,
+        playedColor: '#fbbf24',
+        bufferedColor: 'rgba(255, 255, 255, 0.28)',
+        baseColor: 'rgba(255, 255, 255, 0.12)',
+    });
+
+    const handlePlayPause = async () => {
+        const audio = audioRef.current;
+        if (!audio) return;
+        if (!audio.paused) {
+            audio.pause();
+            return;
+        }
+        requestMediaStart(playerId);
+        try {
+            await audio.play();
+        } catch {
+            setIsPlaying(false);
+        }
+    };
+
+    const toggleMute = () => {
+        const audio = audioRef.current;
+        if (!audio) return;
+        const next = !audio.muted;
+        audio.muted = next;
+        setIsMuted(next);
+    };
+
+    const cyclePlaybackRate = () => {
+        setPlaybackRate((prev) => {
+            const idx = PLAYBACK_RATES.indexOf(prev);
+            return PLAYBACK_RATES[(idx + 1) % PLAYBACK_RATES.length];
+        });
+    };
+
+    if (!src) return null;
+
+    return (
+        <div className="ph-audio-card" data-testid={`ph-audio-player-${playerId}`}>
+            <audio
+                ref={audioRef}
+                className="ph-audio-native-element"
+                hidden
+                controls={false}
+                style={{ display: 'none' }}
+                src={src}
+                preload="metadata"
+                onLoadedMetadata={(event) => {
+                    const nextDuration = Number(event.currentTarget?.duration || 0);
+                    setDuration(Number.isFinite(nextDuration) ? nextDuration : 0);
+                    setIsReady(true);
+                    setHasError(false);
+                }}
+                onTimeUpdate={(event) => {
+                    if (isSeekingRef.current) return;
+                    setCurrentTime(Number(event.currentTarget?.currentTime || 0));
+                }}
+                onProgress={(event) => {
+                    const media = event.currentTarget;
+                    const total = Number(media?.duration || 0);
+                    if (!Number.isFinite(total) || total <= 0) {
+                        setBuffered(0);
+                        return;
+                    }
+                    try {
+                        const ranges = media.buffered;
+                        if (!ranges || ranges.length === 0) {
+                            setBuffered(0);
+                            return;
+                        }
+                        setBuffered(Number(ranges.end(ranges.length - 1)));
+                    } catch {
+                        setBuffered(0);
+                    }
+                }}
+                onPlay={() => {
+                    requestMediaStart(playerId);
+                    setIsPlaying(true);
+                }}
+                onPause={() => {
+                    setIsPlaying(false);
+                    notifyMediaPause(playerId);
+                }}
+                onEnded={() => {
+                    setIsPlaying(false);
+                    notifyMediaPause(playerId);
+                }}
+                onError={() => {
+                    setHasError(true);
+                    setIsReady(false);
+                    setIsPlaying(false);
+                }}
+            />
+            <div className="ph-audio-main">
+                <div className="ph-audio-cover">
+                    {coverUrl ? (
+                        <img src={coverUrl} alt={title} />
+                    ) : (
+                        <div className="ph-audio-cover-fallback">
+                            <Music2 size={18} />
+                        </div>
+                    )}
+                </div>
+                <div className="ph-audio-meta">
+                    <p className="ph-audio-title" title={title}>{title}</p>
+                    <p className="ph-audio-subtitle">{subtitle}</p>
+                    {hasError ? (
+                        <p className="ph-audio-error">
+                            Audio preview unavailable. <a href={src} target="_blank" rel="noreferrer">Open audio</a>
+                        </p>
+                    ) : null}
+                </div>
+            </div>
+            <div className="ph-audio-progress-wrap">
+                <input
+                    type="range"
+                    min={0}
+                    max={sliderMax || 0}
+                    step="0.1"
+                    value={Math.min(currentTime, sliderMax || currentTime || 0)}
+                    disabled={!isReady || sliderMax <= 0 || hasError}
+                    className="ph-audio-progress"
+                    style={{
+                        '--progress-bg': progressGradient,
+                    }}
+                    aria-label="Seek audio"
+                    onMouseDown={() => {
+                        isSeekingRef.current = true;
+                        setIsSeeking(true);
+                    }}
+                    onMouseUp={() => {
+                        isSeekingRef.current = false;
+                        setIsSeeking(false);
+                    }}
+                    onTouchStart={() => {
+                        isSeekingRef.current = true;
+                        setIsSeeking(true);
+                    }}
+                    onTouchEnd={() => {
+                        isSeekingRef.current = false;
+                        setIsSeeking(false);
+                    }}
+                    onChange={(event) => {
+                        const next = Number(event.target.value || 0);
+                        setCurrentTime(next);
+                        if (audioRef.current) audioRef.current.currentTime = next;
+                    }}
+                />
+            </div>
+            <div className="ph-audio-controls">
+                <button type="button" className="ph-audio-btn ph-audio-btn-primary" onClick={handlePlayPause} disabled={hasError}>
+                    {isPlaying ? <Pause size={14} /> : <Play size={14} />}
+                    {isPlaying ? 'Pause' : 'Play'}
+                </button>
+                <button type="button" className="ph-audio-btn" onClick={toggleMute} disabled={hasError}>
+                    {isMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                </button>
+                <button type="button" className="ph-audio-btn" onClick={cyclePlaybackRate} disabled={hasError}>
+                    {playbackRate}x
+                </button>
+                <div className="ph-audio-time">
+                    <span>{formatAudioTime(currentTime)}</span>
+                    <span className="ph-audio-time-sep">/</span>
+                    <span>{formatAudioTime(duration)}</span>
+                    {isSeeking ? <span className="ph-audio-time-seek">seeking</span> : null}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const resolveVideoTitle = (post, attachment) => {
+    const eventTitle = String(post?.event?.title || '').trim();
+    if (eventTitle) return eventTitle;
+    const attachmentName = String(attachment?.file_name || '').trim();
+    if (attachmentName) return attachmentName;
+    const firstLine = String(post?.description || '')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .find(Boolean);
+    return firstLine || 'Persohub Video';
+};
+
+const PersohubVideoPlayer = ({
+    src,
+    playerId,
+    posterUrl = '',
+    title = 'Persohub Video',
+}) => {
+    const containerRef = useRef(null);
+    const videoRef = useRef(null);
+    const hideControlsTimerRef = useRef(null);
+    const isSeekingRef = useRef(false);
+
+    const [isReady, setIsReady] = useState(false);
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [currentTime, setCurrentTime] = useState(0);
+    const [duration, setDuration] = useState(0);
+    const [buffered, setBuffered] = useState(0);
+    const [playbackRate, setPlaybackRate] = useState(1);
+    const [isSeeking, setIsSeeking] = useState(false);
+    const [isMuted, setIsMuted] = useState(false);
+    const [volume, setVolume] = useState(1);
+    const [hasError, setHasError] = useState(false);
+    const [isFullscreen, setIsFullscreen] = useState(false);
+    const [controlsVisible, setControlsVisible] = useState(true);
+
+    useEffect(() => {
+        registerMediaPlayer(playerId, {
+            pause: () => {
+                if (videoRef.current && !videoRef.current.paused) videoRef.current.pause();
+            },
+        });
+        return () => unregisterMediaPlayer(playerId);
+    }, [playerId]);
+
+    useEffect(() => {
+        const video = videoRef.current;
+        if (!video) return;
+        video.playbackRate = playbackRate;
+    }, [playbackRate]);
+
+    useEffect(() => {
+        const video = videoRef.current;
+        if (!video) return;
+        video.muted = isMuted;
+        video.volume = volume;
+    }, [isMuted, volume]);
+
+    useEffect(() => {
+        const onFullscreenChange = () => {
+            const holder = containerRef.current;
+            const current = document.fullscreenElement;
+            setIsFullscreen(Boolean(holder && current && (current === holder || holder.contains(current))));
+        };
+        document.addEventListener('fullscreenchange', onFullscreenChange);
+        return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
+    }, []);
+
+    useEffect(() => {
+        return () => {
+            if (hideControlsTimerRef.current) clearTimeout(hideControlsTimerRef.current);
+        };
+    }, []);
+
+    const sliderMax = Number.isFinite(duration) && duration > 0 ? duration : 0;
+    const playedPercent = sliderMax > 0 ? Math.min(100, Math.max(0, (currentTime / sliderMax) * 100)) : 0;
+    const bufferedPercent = sliderMax > 0 ? Math.min(100, Math.max(0, (buffered / sliderMax) * 100)) : 0;
+    const progressGradient = buildTimelineGradient({
+        playedPercent,
+        bufferedPercent,
+        playedColor: '#f43f5e',
+        bufferedColor: 'rgba(255, 255, 255, 0.24)',
+        baseColor: 'rgba(255, 255, 255, 0.1)',
+    });
+
+    const scheduleHideControls = () => {
+        if (hideControlsTimerRef.current) clearTimeout(hideControlsTimerRef.current);
+        if (!isPlaying) return;
+        hideControlsTimerRef.current = setTimeout(() => {
+            setControlsVisible(false);
+        }, 1800);
+    };
+
+    const showControls = () => {
+        setControlsVisible(true);
+        scheduleHideControls();
+    };
+
+    const handlePlayPause = async () => {
+        const video = videoRef.current;
+        if (!video) return;
+        if (!video.paused) {
+            video.pause();
+            return;
+        }
+        requestMediaStart(playerId);
+        try {
+            await video.play();
+        } catch {
+            setIsPlaying(false);
+        }
+    };
+
+    const toggleMute = () => {
+        setIsMuted((prev) => !prev);
+    };
+
+    const cyclePlaybackRate = () => {
+        setPlaybackRate((prev) => {
+            const idx = VIDEO_PLAYBACK_RATES.indexOf(prev);
+            return VIDEO_PLAYBACK_RATES[(idx + 1) % VIDEO_PLAYBACK_RATES.length];
+        });
+    };
+
+    const toggleFullscreen = async () => {
+        const holder = containerRef.current;
+        if (!holder) return;
+        try {
+            if (!document.fullscreenElement) {
+                await holder.requestFullscreen();
+            } else {
+                await document.exitFullscreen();
+            }
+        } catch {
+            // no-op
+        }
+    };
+
+    if (!src) return null;
+
+    return (
+        <div
+            ref={containerRef}
+            className="ph-video-card"
+            data-testid={`ph-video-player-${playerId}`}
+            onMouseMove={showControls}
+            onTouchStart={showControls}
+            onFocus={showControls}
+        >
+            <video
+                ref={videoRef}
+                src={src}
+                poster={posterUrl || undefined}
+                className="ph-video-canvas"
+                controls={false}
+                playsInline
+                preload="metadata"
+                onClick={handlePlayPause}
+                onLoadedMetadata={(event) => {
+                    const nextDuration = Number(event.currentTarget?.duration || 0);
+                    setDuration(Number.isFinite(nextDuration) ? nextDuration : 0);
+                    setIsReady(true);
+                    setHasError(false);
+                }}
+                onTimeUpdate={(event) => {
+                    if (isSeekingRef.current) return;
+                    setCurrentTime(Number(event.currentTarget?.currentTime || 0));
+                }}
+                onProgress={(event) => {
+                    const media = event.currentTarget;
+                    const total = Number(media?.duration || 0);
+                    if (!Number.isFinite(total) || total <= 0) {
+                        setBuffered(0);
+                        return;
+                    }
+                    try {
+                        const ranges = media.buffered;
+                        if (!ranges || ranges.length === 0) {
+                            setBuffered(0);
+                            return;
+                        }
+                        setBuffered(Number(ranges.end(ranges.length - 1)));
+                    } catch {
+                        setBuffered(0);
+                    }
+                }}
+                onPlay={() => {
+                    requestMediaStart(playerId);
+                    setIsPlaying(true);
+                    scheduleHideControls();
+                }}
+                onPause={() => {
+                    setIsPlaying(false);
+                    setControlsVisible(true);
+                    notifyMediaPause(playerId);
+                }}
+                onEnded={() => {
+                    setIsPlaying(false);
+                    setControlsVisible(true);
+                    notifyMediaPause(playerId);
+                }}
+                onError={() => {
+                    setHasError(true);
+                    setIsPlaying(false);
+                    setIsReady(false);
+                    setControlsVisible(true);
+                }}
+            />
+
+            <div className={`ph-video-controls ${controlsVisible || !isPlaying ? 'is-visible' : ''}`}>
+                <div className="ph-video-progress-wrap">
+                    <input
+                        type="range"
+                        min={0}
+                        max={sliderMax || 0}
+                        step="0.1"
+                        value={Math.min(currentTime, sliderMax || currentTime || 0)}
+                        disabled={!isReady || sliderMax <= 0 || hasError}
+                        className="ph-video-progress"
+                        style={{
+                            '--progress-bg': progressGradient,
+                        }}
+                        aria-label="Seek video"
+                        onMouseDown={() => {
+                            isSeekingRef.current = true;
+                            setIsSeeking(true);
+                        }}
+                        onMouseUp={() => {
+                            isSeekingRef.current = false;
+                            setIsSeeking(false);
+                            scheduleHideControls();
+                        }}
+                        onTouchStart={() => {
+                            isSeekingRef.current = true;
+                            setIsSeeking(true);
+                        }}
+                        onTouchEnd={() => {
+                            isSeekingRef.current = false;
+                            setIsSeeking(false);
+                            scheduleHideControls();
+                        }}
+                        onChange={(event) => {
+                            const next = Number(event.target.value || 0);
+                            setCurrentTime(next);
+                            if (videoRef.current) videoRef.current.currentTime = next;
+                        }}
+                    />
+                </div>
+                <div className="ph-video-controls-row">
+                    <button type="button" className="ph-video-btn ph-video-btn-primary" onClick={handlePlayPause} disabled={hasError}>
+                        {isPlaying ? <Pause size={14} /> : <Play size={14} />}
+                    </button>
+                    <button type="button" className="ph-video-btn" onClick={toggleMute} disabled={hasError}>
+                        {isMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                    </button>
+                    <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step="0.05"
+                        value={isMuted ? 0 : volume}
+                        className="ph-video-volume"
+                        aria-label="Video volume"
+                        onChange={(event) => {
+                            const next = Math.min(1, Math.max(0, Number(event.target.value || 0)));
+                            setVolume(next);
+                            if (next > 0 && isMuted) setIsMuted(false);
+                        }}
+                    />
+                    <button type="button" className="ph-video-btn ph-video-speed" onClick={cyclePlaybackRate} disabled={hasError}>
+                        {playbackRate}x
+                    </button>
+                    <div className="ph-video-time">
+                        <span>{formatAudioTime(currentTime)}</span>
+                        <span className="ph-video-time-sep">/</span>
+                        <span>{formatAudioTime(duration)}</span>
+                        {isSeeking ? <span className="ph-video-time-seek">seeking</span> : null}
+                    </div>
+                    <button type="button" className="ph-video-btn ph-video-fullscreen" onClick={toggleFullscreen} disabled={hasError}>
+                        {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                    </button>
+                </div>
+            </div>
+            {hasError ? (
+                <div className="ph-video-error">
+                    Video preview unavailable. <a href={src} target="_blank" rel="noreferrer">Open video</a>
+                </div>
+            ) : null}
+            {!hasError ? <div className="ph-video-title">{title}</div> : null}
+        </div>
+    );
+};
+
+export const AttachmentCarousel = ({ attachments, post = null }) => {
+    const inputAttachments = useMemo(
+        () => (Array.isArray(attachments) ? attachments : []),
+        [attachments],
+    );
+    const mediaAttachments = useMemo(
+        () => inputAttachments.filter((entry) => String(entry?.attachment_kind || '').toLowerCase() !== 'audio'),
+        [inputAttachments],
+    );
+    const audioAttachments = useMemo(
+        () => sortAttachmentsByOrder(
+            inputAttachments.filter((entry) => String(entry?.attachment_kind || '').toLowerCase() === 'audio'),
+        ),
+        [inputAttachments],
+    );
+    const imageAttachments = useMemo(
+        () => sortAttachmentsByOrder(
+            mediaAttachments.filter((entry) => String(entry?.attachment_kind || '').toLowerCase() === 'image'),
+        ),
+        [mediaAttachments],
+    );
+
+    const [index, setIndex] = useState(0);
+    const mediaTotal = mediaAttachments.length || 0;
+    const item = mediaTotal ? mediaAttachments[index] : null;
+
+    useEffect(() => {
+        if (index < mediaTotal) return;
         setIndex(0);
-    }, [index, total]);
+    }, [index, mediaTotal]);
 
-    if (!item) return null;
+    if (!mediaTotal && !audioAttachments.length) return null;
 
-    const audioCoverUrl = shouldUseImageAsAudioCover
-        ? (visibleAttachments.find((entry) => entry?.attachment_kind === 'image')?.s3_url || '')
-        : '';
+    const sharedCoverUrl = imageAttachments[0]?.s3_url || '';
+    const audioTitle = resolveAudioTitle(post);
+    const audioSubtitle = resolveAudioSubtitle(post);
+    const videoPosterUrl = sharedCoverUrl;
 
-    const goPrev = () => setIndex((prev) => (prev - 1 + total) % total);
-    const goNext = () => setIndex((prev) => (prev + 1) % total);
+    const goPrev = () => setIndex((prev) => (prev - 1 + mediaTotal) % mediaTotal);
+    const goNext = () => setIndex((prev) => (prev + 1) % mediaTotal);
 
     const renderAttachment = () => {
-        if (item.attachment_kind === 'image') {
+        if (!item) return null;
+        const kind = String(item?.attachment_kind || '').toLowerCase();
+        if (kind === 'image') {
             return <img src={item.s3_url} alt="post attachment" className="ph-attachment-slide" loading="lazy" />;
         }
-        if (item.attachment_kind === 'video') {
-            return <video src={item.s3_url} className="ph-attachment-slide" controls preload="metadata" />;
-        }
-        if (item.attachment_kind === 'audio') {
+        if (kind === 'video') {
             return (
-                <div className="ph-attachment-slide" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff' }}>
-                    <audio src={item.s3_url} controls preload="none" style={{ width: '90%' }} />
-                </div>
+                <PersohubVideoPlayer
+                    src={item.s3_url}
+                    playerId={`${post?.slug_token || 'post'}:video:${item?.id || item?.order_no || index}`}
+                    posterUrl={videoPosterUrl}
+                    title={resolveVideoTitle(post, item)}
+                />
             );
         }
-        if (item.attachment_kind === 'pdf') {
+        if (kind === 'pdf') {
             return <PdfAttachmentPreview pdfUrl={item.s3_url} previewImageUrls={item.preview_image_urls || []} />;
         }
         return (
-            <div className="ph-attachment-slide" style={{ background: '#fff', color: '#000', padding: '1rem' }}>
+            <div className="ph-attachment-slide ph-attachment-fallback">
                 <p className="ph-muted">Attachment</p>
                 <a href={item.s3_url} target="_blank" rel="noreferrer" className="ph-btn">Open File</a>
             </div>
@@ -230,48 +843,44 @@ export const AttachmentCarousel = ({ attachments }) => {
     };
 
     return (
-        <div className="ph-attachment" data-testid="ph-attachment-carousel">
-            {renderAttachment()}
-            {total > 1 ? (
+        <div className={`ph-attachment ${!mediaTotal && audioAttachments.length ? 'ph-attachment-audio-only' : ''}`} data-testid="ph-attachment-carousel">
+            {mediaTotal ? (
                 <>
-                    <button type="button" className="ph-slide-btn ph-slide-btn-left" onClick={goPrev} data-testid="ph-attachment-prev">
-                        <ChevronLeft size={18} />
-                    </button>
-                    <button type="button" className="ph-slide-btn ph-slide-btn-right" onClick={goNext} data-testid="ph-attachment-next">
-                        <ChevronRight size={18} />
-                    </button>
-                    <div className="ph-dots">
-                        {visibleAttachments.map((_, idx) => (
-                            <button
-                                key={idx}
-                                type="button"
-                                className={`ph-dot ${idx === index ? 'ph-dot-active' : ''}`}
-                                onClick={() => setIndex(idx)}
-                                aria-label={`Attachment ${idx + 1}`}
-                            />
-                        ))}
-                    </div>
+                    {renderAttachment()}
+                    {mediaTotal > 1 ? (
+                        <>
+                            <button type="button" className="ph-slide-btn ph-slide-btn-left" onClick={goPrev} data-testid="ph-attachment-prev">
+                                <ChevronLeft size={18} />
+                            </button>
+                            <button type="button" className="ph-slide-btn ph-slide-btn-right" onClick={goNext} data-testid="ph-attachment-next">
+                                <ChevronRight size={18} />
+                            </button>
+                            <div className="ph-dots">
+                                {mediaAttachments.map((entry, dotIndex) => (
+                                    <button
+                                        key={`${entry?.id || entry?.s3_url || dotIndex}`}
+                                        type="button"
+                                        className={`ph-dot ${dotIndex === index ? 'ph-dot-active' : ''}`}
+                                        onClick={() => setIndex(dotIndex)}
+                                        aria-label={`Attachment ${dotIndex + 1}`}
+                                    />
+                                ))}
+                            </div>
+                        </>
+                    ) : null}
                 </>
             ) : null}
 
-            {shouldUseImageAsAudioCover ? (
-                <div
-                    className="ph-audio-cover-player"
-                    style={{
-                        marginTop: '0.45rem',
-                        borderRadius: '12px',
-                        border: '1px solid rgba(0,0,0,0.08)',
-                        background: '#fff',
-                        padding: '0.55rem 0.65rem',
-                    }}
-                >
+            {audioAttachments.length ? (
+                <div className="ph-audio-cover-player">
                     {audioAttachments.map((audioItem, audioIdx) => (
-                        <div key={`${audioItem?.id || audioItem?.s3_url || audioIdx}`} style={{ marginBottom: audioIdx < audioAttachments.length - 1 ? '0.4rem' : 0 }}>
-                            <audio
+                        <div key={`${audioItem?.id || audioItem?.s3_url || audioIdx}`} className="ph-audio-track-row">
+                            <PersohubAudioPlayer
                                 src={audioItem?.s3_url}
-                                controls
-                                preload="metadata"
-                                style={{ width: '100%' }}
+                                coverUrl={sharedCoverUrl}
+                                title={audioTitle}
+                                subtitle={audioSubtitle}
+                                playerId={`${post?.slug_token || 'post'}:${audioItem?.id || audioItem?.order_no || audioIdx}`}
                             />
                         </div>
                     ))}
@@ -484,7 +1093,7 @@ export const PostCard = ({
             </div>
 
             <div className="ph-post-body">
-                <AttachmentCarousel attachments={post.attachments} />
+                <AttachmentCarousel attachments={post.attachments} post={post} />
 
                 <div className="ph-desc">
                     <div className={shouldShowCompactPreview ? 'ph-desc-mobile-event-compact' : ''}>

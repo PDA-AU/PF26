@@ -533,6 +533,7 @@ def search_suggestions(
     db: Session = Depends(get_db),
 ):
     needle = q.strip().lower()
+    hashtag_needle = needle.lstrip("#")
     if not needle:
         return PersohubSearchResponse(items=[])
 
@@ -562,7 +563,7 @@ def search_suggestions(
     )
     hashtags = (
         db.query(PersohubHashtag)
-        .filter(PersohubHashtag.hashtag_text.ilike(f"%{needle}%"))
+        .filter(PersohubHashtag.hashtag_text.ilike(f"%{hashtag_needle}%"))
         .order_by(PersohubHashtag.count.desc(), PersohubHashtag.hashtag_text.asc())
         .limit(6)
         .all()
