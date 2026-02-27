@@ -1015,8 +1015,11 @@ export const PostCard = ({
 }) => {
     const READ_MORE_PREVIEW_LIMIT = 800;
     const fallbackLogo = 'https://placehold.co/64x64?text=PDA';
+    const communityLogoUrl = String(post?.community?.logo_url || '').trim();
+    const communityClubLogoUrl = String(post?.community?.club_logo_url || '').trim();
+    const resolveCommunityAvatar = () => communityLogoUrl || communityClubLogoUrl || fallbackLogo;
     const [communityAvatarSrc, setCommunityAvatarSrc] = useState(
-        post?.community?.logo_url || post?.community?.club_logo_url || fallbackLogo,
+        resolveCommunityAvatar(),
     );
     const [expanded, setExpanded] = useState(false);
     const [commentsOpen, setCommentsOpen] = useState(false);
@@ -1033,8 +1036,8 @@ export const PostCard = ({
     ));
 
     useEffect(() => {
-        setCommunityAvatarSrc(post?.community?.logo_url || post?.community?.club_logo_url || fallbackLogo);
-    }, [post?.community?.logo_url, post?.community?.club_logo_url]);
+        setCommunityAvatarSrc(resolveCommunityAvatar());
+    }, [communityLogoUrl, communityClubLogoUrl]);
 
     useEffect(() => {
         if (typeof window === 'undefined') return undefined;
@@ -1146,11 +1149,11 @@ export const PostCard = ({
                         alt={post.community.name}
                         className="ph-avatar"
                         onError={() => {
-                            if (communityAvatarSrc === (post?.community?.club_logo_url || fallbackLogo)) {
+                            if (communityAvatarSrc === (communityClubLogoUrl || fallbackLogo)) {
                                 setCommunityAvatarSrc(fallbackLogo);
                                 return;
                             }
-                            setCommunityAvatarSrc(post?.community?.club_logo_url || fallbackLogo);
+                            setCommunityAvatarSrc(communityClubLogoUrl || fallbackLogo);
                         }}
                     />
                     <div>

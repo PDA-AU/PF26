@@ -16,12 +16,14 @@ from models import (
     PdaUser,
     PersohubEvent,
     PersohubClub,
+    PersohubCommunity,
     PersohubEventStatus,
     PersohubEventParticipantMode,
     PersohubEventEntityType,
     PersohubEventRegistrationStatus,
     PersohubEventRegistration,
     PersohubPayment,
+    PersohubPost,
     PersohubEventTeam,
     PersohubEventTeamMember,
     PersohubEventInvite,
@@ -526,7 +528,33 @@ def list_all_managed_events(db: Session = Depends(get_db)):
 def get_event(slug: str, db: Session = Depends(get_db)):
     event = _get_event_or_404(db, slug)
     _ensure_event_visible_for_public_access(event)
-    payload = PersohubManagedEventResponse.model_validate(event)
+    community = None
+    if int(getattr(event, "community_id", 0) or 0) > 0:
+        community = db.query(PersohubCommunity).filter(PersohubCommunity.id == int(event.community_id)).first()
+    if not community:
+        source_post = (
+            db.query(PersohubPost)
+            .filter(PersohubPost.source_event_id == int(event.id))
+            .order_by(PersohubPost.id.desc())
+            .first()
+        )
+        if source_post and int(getattr(source_post, "community_id", 0) or 0) > 0:
+            community = db.query(PersohubCommunity).filter(PersohubCommunity.id == int(source_post.community_id)).first()
+
+    club = None
+    if int(getattr(event, "club_id", 0) or 0) > 0:
+        club = db.query(PersohubClub).filter(PersohubClub.id == int(event.club_id)).first()
+    if not club and community and int(getattr(community, "club_id", 0) or 0) > 0:
+        club = db.query(PersohubClub).filter(PersohubClub.id == int(community.club_id)).first()
+
+    payload = PersohubManagedEventResponse.model_validate(event).model_copy(
+        update={
+            "community_profile_id": (str(getattr(community, "profile_id", "") or "").strip() or None),
+            "community_name": (str(getattr(community, "name", "") or "").strip() or None),
+            "club_name": (str(getattr(club, "name", "") or "").strip() or None),
+            "club_logo_url": (str(getattr(club, "club_logo_url", "") or "").strip() or None),
+        }
+    )
     registration_available = _registration_available(db, event)
     seat_availability_enabled = bool(getattr(event, "seat_availability_enabled", False))
     if not seat_availability_enabled:

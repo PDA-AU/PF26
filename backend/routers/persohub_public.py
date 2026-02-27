@@ -1,7 +1,9 @@
+from datetime import datetime
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -278,9 +280,63 @@ def get_feed(
     elif feed_type == PersohubFeedTypeEnum.COMMUNITY:
         feed_filter_clause = PersohubPost.post_type == "community"
 
-    followed_ordering = (PersohubPost.created_at.desc(), PersohubPost.id.desc())
-    other_ordering = (PersohubPost.like_count.desc(), PersohubPost.created_at.desc(), PersohubPost.id.desc())
+    created_ordering = (PersohubPost.created_at.desc(), PersohubPost.id.desc())
+    liked_ordering = (PersohubPost.like_count.desc(), PersohubPost.created_at.desc(), PersohubPost.id.desc())
+    ist_today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
+    active_event_clause = and_(
+        PersohubPost.source_event_id.is_not(None),
+        PersohubEvent.start_date.is_not(None),
+        PersohubEvent.start_date >= ist_today,
+    )
+    non_active_clause = or_(
+        PersohubPost.source_event_id.is_(None),
+        PersohubEvent.start_date.is_(None),
+        PersohubEvent.start_date < ist_today,
+    )
 
+    def _base_count_query():
+        query = (
+            db.query(func.count(PersohubPost.id))
+            .select_from(PersohubPost)
+            .outerjoin(PersohubEvent, PersohubEvent.id == PersohubPost.source_event_id)
+            .filter(PersohubPost.is_hidden == 1)
+        )
+        if feed_filter_clause is not None:
+            query = query.filter(feed_filter_clause)
+        return query
+
+    def _base_posts_query():
+        query = (
+            db.query(PersohubPost)
+            .select_from(PersohubPost)
+            .outerjoin(PersohubEvent, PersohubEvent.id == PersohubPost.source_event_id)
+            .filter(PersohubPost.is_hidden == 1)
+        )
+        if feed_filter_clause is not None:
+            query = query.filter(feed_filter_clause)
+        return query
+
+    def _count_posts(*filters):
+        query = _base_count_query()
+        if filters:
+            query = query.filter(*filters)
+        return int(query.scalar() or 0)
+
+    def _fetch_posts(filters, ordering, *, tier_offset: int, tier_limit: int):
+        if tier_limit <= 0:
+            return []
+        query = _base_posts_query()
+        if filters:
+            query = query.filter(*filters)
+        return (
+            query
+            .order_by(*ordering)
+            .offset(tier_offset)
+            .limit(tier_limit)
+            .all()
+        )
+
+    tiers: List[Dict[str, Any]] = []
     if user:
         followed_ids = [
             cid
@@ -288,85 +344,52 @@ def get_feed(
             .filter(PersohubCommunityFollow.user_id == user.id)
             .all()
         ]
-
         if followed_ids:
-            followed_total_query = (
-                db.query(func.count(PersohubPost.id))
-                .filter(PersohubPost.community_id.in_(followed_ids), PersohubPost.is_hidden == 1)
-            )
-            other_total_query = (
-                db.query(func.count(PersohubPost.id))
-                .filter(~PersohubPost.community_id.in_(followed_ids), PersohubPost.is_hidden == 1)
-            )
-            if feed_filter_clause is not None:
-                followed_total_query = followed_total_query.filter(feed_filter_clause)
-                other_total_query = other_total_query.filter(feed_filter_clause)
-            followed_total = followed_total_query.scalar() or 0
-            other_total = other_total_query.scalar() or 0
-            total = int(followed_total + other_total)
-
-            followed_offset = offset
-            followed_limit = 0
-            if followed_offset < followed_total:
-                followed_limit = min(limit, followed_total - followed_offset)
-                followed_posts_query = (
-                    db.query(PersohubPost)
-                    .filter(PersohubPost.community_id.in_(followed_ids), PersohubPost.is_hidden == 1)
-                )
-                if feed_filter_clause is not None:
-                    followed_posts_query = followed_posts_query.filter(feed_filter_clause)
-                posts.extend(
-                    followed_posts_query
-                    .order_by(*followed_ordering)
-                    .offset(followed_offset)
-                    .limit(followed_limit)
-                    .all()
-                )
-
-            remaining = max(0, limit - followed_limit)
-            if remaining > 0:
-                other_offset = max(0, offset - followed_total)
-                other_posts_query = (
-                    db.query(PersohubPost)
-                    .filter(~PersohubPost.community_id.in_(followed_ids), PersohubPost.is_hidden == 1)
-                )
-                if feed_filter_clause is not None:
-                    other_posts_query = other_posts_query.filter(feed_filter_clause)
-                posts.extend(
-                    other_posts_query
-                    .order_by(*other_ordering)
-                    .offset(other_offset)
-                    .limit(remaining)
-                    .all()
-                )
+            followed_clause = PersohubPost.community_id.in_(followed_ids)
+            other_clause = ~PersohubPost.community_id.in_(followed_ids)
+            tiers = [
+                {"filters": [followed_clause, active_event_clause], "ordering": created_ordering},
+                {"filters": [other_clause, active_event_clause], "ordering": created_ordering},
+                {"filters": [followed_clause, non_active_clause], "ordering": liked_ordering},
+                {"filters": [other_clause, non_active_clause], "ordering": liked_ordering},
+            ]
         else:
-            total_query = db.query(func.count(PersohubPost.id)).filter(PersohubPost.is_hidden == 1)
-            posts_query = db.query(PersohubPost).filter(PersohubPost.is_hidden == 1)
-            if feed_filter_clause is not None:
-                total_query = total_query.filter(feed_filter_clause)
-                posts_query = posts_query.filter(feed_filter_clause)
-            total = int(total_query.scalar() or 0)
-            posts = (
-                posts_query
-                .order_by(*other_ordering)
-                .offset(offset)
-                .limit(limit)
-                .all()
-            )
+            tiers = [
+                {"filters": [active_event_clause], "ordering": created_ordering},
+                {"filters": [non_active_clause], "ordering": liked_ordering},
+            ]
     else:
-        total_query = db.query(func.count(PersohubPost.id)).filter(PersohubPost.is_hidden == 1)
-        posts_query = db.query(PersohubPost).filter(PersohubPost.is_hidden == 1)
-        if feed_filter_clause is not None:
-            total_query = total_query.filter(feed_filter_clause)
-            posts_query = posts_query.filter(feed_filter_clause)
-        total = int(total_query.scalar() or 0)
-        posts = (
-            posts_query
-            .order_by(*other_ordering)
-            .offset(offset)
-            .limit(limit)
-            .all()
+        tiers = [
+            {"filters": [active_event_clause], "ordering": created_ordering},
+            {"filters": [non_active_clause], "ordering": liked_ordering},
+        ]
+
+    for tier in tiers:
+        tier["count"] = _count_posts(*tier["filters"])
+    total = int(sum(int(tier["count"]) for tier in tiers))
+
+    remaining = limit
+    tier_offset_remaining = offset
+    for tier in tiers:
+        tier_total = int(tier["count"] or 0)
+        if tier_total <= 0:
+            continue
+        if tier_offset_remaining >= tier_total:
+            tier_offset_remaining -= tier_total
+            continue
+        take = min(remaining, tier_total - tier_offset_remaining)
+        posts.extend(
+            _fetch_posts(
+                tier["filters"],
+                tier["ordering"],
+                tier_offset=tier_offset_remaining,
+                tier_limit=take,
+            )
         )
+        remaining -= take
+        tier_offset_remaining = 0
+        if remaining <= 0:
+            break
 
     next_offset = offset + len(posts)
     has_more = next_offset < total

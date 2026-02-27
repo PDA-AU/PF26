@@ -456,6 +456,11 @@ export default function EventDashboard() {
     const seatProgressPercent = seatAvailabilityEnabled
         ? Math.min(100, 50 + (occupiedRatio * 50))
         : 0;
+    const originCommunityProfileId = String(eventInfo?.community_profile_id || '').trim();
+    const originCommunityName = String(eventInfo?.community_name || '').trim();
+    const originClubName = String(eventInfo?.club_name || '').trim();
+    const originByLabel = originClubName || originCommunityName || originCommunityProfileId || '';
+    const showOriginInlineMeta = Boolean(originByLabel || originCommunityProfileId);
 
     const fetchData = useCallback(async (options = {}) => {
         const authHeaderOverride = options.authHeaderOverride;
@@ -1196,7 +1201,6 @@ export default function EventDashboard() {
                         ) : null}
                     </div>
                 </section>
-
                 {!isParticipantRoute ? (
                     <section className="mt-6 overflow-hidden rounded-md border-4 border-black bg-white shadow-[8px_8px_0px_0px_#000000]">
                         <div className="grid gap-0 lg:grid-cols-[1.25fr_0.75fr]">
@@ -1235,6 +1239,21 @@ export default function EventDashboard() {
                                         </Button>
                                     ) : null}
                                 </div>
+                                {showOriginInlineMeta ? (
+                                    <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2 text-[11px] font-black uppercase tracking-[0.1em] text-slate-700">
+                                        {originByLabel ? (
+                                            <span className="min-w-0 truncate">{`By ${originByLabel}`}</span>
+                                        ) : null}
+                                        {originCommunityProfileId ? (
+                                            <Link
+                                                to={`/persohub/${encodeURIComponent(originCommunityProfileId)}`}
+                                                className="inline-flex max-w-full items-center rounded-md border-2 border-black bg-white px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.1em] text-slate-800 shadow-neo hover:bg-[#fef9c3]"
+                                            >
+                                                <span className="truncate">{`@${originCommunityProfileId}`}</span>
+                                            </Link>
+                                        ) : null}
+                                    </div>
+                                ) : null}
                                 {eventInfo?.registration_fee?.enabled ? (
                                     <div className="mt-3">
                                         <span className="inline-flex rounded-md border-2 border-black bg-[#ffe4b5] px-3 py-1 text-xs font-black uppercase tracking-[0.14em] text-[#7c2d12] shadow-neo">

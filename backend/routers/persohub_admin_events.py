@@ -161,6 +161,17 @@ def _ensure_events_policy_shape(policy: Optional[dict]) -> dict:
     return safe
 
 
+def _actor_log_identity(db: Session, request: Request) -> tuple[str, str, int]:
+    actor_id = int(get_persohub_actor_user_id(request) or 0)
+    actor_user = db.query(PdaUser).filter(PdaUser.id == actor_id).first() if actor_id > 0 else None
+    register_number = str(getattr(actor_user, "regno", "") or "").strip()
+    if not register_number:
+        register_number = str(getattr(getattr(request, "state", None), "persohub_actor_role", "") or "owner").strip()
+    register_number = (register_number[:64] or "owner")
+    actor_name = str(getattr(actor_user, "name", "") or "").strip() or "persohub_owner"
+    return register_number, actor_name, actor_id
+
+
 def _serialize_event(
     event: PersohubEvent,
     sympo: Optional[PersohubSympo] = None,

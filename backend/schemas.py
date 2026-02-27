@@ -2483,6 +2483,10 @@ class PersohubManagedEventResponse(BaseModel):
     event_code: str
     club_id: int
     community_id: Optional[int] = None
+    community_profile_id: Optional[str] = None
+    community_name: Optional[str] = None
+    club_name: Optional[str] = None
+    club_logo_url: Optional[str] = None
     title: str
     description: Optional[str] = None
     start_date: Optional[date] = None
