@@ -1017,9 +1017,9 @@ export const PostCard = ({
     const fallbackLogo = 'https://placehold.co/64x64?text=PDA';
     const communityLogoUrl = String(post?.community?.logo_url || '').trim();
     const communityClubLogoUrl = String(post?.community?.club_logo_url || '').trim();
-    const resolveCommunityAvatar = () => communityLogoUrl || communityClubLogoUrl || fallbackLogo;
+    const resolvedCommunityAvatar = communityLogoUrl || communityClubLogoUrl || fallbackLogo;
     const [communityAvatarSrc, setCommunityAvatarSrc] = useState(
-        resolveCommunityAvatar(),
+        resolvedCommunityAvatar,
     );
     const [expanded, setExpanded] = useState(false);
     const [commentsOpen, setCommentsOpen] = useState(false);
@@ -1036,8 +1036,8 @@ export const PostCard = ({
     ));
 
     useEffect(() => {
-        setCommunityAvatarSrc(resolveCommunityAvatar());
-    }, [communityLogoUrl, communityClubLogoUrl]);
+        setCommunityAvatarSrc(resolvedCommunityAvatar);
+    }, [resolvedCommunityAvatar]);
 
     useEffect(() => {
         if (typeof window === 'undefined') return undefined;
