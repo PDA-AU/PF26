@@ -4,7 +4,6 @@ import { toast } from 'sonner';
 import LoadingState from '@/components/common/LoadingState';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import PersohubAdminLayout from '@/pages/persohub/admin/PersohubAdminLayout';
@@ -41,7 +40,7 @@ export default function PersohubAdminPaymentsPage() {
     const [totalCount, setTotalCount] = useState(0);
 
     const [confirmTarget, setConfirmTarget] = useState(null);
-    const [confirmPassword, setConfirmPassword] = useState('');
+    const [confirmAcknowledged, setConfirmAcknowledged] = useState(false);
     const [confirming, setConfirming] = useState(false);
 
     const [declineTarget, setDeclineTarget] = useState(null);
@@ -77,16 +76,16 @@ export default function PersohubAdminPaymentsPage() {
 
     const submitConfirm = async () => {
         if (!confirmTarget) return;
-        if (!confirmPassword.trim()) {
-            toast.error('Password is required');
+        if (!confirmAcknowledged) {
+            toast.error('Please acknowledge the approval warning');
             return;
         }
         setConfirming(true);
         try {
-            await persohubAdminApi.confirmPersohubPayment(confirmTarget.id, { password: confirmPassword });
+            await persohubAdminApi.confirmPersohubPayment(confirmTarget.id, {});
             toast.success('Payment approved');
             setConfirmTarget(null);
-            setConfirmPassword('');
+            setConfirmAcknowledged(false);
             fetchRows(true);
         } catch (error) {
             toast.error(persohubAdminApi.parseApiError(error, 'Failed to approve payment'));
@@ -191,7 +190,7 @@ export default function PersohubAdminPaymentsPage() {
                                             onClick={() => {
                                                 if (!isPending) return;
                                                 setConfirmTarget(row);
-                                                setConfirmPassword('');
+                                                setConfirmAcknowledged(false);
                                             }}
                                         >
                                             {normalizedStatus === 'approved' ? 'Approved' : 'Confirm'}
@@ -250,25 +249,45 @@ export default function PersohubAdminPaymentsPage() {
                 ) : null}
             </section>
 
-            <Dialog open={Boolean(confirmTarget)} onOpenChange={(open) => (!open ? setConfirmTarget(null) : null)}>
+            <Dialog open={Boolean(confirmTarget)} onOpenChange={(open) => {
+                if (!open) {
+                    setConfirmTarget(null);
+                    setConfirmAcknowledged(false);
+                }
+            }}>
                 <DialogContent className="border-4 border-black bg-white sm:max-w-md">
                     <DialogHeader>
                         <DialogTitle className="font-heading text-xl font-black">Confirm Payment</DialogTitle>
                     </DialogHeader>
                     <div className="space-y-3">
-                        <p className="text-sm text-slate-700">Enter your password to approve this payment.</p>
-                        <div className="space-y-2">
-                            <Label htmlFor="owner-password">Password</Label>
-                            <Input
-                                id="owner-password"
-                                type="password"
-                                value={confirmPassword}
-                                onChange={(event) => setConfirmPassword(event.target.value)}
+                        <p className="text-sm text-amber-800">
+                            Approving payment will mark registration as active. Please verify screenshot, amount and participant details before continuing.
+                        </p>
+                        <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3">
+                            <input
+                                id="payment-approve-warning"
+                                type="checkbox"
+                                checked={confirmAcknowledged}
+                                onChange={(event) => setConfirmAcknowledged(Boolean(event.target.checked))}
+                                className="mt-1 h-4 w-4"
                             />
+                            <Label htmlFor="payment-approve-warning" className="text-sm font-medium text-amber-900">
+                                I have verified the proof and want to approve this payment.
+                            </Label>
                         </div>
                         <div className="flex justify-end gap-2">
-                            <Button type="button" variant="outline" onClick={() => setConfirmTarget(null)} disabled={confirming}>Cancel</Button>
-                            <Button type="button" onClick={submitConfirm} disabled={confirming}>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => {
+                                    setConfirmTarget(null);
+                                    setConfirmAcknowledged(false);
+                                }}
+                                disabled={confirming}
+                            >
+                                Cancel
+                            </Button>
+                            <Button type="button" onClick={submitConfirm} disabled={confirming || !confirmAcknowledged}>
                                 {confirming ? 'Confirming...' : 'Confirm'}
                             </Button>
                         </div>

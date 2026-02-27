@@ -109,10 +109,12 @@ export default function UsersAdmin() {
     const [collegeScope, setCollegeScope] = useState('mit');
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
+    const [regnoSearch, setRegnoSearch] = useState('');
     const [memberFilter, setMemberFilter] = useState('All');
     const [appliedFilter, setAppliedFilter] = useState('All');
     const [verifiedFilter, setVerifiedFilter] = useState('All');
     const [collegeFilter, setCollegeFilter] = useState('MIT');
+    const [deptFilter, setDeptFilter] = useState('All');
     const [sortBy, setSortBy] = useState('name');
     const [sortDir, setSortDir] = useState('asc');
     const [batchFilter, setBatchFilter] = useState('All');
@@ -178,18 +180,25 @@ export default function UsersAdmin() {
             const verifiedMatch = verifiedFilter === 'All' || (verifiedFilter === 'Verified' ? member.email_verified : !member.email_verified);
             const isMit = String(member?.college || '').trim().toLowerCase() === 'mit';
             const collegeMatch = collegeFilter === 'MIT' ? isMit : !isMit;
-            return memberMatch && appliedMatch && verifiedMatch && collegeMatch;
+            const memberDept = normalizeDepartmentValue(member?.dept);
+            const deptMatch = deptFilter === 'All' || memberDept === deptFilter;
+            return memberMatch && appliedMatch && verifiedMatch && collegeMatch && deptMatch;
         });
-        if (!search) return filteredRows;
+        let nextRows = filteredRows;
+        if (regnoSearch.trim()) {
+            const reg = regnoSearch.trim().toLowerCase();
+            nextRows = nextRows.filter((member) => String(member?.regno || '').toLowerCase().includes(reg));
+        }
+        if (!search) return nextRows;
         const s = search.toLowerCase();
-        return filteredRows.filter(m =>
+        return nextRows.filter(m =>
             [m.name, m.profile_name, m.regno, m.preferred_team, m.team, m.email, m.phno, m.dept, m.college]
                 .filter(Boolean)
                 .join(' ')
                 .toLowerCase()
                 .includes(s)
         );
-    }, [usersRows, collegeScope, search, memberFilter, appliedFilter, verifiedFilter, collegeFilter]);
+    }, [usersRows, collegeScope, search, regnoSearch, memberFilter, appliedFilter, verifiedFilter, collegeFilter, deptFilter]);
 
     const sorted = useMemo(() => {
         const rows = [...filtered];
@@ -213,14 +222,33 @@ export default function UsersAdmin() {
                 const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
                 return (ta - tb) * dir;
             }
+            if (sortBy === 'dept') {
+                return (normalizeDepartmentValue(a.dept || '')).localeCompare(normalizeDepartmentValue(b.dept || '')) * dir;
+            }
             return (a.name || '').localeCompare(b.name || '') * dir;
         });
         return rows;
     }, [filtered, sortBy, sortDir]);
 
+    const departmentFilterOptions = useMemo(() => {
+        const values = Array.from(
+            new Set(
+                usersRows
+                    .filter((member) => (
+                        collegeScope === 'all'
+                            ? true
+                            : String(member?.college || '').trim().toLowerCase() === 'mit'
+                    ))
+                    .map((member) => normalizeDepartmentValue(member?.dept))
+                    .filter(Boolean)
+            )
+        ).sort((a, b) => a.localeCompare(b));
+        return values;
+    }, [usersRows, collegeScope]);
+
     useEffect(() => {
         setPage(1);
-    }, [collegeScope, search, memberFilter, appliedFilter, verifiedFilter, collegeFilter, sortBy, sortDir, pageSize]);
+    }, [collegeScope, search, regnoSearch, memberFilter, appliedFilter, verifiedFilter, collegeFilter, deptFilter, sortBy, sortDir, pageSize]);
 
     const boundedPageSize = Math.min(pageSize, MAX_PAGE_SIZE);
     const totalPages = Math.max(1, Math.ceil(sorted.length / boundedPageSize));
@@ -591,6 +619,12 @@ export default function UsersAdmin() {
                             placeholder="Search users..."
                             className="sm:max-w-sm"
                         />
+                        <Input
+                            value={regnoSearch}
+                            onChange={(e) => setRegnoSearch(e.target.value)}
+                            placeholder="Search by Reg No..."
+                            className="sm:max-w-xs"
+                        />
                         <Select value={memberFilter} onValueChange={setMemberFilter}>
                             <SelectTrigger className="sm:w-44">
                                 <SelectValue placeholder="Member status" />
@@ -630,12 +664,24 @@ export default function UsersAdmin() {
                                 <SelectItem value="NON_MIT">NON MIT</SelectItem>
                             </SelectContent>
                         </Select>
+                        <Select value={deptFilter} onValueChange={setDeptFilter}>
+                            <SelectTrigger className="sm:w-56">
+                                <SelectValue placeholder="Department" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="All">All Departments</SelectItem>
+                                {departmentFilterOptions.map((dept) => (
+                                    <SelectItem key={dept} value={dept}>{dept}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
                         <Select value={sortBy} onValueChange={setSortBy}>
                             <SelectTrigger className="sm:w-44">
                                 <SelectValue placeholder="Sort by" />
                             </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="name">Sort: Name</SelectItem>
+                                <SelectItem value="dept">Sort: Dept</SelectItem>
                                 <SelectItem value="batch">Sort: Batch</SelectItem>
                                 <SelectItem value="is_member">Sort: Is Member</SelectItem>
                                 <SelectItem value="is_applied">Sort: Is Applied</SelectItem>
@@ -708,27 +754,33 @@ export default function UsersAdmin() {
                                 }
                             }}
                         >
-                            <div className="hidden sm:grid grid-cols-[1.4fr_1.2fr_1fr_1fr_1fr] bg-[#fff7dc] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-600">
+                            <div className="hidden sm:grid grid-cols-[0.5fr_1.4fr_1.2fr_1fr_1.4fr_0.8fr_0.8fr] bg-[#fff7dc] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-600">
+                                <span>SI.NO</span>
                                 <span>Name</span>
                                 <span>Profile Name</span>
                                 <span>Reg No</span>
+                                <span>Dept</span>
                                 <span>Member</span>
                                 <span>Applied</span>
                             </div>
                             <div className="divide-y divide-black/5">
-                                {paged.map(member => (
+                                {paged.map((member, index) => (
                                     <button
                                         key={member.id}
                                         type="button"
                                         onClick={() => openMember(member)}
-                                        className="w-full px-4 py-3 text-left text-sm hover:bg-[#fffaf0] sm:grid sm:grid-cols-[1.4fr_1.2fr_1fr_1fr_1fr] sm:items-center"
+                                        className="w-full px-4 py-3 text-left text-sm hover:bg-[#fffaf0] sm:grid sm:grid-cols-[0.5fr_1.4fr_1.2fr_1fr_1.4fr_0.8fr_0.8fr] sm:items-center"
                                     >
+                                        <span className="hidden text-slate-600 sm:inline">{((currentPage - 1) * boundedPageSize) + index + 1}</span>
                                         <div className="flex flex-col gap-1 sm:block">
                                             <span className="font-medium text-[#11131a]">{member.name || 'Unnamed'}</span>
-                                            <span className="text-xs text-slate-500 sm:hidden">@{member.profile_name || 'n/a'} · {member.regno || 'N/A'}</span>
+                                            <span className="text-xs text-slate-500 sm:hidden">
+                                                @{member.profile_name || 'n/a'} · {member.regno || 'N/A'} · {normalizeDepartmentValue(member.dept || '') || 'N/A'}
+                                            </span>
                                         </div>
                                         <span className="hidden text-slate-600 sm:inline">@{member.profile_name || 'n/a'}</span>
                                         <span className="hidden text-slate-600 sm:inline">{member.regno || 'N/A'}</span>
+                                        <span className="hidden text-slate-600 sm:inline">{normalizeDepartmentValue(member.dept || '') || 'N/A'}</span>
                                         <span className="text-slate-600">{member.is_member ? 'Yes' : 'No'}</span>
                                         <span className="text-slate-600">{member.is_applied ? 'Yes' : 'No'}</span>
                                     </button>

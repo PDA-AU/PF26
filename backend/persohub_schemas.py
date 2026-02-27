@@ -598,7 +598,7 @@ class PersohubAdminPaymentReviewListItem(BaseModel):
 
 
 class PersohubAdminPaymentConfirmRequest(BaseModel):
-    password: str = Field(..., min_length=6)
+    password: Optional[str] = Field(default=None, min_length=6)
 
 
 class PersohubAdminPaymentDeclineRequest(BaseModel):

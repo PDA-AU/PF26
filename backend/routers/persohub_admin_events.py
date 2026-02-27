@@ -7,7 +7,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from auth import verify_password
 from badge_service import delete_badges_for_persohub_event, delete_badges_for_persohub_teams
 from database import get_db
 from emailer import send_email_async
@@ -1088,10 +1087,8 @@ def confirm_owner_payment(
 
     actor_user_id = int(get_persohub_actor_user_id(request) or 0)
     actor = db.query(PdaUser).filter(PdaUser.id == actor_user_id).first() if actor_user_id > 0 else None
-    if not actor or not actor.hashed_password:
+    if not actor:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Approver account unavailable")
-    if not verify_password(payload.password, actor.hashed_password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid password")
 
     content = _payment_content_dict(payment)
     content["status"] = "approved"
