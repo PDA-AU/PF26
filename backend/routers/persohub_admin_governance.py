@@ -63,6 +63,49 @@ def _resolve_actor_club_id(request: Request, community: PersohubCommunity) -> in
     return club_id
 
 
+def _set_root_community(db: Session, club_id: int, community_id: int) -> None:
+    db.query(PersohubCommunity).filter(PersohubCommunity.club_id == int(club_id)).update(
+        {PersohubCommunity.is_root: False},
+        synchronize_session=False,
+    )
+    db.query(PersohubCommunity).filter(
+        PersohubCommunity.id == int(community_id),
+        PersohubCommunity.club_id == int(club_id),
+    ).update(
+        {PersohubCommunity.is_root: True},
+        synchronize_session=False,
+    )
+
+
+def _ensure_club_has_primary(db: Session, club_id: int) -> None:
+    # Keep a deterministic primary community pointer (root) after deletes.
+    root_exists = (
+        db.query(PersohubCommunity.id)
+        .filter(
+            PersohubCommunity.club_id == int(club_id),
+            PersohubCommunity.is_root == True,  # noqa: E712
+        )
+        .first()
+    )
+    if root_exists:
+        return
+    candidate = (
+        db.query(PersohubCommunity.id)
+        .filter(PersohubCommunity.club_id == int(club_id), PersohubCommunity.is_active == True)  # noqa: E712
+        .order_by(PersohubCommunity.id.asc())
+        .first()
+    )
+    if not candidate:
+        candidate = (
+            db.query(PersohubCommunity.id)
+            .filter(PersohubCommunity.club_id == int(club_id))
+            .order_by(PersohubCommunity.id.asc())
+            .first()
+        )
+    if candidate:
+        _set_root_community(db, int(club_id), int(candidate[0]))
+
+
 def _actor_log_identity(db: Session, request: Request) -> tuple[str, str, int]:
     actor_id = int(get_persohub_actor_user_id(request) or 0)
     actor_user = db.query(PdaUser).filter(PdaUser.id == actor_id).first() if actor_id > 0 else None

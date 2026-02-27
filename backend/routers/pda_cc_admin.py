@@ -224,6 +224,11 @@ def _ensure_club_has_root(db: Session, club_id: int) -> None:
         _set_root_community(db, int(club_id), int(candidate[0]))
 
 
+def _ensure_club_has_primary(db: Session, club_id: int) -> None:
+    # Backward-compatible helper name used by delete flows.
+    _ensure_club_has_root(db, int(club_id))
+
+
 def _normalize_requested_community_admins(
     payload_admins: Optional[List[dict]],
     fallback_admin_id: Optional[int],
