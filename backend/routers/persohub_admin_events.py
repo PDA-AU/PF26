@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from sqlalchemy import func, or_
+from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session
 
 from badge_service import delete_badges_for_persohub_event, delete_badges_for_persohub_teams
@@ -50,6 +50,8 @@ from persohub_schemas import (
     PersohubAdminPaymentConfirmRequest,
     PersohubAdminPaymentDeclineRequest,
     PersohubAdminPaymentReviewListItem,
+    PersohubAdminPaymentSearchSuggestion,
+    PersohubAdminPaymentSearchSuggestionResponse,
     PersohubAdminEventCreateRequest,
     PersohubAdminEventResponse,
     PersohubAdminEventSympoAssignRequest,
@@ -1035,24 +1037,34 @@ def list_owner_payments(
     response: Response,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
+    q: Optional[str] = Query(default=None, max_length=120),
     community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
     _assert_persohub_admin_token(request)
     _assert_owner_or_superadmin(request)
     club_id = _resolve_actor_club_id(request, community)
-    rows = (
+    query = (
         db.query(PersohubPayment, PersohubEvent, PdaUser, PersohubClub)
         .join(PersohubEvent, PersohubEvent.id == PersohubPayment.event_id)
         .join(PdaUser, PdaUser.id == PersohubPayment.user_id)
         .outerjoin(PersohubClub, PersohubClub.id == PersohubEvent.club_id)
         .filter(PersohubEvent.club_id == club_id)
-        .order_by(PersohubPayment.created_at.desc(), PersohubPayment.id.desc())
-        .all()
     )
+    normalized_query = str(q or "").strip()
+    if normalized_query:
+        term = f"%{normalized_query.lower()}%"
+        query = query.filter(
+            or_(
+                func.lower(func.coalesce(PdaUser.name, "")).like(term),
+                func.lower(func.coalesce(PdaUser.regno, "")).like(term),
+            )
+        )
+    rows = query.order_by(PersohubPayment.created_at.desc(), PersohubPayment.id.desc()).all()
     items = [_build_payment_list_item(payment, event, participant, club) for payment, event, participant, club in rows]
     items.sort(
         key=lambda row: (
+            str(row.event_title or "").strip().lower(),
             0 if str(row.status or "").strip().lower() == "pending" else 1,
             -(row.created_at.timestamp() if row.created_at else 0.0),
             -int(row.id),
@@ -1068,6 +1080,73 @@ def list_owner_payments(
     response.headers["X-Page"] = str(page)
     response.headers["X-Page-Size"] = str(page_size)
     return paged_items
+
+
+@router.get("/persohub/admin/payments/suggestions", response_model=PersohubAdminPaymentSearchSuggestionResponse)
+def list_owner_payment_suggestions(
+    request: Request,
+    q: str = Query(default="", max_length=120),
+    limit: int = Query(default=8, ge=1, le=12),
+    community: PersohubCommunity = Depends(require_persohub_community),
+    db: Session = Depends(get_db),
+):
+    _assert_persohub_admin_token(request)
+    _assert_owner_or_superadmin(request)
+    club_id = _resolve_actor_club_id(request, community)
+    normalized_query = str(q or "").strip()
+    if not normalized_query:
+        return PersohubAdminPaymentSearchSuggestionResponse(items=[])
+
+    query_lc = normalized_query.lower()
+    contains_term = f"%{query_lc}%"
+    prefix_term = f"{query_lc}%"
+    regno_rank = case(
+        (func.lower(func.coalesce(PdaUser.regno, "")) == query_lc, 0),
+        (func.lower(func.coalesce(PdaUser.regno, "")).like(prefix_term), 1),
+        else_=2,
+    )
+    name_rank = case(
+        (func.lower(func.coalesce(PdaUser.name, "")).like(prefix_term), 0),
+        else_=1,
+    )
+    rows = (
+        db.query(
+            PdaUser.id.label("user_id"),
+            PdaUser.name.label("name"),
+            PdaUser.regno.label("regno"),
+            func.max(PersohubPayment.created_at).label("latest_payment_at"),
+            regno_rank.label("regno_rank"),
+            name_rank.label("name_rank"),
+        )
+        .join(PersohubPayment, PersohubPayment.user_id == PdaUser.id)
+        .join(PersohubEvent, PersohubEvent.id == PersohubPayment.event_id)
+        .filter(
+            PersohubEvent.club_id == club_id,
+            or_(
+                func.lower(func.coalesce(PdaUser.name, "")).like(contains_term),
+                func.lower(func.coalesce(PdaUser.regno, "")).like(contains_term),
+            ),
+        )
+        .group_by(PdaUser.id, PdaUser.name, PdaUser.regno, regno_rank, name_rank)
+        .order_by(regno_rank.asc(), name_rank.asc(), func.max(PersohubPayment.created_at).desc(), PdaUser.id.desc())
+        .limit(limit)
+        .all()
+    )
+
+    items: List[PersohubAdminPaymentSearchSuggestion] = []
+    for row in rows:
+        raw_name = str(getattr(row, "name", "") or "").strip()
+        raw_regno = str(getattr(row, "regno", "") or "").strip()
+        display_name = raw_name or (f"User {int(getattr(row, 'user_id', 0) or 0)}")
+        label = f"{display_name} ({raw_regno})" if raw_regno else display_name
+        items.append(
+            PersohubAdminPaymentSearchSuggestion(
+                label=label,
+                name=(raw_name or None),
+                regno=(raw_regno or None),
+            )
+        )
+    return PersohubAdminPaymentSearchSuggestionResponse(items=items)
 
 
 @router.post("/persohub/admin/payments/{payment_id}/confirm", response_model=PersohubAdminPaymentReviewListItem)

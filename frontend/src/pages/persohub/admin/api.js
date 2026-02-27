@@ -166,6 +166,16 @@ export const persohubAdminApi = {
         };
     },
 
+    async listPersohubPaymentSuggestions({ q, limit = 8 } = {}) {
+        const normalized = String(q || '').trim();
+        if (!normalized) return { items: [] };
+        const response = await axios.get(`${API}/persohub/admin/payments/suggestions`, {
+            params: { q: normalized, limit },
+            headers: { ...getCombinedAuthHeader() },
+        });
+        return response.data || { items: [] };
+    },
+
     async confirmPersohubPayment(paymentId, payload) {
         const response = await axios.post(`${API}/persohub/admin/payments/${paymentId}/confirm`, payload, {
             headers: { ...getCombinedAuthHeader() },

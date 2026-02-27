@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import LoadingState from '@/components/common/LoadingState';
@@ -38,6 +38,15 @@ export default function PersohubAdminPaymentsPage() {
     const [page, setPage] = useState(1);
     const [pageSize] = useState(20);
     const [totalCount, setTotalCount] = useState(0);
+    const [searchInput, setSearchInput] = useState('');
+    const [searchDebounced, setSearchDebounced] = useState('');
+    const [suggestions, setSuggestions] = useState([]);
+    const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+    const [suggestionLoading, setSuggestionLoading] = useState(false);
+    const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
+    const [searchFocused, setSearchFocused] = useState(false);
+    const blurCloseTimerRef = useRef(null);
+    const suggestionRequestIdRef = useRef(0);
 
     const [confirmTarget, setConfirmTarget] = useState(null);
     const [confirmAcknowledged, setConfirmAcknowledged] = useState(false);
@@ -47,6 +56,17 @@ export default function PersohubAdminPaymentsPage() {
     const [declineReason, setDeclineReason] = useState('');
     const [declining, setDeclining] = useState(false);
 
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            setSearchDebounced(String(searchInput || '').trim());
+        }, 250);
+        return () => window.clearTimeout(timer);
+    }, [searchInput]);
+
+    useEffect(() => {
+        setPage(1);
+    }, [searchDebounced]);
+
     const fetchRows = useCallback(async (isRefresh = false) => {
         if (isRefresh) setRefreshing(true);
         else setLoading(true);
@@ -54,6 +74,7 @@ export default function PersohubAdminPaymentsPage() {
             const result = await persohubAdminApi.listPersohubPayments({
                 page,
                 page_size: pageSize,
+                q: searchDebounced || undefined,
             });
             const nextRows = Array.isArray(result?.items) ? result.items : [];
             setRows(nextRows);
@@ -64,11 +85,56 @@ export default function PersohubAdminPaymentsPage() {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [page, pageSize]);
+    }, [page, pageSize, searchDebounced]);
 
     useEffect(() => {
         fetchRows();
     }, [fetchRows]);
+
+    useEffect(() => {
+        const query = String(searchDebounced || '').trim();
+        if (!searchFocused || query.length < 2) {
+            setSuggestionLoading(false);
+            setSuggestions([]);
+            setSuggestionsOpen(false);
+            setActiveSuggestionIndex(-1);
+            return;
+        }
+        const requestId = suggestionRequestIdRef.current + 1;
+        suggestionRequestIdRef.current = requestId;
+        setSuggestionLoading(true);
+        persohubAdminApi
+            .listPersohubPaymentSuggestions({ q: query, limit: 8 })
+            .then((result) => {
+                if (suggestionRequestIdRef.current !== requestId) return;
+                const nextItems = Array.isArray(result?.items) ? result.items : [];
+                setSuggestions(nextItems);
+                setSuggestionsOpen(nextItems.length > 0);
+                setActiveSuggestionIndex(nextItems.length ? 0 : -1);
+            })
+            .catch(() => {
+                if (suggestionRequestIdRef.current !== requestId) return;
+                setSuggestions([]);
+                setSuggestionsOpen(false);
+                setActiveSuggestionIndex(-1);
+            })
+            .finally(() => {
+                if (suggestionRequestIdRef.current === requestId) {
+                    setSuggestionLoading(false);
+                }
+            });
+    }, [searchDebounced, searchFocused]);
+
+    useEffect(() => () => {
+        if (blurCloseTimerRef.current) window.clearTimeout(blurCloseTimerRef.current);
+    }, []);
+
+    const applySuggestion = useCallback((item) => {
+        const nextValue = String(item?.regno || item?.label || item?.name || '').trim();
+        setSearchInput(nextValue);
+        setSuggestionsOpen(false);
+        setActiveSuggestionIndex(-1);
+    }, []);
 
     const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
     const startIndex = totalCount ? ((page - 1) * pageSize) + 1 : 0;
@@ -121,21 +187,125 @@ export default function PersohubAdminPaymentsPage() {
             <section className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                     <h2 className="text-2xl font-heading font-black">Payments Queue</h2>
-                    <Button
-                        type="button"
-                        variant="outline"
-                        className="border-black/20"
-                        disabled={refreshing}
-                        onClick={() => fetchRows(true)}
-                    >
-                        {refreshing ? 'Refreshing...' : 'Refresh'}
-                    </Button>
+                    <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-[340px]">
+                        <div
+                            className="relative"
+                            onFocus={() => {
+                                if (blurCloseTimerRef.current) {
+                                    window.clearTimeout(blurCloseTimerRef.current);
+                                    blurCloseTimerRef.current = null;
+                                }
+                                setSearchFocused(true);
+                                if (suggestions.length > 0 && String(searchInput || '').trim().length >= 2) {
+                                    setSuggestionsOpen(true);
+                                }
+                            }}
+                            onBlur={() => {
+                                blurCloseTimerRef.current = window.setTimeout(() => {
+                                    setSearchFocused(false);
+                                    setSuggestionsOpen(false);
+                                    setActiveSuggestionIndex(-1);
+                                }, 120);
+                            }}
+                        >
+                            <input
+                                type="text"
+                                value={searchInput}
+                                onChange={(event) => setSearchInput(event.target.value)}
+                                onKeyDown={(event) => {
+                                    if (event.key === 'ArrowDown') {
+                                        event.preventDefault();
+                                        if (!suggestions.length) return;
+                                        setSuggestionsOpen(true);
+                                        setActiveSuggestionIndex((prev) => {
+                                            const next = prev < 0 ? 0 : Math.min(prev + 1, suggestions.length - 1);
+                                            return next;
+                                        });
+                                        return;
+                                    }
+                                    if (event.key === 'ArrowUp') {
+                                        event.preventDefault();
+                                        if (!suggestions.length) return;
+                                        setSuggestionsOpen(true);
+                                        setActiveSuggestionIndex((prev) => {
+                                            const next = prev <= 0 ? 0 : prev - 1;
+                                            return next;
+                                        });
+                                        return;
+                                    }
+                                    if (event.key === 'Enter' && suggestionsOpen && activeSuggestionIndex >= 0 && suggestions[activeSuggestionIndex]) {
+                                        event.preventDefault();
+                                        applySuggestion(suggestions[activeSuggestionIndex]);
+                                        return;
+                                    }
+                                    if (event.key === 'Escape') {
+                                        setSuggestionsOpen(false);
+                                        setActiveSuggestionIndex(-1);
+                                    }
+                                }}
+                                placeholder="Search by participant name or regno"
+                                className="h-10 w-full rounded-lg border border-black/20 px-3 text-sm font-medium text-slate-800 outline-none ring-0 transition focus:border-black/40 sm:w-[340px]"
+                            />
+                            {searchInput ? (
+                                <button
+                                    type="button"
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md px-2 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                                    onMouseDown={(event) => event.preventDefault()}
+                                    onClick={() => {
+                                        setSearchInput('');
+                                        setSuggestions([]);
+                                        setSuggestionsOpen(false);
+                                        setActiveSuggestionIndex(-1);
+                                    }}
+                                >
+                                    Clear
+                                </button>
+                            ) : null}
+                            {suggestionsOpen ? (
+                                <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-black/15 bg-white shadow-[0_10px_24px_rgba(0,0,0,0.14)] sm:w-[340px]">
+                                    {suggestionLoading ? (
+                                        <p className="px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Loading...</p>
+                                    ) : suggestions.length ? (
+                                        suggestions.map((item, index) => (
+                                            <button
+                                                key={`${item.regno || item.name || 'payment'}-${index}`}
+                                                type="button"
+                                                onMouseDown={(event) => event.preventDefault()}
+                                                onClick={() => applySuggestion(item)}
+                                                className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm ${
+                                                    activeSuggestionIndex === index ? 'bg-slate-100' : 'hover:bg-slate-50'
+                                                }`}
+                                            >
+                                                <span className="min-w-0 truncate font-semibold text-slate-900">{item.label || item.name || '-'}</span>
+                                                <span className="shrink-0 text-xs uppercase tracking-[0.12em] text-slate-500">Match</span>
+                                            </button>
+                                        ))
+                                    ) : (
+                                        <p className="px-3 py-2 text-sm text-slate-500">No matches found.</p>
+                                    )}
+                                </div>
+                            ) : null}
+                        </div>
+                        <div className="flex justify-end">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="border-black/20"
+                                disabled={refreshing}
+                                onClick={() => fetchRows(true)}
+                            >
+                                {refreshing ? 'Refreshing...' : 'Refresh'}
+                            </Button>
+                        </div>
+                    </div>
                 </div>
 
                 {loading ? (
                     <LoadingState variant="inline" containerClassName="mt-4" />
                 ) : rows.length === 0 ? (
-                    <p className="mt-4 text-sm text-slate-500">No payments submitted yet.</p>
+                    <p className="mt-4 text-sm text-slate-500">
+                        {searchDebounced ? 'No payments found for this search.' : 'No payments submitted yet.'}
+                    </p>
                 ) : (
                     <div className="mt-4 grid gap-4">
                         {rows.map((row) => {

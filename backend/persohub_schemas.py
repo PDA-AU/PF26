@@ -597,6 +597,16 @@ class PersohubAdminPaymentReviewListItem(BaseModel):
     updated_at: Optional[datetime] = None
 
 
+class PersohubAdminPaymentSearchSuggestion(BaseModel):
+    label: str
+    name: Optional[str] = None
+    regno: Optional[str] = None
+
+
+class PersohubAdminPaymentSearchSuggestionResponse(BaseModel):
+    items: List[PersohubAdminPaymentSearchSuggestion] = Field(default_factory=list)
+
+
 class PersohubAdminPaymentConfirmRequest(BaseModel):
     password: Optional[str] = Field(default=None, min_length=6)
 
