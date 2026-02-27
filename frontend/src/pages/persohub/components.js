@@ -23,6 +23,8 @@ import {
     Music2,
     Pause,
     Play,
+    RotateCcw,
+    RotateCw,
     Volume2,
     VolumeX,
 } from 'lucide-react';
@@ -501,6 +503,7 @@ const PersohubVideoPlayer = ({
 }) => {
     const containerRef = useRef(null);
     const videoRef = useRef(null);
+    const volumeWrapRef = useRef(null);
     const hideControlsTimerRef = useRef(null);
     const isSeekingRef = useRef(false);
 
@@ -516,6 +519,7 @@ const PersohubVideoPlayer = ({
     const [hasError, setHasError] = useState(false);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [controlsVisible, setControlsVisible] = useState(true);
+    const [volumeOpen, setVolumeOpen] = useState(false);
 
     useEffect(() => {
         registerMediaPlayer(playerId, {
@@ -554,6 +558,21 @@ const PersohubVideoPlayer = ({
             if (hideControlsTimerRef.current) clearTimeout(hideControlsTimerRef.current);
         };
     }, []);
+
+    useEffect(() => {
+        if (!volumeOpen) return undefined;
+        const handlePointerDown = (event) => {
+            if (!volumeWrapRef.current?.contains(event.target)) {
+                setVolumeOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handlePointerDown);
+        document.addEventListener('touchstart', handlePointerDown);
+        return () => {
+            document.removeEventListener('mousedown', handlePointerDown);
+            document.removeEventListener('touchstart', handlePointerDown);
+        };
+    }, [volumeOpen]);
 
     const sliderMax = Number.isFinite(duration) && duration > 0 ? duration : 0;
     const playedPercent = sliderMax > 0 ? Math.min(100, Math.max(0, (currentTime / sliderMax) * 100)) : 0;
@@ -594,8 +613,9 @@ const PersohubVideoPlayer = ({
         }
     };
 
-    const toggleMute = () => {
-        setIsMuted((prev) => !prev);
+    const handleVolumeButtonClick = () => {
+        setVolumeOpen((prev) => !prev);
+        showControls();
     };
 
     const cyclePlaybackRate = () => {
@@ -603,6 +623,18 @@ const PersohubVideoPlayer = ({
             const idx = VIDEO_PLAYBACK_RATES.indexOf(prev);
             return VIDEO_PLAYBACK_RATES[(idx + 1) % VIDEO_PLAYBACK_RATES.length];
         });
+    };
+
+    const jumpBySeconds = (deltaSeconds) => {
+        const video = videoRef.current;
+        if (!video || hasError) return;
+        const mediaDuration = Number(video.duration || duration || 0);
+        const maxTime = Number.isFinite(mediaDuration) && mediaDuration > 0 ? mediaDuration : Number.MAX_SAFE_INTEGER;
+        const current = Number(video.currentTime || 0);
+        const next = Math.min(maxTime, Math.max(0, current + Number(deltaSeconds || 0)));
+        video.currentTime = next;
+        setCurrentTime(next);
+        showControls();
     };
 
     const toggleFullscreen = async () => {
@@ -733,23 +765,54 @@ const PersohubVideoPlayer = ({
                     <button type="button" className="ph-video-btn ph-video-btn-primary" onClick={handlePlayPause} disabled={hasError}>
                         {isPlaying ? <Pause size={14} /> : <Play size={14} />}
                     </button>
-                    <button type="button" className="ph-video-btn" onClick={toggleMute} disabled={hasError}>
-                        {isMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                    <button
+                        type="button"
+                        className="ph-video-btn ph-video-jump-btn"
+                        onClick={() => jumpBySeconds(-10)}
+                        disabled={hasError}
+                        aria-label="Back 10 seconds"
+                    >
+                        <RotateCcw size={13} />
                     </button>
-                    <input
-                        type="range"
-                        min={0}
-                        max={1}
-                        step="0.05"
-                        value={isMuted ? 0 : volume}
-                        className="ph-video-volume"
-                        aria-label="Video volume"
-                        onChange={(event) => {
-                            const next = Math.min(1, Math.max(0, Number(event.target.value || 0)));
-                            setVolume(next);
-                            if (next > 0 && isMuted) setIsMuted(false);
-                        }}
-                    />
+                    <button
+                        type="button"
+                        className="ph-video-btn ph-video-jump-btn"
+                        onClick={() => jumpBySeconds(10)}
+                        disabled={hasError}
+                        aria-label="Forward 10 seconds"
+                    >
+                        <RotateCw size={13} />
+                    </button>
+                    <div className="ph-video-volume-wrap" ref={volumeWrapRef}>
+                        <button
+                            type="button"
+                            className="ph-video-btn"
+                            onClick={handleVolumeButtonClick}
+                            disabled={hasError}
+                            aria-label={volumeOpen ? 'Hide volume slider' : 'Show volume slider'}
+                        >
+                            {isMuted || volume <= 0 ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                        </button>
+                        {volumeOpen ? (
+                            <div className="ph-video-volume-pop">
+                                <input
+                                    type="range"
+                                    min={0}
+                                    max={1}
+                                    step="0.05"
+                                    value={isMuted ? 0 : volume}
+                                    className="ph-video-volume"
+                                    aria-label="Video volume"
+                                    aria-orientation="vertical"
+                                    onChange={(event) => {
+                                        const next = Math.min(1, Math.max(0, Number(event.target.value || 0)));
+                                        setVolume(next);
+                                        setIsMuted(next <= 0);
+                                    }}
+                                />
+                            </div>
+                        ) : null}
+                    </div>
                     <button type="button" className="ph-video-btn ph-video-speed" onClick={cyclePlaybackRate} disabled={hasError}>
                         {playbackRate}x
                     </button>
