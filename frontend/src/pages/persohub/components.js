@@ -544,13 +544,37 @@ const PersohubVideoPlayer = ({
     }, [isMuted, volume]);
 
     useEffect(() => {
+        const getFullscreenElement = () => (
+            document.fullscreenElement
+            || document.webkitFullscreenElement
+            || document.mozFullScreenElement
+            || document.msFullscreenElement
+            || null
+        );
         const onFullscreenChange = () => {
             const holder = containerRef.current;
-            const current = document.fullscreenElement;
+            const current = getFullscreenElement();
             setIsFullscreen(Boolean(holder && current && (current === holder || holder.contains(current))));
         };
         document.addEventListener('fullscreenchange', onFullscreenChange);
-        return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
+        document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+
+        const video = videoRef.current;
+        const onWebkitBeginFullscreen = () => setIsFullscreen(true);
+        const onWebkitEndFullscreen = () => setIsFullscreen(false);
+        if (video) {
+            video.addEventListener('webkitbeginfullscreen', onWebkitBeginFullscreen);
+            video.addEventListener('webkitendfullscreen', onWebkitEndFullscreen);
+        }
+
+        return () => {
+            document.removeEventListener('fullscreenchange', onFullscreenChange);
+            document.removeEventListener('webkitfullscreenchange', onFullscreenChange);
+            if (video) {
+                video.removeEventListener('webkitbeginfullscreen', onWebkitBeginFullscreen);
+                video.removeEventListener('webkitendfullscreen', onWebkitEndFullscreen);
+            }
+        };
     }, []);
 
     useEffect(() => {
@@ -639,12 +663,30 @@ const PersohubVideoPlayer = ({
 
     const toggleFullscreen = async () => {
         const holder = containerRef.current;
-        if (!holder) return;
+        const video = videoRef.current;
+        if (!holder && !video) return;
+        const activeFullscreenElement = (
+            document.fullscreenElement
+            || document.webkitFullscreenElement
+            || document.mozFullScreenElement
+            || document.msFullscreenElement
+            || null
+        );
         try {
-            if (!document.fullscreenElement) {
+            if (!activeFullscreenElement && holder && typeof holder.requestFullscreen === 'function') {
                 await holder.requestFullscreen();
-            } else {
+                return;
+            }
+            if (activeFullscreenElement && typeof document.exitFullscreen === 'function') {
                 await document.exitFullscreen();
+                return;
+            }
+            if (!isFullscreen && video && typeof video.webkitEnterFullscreen === 'function') {
+                video.webkitEnterFullscreen();
+                return;
+            }
+            if (isFullscreen && video && typeof video.webkitExitFullscreen === 'function') {
+                video.webkitExitFullscreen();
             }
         } catch {
             // no-op
