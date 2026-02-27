@@ -1208,6 +1208,11 @@ export default function PersohubAdminEventsPage() {
                             const isExpanded = Boolean(expandedDescriptions[eventRow.id]);
                             const canToggle = description.length > 160;
                             const shouldClamp = canToggle && !isExpanded;
+                            const canManageEvent = Boolean(
+                                canAccessEvents
+                                && eventRow.persohub_access_approved
+                                && (canMutate ? parityEnabled : true)
+                            );
 
                             return (
                                 <div key={eventRow.id} className="rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
@@ -1315,16 +1320,16 @@ export default function PersohubAdminEventsPage() {
                                         ) : null}
                                     </div>
 
-                                    {canMutate ? (
+                                    {canMutate || canManageEvent ? (
                                         <div className="mt-4 flex flex-wrap gap-2">
-                                            {parityEnabled && Boolean(eventRow.persohub_access_approved) ? (
+                                            {canManageEvent ? (
                                                 <Button asChild className="bg-[#11131a] text-white hover:bg-[#1f2330]">
                                                     <Link to={`/persohub/admin/persohub-events/${eventRow.slug}/dashboard`}>
                                                         Manage Event
                                                     </Link>
                                                 </Button>
                                             ) : null}
-                                            {!Boolean(eventRow.persohub_access_approved) ? (
+                                            {canMutate && !Boolean(eventRow.persohub_access_approved) ? (
                                                 <Button
                                                     variant="outline"
                                                     className="border-black/20"
@@ -1336,19 +1341,25 @@ export default function PersohubAdminEventsPage() {
                                                         : (requestingAccessSlug === eventRow.slug ? 'Requesting...' : 'Request Persohub Access')}
                                                 </Button>
                                             ) : null}
-                                            <Button variant="outline" className="border-black/20" onClick={() => openEditDialog(eventRow)}>
-                                                Edit Event
-                                            </Button>
-                                            <Button variant="outline" className="border-black/20" onClick={() => toggleStatus(eventRow)}>
-                                                {eventRow.status === 'open' ? 'Close Event' : 'Open Event'}
-                                            </Button>
-                                            <Button
-                                                variant="outline"
-                                                className="border-red-300 text-red-600 hover:bg-red-50"
-                                                onClick={() => openDeleteDialog(eventRow)}
-                                            >
-                                                Delete Event
-                                            </Button>
+                                            {canMutate ? (
+                                                <Button variant="outline" className="border-black/20" onClick={() => openEditDialog(eventRow)}>
+                                                    Edit Event
+                                                </Button>
+                                            ) : null}
+                                            {canMutate ? (
+                                                <Button variant="outline" className="border-black/20" onClick={() => toggleStatus(eventRow)}>
+                                                    {eventRow.status === 'open' ? 'Close Event' : 'Open Event'}
+                                                </Button>
+                                            ) : null}
+                                            {canMutate ? (
+                                                <Button
+                                                    variant="outline"
+                                                    className="border-red-300 text-red-600 hover:bg-red-50"
+                                                    onClick={() => openDeleteDialog(eventRow)}
+                                                >
+                                                    Delete Event
+                                                </Button>
+                                            ) : null}
                                         </div>
                                     ) : null}
                                     <div className="mt-3">
