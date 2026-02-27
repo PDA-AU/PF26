@@ -739,6 +739,8 @@ def _registered_entities(db: Session, event: PersohubEvent):
         rows = query.all()
         payload = []
         for reg, user in rows:
+            college_value = str(getattr(user, "college", "") or "").strip()
+            is_mit_participant = college_value.lower() == "mit"
             payload.append(
                 {
                     "entity_type": "user",
@@ -750,6 +752,8 @@ def _registered_entities(db: Session, event: PersohubEvent):
                     "register_number": user.regno,
                     "participant_register_number": user.regno,
                     "email": user.email,
+                    "college": college_value or None,
+                    "is_mit_participant": bool(is_mit_participant),
                     "department": user.dept,
                     "gender": user.gender,
                     "batch": _batch_from_regno(user.regno),
@@ -1400,6 +1404,7 @@ def event_participants(
     department: Optional[str] = None,
     gender: Optional[str] = None,
     batch: Optional[str] = None,
+    mit_scope: Optional[str] = None,
     status_filter: Optional[str] = Query(None, alias="status"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
@@ -1410,6 +1415,13 @@ def event_participants(
     event = _get_event_or_404(db, slug)
     items = _registered_entities(db, event)
     if event.participant_mode == PersohubEventParticipantMode.INDIVIDUAL:
+        normalized_mit_scope = str(mit_scope or "").strip().upper()
+        if normalized_mit_scope in {"MIT", "NON_MIT", "NON-MIT", "NONMIT"}:
+            want_mit = normalized_mit_scope == "MIT"
+            items = [
+                item for item in items
+                if bool(item.get("is_mit_participant")) == want_mit
+            ]
         if department:
             items = [item for item in items if str(item.get("department") or "") == str(department)]
         if gender:

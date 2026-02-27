@@ -607,6 +607,16 @@ class PersohubAdminPaymentSearchSuggestionResponse(BaseModel):
     items: List[PersohubAdminPaymentSearchSuggestion] = Field(default_factory=list)
 
 
+class PersohubAdminPaymentEventOption(BaseModel):
+    event_slug: str
+    event_title: str
+    payment_count: int = 0
+
+
+class PersohubAdminPaymentEventOptionResponse(BaseModel):
+    items: List[PersohubAdminPaymentEventOption] = Field(default_factory=list)
+
+
 class PersohubAdminPaymentConfirmRequest(BaseModel):
     password: Optional[str] = Field(default=None, min_length=6)
 

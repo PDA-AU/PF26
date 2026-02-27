@@ -5,6 +5,7 @@ import LoadingState from '@/components/common/LoadingState';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import PersohubAdminLayout from '@/pages/persohub/admin/PersohubAdminLayout';
 import { persohubAdminApi } from '@/pages/persohub/admin/api';
@@ -38,6 +39,8 @@ export default function PersohubAdminPaymentsPage() {
     const [page, setPage] = useState(1);
     const [pageSize] = useState(20);
     const [totalCount, setTotalCount] = useState(0);
+    const [eventFilter, setEventFilter] = useState('all');
+    const [eventOptions, setEventOptions] = useState([]);
     const [searchInput, setSearchInput] = useState('');
     const [searchDebounced, setSearchDebounced] = useState('');
     const [suggestions, setSuggestions] = useState([]);
@@ -65,7 +68,25 @@ export default function PersohubAdminPaymentsPage() {
 
     useEffect(() => {
         setPage(1);
-    }, [searchDebounced]);
+    }, [searchDebounced, eventFilter]);
+
+    useEffect(() => {
+        let mounted = true;
+        persohubAdminApi
+            .listPersohubPaymentEventOptions()
+            .then((result) => {
+                if (!mounted) return;
+                const nextItems = Array.isArray(result?.items) ? result.items : [];
+                setEventOptions(nextItems);
+            })
+            .catch(() => {
+                if (!mounted) return;
+                setEventOptions([]);
+            });
+        return () => {
+            mounted = false;
+        };
+    }, []);
 
     const fetchRows = useCallback(async (isRefresh = false) => {
         if (isRefresh) setRefreshing(true);
@@ -75,6 +96,7 @@ export default function PersohubAdminPaymentsPage() {
                 page,
                 page_size: pageSize,
                 q: searchDebounced || undefined,
+                event_slug: eventFilter !== 'all' ? eventFilter : undefined,
             });
             const nextRows = Array.isArray(result?.items) ? result.items : [];
             setRows(nextRows);
@@ -85,7 +107,7 @@ export default function PersohubAdminPaymentsPage() {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [page, pageSize, searchDebounced]);
+    }, [eventFilter, page, pageSize, searchDebounced]);
 
     useEffect(() => {
         fetchRows();
@@ -188,6 +210,25 @@ export default function PersohubAdminPaymentsPage() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                     <h2 className="text-2xl font-heading font-black">Payments Queue</h2>
                     <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-[340px]">
+                        <Select value={eventFilter} onValueChange={setEventFilter}>
+                            <SelectTrigger className="h-10 w-full border-black/20 sm:w-[340px]">
+                                <SelectValue placeholder="Filter by event" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All Events</SelectItem>
+                                {eventOptions.map((option) => {
+                                    const slug = String(option?.event_slug || '').trim();
+                                    const title = String(option?.event_title || '').trim();
+                                    if (!slug || !title) return null;
+                                    const count = Number(option?.payment_count || 0);
+                                    return (
+                                        <SelectItem key={slug} value={slug}>
+                                            {title} ({count})
+                                        </SelectItem>
+                                    );
+                                })}
+                            </SelectContent>
+                        </Select>
                         <div
                             className="relative"
                             onFocus={() => {

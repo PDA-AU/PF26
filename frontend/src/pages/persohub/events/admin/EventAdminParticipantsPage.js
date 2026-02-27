@@ -75,6 +75,7 @@ function ParticipantsContent() {
         department: '',
         gender: '',
         batch: '',
+        mit_scope: '',
         status: '',
         search: '',
     });
@@ -92,6 +93,7 @@ function ParticipantsContent() {
             if (filters.search) params.append('search', filters.search);
             if (filters.status) params.append('status', filters.status);
             if (!isTeamMode) {
+                if (filters.mit_scope) params.append('mit_scope', filters.mit_scope);
                 if (filters.department) params.append('department', filters.department);
                 if (filters.gender) params.append('gender', filters.gender);
                 if (filters.batch) params.append('batch', filters.batch);
@@ -112,7 +114,7 @@ function ParticipantsContent() {
         } finally {
             setLoading(false);
         }
-    }, [currentPage, eventSlug, filters.batch, filters.department, filters.gender, filters.search, filters.status, getAuthHeader, isTeamMode]);
+    }, [currentPage, eventSlug, filters.batch, filters.department, filters.gender, filters.mit_scope, filters.search, filters.status, getAuthHeader, isTeamMode]);
 
     useEffect(() => {
         fetchRows();
@@ -129,7 +131,7 @@ function ParticipantsContent() {
 
     useEffect(() => {
         setCurrentPage(1);
-    }, [filters.batch, filters.department, filters.gender, filters.search, filters.status]);
+    }, [filters.batch, filters.department, filters.gender, filters.mit_scope, filters.search, filters.status]);
 
     const totalPages = Math.max(1, Math.ceil(totalRows / PAGE_SIZE));
 
@@ -146,6 +148,7 @@ function ParticipantsContent() {
             if (filters.search) params.append('search', filters.search);
             if (filters.status) params.append('status', filters.status);
             if (!isTeamMode) {
+                if (filters.mit_scope) params.append('mit_scope', filters.mit_scope);
                 if (filters.department) params.append('department', filters.department);
                 if (filters.gender) params.append('gender', filters.gender);
                 if (filters.batch) params.append('batch', filters.batch);
@@ -177,6 +180,7 @@ function ParticipantsContent() {
             department: '',
             gender: '',
             batch: '',
+            mit_scope: '',
             status: '',
             search: '',
         });
@@ -301,7 +305,7 @@ function ParticipantsContent() {
         }
     };
 
-    const hasAnyFilters = Boolean(filters.department || filters.gender || filters.batch || filters.status || filters.search);
+    const hasAnyFilters = Boolean(filters.department || filters.gender || filters.batch || filters.mit_scope || filters.status || filters.search);
 
     const batchOptions = useMemo(() => {
         const values = new Set();
@@ -333,7 +337,7 @@ function ParticipantsContent() {
                     </div>
                 </div>
 
-                <div className={`grid gap-3 ${isTeamMode ? 'grid-cols-1 md:grid-cols-3' : 'grid-cols-1 md:grid-cols-6'}`}>
+                <div className={`grid gap-3 ${isTeamMode ? 'grid-cols-1 md:grid-cols-3' : 'grid-cols-1 md:grid-cols-7'}`}>
                     <div className={`relative ${isTeamMode ? 'md:col-span-2' : 'md:col-span-2'}`}>
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                         <Input
@@ -351,6 +355,30 @@ function ParticipantsContent() {
                             className="neo-input pl-10"
                         />
                     </div>
+
+                    {!isTeamMode ? (
+                        <Select
+                            value={filters.mit_scope || 'all'}
+                            onValueChange={(value) => {
+                                const previous = { ...filters };
+                                const nextValue = value === 'all' ? '' : value;
+                                setFilters((prev) => ({ ...prev, mit_scope: nextValue }));
+                                pushLocalUndo({
+                                    label: 'Undo MIT scope filter change',
+                                    undoFn: () => setFilters(previous),
+                                });
+                            }}
+                        >
+                            <SelectTrigger className="neo-input">
+                                <SelectValue placeholder="MIT Scope" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All Participants</SelectItem>
+                                <SelectItem value="MIT">MIT</SelectItem>
+                                <SelectItem value="NON_MIT">Non MIT</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    ) : null}
 
                     {!isTeamMode ? (
                         <Select

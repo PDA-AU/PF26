@@ -49,6 +49,8 @@ from models import (
 from persohub_schemas import (
     PersohubAdminPaymentConfirmRequest,
     PersohubAdminPaymentDeclineRequest,
+    PersohubAdminPaymentEventOption,
+    PersohubAdminPaymentEventOptionResponse,
     PersohubAdminPaymentReviewListItem,
     PersohubAdminPaymentSearchSuggestion,
     PersohubAdminPaymentSearchSuggestionResponse,
@@ -1038,6 +1040,7 @@ def list_owner_payments(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     q: Optional[str] = Query(default=None, max_length=120),
+    event_slug: Optional[str] = Query(default=None, max_length=160),
     community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
@@ -1060,12 +1063,25 @@ def list_owner_payments(
                 func.lower(func.coalesce(PdaUser.regno, "")).like(term),
             )
         )
+    normalized_event_slug = str(event_slug or "").strip().lower()
+    if normalized_event_slug:
+        query = query.filter(func.lower(func.coalesce(PersohubEvent.slug, "")) == normalized_event_slug)
     rows = query.order_by(PersohubPayment.created_at.desc(), PersohubPayment.id.desc()).all()
     items = [_build_payment_list_item(payment, event, participant, club) for payment, event, participant, club in rows]
+    def _status_bucket(status_value: Optional[str]) -> int:
+        normalized = str(status_value or "").strip().lower()
+        if normalized == "pending":
+            return 0
+        if normalized == "declined":
+            return 1
+        if normalized == "approved":
+            return 2
+        return 3
+
     items.sort(
         key=lambda row: (
             str(row.event_title or "").strip().lower(),
-            0 if str(row.status or "").strip().lower() == "pending" else 1,
+            _status_bucket(row.status),
             -(row.created_at.timestamp() if row.created_at else 0.0),
             -int(row.id),
         )
@@ -1080,6 +1096,48 @@ def list_owner_payments(
     response.headers["X-Page"] = str(page)
     response.headers["X-Page-Size"] = str(page_size)
     return paged_items
+
+
+@router.get("/persohub/admin/payments/event-options", response_model=PersohubAdminPaymentEventOptionResponse)
+def list_owner_payment_event_options(
+    request: Request,
+    community: PersohubCommunity = Depends(require_persohub_community),
+    db: Session = Depends(get_db),
+):
+    _assert_persohub_admin_token(request)
+    _assert_owner_or_superadmin(request)
+    club_id = _resolve_actor_club_id(request, community)
+    rows = (
+        db.query(
+            PersohubEvent.slug.label("event_slug"),
+            PersohubEvent.title.label("event_title"),
+            func.count(PersohubPayment.id).label("payment_count"),
+            func.max(PersohubPayment.created_at).label("latest_payment_at"),
+        )
+        .join(PersohubPayment, PersohubPayment.event_id == PersohubEvent.id)
+        .filter(PersohubEvent.club_id == club_id)
+        .group_by(PersohubEvent.id, PersohubEvent.slug, PersohubEvent.title)
+        .order_by(
+            func.lower(func.coalesce(PersohubEvent.title, "")).asc(),
+            func.max(PersohubPayment.created_at).desc(),
+            PersohubEvent.id.desc(),
+        )
+        .all()
+    )
+    items: List[PersohubAdminPaymentEventOption] = []
+    for row in rows:
+        slug_value = str(getattr(row, "event_slug", "") or "").strip()
+        title_value = str(getattr(row, "event_title", "") or "").strip()
+        if not slug_value or not title_value:
+            continue
+        items.append(
+            PersohubAdminPaymentEventOption(
+                event_slug=slug_value,
+                event_title=title_value,
+                payment_count=int(getattr(row, "payment_count", 0) or 0),
+            )
+        )
+    return PersohubAdminPaymentEventOptionResponse(items=items)
 
 
 @router.get("/persohub/admin/payments/suggestions", response_model=PersohubAdminPaymentSearchSuggestionResponse)

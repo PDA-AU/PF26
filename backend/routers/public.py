@@ -158,6 +158,7 @@ def list_routes():
             {"method": "GET", "path": "/persohub/admin/persohub-events/parity-enabled"},
             {"method": "GET", "path": "/persohub/admin/persohub-sympo-options"},
             {"method": "GET", "path": "/persohub/admin/payments"},
+            {"method": "GET", "path": "/persohub/admin/payments/event-options"},
             {"method": "GET", "path": "/persohub/admin/payments/suggestions"},
             {"method": "POST", "path": "/persohub/admin/payments/{payment_id}/confirm"},
             {"method": "POST", "path": "/persohub/admin/payments/{payment_id}/decline"},
