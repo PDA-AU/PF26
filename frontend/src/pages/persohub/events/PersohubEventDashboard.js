@@ -324,6 +324,7 @@ export default function EventDashboard() {
     const feeKey = dashboard?.fee_key || null;
     const feeCurrency = String(eventInfo?.registration_fee?.currency || 'INR');
     const paymentConfig = dashboard?.payment_config || {};
+    const paymentReviewReason = String(dashboard?.payment_review_reason || '').trim();
     const paymentQrImage = String(paymentConfig?.payment_url_image || '').trim();
     const paymentId = String(paymentConfig?.payment_id || '').trim();
     const clubOwnerMobile = String(paymentConfig?.club_owner_mobile || '').trim();
@@ -1592,6 +1593,11 @@ export default function EventDashboard() {
                                                 </Button>
                                             ) : null}
                                         </div>
+                                    ) : null}
+                                    {isPendingRegistration && paymentStatus === 'declined' && paymentReviewReason ? (
+                                        <p className="mt-3 rounded-md border border-red-300 bg-red-100 px-3 py-2 text-xs font-semibold text-red-900">
+                                            Decline Reason: {paymentReviewReason}
+                                        </p>
                                     ) : null}
                                 </section>
 

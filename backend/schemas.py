@@ -2523,6 +2523,7 @@ class PersohubManagedEventDashboard(BaseModel):
     is_registered: bool = False
     registration_status: PersohubDashboardRegistrationStatusEnum = PersohubDashboardRegistrationStatusEnum.NOT_REGISTERED
     payment_status: PersohubPaymentStatusEnum = PersohubPaymentStatusEnum.NONE
+    payment_review_reason: Optional[str] = None
     payable_amount: float = 0
     fee_key: Optional[Literal["MIT", "Other"]] = None
     payment_required: bool = False

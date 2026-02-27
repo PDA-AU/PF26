@@ -887,6 +887,11 @@ def get_event_dashboard(
     )
     registration_status = _registration_status_for_dashboard(registration)
     payment_status = _payment_status_from_row(payment_row, payment_required)
+    payment_review_reason = None
+    if payment_row and isinstance(getattr(payment_row, "content", None), dict):
+        review_block = payment_row.content.get("review")
+        if isinstance(review_block, dict):
+            payment_review_reason = str(review_block.get("reason") or "").strip() or None
     payment_config = _club_payment_config(db, event)
     registration_available = _registration_available(db, event)
     event_payload = PersohubManagedEventResponse.model_validate(event).model_copy(
@@ -898,6 +903,7 @@ def get_event_dashboard(
         is_registered=bool(registration),
         registration_status=registration_status,
         payment_status=payment_status,
+        payment_review_reason=payment_review_reason,
         payable_amount=float(payable_amount),
         fee_key=fee_key,
         payment_required=bool(payment_required),

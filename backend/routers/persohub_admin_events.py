@@ -690,6 +690,7 @@ def list_admin_events(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     q: Optional[str] = Query(default=None),
+    open_for: Optional[str] = Query(default=None),
     community: PersohubCommunity = Depends(require_persohub_community),
     db: Session = Depends(get_db),
 ):
@@ -723,6 +724,16 @@ def list_admin_events(
                 PersohubEvent.event_code.ilike(keyword),
             )
         )
+    open_for_key = str(open_for or "").strip().upper()
+    if open_for_key:
+        if open_for_key == "MIT":
+            query = query.filter(PersohubEvent.open_for == "MIT")
+        elif open_for_key in {"NON_MIT", "NON-MIT", "NONMIT"}:
+            query = query.filter(PersohubEvent.open_for != "MIT")
+        elif open_for_key == "ALL":
+            pass
+        else:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid open_for filter")
 
     total_count = int(query.count())
     rows = (

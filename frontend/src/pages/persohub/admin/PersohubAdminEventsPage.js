@@ -817,6 +817,7 @@ export default function PersohubAdminEventsPage() {
     const [requestingAccessSlug, setRequestingAccessSlug] = useState('');
     const [query, setQuery] = useState('');
     const [queryDebounced, setQueryDebounced] = useState('');
+    const [openForFilter, setOpenForFilter] = useState('ALL');
     const [page, setPage] = useState(1);
     const [pageSize] = useState(20);
     const [totalCount, setTotalCount] = useState(0);
@@ -858,6 +859,7 @@ export default function PersohubAdminEventsPage() {
                 page,
                 page_size: pageSize,
                 q: queryDebounced || undefined,
+                open_for: openForFilter === 'ALL' ? undefined : openForFilter,
             });
             const rows = response?.items || [];
             setEvents(rows);
@@ -873,7 +875,7 @@ export default function PersohubAdminEventsPage() {
         } finally {
             setLoading(false);
         }
-    }, [canAccessEvents, community, page, pageSize, queryDebounced]);
+    }, [canAccessEvents, community, openForFilter, page, pageSize, queryDebounced]);
 
     const fetchSympoOptions = useCallback(async () => {
         if (!community || !canMutate) {
@@ -1187,15 +1189,33 @@ export default function PersohubAdminEventsPage() {
             <section className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <h2 className="text-2xl font-heading font-black">Club Events</h2>
-                    <Input
-                        value={query}
-                        onChange={(e) => {
-                            setQuery(e.target.value);
-                            setPage(1);
-                        }}
-                        placeholder="Search events"
-                        className="sm:max-w-sm"
-                    />
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                        <Select
+                            value={openForFilter}
+                            onValueChange={(value) => {
+                                setOpenForFilter(value);
+                                setPage(1);
+                            }}
+                        >
+                            <SelectTrigger className="sm:w-40">
+                                <SelectValue placeholder="Open For" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="ALL">All</SelectItem>
+                                <SelectItem value="MIT">MIT</SelectItem>
+                                <SelectItem value="NON_MIT">NON MIT</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <Input
+                            value={query}
+                            onChange={(e) => {
+                                setQuery(e.target.value);
+                                setPage(1);
+                            }}
+                            placeholder="Search events"
+                            className="sm:max-w-sm"
+                        />
+                    </div>
                 </div>
                 {loading ? (
                     <LoadingState variant="inline" containerClassName="mt-4" />
