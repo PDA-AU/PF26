@@ -55,6 +55,10 @@ export default function EntityDetailsModal({
                                 {entityMode !== 'team' ? (
                                     <>
                                         <div className="flex justify-between">
+                                            <span className="font-semibold">College</span>
+                                            <span>{safeText(entity.college)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
                                             <span className="font-semibold">Department</span>
                                             <span>{departmentLabel || safeText(entity.department)}</span>
                                         </div>

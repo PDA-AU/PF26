@@ -836,7 +836,6 @@ export default function PersohubAdminEventsPage() {
     const [editPosterUploadRatio, setEditPosterUploadRatio] = useState('4:5');
     const [uploadingPoster, setUploadingPoster] = useState(false);
     const [uploadingEditPoster, setUploadingEditPoster] = useState(false);
-    const [parityEnabled, setParityEnabled] = useState(false);
     const [form, setForm] = useState(initialForm);
     const [editForm, setEditForm] = useState(initialForm);
     const [expandedDescriptions, setExpandedDescriptions] = useState({});
@@ -890,20 +889,6 @@ export default function PersohubAdminEventsPage() {
         }
     }, [canMutate, community]);
 
-    const fetchParityEnabled = useCallback(async () => {
-        if (!community || !canMutate) {
-            setParityEnabled(false);
-            return;
-        }
-        try {
-            const enabled = await persohubAdminApi.isPersohubEventsParityEnabled();
-            setParityEnabled(Boolean(enabled));
-        } catch (error) {
-            setParityEnabled(false);
-            toast.error(persohubAdminApi.parseApiError(error, 'Failed to read parity status'));
-        }
-    }, [canMutate, community]);
-
     useEffect(() => {
         fetchEvents();
     }, [fetchEvents]);
@@ -911,10 +896,6 @@ export default function PersohubAdminEventsPage() {
     useEffect(() => {
         fetchSympoOptions();
     }, [fetchSympoOptions]);
-
-    useEffect(() => {
-        fetchParityEnabled();
-    }, [fetchParityEnabled]);
 
     const validateDateRange = (formState) => {
         const normalizedStart = normalizeEventDateValue(formState.start_date);
@@ -1156,12 +1137,6 @@ export default function PersohubAdminEventsPage() {
             subtitle={canMutate ? "Manage club-owned events for your club." : "Manage only the events assigned by policy."}
             activeTab="events"
         >
-            {canMutate && !parityEnabled ? (
-                <section className="rounded-2xl border border-black/10 bg-slate-50 p-4 text-sm text-slate-700">
-                    Parity admin screens are currently disabled by feature flag. Core event CRUD is still available here.
-                </section>
-            ) : null}
-
             {canMutate ? (
                 <section className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
                     <h2 className="text-2xl font-heading font-black">Create Event</h2>
@@ -1231,7 +1206,6 @@ export default function PersohubAdminEventsPage() {
                             const canManageEvent = Boolean(
                                 canAccessEvents
                                 && eventRow.persohub_access_approved
-                                && (canMutate ? parityEnabled : true)
                             );
 
                             return (

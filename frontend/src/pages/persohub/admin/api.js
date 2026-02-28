@@ -97,20 +97,6 @@ export const persohubAdminApi = {
         };
     },
 
-    async isPersohubEventsParityEnabled() {
-        try {
-            const response = await axios.get(`${API}/persohub/admin/persohub-events/parity-enabled`, {
-                headers: { ...getCombinedAuthHeader() },
-            });
-            return Boolean(response.data?.enabled);
-        } catch (error) {
-            if (error?.response?.status === 404 || error?.response?.status === 403) {
-                return false;
-            }
-            throw error;
-        }
-    },
-
     async listPersohubSympoOptions() {
         const response = await axios.get(`${API}/persohub/admin/persohub-sympo-options`, {
             headers: { ...getCombinedAuthHeader() },

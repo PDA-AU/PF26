@@ -53,6 +53,7 @@ from models import (
     PersohubEventRoundPanelAssignment,
     PersohubEventAttendance,
     PersohubEventScore,
+    PersohubPayment,
     PersohubEventRoundSubmission,
     PersohubEventInvite,
     PersohubEventLog,
@@ -93,18 +94,17 @@ from schemas import (
     PersohubRoundPanelMemberResponse,
     PersohubRoundPanelAdminOption,
 )
-from emailer import send_bulk_email
+from emailer import send_bulk_email, send_email_async
 from email_bulk import render_email_template, derive_text_from_html, extract_batch
 from security import (
     get_persohub_admin_context,
     require_persohub_event_admin,
-    require_persohub_events_parity_enabled,
     require_persohub_root_community_admin,
     require_persohub_community,
 )
 from utils import log_admin_action, log_persohub_event_action, _upload_bytes_to_s3, _generate_presigned_put_url
 
-router = APIRouter(dependencies=[Depends(require_persohub_events_parity_enabled)])
+router = APIRouter()
 OFFICIAL_LETTERHEAD_LEFT_LOGO_URL = ""
 
 
@@ -495,6 +495,111 @@ def _registration_status_label(value) -> str:
     if "PENDING" in raw:
         return "Pending"
     return "Active"
+
+
+def _payment_content_dict(payment: PersohubPayment) -> Dict[str, Any]:
+    raw = payment.content if isinstance(payment.content, dict) else {}
+    return dict(raw or {})
+
+
+def _payment_status(payment: PersohubPayment) -> str:
+    raw = str(_payment_content_dict(payment).get("status") or "").strip().lower()
+    if raw in {"pending", "approved", "declined"}:
+        return raw
+    return "pending"
+
+
+def _to_int_or_none(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _to_float_or_none(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _find_pending_payment_for_entity(
+    db: Session,
+    event: PersohubEvent,
+    entity_type: PersohubEventEntityType,
+    entity_id: int,
+) -> Optional[PersohubPayment]:
+    target_entity = int(entity_id)
+    target_entity_type = "team" if entity_type == PersohubEventEntityType.TEAM else "user"
+    rows = (
+        db.query(PersohubPayment)
+        .filter(PersohubPayment.event_id == event.id)
+        .order_by(PersohubPayment.created_at.desc(), PersohubPayment.id.desc())
+        .all()
+    )
+    for payment in rows:
+        if _payment_status(payment) != "pending":
+            continue
+        content = _payment_content_dict(payment)
+        payment_entity_type = str(content.get("entity_type") or "").strip().lower()
+        payment_entity_id = _to_int_or_none(content.get("entity_id"))
+        payment_team_id = _to_int_or_none(content.get("team_id"))
+        payment_user_id = _to_int_or_none(payment.user_id)
+
+        if target_entity_type == "team":
+            if payment_entity_type == "team" and payment_entity_id == target_entity:
+                return payment
+            if payment_team_id == target_entity:
+                return payment
+            continue
+
+        if payment_entity_type == "user" and payment_entity_id == target_entity:
+            return payment
+        if payment_user_id == target_entity:
+            return payment
+    return None
+
+
+def _registration_for_entity(
+    db: Session,
+    event: PersohubEvent,
+    entity_type: PersohubEventEntityType,
+    entity_id: int,
+) -> Optional[PersohubEventRegistration]:
+    filters = [
+        PersohubEventRegistration.event_id == event.id,
+        PersohubEventRegistration.entity_type == entity_type,
+    ]
+    if entity_type == PersohubEventEntityType.TEAM:
+        filters.append(PersohubEventRegistration.team_id == int(entity_id))
+    else:
+        filters.append(PersohubEventRegistration.user_id == int(entity_id))
+    return db.query(PersohubEventRegistration).filter(*filters).first()
+
+
+def _send_payment_approved_email(participant: Optional[PdaUser], event: PersohubEvent) -> None:
+    if not participant or not participant.email:
+        return
+    safe_name = str(participant.name or "Participant")
+    event_title = str(event.title or "event")
+    whatsapp_url = str(getattr(event, "whatsapp_url", "") or "").strip()
+    whatsapp_text = f"\nJoin our WhatsApp channel for updates: {whatsapp_url}\n" if whatsapp_url else ""
+    subject = f"Registration confirmed - {event_title}"
+    text = (
+        f"Hello {safe_name},\n\n"
+        f"Your payment has been approved and your registration for {event_title} is confirmed.\n"
+        f"{whatsapp_text}\n"
+        "Regards,\nPersohub Team"
+    )
+    html = "<html><body>" + "".join(f"<p>{line}</p>" for line in text.split("\n") if line) + "</body></html>"
+    try:
+        send_email_async(participant.email, subject, html, text)
+    except Exception:
+        pass
 
 
 def _status_is_active(value) -> bool:
@@ -1543,6 +1648,127 @@ def update_participant_status(
         meta={"user_id": user_id, "status": normalized},
     )
     return {"message": "Status updated"}
+
+
+@router.post("/persohub/admin/persohub-events/{slug}/participants/{entity_id}/approve-payment")
+def approve_participant_payment(
+    slug: str,
+    entity_id: int,
+    admin: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    target_entity_type = (
+        PersohubEventEntityType.TEAM
+        if event.participant_mode == PersohubEventParticipantMode.TEAM
+        else PersohubEventEntityType.USER
+    )
+    target_id = int(entity_id)
+    registration = _registration_for_entity(db, event, target_entity_type, target_id)
+    if not registration:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Participant not found")
+
+    payment = _find_pending_payment_for_entity(db, event, target_entity_type, target_id)
+    if not payment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pending payment not found")
+
+    content = _payment_content_dict(payment)
+    content["status"] = "approved"
+    content["review"] = {
+        "by_user_id": int(admin.id),
+        "by_name": str(admin.name or ""),
+        "at": datetime.now(timezone.utc).isoformat(),
+        "reason": None,
+    }
+    payment.content = content
+    registration.status = PersohubEventRegistrationStatus.ACTIVE
+    db.commit()
+
+    participant = db.query(PdaUser).filter(PdaUser.id == int(payment.user_id or 0)).first()
+    _send_payment_approved_email(participant, event)
+    _log_event_admin_action(
+        db,
+        admin,
+        event,
+        "approve_persohub_event_payment",
+        method="POST",
+        path=f"/persohub/admin/persohub-events/{slug}/participants/{entity_id}/approve-payment",
+        meta={
+            "entity_type": str(target_entity_type.value if hasattr(target_entity_type, "value") else target_entity_type),
+            "entity_id": target_id,
+            "payment_id": int(payment.id),
+            "status": "approved",
+        },
+    )
+    return {"message": "Payment approved", "payment_id": int(payment.id)}
+
+
+@router.get("/persohub/admin/persohub-events/{slug}/participants/{entity_id}/pending-payment")
+def participant_pending_payment(
+    slug: str,
+    entity_id: int,
+    _: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    target_entity_type = (
+        PersohubEventEntityType.TEAM
+        if event.participant_mode == PersohubEventParticipantMode.TEAM
+        else PersohubEventEntityType.USER
+    )
+    target_id = int(entity_id)
+    registration = _registration_for_entity(db, event, target_entity_type, target_id)
+    if not registration:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Participant not found")
+
+    payment = _find_pending_payment_for_entity(db, event, target_entity_type, target_id)
+    if not payment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pending payment not found")
+
+    content = _payment_content_dict(payment)
+    payer_user = db.query(PdaUser).filter(PdaUser.id == int(payment.user_id or 0)).first()
+    team = None
+    if target_entity_type == PersohubEventEntityType.TEAM:
+        team = db.query(PersohubEventTeam).filter(
+            PersohubEventTeam.event_id == event.id,
+            PersohubEventTeam.id == target_id,
+        ).first()
+
+    participant_name = (
+        str(team.team_name or "").strip()
+        if team
+        else str(getattr(payer_user, "name", "") or "").strip()
+    )
+    participant_regno = (
+        str(team.team_code or "").strip()
+        if team
+        else str(getattr(payer_user, "regno", "") or "").strip()
+    )
+
+    return {
+        "id": int(payment.id),
+        "event_id": int(event.id),
+        "event_slug": str(event.slug or ""),
+        "event_title": str(event.title or ""),
+        "entity_type": "team" if target_entity_type == PersohubEventEntityType.TEAM else "user",
+        "entity_id": target_id,
+        "participant_name": participant_name or f"Participant {target_id}",
+        "participant_regno": participant_regno or None,
+        "participant_email": (str(getattr(payer_user, "email", "") or "").strip() or None),
+        "participant_phno": (str(getattr(payer_user, "phno", "") or "").strip() or None),
+        "participant_college": (str(getattr(payer_user, "college", "") or "").strip() or None),
+        "participant_dept": (str(getattr(payer_user, "dept", "") or "").strip() or None),
+        "payment_info_url": str(payment.payment_info_url or ""),
+        "status": _payment_status(payment),
+        "fee_key": (str(content.get("fee_key") or "").strip() or None),
+        "amount": _to_float_or_none(content.get("amount")),
+        "currency": (str(content.get("currency") or "").strip() or None),
+        "comment": (str(content.get("comment") or "").strip() or None),
+        "attempt": int(content.get("attempt") or 1),
+        "review": (content.get("review") if isinstance(content.get("review"), dict) else None),
+        "created_at": payment.created_at,
+        "updated_at": payment.updated_at,
+    }
 
 
 @router.put(

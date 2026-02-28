@@ -60,11 +60,10 @@ from schemas import (
 from security import (
     is_persohub_event_access_approved,
     require_pda_user,
-    require_persohub_events_parity_enabled,
 )
 from utils import _generate_presigned_put_url
 
-router = APIRouter(dependencies=[Depends(require_persohub_events_parity_enabled)])
+router = APIRouter()
 
 _ALLOWED_PAYMENT_SCREENSHOT_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/webp"]
 _PAYMENT_SCREENSHOT_MAX_BYTES = 10 * 1024 * 1024

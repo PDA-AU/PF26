@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PDA Certificate - A4 Print Version</title>
+    <style>
+        /* A4 Landscape Dimensions */
+        :root {
+            --width: 297mm;
+            --height: 210mm;
+            --gold-thick: #b38c4c;
+            --gold-text: #966f33;
+            --navy-blue: #091a3f;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background: #ccc;
+            display: flex;
+            justify-content: center;
+            padding: 20mm 0;
+            font-family: 'Times New Roman', Times, serif;
+        }
+
+        /* The Main Page Container */
+        .page {
+            width: var(--width);
+            height: var(--height);
+            background-color: var(--gold-thick);
+            padding: 8mm; /* Outer thick gold border */
+            position: relative;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+            overflow: hidden;
+        }
+
+        /* Inner White Content Area */
+        .inner-canvas {
+            width: 100%;
+            height: 100%;
+            background-color: #ffffff;
+            /* Geometric background pattern */
+            background-image: 
+                linear-gradient(30deg, #f9f9f9 12%, transparent 12.5%, transparent 87%, #f9f9f9 87.5%, #f9f9f9),
+                linear-gradient(150deg, #f9f9f9 12%, transparent 12.5%, transparent 87%, #f9f9f9 87.5%, #f9f9f9),
+                linear-gradient(60deg, #f3f3f3 25%, transparent 25.5%, transparent 75%, #f3f3f3 75%, #f3f3f3);
+            background-size: 15mm 25mm;
+            position: relative;
+            padding: 3mm;
+        }
+
+        /* Decorative Thin Double Border */
+        .border-frame {
+            border: 0.8mm solid var(--gold-thick);
+            width: 100%;
+            height: 100%;
+            position: relative;
+            padding: 10mm;
+            display: flex;
+            flex-direction: column;
+            z-index: 5;
+        }
+
+        /* Watermark */
+        .watermark-layer {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            opacity: 0.08;
+            text-align: center;
+            z-index: 1;
+            pointer-events: none;
+        }
+        .watermark-layer img { width: 100mm; }
+
+        /* Content Layout */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5mm;
+        }
+        .header-logo { width: 30mm; height: 30mm; object-fit: contain; }
+        .header-text { text-align: center; flex: 1; }
+        .header-text h1 { color: var(--navy-blue); font-size: 28pt; font-weight: normal; }
+        .header-text h2 { color: var(--navy-blue); font-size: 16pt; letter-spacing: 1px; margin-top: 2mm; }
+
+        .title-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 5mm 0;
+        }
+        .side-graphic { width: 45mm; text-align: center; }
+        .main-title { text-align: center; flex: 1; }
+        .main-title h1 { color: var(--gold-text); font-size: 58pt; font-family: Georgia, serif; letter-spacing: 3mm; }
+        .main-title h3 { color: var(--navy-blue); font-size: 24pt; letter-spacing: 1.5mm; margin-top: -2mm; }
+
+        .recipient-block { text-align: center; margin-top: 8mm; }
+        .intro-text { color: var(--gold-text); font-size: 16pt; font-style: italic; margin-bottom: 4mm; }
+        .name { color: var(--navy-blue); font-size: 42pt; font-weight: bold; border-bottom: 0.2mm solid #ddd; display: inline-block; padding: 0 15mm; }
+
+        .achievement-text {
+            text-align: center;
+            color: var(--gold-text);
+            font-size: 16pt;
+            line-height: 1.5;
+            margin-top: 8mm;
+            padding: 0 20mm;
+        }
+
+        .footer-sigs {
+            margin-top: auto;
+            display: flex;
+            justify-content: space-between;
+            padding: 0 10mm 5mm;
+        }
+        .sig-box { text-align: center; width: 60mm; }
+        .sig-line { border-top: 0.5mm solid var(--gold-text); margin-bottom: 2mm; }
+        .sig-name { color: var(--navy-blue); font-weight: bold; font-size: 13pt; }
+        .sig-role { color: var(--gold-text); font-size: 13pt; }
+
+        /* Print Settings */
+        @media print {
+            body { background: none; padding: 0; }
+            .page { box-shadow: none; margin: 0; }
+            @page {
+                size: A4 landscape;
+                margin: 0;
+            }
+            .inner-canvas { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="page">
+        <div class="inner-canvas">
+            
+            <div class="watermark-layer">
+                <div style="font-size: 40pt; border: 2mm solid #000; border-radius: 50%; padding: 20mm; transform: rotate(-15deg);">PDA WATERMARK</div>
+            </div>
+
+            <div class="border-frame">
+                
+                <div class="header">
+                    <div class="header-logo"><img src="anna_univ_logo.png" alt="Anna Univ" style="width:100%"></div>
+                    <div class="header-text">
+                        <h1>Madras Institute of Technology</h1>
+                        <h2>PERSONALITY DEVELOPMENT ASSOCIATION</h2>
+                    </div>
+                    <div class="header-logo"><img src="mit_india_logo.png" alt="MIT India" style="width:100%"></div>
+                </div>
+
+                <div class="title-row">
+                    <div class="side-graphic"><img src="mountain_icon.png" alt="Mountain" style="width:80%"></div>
+                    <div class="main-title">
+                        <h1>CERTIFICATE</h1>
+                        <h3>OF ACHIEVEMENT</h3>
+                    </div>
+                    <div class="side-graphic"><img src="gold_seal.png" alt="Seal" style="width:70%"></div>
+                </div>
+
+                <div class="recipient-block">
+                    <p class="intro-text">This certificate is proudly presented to</p>
+                    <h1 class="name">ADELINE PALMERSTON</h1>
+                </div>
+
+                <div class="achievement-text">
+                    For her Remarkable Performance And Achievement as the Winner of Crestora'26,<br>
+                    Conducted by the Personality Development Association of MIT in the year 2025-2026
+                </div>
+
+                <div class="footer-sigs">
+                    <div class="sig-box">
+                        <div class="sig-line"></div>
+                        <div class="sig-name">Akshaya B G</div>
+                        <div class="sig-role">Chairperson, PDA</div>
+                    </div>
+                    <div class="sig-box">
+                        <div class="sig-line"></div>
+                        <div class="sig-name">Dr. P. Pabitha</div>
+                        <div class="sig-role">Staff Incharge, PDA</div>
+                    </div>
+                    <div class="sig-box">
+                        <div class="sig-line"></div>
+                        <div class="sig-name">Dr. P. Jayashree</div>
+                        <div class="sig-role">Dean, MIT Campus</div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>

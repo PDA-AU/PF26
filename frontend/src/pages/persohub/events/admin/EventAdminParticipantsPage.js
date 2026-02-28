@@ -39,7 +39,28 @@ const DEPARTMENTS = [
 ];
 
 const GENDERS = ['Male', 'Female'];
-const STATUSES = ['Active', 'Eliminated'];
+const STATUSES = ['Active', 'Eliminated', 'Pending'];
+const formatDateTime = (value) => {
+    if (!value) return '-';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '-';
+    return parsed.toLocaleString('en-IN', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+    });
+};
+
+const paymentStatusBadgeClass = (status) => {
+    const normalized = String(status || '').toLowerCase();
+    if (normalized === 'approved') return 'border-emerald-300 bg-emerald-50 text-emerald-700';
+    if (normalized === 'declined') return 'border-red-300 bg-red-50 text-red-700';
+    if (normalized === 'pending') return 'border-amber-300 bg-amber-50 text-amber-700';
+    return 'border-black/10 bg-white text-slate-700';
+};
 
 function ParticipantsContent() {
     const { getAuthHeader } = usePersohubAdminAuth();
@@ -64,6 +85,7 @@ function ParticipantsContent() {
     const [statusDialogOpen, setStatusDialogOpen] = useState(false);
     const [statusTarget, setStatusTarget] = useState(null);
     const [pendingStatus, setPendingStatus] = useState(null);
+    const [statusActionAcknowledged, setStatusActionAcknowledged] = useState(false);
     const [teamDeleteDialogOpen, setTeamDeleteDialogOpen] = useState(false);
     const [teamDeleteTarget, setTeamDeleteTarget] = useState(null);
     const [deletingTeam, setDeletingTeam] = useState(false);
@@ -71,6 +93,12 @@ function ParticipantsContent() {
     const [participantDeleteTarget, setParticipantDeleteTarget] = useState(null);
     const [participantDeleteConfirmText, setParticipantDeleteConfirmText] = useState('');
     const [deletingParticipant, setDeletingParticipant] = useState(false);
+    const [approvingPaymentEntityKey, setApprovingPaymentEntityKey] = useState('');
+    const [paymentApprovalTarget, setPaymentApprovalTarget] = useState(null);
+    const [paymentApprovalDetails, setPaymentApprovalDetails] = useState(null);
+    const [paymentApprovalLoading, setPaymentApprovalLoading] = useState(false);
+    const [paymentApprovalError, setPaymentApprovalError] = useState('');
+    const [paymentApprovalAcknowledged, setPaymentApprovalAcknowledged] = useState(false);
     const [filters, setFilters] = useState({
         department: '',
         gender: '',
@@ -255,9 +283,64 @@ function ParticipantsContent() {
         }
     };
 
+    const openApprovePaymentDialog = async (row) => {
+        if (!row) return;
+        setPaymentApprovalTarget(row);
+        setPaymentApprovalDetails(null);
+        setPaymentApprovalError('');
+        setPaymentApprovalAcknowledged(false);
+        setPaymentApprovalLoading(true);
+        try {
+            const response = await axios.get(
+                `${API}/persohub/admin/persohub-events/${eventSlug}/participants/${row.entity_id}/pending-payment`,
+                { headers: getAuthHeader() }
+            );
+            setPaymentApprovalDetails(response.data || null);
+        } catch (error) {
+            setPaymentApprovalError(getErrorMessage(error, 'Failed to load payment details'));
+        } finally {
+            setPaymentApprovalLoading(false);
+        }
+    };
+
+    const closeApprovePaymentDialog = () => {
+        if (approvingPaymentEntityKey) return;
+        setPaymentApprovalTarget(null);
+        setPaymentApprovalDetails(null);
+        setPaymentApprovalError('');
+        setPaymentApprovalAcknowledged(false);
+        setPaymentApprovalLoading(false);
+    };
+
+    const handleApprovePendingPayment = async () => {
+        if (!paymentApprovalTarget) return;
+        if (!paymentApprovalAcknowledged) {
+            toast.error('Please acknowledge the approval warning');
+            return;
+        }
+        const entityKey = `${paymentApprovalTarget.entity_type}-${paymentApprovalTarget.entity_id}`;
+        if (approvingPaymentEntityKey === entityKey) return;
+        setApprovingPaymentEntityKey(entityKey);
+        try {
+            await axios.post(
+                `${API}/persohub/admin/persohub-events/${eventSlug}/participants/${paymentApprovalTarget.entity_id}/approve-payment`,
+                {},
+                { headers: getAuthHeader() }
+            );
+            toast.success('Payment approved');
+            closeApprovePaymentDialog();
+            fetchRows();
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to approve payment'));
+        } finally {
+            setApprovingPaymentEntityKey('');
+        }
+    };
+
     const openStatusDialog = (row, newStatus) => {
         setStatusTarget(row);
         setPendingStatus(newStatus);
+        setStatusActionAcknowledged(false);
         setStatusDialogOpen(true);
     };
 
@@ -318,6 +401,7 @@ function ParticipantsContent() {
     const departmentLabel = selectedEntity
         ? (DEPARTMENTS.find((d) => d.value === selectedEntity.department)?.label || selectedEntity.department)
         : '';
+    const paymentApprovalAmount = Number(paymentApprovalDetails?.amount || 0);
 
     return (
         <>
@@ -546,7 +630,21 @@ function ParticipantsContent() {
                                     </td>
                                     <td>
                                         {!isTeamMode ? (
-                                            row.status === 'Active' ? (
+                                            row.status === 'Pending' ? (
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        openApprovePaymentDialog(row);
+                                                    }}
+                                                    disabled={approvingPaymentEntityKey === `${row.entity_type}-${row.entity_id}`}
+                                                    className="border-2 border-black text-emerald-600"
+                                                    title="Approve payment"
+                                                >
+                                                    <UserCheck className="w-4 h-4" />
+                                                </Button>
+                                            ) : row.status === 'Active' ? (
                                                 <Button
                                                     size="sm"
                                                     variant="outline"
@@ -572,18 +670,35 @@ function ParticipantsContent() {
                                                 </Button>
                                             )
                                         ) : (
-                                            <Button
-                                                size="sm"
-                                                variant="outline"
-                                                onClick={(event) => {
-                                                    event.stopPropagation();
-                                                    openTeamDeleteDialog(row);
-                                                }}
-                                                className="border-2 border-black text-red-500"
-                                                title="Delete team with cascade"
-                                            >
-                                                <Trash2 className="w-4 h-4" />
-                                            </Button>
+                                            <div className="flex items-center gap-2">
+                                                {row.status === 'Pending' ? (
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        onClick={(event) => {
+                                                            event.stopPropagation();
+                                                            openApprovePaymentDialog(row);
+                                                        }}
+                                                        disabled={approvingPaymentEntityKey === `${row.entity_type}-${row.entity_id}`}
+                                                        className="border-2 border-black text-emerald-600"
+                                                        title="Approve payment"
+                                                    >
+                                                        <UserCheck className="w-4 h-4" />
+                                                    </Button>
+                                                ) : null}
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        openTeamDeleteDialog(row);
+                                                    }}
+                                                    className="border-2 border-black text-red-500"
+                                                    title="Delete team with cascade"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </Button>
+                                            </div>
                                         )}
                                     </td>
                                 </tr>
@@ -593,7 +708,141 @@ function ParticipantsContent() {
                 </div>
             )}
 
-            <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
+            <Dialog
+                open={Boolean(paymentApprovalTarget)}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        closeApprovePaymentDialog();
+                    }
+                }}
+            >
+                <DialogContent className="border-4 border-black bg-white sm:max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading font-bold text-xl">Confirm Payment</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        {paymentApprovalLoading ? (
+                            <p className="text-sm text-gray-600">Loading payment details...</p>
+                        ) : paymentApprovalError ? (
+                            <p className="text-sm text-red-700">{paymentApprovalError}</p>
+                        ) : paymentApprovalDetails ? (
+                            <>
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div>
+                                        <p className="text-xs uppercase tracking-[0.24em] text-slate-500">{paymentApprovalDetails.event_slug || eventSlug}</p>
+                                        <h3 className="text-lg font-heading font-black">{paymentApprovalDetails.event_title || eventInfo?.title || 'Event'}</h3>
+                                        <p className="text-sm text-slate-600">
+                                            {paymentApprovalDetails.participant_name || paymentApprovalTarget?.name}
+                                            {paymentApprovalDetails.participant_regno ? ` (${paymentApprovalDetails.participant_regno})` : ''}
+                                        </p>
+                                    </div>
+                                    <span className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] ${paymentStatusBadgeClass(paymentApprovalDetails.status)}`}>
+                                        {paymentApprovalDetails.status || 'pending'}
+                                    </span>
+                                </div>
+
+                                <div className="grid gap-3 text-sm text-slate-700 sm:grid-cols-2">
+                                    <p><span className="font-semibold">Fee Slab:</span> {paymentApprovalDetails.fee_key || '-'}</p>
+                                    <p>
+                                        <span className="font-semibold">Amount:</span>{' '}
+                                        {Number.isFinite(paymentApprovalAmount)
+                                            ? `${paymentApprovalAmount} ${paymentApprovalDetails.currency || 'INR'}`
+                                            : '-'}
+                                    </p>
+                                    <p><span className="font-semibold">Attempt:</span> {paymentApprovalDetails.attempt || 1}</p>
+                                    <p><span className="font-semibold">Recipient Email:</span> {paymentApprovalDetails.participant_email || '-'}</p>
+                                    <p><span className="font-semibold">Recipient Phone:</span> {paymentApprovalDetails.participant_phno || '-'}</p>
+                                    <p><span className="font-semibold">Recipient College:</span> {paymentApprovalDetails.participant_college || '-'}</p>
+                                    <p><span className="font-semibold">Recipient Dept:</span> {paymentApprovalDetails.participant_dept || '-'}</p>
+                                    <p><span className="font-semibold">Submitted At:</span> {formatDateTime(paymentApprovalDetails.created_at)}</p>
+                                    <p><span className="font-semibold">Reviewed At:</span> {formatDateTime(paymentApprovalDetails?.review?.at)}</p>
+                                    {paymentApprovalDetails.comment ? (
+                                        <p className="sm:col-span-2"><span className="font-semibold">Payment Note:</span> {paymentApprovalDetails.comment}</p>
+                                    ) : null}
+                                </div>
+
+                                {paymentApprovalDetails.payment_info_url ? (
+                                    <div className="space-y-2">
+                                        <a
+                                            href={paymentApprovalDetails.payment_info_url}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="inline-flex"
+                                        >
+                                            <Button type="button" variant="outline" className="border-black/20">View Screenshot</Button>
+                                        </a>
+                                        <a
+                                            href={paymentApprovalDetails.payment_info_url}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="block overflow-hidden rounded-lg border border-black/10 bg-slate-50"
+                                        >
+                                            <img
+                                                src={paymentApprovalDetails.payment_info_url}
+                                                alt="Payment screenshot"
+                                                className="max-h-64 w-full object-contain"
+                                            />
+                                        </a>
+                                    </div>
+                                ) : null}
+
+                                <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3">
+                                    <input
+                                        id="participant-payment-approve-warning"
+                                        type="checkbox"
+                                        checked={paymentApprovalAcknowledged}
+                                        onChange={(event) => setPaymentApprovalAcknowledged(Boolean(event.target.checked))}
+                                        className="mt-1 h-4 w-4"
+                                    />
+                                    <label htmlFor="participant-payment-approve-warning" className="text-sm font-medium text-amber-900">
+                                        I have verified the proof, amount and participant details and want to approve this payment.
+                                    </label>
+                                </div>
+                            </>
+                        ) : (
+                            <p className="text-sm text-gray-600">No payment details available.</p>
+                        )}
+
+                        <div className="flex justify-end gap-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="border-2 border-black"
+                                onClick={closeApprovePaymentDialog}
+                                disabled={Boolean(approvingPaymentEntityKey)}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                type="button"
+                                className="bg-emerald-600 text-white border-2 border-black hover:bg-emerald-700"
+                                onClick={handleApprovePendingPayment}
+                                disabled={
+                                    !paymentApprovalDetails
+                                    || paymentApprovalLoading
+                                    || Boolean(paymentApprovalError)
+                                    || !paymentApprovalAcknowledged
+                                    || Boolean(approvingPaymentEntityKey)
+                                }
+                            >
+                                {Boolean(approvingPaymentEntityKey) ? 'Confirming...' : 'Confirm'}
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog
+                open={statusDialogOpen}
+                onOpenChange={(open) => {
+                    setStatusDialogOpen(open);
+                    if (!open) {
+                        setStatusTarget(null);
+                        setPendingStatus(null);
+                        setStatusActionAcknowledged(false);
+                    }
+                }}
+            >
                 <DialogContent className="border-4 border-black">
                     <DialogHeader>
                         <DialogTitle className="font-heading font-bold text-xl">
@@ -606,16 +855,32 @@ function ParticipantsContent() {
                                 ? `Are you sure you want to eliminate ${statusTarget?.name || 'this participant'}?`
                                 : `Are you sure you want to activate ${statusTarget?.name || 'this participant'}?`}
                         </p>
+                        <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3">
+                            <input
+                                id="participant-status-warning"
+                                type="checkbox"
+                                checked={statusActionAcknowledged}
+                                onChange={(event) => setStatusActionAcknowledged(Boolean(event.target.checked))}
+                                className="mt-1 h-4 w-4"
+                            />
+                            <label htmlFor="participant-status-warning" className="text-sm font-medium text-amber-900">
+                                {pendingStatus === 'Eliminated'
+                                    ? 'I understand this participant will be eliminated from progression.'
+                                    : 'I understand this participant will be marked active again.'}
+                            </label>
+                        </div>
                         <div className="flex gap-2">
                             <Button variant="outline" className="flex-1 border-2 border-black" onClick={() => setStatusDialogOpen(false)}>
                                 Cancel
                             </Button>
                             <Button
                                 className={`flex-1 ${pendingStatus === 'Eliminated' ? 'bg-red-500' : 'bg-green-500'} text-white border-2 border-black`}
+                                disabled={!statusActionAcknowledged}
                                 onClick={() => {
                                     if (statusTarget && pendingStatus) {
                                         handleStatusChange(statusTarget.entity_id, pendingStatus, statusTarget.status);
                                     }
+                                    setStatusActionAcknowledged(false);
                                     setStatusDialogOpen(false);
                                 }}
                             >

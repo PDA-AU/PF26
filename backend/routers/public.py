@@ -171,6 +171,8 @@ def list_routes():
             {"method": "PUT", "path": "/persohub/admin/persohub-events/{slug}/visibility"},
             {"method": "GET", "path": "/persohub/admin/persohub-events/{slug}/dashboard"},
             {"method": "GET", "path": "/persohub/admin/persohub-events/{slug}/participants"},
+            {"method": "POST", "path": "/persohub/admin/persohub-events/{slug}/participants/{entity_id}/approve-payment"},
+            {"method": "GET", "path": "/persohub/admin/persohub-events/{slug}/participants/{entity_id}/pending-payment"},
             {"method": "GET", "path": "/persohub/admin/persohub-events/{slug}/rounds"},
             {"method": "POST", "path": "/persohub/admin/persohub-events/{slug}/rounds"},
             {"method": "GET", "path": "/persohub/admin/persohub-events/{slug}/leaderboard"},
