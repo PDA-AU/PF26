@@ -5406,12 +5406,13 @@ def export_participants(
         db=db,
     )
     if event.participant_mode == PersohubEventParticipantMode.INDIVIDUAL:
-        headers = ["Register Number", "Name", "Email", "Department", "Gender", "Batch", "Status", "Referral Code", "Referred By", "Referral Count"]
+        headers = ["Register Number", "Name", "Email", "College", "Department", "Gender", "Batch", "Status", "Referral Code", "Referred By", "Referral Count"]
         rows = [
             [
                 e.get("register_number"),
                 e.get("name"),
                 e.get("email"),
+                e.get("college"),
                 e.get("department"),
                 e.get("gender"),
                 e.get("batch"),

@@ -589,6 +589,7 @@ function ParticipantsContent() {
                                 <th>{isTeamMode ? 'Team Code' : 'Register No'}</th>
                                 <th>{isTeamMode ? 'Team Name' : 'Name'}</th>
                                 {isTeamMode ? <th>Members</th> : <th>Email</th>}
+                                {!isTeamMode ? <th>College</th> : null}
                                 {!isTeamMode ? <th>Department</th> : null}
                                 {!isTeamMode ? <th>Batch</th> : null}
                                 {!isTeamMode ? <th>Gender</th> : null}
@@ -611,6 +612,7 @@ function ParticipantsContent() {
                                     ) : (
                                         <td className="text-sm">{row.email}</td>
                                     )}
+                                    {!isTeamMode ? <td className="text-sm">{row.college || '-'}</td> : null}
                                     {!isTeamMode ? (
                                         <td className="text-sm">{DEPARTMENTS.find((d) => d.value === row.department)?.label || row.department}</td>
                                     ) : null}
