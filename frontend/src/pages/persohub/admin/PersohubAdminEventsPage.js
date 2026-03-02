@@ -1318,7 +1318,7 @@ export default function PersohubAdminEventsPage() {
                                         <div className="mt-4 flex flex-wrap gap-2">
                                             {canManageEvent ? (
                                                 <Button asChild className="bg-[#11131a] text-white hover:bg-[#1f2330]">
-                                                    <Link to={`/persohub/admin/persohub-events/${eventRow.slug}/dashboard`}>
+                                                    <Link to={`/persohub/admin/events/${eventRow.slug}/dashboard`}>
                                                         Manage Event
                                                     </Link>
                                                 </Button>

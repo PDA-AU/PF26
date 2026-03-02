@@ -271,7 +271,7 @@ export default function PersohubAdminLayout({ children, title = 'Persohub Admin'
         ...(canAccessClubAdminPanel ? [{ id: 'profile', label: 'Profile', path: '/persohub/admin/profile' }] : []),
         ...(canAccessClubAdminPanel ? [{ id: 'communities', label: 'Communities', path: '/persohub/admin/communities' }] : []),
         ...(canAccessClubAdminPanel ? [{ id: 'payments', label: 'Payments', path: '/persohub/admin/payments' }] : []),
-        ...(canAccessEvents ? [{ id: 'events', label: 'Events', path: '/persohub/admin/persohub-events' }] : []),
+        ...(canAccessEvents ? [{ id: 'events', label: 'Events', path: '/persohub/admin/events' }] : []),
         ...(isOwner ? [{ id: 'policies', label: 'Policies', path: '/persohub/admin/policies' }] : []),
     ];
 

@@ -404,6 +404,11 @@ export default function EventDashboard() {
         const value = String(eventInfo?.external_url_name || '').trim();
         return value || 'Join whatsapp channel';
     }, [eventInfo?.external_url_name]);
+    const isEventClosed = useMemo(
+        () => String(eventInfo?.status || '').toLowerCase() === 'closed',
+        [eventInfo?.status]
+    );
+    const disableExternalCtas = isEventClosed;
     const eventQrWhatsappShareUrl = useMemo(() => {
         const eventUrl = `${window.location.origin}${infoPath}`;
         const title = String(eventInfo?.title || 'PDA Event').trim();
@@ -1310,15 +1315,26 @@ export default function EventDashboard() {
                                 ) : null}
                                 {whatsappUrl ? (
                                     <div className="mt-3">
-                                        <a href={whatsappUrl} target="_blank" rel="noreferrer" className="inline-block max-w-full">
+                                        {disableExternalCtas ? (
                                             <Button
                                                 data-testid="event-overview-whatsapp-button"
-                                                className="h-auto max-w-full whitespace-normal border-2 border-black bg-[#DC2626] py-2 text-left text-white shadow-neo hover:bg-[#B91C1C]"
+                                                disabled
+                                                className="h-auto max-w-full whitespace-normal border-2 border-black bg-[#DC2626] py-2 text-left text-white shadow-neo"
                                             >
                                                 <ExternalLink className="mr-2 h-4 w-4 shrink-0" />
                                                 <span className="break-words">{externalUrlLabel}</span>
                                             </Button>
-                                        </a>
+                                        ) : (
+                                            <a href={whatsappUrl} target="_blank" rel="noreferrer" className="inline-block max-w-full">
+                                                <Button
+                                                    data-testid="event-overview-whatsapp-button"
+                                                    className="h-auto max-w-full whitespace-normal border-2 border-black bg-[#DC2626] py-2 text-left text-white shadow-neo hover:bg-[#B91C1C]"
+                                                >
+                                                    <ExternalLink className="mr-2 h-4 w-4 shrink-0" />
+                                                    <span className="break-words">{externalUrlLabel}</span>
+                                                </Button>
+                                            </a>
+                                        )}
                                     </div>
                                 ) : null}
                                 <div className="mt-3">
@@ -1752,15 +1768,26 @@ export default function EventDashboard() {
                                                         : (qrLoading ? 'Generating QR...' : 'View Attendance QR')}
                                                 </Button>
                                                 {whatsappUrl ? (
-                                                    <a href={whatsappUrl} target="_blank" rel="noreferrer" className="block">
+                                                    disableExternalCtas ? (
                                                         <Button
                                                             data-testid="event-dashboard-whatsapp-button"
-                                                            className="w-full border-2 border-black bg-[#DC2626] text-white shadow-neo hover:bg-[#B91C1C]"
+                                                            disabled
+                                                            className="w-full border-2 border-black bg-[#DC2626] text-white shadow-neo"
                                                         >
                                                             <ExternalLink className="mr-2 h-4 w-4" />
                                                             {externalUrlLabel}
                                                         </Button>
-                                                    </a>
+                                                    ) : (
+                                                        <a href={whatsappUrl} target="_blank" rel="noreferrer" className="block">
+                                                            <Button
+                                                                data-testid="event-dashboard-whatsapp-button"
+                                                                className="w-full border-2 border-black bg-[#DC2626] text-white shadow-neo hover:bg-[#B91C1C]"
+                                                            >
+                                                                <ExternalLink className="mr-2 h-4 w-4" />
+                                                                {externalUrlLabel}
+                                                            </Button>
+                                                        </a>
+                                                    )
                                                 ) : null}
                                                 <Link to="/" className="block">
                                                     <Button data-testid="event-dashboard-back-home-button" variant="outline" className="w-full border-2 border-black shadow-neo">
@@ -2513,12 +2540,19 @@ export default function EventDashboard() {
                                             ) : null}
                                         </div>
                                         {String(selectedRound?.external_url || '').trim() ? (
-                                            <a href={String(selectedRound?.external_url || '').trim()} target="_blank" rel="noreferrer">
-                                                <Button className="w-full border-2 border-black bg-[#DC2626] text-white shadow-neo hover:bg-[#B91C1C]">
+                                            disableExternalCtas ? (
+                                                <Button disabled className="w-full border-2 border-black bg-[#DC2626] text-white shadow-neo">
                                                     <ExternalLink className="mr-2 h-4 w-4" />
                                                     {String(selectedRound?.external_url_name || '').trim() || 'Explore Round'}
                                                 </Button>
-                                            </a>
+                                            ) : (
+                                                <a href={String(selectedRound?.external_url || '').trim()} target="_blank" rel="noreferrer">
+                                                    <Button className="w-full border-2 border-black bg-[#DC2626] text-white shadow-neo hover:bg-[#B91C1C]">
+                                                        <ExternalLink className="mr-2 h-4 w-4" />
+                                                        {String(selectedRound?.external_url_name || '').trim() || 'Explore Round'}
+                                                    </Button>
+                                                </a>
+                                            )
                                         ) : null}
                                         {selectedRound?.requires_submission ? (
                                             <div className="rounded-md border-2 border-black bg-[#fffdf0] p-4">
@@ -2964,12 +2998,19 @@ export default function EventDashboard() {
                                 : 'You are registered. Join the external channel for updates.'}
                         </p>
                         {whatsappUrl ? (
-                            <a href={whatsappUrl} target="_blank" rel="noreferrer">
-                                <Button type="button" className="w-full border-2 border-black bg-[#16A34A] text-white shadow-neo hover:bg-[#15803D]">
+                            disableExternalCtas ? (
+                                <Button type="button" disabled className="w-full border-2 border-black bg-[#16A34A] text-white shadow-neo">
                                     <ExternalLink className="mr-2 h-4 w-4" />
                                     {externalUrlLabel}
                                 </Button>
-                            </a>
+                            ) : (
+                                <a href={whatsappUrl} target="_blank" rel="noreferrer">
+                                    <Button type="button" className="w-full border-2 border-black bg-[#16A34A] text-white shadow-neo hover:bg-[#15803D]">
+                                        <ExternalLink className="mr-2 h-4 w-4" />
+                                        {externalUrlLabel}
+                                    </Button>
+                                </a>
+                            )
                         ) : null}
                         <div className="flex justify-end">
                             <Button

@@ -108,14 +108,14 @@ export default function EventAdminShell({
     );
 
     const navItems = [
-        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, to: `/persohub/admin/persohub-events/${eventSlug}/dashboard` },
-        { id: 'attendance', label: 'Attendance', icon: Camera, to: `/persohub/admin/persohub-events/${eventSlug}/attendance` },
-        ...(hideRoundsAndLeaderboard ? [] : [{ id: 'rounds', label: 'Rounds', icon: Calendar, to: `/persohub/admin/persohub-events/${eventSlug}/rounds` }]),
-        { id: 'participants', label: participantTabLabel, icon: Users, to: `/persohub/admin/persohub-events/${eventSlug}/participants` },
-        ...(hideRoundsAndLeaderboard ? [] : [{ id: 'leaderboard', label: 'Leaderboard', icon: Trophy, to: `/persohub/admin/persohub-events/${eventSlug}/leaderboard` }]),
-        { id: 'email', label: 'Email', icon: Mail, to: `/persohub/admin/persohub-events/${eventSlug}/email` },
-        { id: 'badges', label: 'Badges', icon: Award, to: `/persohub/admin/persohub-events/${eventSlug}/badges` },
-        { id: 'logs', label: 'Logs', icon: ListChecks, to: `/persohub/admin/persohub-events/${eventSlug}/logs` },
+        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, to: `/persohub/admin/events/${eventSlug}/dashboard` },
+        { id: 'attendance', label: 'Attendance', icon: Camera, to: `/persohub/admin/events/${eventSlug}/attendance` },
+        ...(hideRoundsAndLeaderboard ? [] : [{ id: 'rounds', label: 'Rounds', icon: Calendar, to: `/persohub/admin/events/${eventSlug}/rounds` }]),
+        { id: 'participants', label: participantTabLabel, icon: Users, to: `/persohub/admin/events/${eventSlug}/participants` },
+        ...(hideRoundsAndLeaderboard ? [] : [{ id: 'leaderboard', label: 'Leaderboard', icon: Trophy, to: `/persohub/admin/events/${eventSlug}/leaderboard` }]),
+        { id: 'email', label: 'Email', icon: Mail, to: `/persohub/admin/events/${eventSlug}/email` },
+        { id: 'badges', label: 'Badges', icon: Award, to: `/persohub/admin/events/${eventSlug}/badges` },
+        { id: 'logs', label: 'Logs', icon: ListChecks, to: `/persohub/admin/events/${eventSlug}/logs` },
     ];
 
     const navActiveTab = activeTab === 'scoring' ? 'rounds' : activeTab;
@@ -217,7 +217,7 @@ export default function EventAdminShell({
                 <div className="max-w-7xl mx-auto px-4 py-10">
                     <div className="neo-card">
                         <p className="font-heading text-xl">Event not found or permission denied.</p>
-                        <Link to="/persohub/admin/persohub-events" className="inline-block mt-4">
+                        <Link to="/persohub/admin/events" className="inline-block mt-4">
                             <Button variant="outline" className="border-2 border-black">
                                 Back to Events
                             </Button>

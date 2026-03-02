@@ -935,7 +935,7 @@ function RoundsContent() {
                                     </>
                                 ) : null}
                                 {(isActiveState(round.state) || isCompletedState(round.state) || isRevealState(round.state)) ? (
-                                    <Link to={`/persohub/admin/persohub-events/${eventSlug}/rounds/${round.id}/scoring`}>
+                                    <Link to={`/persohub/admin/events/${eventSlug}/rounds/${round.id}/scoring`}>
                                         <Button size="sm" className="bg-primary text-white border-2 border-black">
                                             <ChevronRight className="w-4 h-4" /> Scores
                                         </Button>

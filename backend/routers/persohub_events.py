@@ -1,8 +1,9 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import os
 import random
 import string
 from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -69,10 +70,40 @@ _ALLOWED_PAYMENT_SCREENSHOT_TYPES = ["image/png", "image/jpeg", "image/jpg", "im
 _PAYMENT_SCREENSHOT_MAX_BYTES = 10 * 1024 * 1024
 
 
+def _ist_today() -> date:
+    return datetime.now(ZoneInfo("Asia/Kolkata")).date()
+
+
+def _is_event_past_grace(event: PersohubEvent, today: date) -> bool:
+    end_date = getattr(event, "end_date", None)
+    if not end_date:
+        return False
+    return today > (end_date + timedelta(days=1))
+
+
+def _auto_close_event_if_past_grace(db: Session, event: PersohubEvent) -> bool:
+    if not _is_event_past_grace(event, _ist_today()):
+        return False
+
+    changed = False
+    if event.status != PersohubEventStatus.CLOSED:
+        event.status = PersohubEventStatus.CLOSED
+        changed = True
+    if bool(getattr(event, "registration_open", True)):
+        event.registration_open = False
+        changed = True
+
+    if changed:
+        db.commit()
+        db.refresh(event)
+    return changed
+
+
 def _get_event_or_404(db: Session, slug: str) -> PersohubEvent:
     event = db.query(PersohubEvent).filter(PersohubEvent.slug == slug).first()
     if not event:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+    _auto_close_event_if_past_grace(db, event)
     return event
 
 
@@ -533,6 +564,9 @@ def list_ongoing_events(db: Session = Depends(get_db)):
     )
     payloads = []
     for event in events:
+        _auto_close_event_if_past_grace(db, event)
+        if event.status != PersohubEventStatus.OPEN:
+            continue
         payload = PersohubManagedEventResponse.model_validate(event)
         payloads.append(payload.model_copy(update={"registration_available": _registration_available(db, event)}))
     return payloads
@@ -543,6 +577,7 @@ def list_all_managed_events(db: Session = Depends(get_db)):
     events = db.query(PersohubEvent).filter(PersohubEvent.is_visible == True).order_by(PersohubEvent.created_at.desc()).all()  # noqa: E712
     payloads = []
     for event in events:
+        _auto_close_event_if_past_grace(db, event)
         payload = PersohubManagedEventResponse.model_validate(event)
         payloads.append(payload.model_copy(update={"registration_available": _registration_available(db, event)}))
     return payloads
@@ -1529,6 +1564,7 @@ def my_events(user: PdaUser = Depends(require_pda_user), db: Session = Depends(g
         event = db.query(PersohubEvent).filter(PersohubEvent.id == reg.event_id).first()
         if not event:
             continue
+        _auto_close_event_if_past_grace(db, event)
         key = (event.id, reg.user_id, reg.team_id)
         if key in seen:
             continue

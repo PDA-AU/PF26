@@ -1694,7 +1694,7 @@ function ScoringContent() {
             <div className="neo-card text-center py-12">
                 <AlertTriangle className="w-16 h-16 mx-auto mb-4 text-red-500" />
                 <h2 className="font-heading font-bold text-xl mb-4">Round Not Found</h2>
-                <Button className="bg-primary text-white border-2 border-black shadow-neo" onClick={() => navigate(`/persohub/admin/persohub-events/${eventSlug}/rounds`)}>
+                <Button className="bg-primary text-white border-2 border-black shadow-neo" onClick={() => navigate(`/persohub/admin/events/${eventSlug}/rounds`)}>
                     <ArrowLeft className="w-4 h-4 mr-2" /> Back
                 </Button>
             </div>
@@ -1707,11 +1707,11 @@ function ScoringContent() {
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div className="flex items-start gap-4 min-w-0">
                         <Link
-                            to={`/persohub/admin/persohub-events/${eventSlug}/rounds`}
+                            to={`/persohub/admin/events/${eventSlug}/rounds`}
                             onClick={(event) => {
                                 event.preventDefault();
                                 runWithUnsavedGuard(
-                                    () => navigate(`/persohub/admin/persohub-events/${eventSlug}/rounds`),
+                                    () => navigate(`/persohub/admin/events/${eventSlug}/rounds`),
                                     'You have unsaved score, panel definition, or panel assignment changes. Leave this page without saving?'
                                 );
                             }}

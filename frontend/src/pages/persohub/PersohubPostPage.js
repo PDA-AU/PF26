@@ -20,6 +20,7 @@ export default function PersohubPostPage() {
     const [loading, setLoading] = useState(true);
     const [shareOpen, setShareOpen] = useState(false);
     const [likePending, setLikePending] = useState(false);
+    const [followPending, setFollowPending] = useState(false);
     const likePendingRef = useRef(false);
 
     const isUserLoggedIn = Boolean(user);
@@ -67,6 +68,36 @@ export default function PersohubPostPage() {
         return created;
     };
 
+    const handleToggleFollow = async (targetPost) => {
+        const profileId = String(targetPost?.community?.profile_id || '').trim().toLowerCase();
+        if (!profileId) return;
+        if (!isUserLoggedIn) {
+            toast.error('Login as PDA user to follow communities');
+            return;
+        }
+        if (followPending) return;
+        setFollowPending(true);
+        try {
+            await persohubApi.toggleCommunityFollow(profileId);
+            setPost((prev) => {
+                if (!prev) return prev;
+                const prevProfileId = String(prev?.community?.profile_id || '').trim().toLowerCase();
+                if (prevProfileId !== profileId) return prev;
+                return {
+                    ...prev,
+                    community: {
+                        ...prev.community,
+                        is_following: !Boolean(prev.community?.is_following),
+                    },
+                };
+            });
+        } catch (error) {
+            toast.error(persohubApi.parseApiError(error, 'Failed to update follow status'));
+        } finally {
+            setFollowPending(false);
+        }
+    };
+
     return (
         <div className="persohub-page">
             <PdaHeader />
@@ -95,6 +126,9 @@ export default function PersohubPostPage() {
                         isUserLoggedIn={isUserLoggedIn}
                         fetchComments={persohubApi.fetchComments}
                         createComment={handleCreateComment}
+                        onToggleFollow={handleToggleFollow}
+                        followPending={followPending}
+                        showFollowAction
                         allowModeration={false}
                     />
                 ) : null}

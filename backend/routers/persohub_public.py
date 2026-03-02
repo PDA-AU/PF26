@@ -282,6 +282,9 @@ def get_feed(
 
     created_ordering = (PersohubPost.created_at.desc(), PersohubPost.id.desc())
     liked_ordering = (PersohubPost.like_count.desc(), PersohubPost.created_at.desc(), PersohubPost.id.desc())
+    # Community feed should stay recency-first, with engagement as secondary ranking.
+    if feed_type == PersohubFeedTypeEnum.COMMUNITY:
+        liked_ordering = (PersohubPost.created_at.desc(), PersohubPost.like_count.desc(), PersohubPost.id.desc())
     ist_today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
     active_event_clause = and_(
         PersohubPost.source_event_id.is_not(None),

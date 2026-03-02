@@ -15,7 +15,7 @@ export default function PersohubAdminEntryPage() {
                 navigate('/persohub/admin/profile', { replace: true });
                 return;
             }
-            navigate('/persohub/admin/persohub-events', { replace: true });
+            navigate('/persohub/admin/events', { replace: true });
         }
     }, [community, loading, navigate]);
 

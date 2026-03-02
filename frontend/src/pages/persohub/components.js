@@ -2,8 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
     CalendarDays,
+    ChevronDown,
     ChevronLeft,
     ChevronRight,
+    ChevronUp,
     LogIn,
     MessageCircle,
     Heart,
@@ -25,6 +27,8 @@ import {
     Play,
     RotateCcw,
     RotateCw,
+    UserCheck,
+    UserPlus,
     Volume2,
     VolumeX,
 } from 'lucide-react';
@@ -1010,6 +1014,9 @@ export const PostCard = ({
     onEdit,
     onHide,
     hidePending = false,
+    onToggleFollow,
+    followPending = false,
+    showFollowAction = false,
     onExplore,
     compactEventMobile = false,
 }) => {
@@ -1094,6 +1101,8 @@ export const PostCard = ({
     const showInlineModeration = Boolean(allowModeration && !isMobileViewport);
     const showMobileModerationMenu = Boolean(allowModeration && isMobileViewport);
     const communityProfileId = String(post?.community?.profile_id || '').trim().toLowerCase();
+    const canShowFollowAction = Boolean(showFollowAction && onToggleFollow && communityProfileId);
+    const isFollowingCommunity = Boolean(post?.community?.is_following);
 
     const loadComments = async ({ reset = false } = {}) => {
         if (!fetchComments) return;
@@ -1164,6 +1173,22 @@ export const PostCard = ({
                     </div>
                 </div>
                 <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+                    {canShowFollowAction ? (
+                        <button
+                            type="button"
+                            className={`ph-action-btn ${!isMobileViewport && isFollowingCommunity ? 'ph-btn-accent' : ''}`.trim()}
+                            onClick={() => onToggleFollow?.(post)}
+                            disabled={followPending}
+                            data-testid={`ph-post-follow-${post.slug_token}`}
+                            title={isFollowingCommunity ? 'Unfollow community' : 'Follow community'}
+                        >
+                            {isMobileViewport ? (
+                                isFollowingCommunity ? <UserCheck size={14} /> : <UserPlus size={14} />
+                            ) : (
+                                isFollowingCommunity ? 'Following' : 'Follow'
+                            )}
+                        </button>
+                    ) : null}
                     {showInlineModeration && canEditDeletePost ? (
                         <button type="button" className="ph-action-btn" onClick={() => onEdit?.(post)} data-testid={`ph-post-edit-${post.slug_token}`}>
                             <Pencil size={14} />
@@ -1494,21 +1519,37 @@ const fileNameFromUrl = (url) => {
 export const CommunityPostEditModal = ({ open, post, onClose, onSubmit, submitting }) => {
     const MAX_POST_DESCRIPTION_LENGTH = 8000;
     const [description, setDescription] = useState('');
-    const [existingAttachments, setExistingAttachments] = useState([]);
-    const [newFiles, setNewFiles] = useState([]);
+    const [contentItems, setContentItems] = useState([]);
 
     useEffect(() => {
         if (!open || !post) return;
         setDescription(post.description || '');
-        setExistingAttachments(post.attachments || []);
-        setNewFiles([]);
+        const existingItems = sortAttachmentsByOrder(post.attachments || []).map((item, index) => ({
+            id: `existing-${item.id || index}`,
+            kind: 'existing',
+            attachment: item,
+        }));
+        setContentItems(existingItems);
     }, [open, post]);
 
     if (!open || !post) return null;
 
+    const moveContentItem = (targetIndex, direction) => {
+        setContentItems((prev) => {
+            const list = [...prev];
+            const nextIndex = targetIndex + direction;
+            if (targetIndex < 0 || nextIndex < 0 || targetIndex >= list.length || nextIndex >= list.length) {
+                return prev;
+            }
+            const [entry] = list.splice(targetIndex, 1);
+            list.splice(nextIndex, 0, entry);
+            return list;
+        });
+    };
+
     return (
         <div className="ph-modal-overlay" role="dialog" aria-modal="true">
-            <div className="ph-modal">
+            <div className="ph-modal ph-edit-post-modal">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <h2 style={{ marginTop: 0 }}>Edit Post</h2>
                     <button type="button" className="ph-action-btn" onClick={onClose}>
@@ -1516,12 +1557,19 @@ export const CommunityPostEditModal = ({ open, post, onClose, onSubmit, submitti
                     </button>
                 </div>
                 <form
+                    className="ph-edit-post-form"
                     onSubmit={(event) => {
                         event.preventDefault();
+                        const orderedContent = contentItems.map((entry) => (
+                            entry.kind === 'existing'
+                                ? { kind: 'existing', attachment: entry.attachment }
+                                : { kind: 'new', file: entry.file }
+                        ));
                         onSubmit?.({
                             description: description.trim().slice(0, MAX_POST_DESCRIPTION_LENGTH),
-                            existingAttachments,
-                            newFiles,
+                            existingAttachments: orderedContent.filter((entry) => entry.kind === 'existing').map((entry) => entry.attachment),
+                            newFiles: orderedContent.filter((entry) => entry.kind === 'new').map((entry) => entry.file),
+                            orderedContent,
                         });
                     }}
                 >
@@ -1534,21 +1582,48 @@ export const CommunityPostEditModal = ({ open, post, onClose, onSubmit, submitti
                         placeholder="Use #hashtags and @profile mentions"
                     />
 
-                    <p className="ph-muted" style={{ marginBottom: '0.3rem' }}>Existing attachments</p>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '0.7rem' }}>
-                        {existingAttachments.length === 0 ? <span className="ph-muted">No existing attachments</span> : null}
-                        {existingAttachments.map((item) => (
-                            <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', alignItems: 'center' }}>
-                                <a href={item.s3_url} target="_blank" rel="noreferrer" className="ph-muted">
-                                    {fileNameFromUrl(item.s3_url)}
-                                </a>
-                                <button
-                                    type="button"
-                                    className="ph-action-btn"
-                                    onClick={() => setExistingAttachments((prev) => prev.filter((row) => row.id !== item.id))}
-                                >
-                                    Remove
-                                </button>
+                    <p className="ph-muted" style={{ marginBottom: '0.3rem' }}>Content order</p>
+                    <div className="ph-edit-content-list">
+                        {contentItems.length === 0 ? <span className="ph-muted">No attachments</span> : null}
+                        {contentItems.map((entry, index) => (
+                            <div key={entry.id} className="ph-edit-content-item">
+                                <div className="ph-edit-content-main">
+                                    {entry.kind === 'existing' ? (
+                                        <a href={entry.attachment.s3_url} target="_blank" rel="noreferrer" className="ph-muted">
+                                            {fileNameFromUrl(entry.attachment.s3_url)}
+                                        </a>
+                                    ) : (
+                                        <span className="ph-muted">{entry.file.name}</span>
+                                    )}
+                                    <span className="ph-muted">{entry.kind === 'existing' ? 'Existing' : 'New'}</span>
+                                </div>
+                                <div className="ph-edit-content-actions">
+                                    <button
+                                        type="button"
+                                        className="ph-action-btn"
+                                        onClick={() => moveContentItem(index, -1)}
+                                        disabled={index === 0}
+                                        aria-label="Move up"
+                                    >
+                                        <ChevronUp size={14} />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="ph-action-btn"
+                                        onClick={() => moveContentItem(index, 1)}
+                                        disabled={index === contentItems.length - 1}
+                                        aria-label="Move down"
+                                    >
+                                        <ChevronDown size={14} />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="ph-action-btn"
+                                        onClick={() => setContentItems((prev) => prev.filter((row) => row.id !== entry.id))}
+                                    >
+                                        Remove
+                                    </button>
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -1559,10 +1634,23 @@ export const CommunityPostEditModal = ({ open, post, onClose, onSubmit, submitti
                         className="ph-input"
                         type="file"
                         multiple
-                        onChange={(event) => setNewFiles(Array.from(event.target.files || []))}
+                        onChange={(event) => {
+                            const selectedFiles = Array.from(event.target.files || []);
+                            if (!selectedFiles.length) return;
+                            const timestamp = Date.now();
+                            setContentItems((prev) => ([
+                                ...prev,
+                                ...selectedFiles.map((file, fileIdx) => ({
+                                    id: `new-${timestamp}-${fileIdx}-${file.name}`,
+                                    kind: 'new',
+                                    file,
+                                })),
+                            ]));
+                            event.target.value = '';
+                        }}
                     />
 
-                    <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                    <div className="ph-edit-post-actions">
                         <button type="button" className="ph-btn" onClick={onClose}>Cancel</button>
                         <button type="submit" className="ph-btn ph-btn-primary" disabled={submitting}>
                             {submitting ? 'Saving...' : 'Save Changes'}

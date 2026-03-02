@@ -101,8 +101,10 @@ export default function PersohubFeedPage() {
     const [editSubmitting, setEditSubmitting] = useState(false);
     const [pendingLikeSlugs, setPendingLikeSlugs] = useState(() => new Set());
     const [pendingHideSlugs, setPendingHideSlugs] = useState(() => new Set());
+    const [pendingFollowProfiles, setPendingFollowProfiles] = useState(() => new Set());
     const pendingLikeSlugsRef = useRef(new Set());
     const pendingHideSlugsRef = useRef(new Set());
+    const pendingFollowProfilesRef = useRef(new Set());
     const feedLoadingMoreRef = useRef(false);
     const searchInputRef = useRef(null);
     const lastScrollYRef = useRef(0);
@@ -492,7 +494,9 @@ export default function PersohubFeedPage() {
         }
     }, [activeHashtag, handleHashtagClick, loadInitial, search, syncHashtagQueryInUrl]);
 
-    const handleToggleFollow = async (profileId) => {
+    const handleToggleFollow = async (targetPost) => {
+        const profileId = String(targetPost?.community?.profile_id || '').trim().toLowerCase();
+        if (!profileId) return;
         if (!isUserLoggedIn) {
             toast.error('Login as PDA user to follow communities');
             return;
@@ -501,12 +505,29 @@ export default function PersohubFeedPage() {
             toast.error('Switch to User mode to follow communities');
             return;
         }
+        if (pendingFollowProfilesRef.current.has(profileId)) return;
+        pendingFollowProfilesRef.current.add(profileId);
+        setPendingFollowProfiles(new Set(pendingFollowProfilesRef.current));
         try {
             await persohubApi.toggleCommunityFollow(profileId);
+            setPosts((prev) => prev.map((item) => {
+                const itemProfileId = String(item?.community?.profile_id || '').trim().toLowerCase();
+                if (itemProfileId !== profileId) return item;
+                return {
+                    ...item,
+                    community: {
+                        ...item.community,
+                        is_following: !Boolean(item.community?.is_following),
+                    },
+                };
+            }));
             const refreshed = await persohubApi.fetchCommunities();
             setCommunities(refreshed || []);
         } catch (error) {
             toast.error(persohubApi.parseApiError(error, 'Failed to update follow status'));
+        } finally {
+            pendingFollowProfilesRef.current.delete(profileId);
+            setPendingFollowProfiles(new Set(pendingFollowProfilesRef.current));
         }
     };
 
@@ -680,29 +701,40 @@ export default function PersohubFeedPage() {
         if (!editingPost) return;
         setEditSubmitting(true);
         try {
-            const uploadedAttachments = [];
-            for (const originalFile of payload.newFiles || []) {
-                let targetFile = originalFile;
-                if (originalFile.type?.startsWith('image/')) {
-                    targetFile = await compressImageToWebp(originalFile, { maxDimension: 1800, quality: 0.84 });
+            const normalizedOrder = Array.isArray(payload?.orderedContent) && payload.orderedContent.length
+                ? payload.orderedContent
+                : [
+                    ...((payload?.existingAttachments || []).map((item) => ({ kind: 'existing', attachment: item }))),
+                    ...((payload?.newFiles || []).map((file) => ({ kind: 'new', file }))),
+                ];
+            const nextAttachments = [];
+            for (const entry of normalizedOrder) {
+                if (entry?.kind === 'existing' && entry?.attachment) {
+                    nextAttachments.push({
+                        s3_url: entry.attachment.s3_url,
+                        preview_image_urls: entry.attachment.preview_image_urls || [],
+                        mime_type: entry.attachment.mime_type,
+                        size_bytes: entry.attachment.size_bytes,
+                    });
+                    continue;
                 }
-                const attachment = await persohubApi.uploadAttachment(targetFile);
-                uploadedAttachments.push(attachment);
+                if (entry?.kind === 'new' && entry?.file) {
+                    const originalFile = entry.file;
+                    let targetFile = originalFile;
+                    if (originalFile.type?.startsWith('image/')) {
+                        targetFile = await compressImageToWebp(originalFile, { maxDimension: 1800, quality: 0.84 });
+                    }
+                    const attachment = await persohubApi.uploadAttachment(targetFile);
+                    nextAttachments.push(attachment);
+                }
             }
-
-            const retained = (payload.existingAttachments || []).map((item) => ({
-                s3_url: item.s3_url,
-                preview_image_urls: item.preview_image_urls || [],
-                mime_type: item.mime_type,
-                size_bytes: item.size_bytes,
-            }));
             const description = String(payload.description || '').trim().slice(0, MAX_POST_DESCRIPTION_LENGTH);
             const mentions = extractInlineMentions(description);
 
             const updated = await persohubApi.updateCommunityPost(editingPost.slug_token, {
                 description,
                 mentions,
-                attachments: [...retained, ...uploadedAttachments],
+                attachments: nextAttachments,
             });
             patchPost(updated);
             setEditPostModalOpen(false);
@@ -968,6 +1000,9 @@ export default function PersohubFeedPage() {
                                                 onDelete={handleDeletePost}
                                                 onEdit={handleEditPost}
                                                 onHide={handleHidePost}
+                                                onToggleFollow={handleToggleFollow}
+                                                followPending={pendingFollowProfiles.has(String(post?.community?.profile_id || '').trim().toLowerCase())}
+                                                showFollowAction
                                                 compactEventMobile={isMobileViewport && feedType === 'event'}
                                             />
                                         ))}

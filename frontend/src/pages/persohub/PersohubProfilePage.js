@@ -251,29 +251,40 @@ export default function PersohubProfilePage() {
         if (!editingPost) return;
         setEditSubmitting(true);
         try {
-            const uploadedAttachments = [];
-            for (const originalFile of payload.newFiles || []) {
-                let targetFile = originalFile;
-                if (originalFile.type?.startsWith('image/')) {
-                    targetFile = await compressImageToWebp(originalFile, { maxDimension: 1800, quality: 0.84 });
+            const normalizedOrder = Array.isArray(payload?.orderedContent) && payload.orderedContent.length
+                ? payload.orderedContent
+                : [
+                    ...((payload?.existingAttachments || []).map((item) => ({ kind: 'existing', attachment: item }))),
+                    ...((payload?.newFiles || []).map((file) => ({ kind: 'new', file }))),
+                ];
+            const nextAttachments = [];
+            for (const entry of normalizedOrder) {
+                if (entry?.kind === 'existing' && entry?.attachment) {
+                    nextAttachments.push({
+                        s3_url: entry.attachment.s3_url,
+                        preview_image_urls: entry.attachment.preview_image_urls || [],
+                        mime_type: entry.attachment.mime_type,
+                        size_bytes: entry.attachment.size_bytes,
+                    });
+                    continue;
                 }
-                const attachment = await persohubApi.uploadAttachment(targetFile);
-                uploadedAttachments.push(attachment);
+                if (entry?.kind === 'new' && entry?.file) {
+                    const originalFile = entry.file;
+                    let targetFile = originalFile;
+                    if (originalFile.type?.startsWith('image/')) {
+                        targetFile = await compressImageToWebp(originalFile, { maxDimension: 1800, quality: 0.84 });
+                    }
+                    const attachment = await persohubApi.uploadAttachment(targetFile);
+                    nextAttachments.push(attachment);
+                }
             }
-
-            const retained = (payload.existingAttachments || []).map((item) => ({
-                s3_url: item.s3_url,
-                preview_image_urls: item.preview_image_urls || [],
-                mime_type: item.mime_type,
-                size_bytes: item.size_bytes,
-            }));
             const description = String(payload.description || '').trim().slice(0, MAX_POST_DESCRIPTION_LENGTH);
             const mentions = extractInlineMentions(description);
 
             const updated = await persohubApi.updateCommunityPost(editingPost.slug_token, {
                 description,
                 mentions,
-                attachments: [...retained, ...uploadedAttachments],
+                attachments: nextAttachments,
             });
             patchPost(updated);
             setEditPostModalOpen(false);

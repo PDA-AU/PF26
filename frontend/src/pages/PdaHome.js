@@ -945,9 +945,8 @@ export default function PdaHome() {
                                             </div>
                                             <div className="mt-2 h-[58px] overflow-hidden">
                                                 <h3 className="line-clamp-1 text-lg font-heading font-bold">{member.name}</h3>
-                                                <p className="line-clamp-1 text-xs text-slate-600">{member.regno}</p>
                                                 <p className="mt-1 line-clamp-1 text-[11px] uppercase tracking-[0.2em] text-slate-500">
-                                                    {shortDept(member.dept) || '\u00A0'}
+                                                    {shortDept(member.dept) || member.dept || '\u00A0'}
                                                 </p>
                                             </div>
                                             <div className="mt-auto pt-3">

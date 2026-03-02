@@ -6,10 +6,11 @@ import base64
 import hashlib
 import ssl
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.request import Request as UrlRequest, urlopen
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -136,10 +137,40 @@ def _next_event_code(db: Session) -> str:
     return f"EVT{next_id:03d}"
 
 
+def _ist_today() -> date:
+    return datetime.now(ZoneInfo("Asia/Kolkata")).date()
+
+
+def _is_event_past_grace(event: PersohubEvent, today: date) -> bool:
+    end_date = getattr(event, "end_date", None)
+    if not end_date:
+        return False
+    return today > (end_date + timedelta(days=1))
+
+
+def _auto_close_event_if_past_grace(db: Session, event: PersohubEvent) -> bool:
+    if not _is_event_past_grace(event, _ist_today()):
+        return False
+
+    changed = False
+    if event.status != PersohubEventStatus.CLOSED:
+        event.status = PersohubEventStatus.CLOSED
+        changed = True
+    if bool(getattr(event, "registration_open", True)):
+        event.registration_open = False
+        changed = True
+
+    if changed:
+        db.commit()
+        db.refresh(event)
+    return changed
+
+
 def _get_event_or_404(db: Session, slug: str) -> PersohubEvent:
     event = db.query(PersohubEvent).filter(PersohubEvent.slug == slug).first()
     if not event:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+    _auto_close_event_if_past_grace(db, event)
     return event
 
 

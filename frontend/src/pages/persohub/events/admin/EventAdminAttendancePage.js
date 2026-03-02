@@ -3,6 +3,7 @@ import axios from 'axios';
 import jsQR from 'jsqr';
 import { toast } from 'sonner';
 import { Camera, ChevronLeft, ChevronRight, Download, Save, Search } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -97,8 +98,26 @@ const READ_ONLY_ROUND_STATES = new Set(['completed', 'reveal']);
 const VISIBLE_ROUND_STATES = new Set([...EDITABLE_ROUND_STATES, ...READ_ONLY_ROUND_STATES]);
 const ATTENDANCE_LEVEL_ENTRY = 'entry';
 const ATTENDANCE_LEVEL_ROUND = 'round';
+const ATTENDANCE_LEVEL_QUERY_KEY = 'attendance_level';
+const ATTENDANCE_ROUND_NO_QUERY_KEY = 'round_no';
+
+const normalizeAttendanceLevelQuery = (value) => (
+    String(value || '').trim().toLowerCase() === ATTENDANCE_LEVEL_ENTRY
+        ? ATTENDANCE_LEVEL_ENTRY
+        : ATTENDANCE_LEVEL_ROUND
+);
+
+const parseRoundNoQuery = (value) => {
+    const parsed = Number.parseInt(String(value || '').trim(), 10);
+    return Number.isFinite(parsed) ? parsed : null;
+};
 
 function AttendanceContent() {
+    const [searchParams, setSearchParams] = useSearchParams();
+    const initialQueryRef = useRef({
+        attendanceLevel: normalizeAttendanceLevelQuery(searchParams.get(ATTENDANCE_LEVEL_QUERY_KEY)),
+        roundNo: parseRoundNoQuery(searchParams.get(ATTENDANCE_ROUND_NO_QUERY_KEY)),
+    });
     const { getAuthHeader } = usePersohubAdminAuth();
     const {
         eventSlug,
@@ -108,10 +127,12 @@ function AttendanceContent() {
     const [rows, setRows] = useState([]);
     const [rounds, setRounds] = useState([]);
     const [attendanceRoundId, setAttendanceRoundId] = useState('');
-    const [attendanceLevel, setAttendanceLevel] = useState(ATTENDANCE_LEVEL_ROUND);
+    const [attendanceLevel, setAttendanceLevel] = useState(initialQueryRef.current.attendanceLevel);
     const [search, setSearch] = useState('');
     const [markedFilter, setMarkedFilter] = useState('all');
     const [loading, setLoading] = useState(true);
+    const [roundsLoaded, setRoundsLoaded] = useState(false);
+    const [queryHydrated, setQueryHydrated] = useState(false);
     const [isScanning, setIsScanning] = useState(false);
     const [savingChanges, setSavingChanges] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
@@ -181,6 +202,8 @@ function AttendanceContent() {
             setRounds([]);
             setAttendanceRoundId('');
             setRows([]);
+        } finally {
+            setRoundsLoaded(true);
         }
     }, [attendanceRoundId, eventSlug, getAuthHeader]);
 
@@ -221,6 +244,52 @@ function AttendanceContent() {
     useEffect(() => {
         fetchRounds();
     }, [fetchRounds]);
+
+    useEffect(() => {
+        if (queryHydrated || !roundsLoaded) return;
+
+        const savedRoundNo = initialQueryRef.current.roundNo;
+        if (savedRoundNo !== null) {
+            const matchedRound = attendanceRounds.find((round) => Number(round.round_no) === savedRoundNo);
+            if (matchedRound) {
+                const matchedRoundId = String(matchedRound.id);
+                if (matchedRoundId !== attendanceRoundId) {
+                    setAttendanceRoundId(matchedRoundId);
+                    return;
+                }
+            }
+        }
+
+        setQueryHydrated(true);
+    }, [attendanceRoundId, attendanceRounds, queryHydrated, roundsLoaded]);
+
+    useEffect(() => {
+        if (!queryHydrated) return;
+
+        const nextParams = new URLSearchParams(searchParams);
+        const nextLevel = attendanceLevel === ATTENDANCE_LEVEL_ENTRY ? ATTENDANCE_LEVEL_ENTRY : ATTENDANCE_LEVEL_ROUND;
+        let changed = false;
+
+        if (nextParams.get(ATTENDANCE_LEVEL_QUERY_KEY) !== nextLevel) {
+            nextParams.set(ATTENDANCE_LEVEL_QUERY_KEY, nextLevel);
+            changed = true;
+        }
+
+        const selectedRoundNo = selectedRound ? String(selectedRound.round_no) : '';
+        if (selectedRoundNo) {
+            if (nextParams.get(ATTENDANCE_ROUND_NO_QUERY_KEY) !== selectedRoundNo) {
+                nextParams.set(ATTENDANCE_ROUND_NO_QUERY_KEY, selectedRoundNo);
+                changed = true;
+            }
+        } else if (nextParams.has(ATTENDANCE_ROUND_NO_QUERY_KEY)) {
+            nextParams.delete(ATTENDANCE_ROUND_NO_QUERY_KEY);
+            changed = true;
+        }
+
+        if (changed) {
+            setSearchParams(nextParams, { replace: true });
+        }
+    }, [attendanceLevel, queryHydrated, searchParams, selectedRound, setSearchParams]);
 
     useEffect(() => {
         fetchAttendance();
