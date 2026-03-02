@@ -26,6 +26,7 @@ const DESIGNATIONS = [
     'Volunteer',
     'JS',
     'Head',
+    'Staff Advisor',
     'General Secretary',
     'Treasurer',
     'Vice Chairperson',
@@ -33,6 +34,7 @@ const DESIGNATIONS = [
 ];
 
 const EXECUTIVE_DESIGNATIONS = [
+    'Staff Advisor',
     'Chairperson',
     'Vice Chairperson',
     'General Secretary',

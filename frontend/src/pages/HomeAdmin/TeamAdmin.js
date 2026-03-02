@@ -46,7 +46,7 @@ const GENDERS = [
     { value: 'Female', label: 'Female' }
 ];
 
-const EXEC_DESIG = ['Chairperson', 'Vice Chairperson', 'Treasurer', 'General Secretary'];
+const EXEC_DESIG = ['Staff Advisor', 'Chairperson', 'Vice Chairperson', 'Treasurer', 'General Secretary'];
 const TEAM_DESIG = ['Head', 'JS', 'Member', 'Volunteer'];
 const DEPT_SHORT = {
     'Computer Technology': 'CT',

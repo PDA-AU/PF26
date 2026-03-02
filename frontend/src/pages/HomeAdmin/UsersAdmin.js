@@ -28,7 +28,7 @@ const TEAMS = [
     'Library'
 ];
 
-const EXEC_DESIG = ['Chairperson', 'Vice Chairperson', 'Treasurer', 'General Secretary'];
+const EXEC_DESIG = ['Staff Advisor', 'Chairperson', 'Vice Chairperson', 'Treasurer', 'General Secretary'];
 const TEAM_DESIG = ['Head', 'JS', 'Member', 'Volunteer'];
 const DEPARTMENTS = [
     { value: 'Artificial Intelligence and Data Science', label: 'AI & Data Science' },

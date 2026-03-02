@@ -302,6 +302,7 @@ export default function PdaHome() {
     const getDesignationPriority = (designation, team) => {
         const value = (designation || '').toLowerCase().trim();
         if ((team || '').toLowerCase() === 'executive') {
+            if (value.includes('staff advisor')) return 0;
             if (value.includes('chair')) return 1;
             if (value.includes('vice')) return 2;
             if (value.includes('general secretary')) return 3;
