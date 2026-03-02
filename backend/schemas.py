@@ -1310,6 +1310,7 @@ class PdaTeamName(str, Enum):
 
 class PdaTeamDesignation(str, Enum):
     ROOT = "Root"
+    STAFF_ADVISOR = "Staff Advisor"
     CHAIRPERSON = "Chairperson"
     VICE_CHAIRPERSON = "Vice Chairperson"
     TREASURER = "Treasurer"

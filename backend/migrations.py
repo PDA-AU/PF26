@@ -538,6 +538,9 @@ def ensure_pda_gallery_tag_column(engine):
         if designation_constraint and "Root" not in (designation_constraint[0] or ""):
             conn.execute(text("ALTER TABLE pda_team DROP CONSTRAINT pda_team_designation_check"))
             designation_constraint = None
+        if designation_constraint and "Staff Advisor" not in (designation_constraint[0] or ""):
+            conn.execute(text("ALTER TABLE pda_team DROP CONSTRAINT pda_team_designation_check"))
+            designation_constraint = None
         if not designation_constraint:
             conn.execute(
                 text(
@@ -546,6 +549,7 @@ def ensure_pda_gallery_tag_column(engine):
                     ADD CONSTRAINT pda_team_designation_check
                     CHECK (designation IS NULL OR designation IN (
                         'Root',
+                        'Staff Advisor',
                         'Chairperson',
                         'Vice Chairperson',
                         'Treasurer',
@@ -878,6 +882,7 @@ def normalize_pda_team(db: Session):
     }
     allowed_designations = {
         "Root",
+        "Staff Advisor",
         "Chairperson",
         "Vice Chairperson",
         "Treasurer",

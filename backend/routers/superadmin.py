@@ -1001,7 +1001,7 @@ def approve_recruitments(
         team_to_assign = assigned_team or recruit_state.get("preferred_team_1") or recruit_state.get("preferred_team_2") or recruit_state.get("preferred_team_3")
         if not team_to_assign:
             continue
-        if team_to_assign == "Executive" and assigned_designation not in {"Chairperson", "Vice Chairperson", "General Secretary", "Treasurer"}:
+        if team_to_assign == "Executive" and assigned_designation not in {"Staff Advisor", "Chairperson", "Vice Chairperson", "General Secretary", "Treasurer"}:
             continue
         team_row = db.query(PdaTeam).filter(PdaTeam.user_id == user.id).first()
         if not team_row:
