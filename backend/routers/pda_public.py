@@ -5,7 +5,7 @@ from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 
 from database import get_db
-from models import PdaItem, PdaTeam, PdaGallery, PdaUser, PdaAdmin
+from models import PdaItem, PdaTeam, PdaGallery, PdaUser
 from schemas import ProgramResponse, EventResponse, PdaTeamResponse, PdaGalleryResponse, PdaBirthdayWishResponse
 
 router = APIRouter()
@@ -106,8 +106,7 @@ def get_pda_birthdays_today(db: Session = Depends(get_db)):
     day = ist_now.day
 
     rows = (
-        db.query(PdaUser.name, PdaUser.regno, PdaAdmin.policy)
-        .outerjoin(PdaAdmin, PdaAdmin.user_id == PdaUser.id)
+        db.query(PdaUser.name, PdaUser.regno)
         .filter(
             PdaUser.dob.isnot(None),
             PdaUser.name.isnot(None),
@@ -120,12 +119,10 @@ def get_pda_birthdays_today(db: Session = Depends(get_db)):
     )
 
     wishes: List[PdaBirthdayWishResponse] = []
-    for name, regno, policy in rows:
+    for name, regno in rows:
         if not name:
             continue
         if str(regno or "").strip() == "0000000000":
-            continue
-        if isinstance(policy, dict) and bool(policy.get("superAdmin")):
             continue
         wishes.append(
             PdaBirthdayWishResponse(
