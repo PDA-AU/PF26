@@ -425,6 +425,7 @@ function ScoringContent() {
     const [panelModeDisableConfirmOpen, setPanelModeDisableConfirmOpen] = useState(false);
     const fileInputRef = useRef(null);
     const pendingDiscardActionRef = useRef(null);
+    const scoreModalCriterionInputRefs = useRef({});
 
     const getErrorMessage = useCallback((error, fallback) => normalizeErrorMessage(
         error?.response?.data?.detail ?? error?.response?.data?.message,
@@ -932,6 +933,7 @@ function ScoringContent() {
         setScoreModalDraft({});
         setScoreModalIsPresent(true);
         setScoreModalShowZeroWarning(false);
+        scoreModalCriterionInputRefs.current = {};
     }, [savingScoreModal]);
 
     const handleScoreModalDraftChange = useCallback((criteriaName, value) => {
@@ -2988,15 +2990,29 @@ function ScoringContent() {
                             ) : null}
                         </div>
                         <div className="space-y-4">
-                            <div className="max-h-[52vh] space-y-3 overflow-y-auto pr-1">
+                            <div className="space-y-3">
                                 {criteria.map((criterion, index) => (
                                     <div key={`${criterion.name}-${index}`} className="space-y-2 rounded-md border border-slate-300 p-3">
                                         <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_120px] sm:items-center">
                                             <Label className="font-semibold">{criterion.name} (/{criterion.max_marks})</Label>
                                             <Input
                                                 type="number"
+                                                ref={(node) => {
+                                                    if (!node) return;
+                                                    scoreModalCriterionInputRefs.current[index] = node;
+                                                }}
                                                 value={scoreModalDraft?.[criterion.name] ?? ''}
                                                 onChange={(e) => handleScoreModalDraftChange(criterion.name, e.target.value)}
+                                                onKeyDown={(e) => {
+                                                    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+                                                    const delta = e.key === 'ArrowDown' ? 1 : -1;
+                                                    const nextIndex = index + delta;
+                                                    const nextInput = scoreModalCriterionInputRefs.current[nextIndex];
+                                                    if (!nextInput) return;
+                                                    e.preventDefault();
+                                                    nextInput.focus();
+                                                    nextInput.select();
+                                                }}
                                                 disabled={!scoreModalIsPresent || !canEditScoreRow(scoreModalRow) || savingScoreModal}
                                                 className={`neo-input h-10 w-full text-base ${
                                                     Number(scoreModalDraft?.[criterion.name] ?? 0) === 0 && scoreModalIsPresent
