@@ -56,59 +56,67 @@ const createCriterionDraft = (name = '', maxMarks = 0) => ({
     rubric: null,
 });
 
-const LIKERT_RUBRIC_LEVELS = [
-    { level: 1, label: 'Very Poor' },
-    { level: 2, label: 'Poor' },
-    { level: 3, label: 'Average' },
-    { level: 4, label: 'Good' },
-    { level: 5, label: 'Excellent' },
-];
+const DEFAULT_RUBRIC_LABELS = ['Very Poor', 'Poor', 'Average', 'Good', 'Excellent'];
 
-const buildEqualLikertBands = (maxMarks = 0) => {
+const sortRubricBandsByLevel = (bands = []) => (
+    [...bands].sort((left, right) => Number(left?.level || 0) - Number(right?.level || 0))
+);
+
+const reindexRubricBands = (bands = [], maxMarks = 0) => {
+    const sortedBands = sortRubricBandsByLevel(Array.isArray(bands) ? bands : []);
+    return sortedBands.map((band, index) => {
+        const parsedMin = Number.parseFloat(band?.min_marks);
+        const parsedMax = Number.parseFloat(band?.max_marks);
+        return {
+            level: index + 1,
+            label: String(band?.label || `Level ${index + 1}`).trim() || `Level ${index + 1}`,
+            min_marks: Number.isFinite(parsedMin) ? parsedMin : 0,
+            max_marks: Number.isFinite(parsedMax) ? parsedMax : maxMarks,
+        };
+    });
+};
+
+const buildEqualRubricBands = (maxMarks = 0, labels = DEFAULT_RUBRIC_LABELS) => {
     const safeMax = Number.isFinite(Number(maxMarks)) ? Math.max(Number(maxMarks), 0) : 0;
-    const step = safeMax / LIKERT_RUBRIC_LEVELS.length;
-    return LIKERT_RUBRIC_LEVELS.map((item, index) => ({
-        level: item.level,
-        label: item.label,
+    const safeLabels = Array.isArray(labels) && labels.length ? labels : DEFAULT_RUBRIC_LABELS;
+    const step = safeMax / safeLabels.length;
+    return safeLabels.map((label, index) => ({
+        level: index + 1,
+        label,
         min_marks: index === 0 ? 0 : (step * index),
-        max_marks: index === LIKERT_RUBRIC_LEVELS.length - 1 ? safeMax : (step * (index + 1)),
+        max_marks: index === safeLabels.length - 1 ? safeMax : (step * (index + 1)),
     }));
 };
 
 const createDefaultRubric = (maxMarks = 0) => ({
-    scale: 'likert_5',
-    bands: buildEqualLikertBands(maxMarks),
+    scale: 'likert_custom',
+    bands: buildEqualRubricBands(maxMarks),
 });
 
 const normalizeCriterionRubric = (rubric, maxMarks = 0) => {
     if (!rubric || typeof rubric !== 'object') return null;
-    const bands = Array.isArray(rubric.bands) ? rubric.bands : [];
+    const bands = Array.isArray(rubric.bands) ? rubric.bands : buildEqualRubricBands(maxMarks);
+    const normalizedBands = reindexRubricBands(bands, maxMarks);
     return {
-        scale: 'likert_5',
-        bands: LIKERT_RUBRIC_LEVELS.map((item, index) => {
-            const source = bands.find((band) => Number(band?.level) === item.level) || bands[index] || {};
-            return {
-                level: item.level,
-                label: item.label,
-                min_marks: Number.parseFloat(source.min_marks) || 0,
-                max_marks: Number.parseFloat(source.max_marks) || maxMarks,
-            };
-        }),
+        scale: String(rubric.scale || 'likert_custom').trim() || 'likert_custom',
+        bands: normalizedBands.length ? normalizedBands : buildEqualRubricBands(maxMarks),
     };
 };
 
 const validateCriterionRubric = (criterion) => {
     const rubric = criterion?.rubric;
     if (!rubric) return null;
-    if (rubric.scale !== 'likert_5') return 'Rubric scale must be likert_5';
-    if (!Array.isArray(rubric.bands) || rubric.bands.length !== 5) return `Criterion "${criterion.name}": rubric must have 5 levels`;
+    if (!Array.isArray(rubric.bands) || !rubric.bands.length) return `Criterion "${criterion.name}": rubric must have at least one level`;
     const maxMarks = Number.parseFloat(criterion.max_marks);
     const safeMax = Number.isFinite(maxMarks) ? maxMarks : 0;
-    for (const level of LIKERT_RUBRIC_LEVELS) {
-        const band = rubric.bands.find((item) => Number(item.level) === level.level);
-        if (!band) return `Criterion "${criterion.name}": missing rubric level ${level.label}`;
-        if (String(band.label || '').trim() !== level.label) {
-            return `Criterion "${criterion.name}": invalid label for level ${level.level}`;
+    const sortedBands = sortRubricBandsByLevel(rubric.bands);
+    const levels = sortedBands.map((band) => Number(band.level));
+    if (new Set(levels).size !== levels.length) {
+        return `Criterion "${criterion.name}": rubric levels must be unique`;
+    }
+    for (const band of sortedBands) {
+        if (!String(band.label || '').trim()) {
+            return `Criterion "${criterion.name}": rubric label is required`;
         }
         const minMarks = Number.parseFloat(band.min_marks);
         const maxBandMarks = Number.parseFloat(band.max_marks);
@@ -190,6 +198,16 @@ const formatSubmissionTime = (value) => {
     });
 };
 
+const inferSubmissionPreviewType = (urlValue) => {
+    const url = String(urlValue || '').trim().toLowerCase();
+    if (!url) return 'none';
+    const clean = url.split('?')[0];
+    if (/\.(png|jpg|jpeg|webp|gif|bmp|svg)$/.test(clean)) return 'image';
+    if (/\.(mp4|webm|mov|m4v|ogg)$/.test(clean)) return 'video';
+    if (/\.pdf$/.test(clean)) return 'pdf';
+    return 'link';
+};
+
 const parseInstantOrNull = (value) => {
     const raw = String(value || '').trim();
     if (!raw) return null;
@@ -263,7 +281,7 @@ const scoreSnapshotForRow = (row, criteriaList) => {
         : [{ name: 'Score', max_marks: 100 }];
     const criteriaValues = normalizedCriteria.map((criterion) => {
         const parsed = Number.parseFloat(row?.criteria_scores?.[criterion.name]);
-        return Number.isFinite(parsed) ? parsed : 0;
+        return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
     });
     return JSON.stringify({
         is_present: Boolean(row?.is_present),
@@ -387,6 +405,9 @@ function ScoringContent() {
     const [scoreModalOpen, setScoreModalOpen] = useState(false);
     const [scoreModalEntity, setScoreModalEntity] = useState(null);
     const [scoreModalDraft, setScoreModalDraft] = useState({});
+    const [scoreModalIsPresent, setScoreModalIsPresent] = useState(true);
+    const [scoreModalShowZeroWarning, setScoreModalShowZeroWarning] = useState(false);
+    const [savingScoreModal, setSavingScoreModal] = useState(false);
     const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false);
     const [unsavedDialogMessage, setUnsavedDialogMessage] = useState('You have unsaved changes. Continue without saving?');
     const [panelModeDisableConfirmOpen, setPanelModeDisableConfirmOpen] = useState(false);
@@ -602,7 +623,7 @@ function ScoringContent() {
     const getTotalScore = useCallback((row) => (
         criteria.reduce((sum, criterion) => {
             const parsed = Number.parseFloat(row.criteria_scores?.[criterion.name]);
-            return sum + (Number.isNaN(parsed) ? 0 : parsed);
+            return sum + (Number.isNaN(parsed) ? 0 : Math.max(0, parsed));
         }, 0)
     ), [criteria]);
 
@@ -632,6 +653,19 @@ function ScoringContent() {
     const submissionTimingStatus = useMemo(
         () => getSubmissionTimingStatus(scoreModalRow?.submission_submitted_at, round?.submission_deadline),
         [scoreModalRow?.submission_submitted_at, round?.submission_deadline]
+    );
+    const scoreModalSubmissionFileUrl = useMemo(
+        () => String(scoreModalRow?.submission_file_url || '').trim(),
+        [scoreModalRow?.submission_file_url]
+    );
+    const scoreModalSubmissionLinkUrl = useMemo(
+        () => String(scoreModalRow?.submission_link_url || '').trim(),
+        [scoreModalRow?.submission_link_url]
+    );
+    const scoreModalSubmissionPreviewUrl = scoreModalSubmissionFileUrl || scoreModalSubmissionLinkUrl;
+    const scoreModalSubmissionPreviewType = useMemo(
+        () => inferSubmissionPreviewType(scoreModalSubmissionPreviewUrl),
+        [scoreModalSubmissionPreviewUrl]
     );
 
     const displayedRows = useMemo(() => {
@@ -849,7 +883,7 @@ function ScoringContent() {
                 const zeroed = Object.fromEntries(criteria.map((criterion) => [criterion.name, 0]));
                 return { ...row, is_present: false, criteria_scores: { ...zeroed, ...metadataScores } };
             }
-            const unscored = Object.fromEntries(criteria.map((criterion) => [criterion.name, -1]));
+            const unscored = Object.fromEntries(criteria.map((criterion) => [criterion.name, 0]));
             return { ...row, is_present: true, criteria_scores: { ...unscored, ...metadataScores } };
         });
     }, [canEditScoreRow, criteria, updateRowScoreDraft]);
@@ -857,11 +891,15 @@ function ScoringContent() {
     const openScoreModal = useCallback((row) => {
         if (!row) return;
         setScoreModalEntity({ entityType: row._entityType, entityId: row._entityId });
+        setScoreModalIsPresent(Boolean(row.is_present));
+        setScoreModalShowZeroWarning(false);
         setScoreModalDraft(
             (() => {
                 const next = criteria.reduce((acc, criterion) => {
                     const value = row.criteria_scores?.[criterion.name];
-                    acc[criterion.name] = value == null ? '' : String(value);
+                    const parsed = Number.parseFloat(value);
+                    const safe = Number.isNaN(parsed) ? 0 : Math.max(0, Math.min(parsed, Number(criterion.max_marks ?? 100)));
+                    acc[criterion.name] = String(safe);
                     return acc;
                 }, {});
                 next.__judge_feedback = String(row?.criteria_scores?.__judge_feedback || '');
@@ -876,49 +914,94 @@ function ScoringContent() {
     }, []);
 
     const closeScoreModal = useCallback(() => {
+        if (savingScoreModal) return;
         setScoreModalOpen(false);
         setScoreModalEntity(null);
         setScoreModalDraft({});
-    }, []);
+        setScoreModalIsPresent(true);
+        setScoreModalShowZeroWarning(false);
+    }, [savingScoreModal]);
 
     const handleScoreModalDraftChange = useCallback((criteriaName, value) => {
         if (!/^$|^\d*\.?\d*$/.test(value)) return;
+        setScoreModalShowZeroWarning(false);
         setScoreModalDraft((prev) => ({ ...prev, [criteriaName]: value }));
     }, []);
 
-    const saveScoreModalDraft = useCallback(() => {
+    const saveScoreModalDraft = useCallback(async (options = {}) => {
+        const { allowZeroScores = false } = options;
         if (!scoreModalEntity || !scoreModalRow) return;
-        updateRowScoreDraft(scoreModalEntity.entityType, scoreModalEntity.entityId, (row) => {
-            if (!canEditScoreRow(row)) return row;
-            const sourceScores = row.criteria_scores && typeof row.criteria_scores === 'object' ? row.criteria_scores : {};
-            const metadataScores = Object.keys(sourceScores).reduce((acc, key) => {
-                if (String(key).startsWith('__') && key !== '__judge_feedback' && key !== '__participant_notes_snapshot') {
-                    acc[key] = sourceScores[key];
+        if (!canEditScoreRow(scoreModalRow)) return;
+        const nextScores = criteria.reduce((acc, criterion) => {
+            const maxMarks = Number(criterion.max_marks ?? 100);
+            const parsed = Number.parseFloat(scoreModalDraft?.[criterion.name]);
+            const normalized = Number.isNaN(parsed)
+                ? 0
+                : Math.max(0, Math.min(parsed, maxMarks));
+            acc[criterion.name] = scoreModalIsPresent ? normalized : 0;
+            return acc;
+        }, {});
+        const hasZeroWhenPresent = scoreModalIsPresent
+            && criteria.some((criterion) => Number(nextScores[criterion.name] || 0) === 0);
+        if (hasZeroWhenPresent && !allowZeroScores) {
+            setScoreModalShowZeroWarning(true);
+            return;
+        }
+
+        const feedback = String(scoreModalDraft?.__judge_feedback || '').trim();
+        const criteriaScoresPayload = feedback
+            ? { ...nextScores, __judge_feedback: feedback }
+            : nextScores;
+        setSavingScoreModal(true);
+        try {
+            await axios.post(`${API}/persohub/admin/persohub-events/${eventSlug}/rounds/${roundId}/scores`, [
+                {
+                    entity_type: scoreModalEntity.entityType,
+                    user_id: scoreModalEntity.entityType === 'user' ? scoreModalEntity.entityId : null,
+                    team_id: scoreModalEntity.entityType === 'team' ? scoreModalEntity.entityId : null,
+                    criteria_scores: criteriaScoresPayload,
+                    is_present: Boolean(scoreModalIsPresent),
+                },
+            ], { headers: getAuthHeader() });
+            const metadataScores = Object.keys(scoreModalRow?.criteria_scores || {}).reduce((acc, key) => {
+                if (String(key).startsWith('__') && key !== '__judge_feedback') {
+                    acc[key] = scoreModalRow.criteria_scores[key];
                 }
                 return acc;
             }, {});
-            const nextScores = criteria.reduce((acc, criterion) => {
-                const maxMarks = Number(criterion.max_marks ?? 100);
-                const parsed = Number.parseFloat(scoreModalDraft?.[criterion.name]);
-                const normalized = Number.isNaN(parsed)
-                    ? (row.is_present ? -1 : 0)
-                    : Math.min(parsed, maxMarks);
-                acc[criterion.name] = row.is_present ? normalized : 0;
-                return acc;
-            }, {});
-            const feedback = String(scoreModalDraft?.__judge_feedback || '').trim();
-            if (feedback) {
-                metadataScores.__judge_feedback = feedback;
-            } else {
-                delete metadataScores.__judge_feedback;
-            }
-            return {
-                ...row,
-                criteria_scores: { ...nextScores, ...metadataScores },
+            const nextCriteriaScores = {
+                ...nextScores,
+                ...metadataScores,
             };
-        });
-        closeScoreModal();
-    }, [canEditScoreRow, closeScoreModal, criteria, scoreModalDraft, scoreModalEntity, scoreModalRow, updateRowScoreDraft]);
+            if (feedback) {
+                nextCriteriaScores.__judge_feedback = feedback;
+            }
+            const nextRow = {
+                ...scoreModalRow,
+                is_present: Boolean(scoreModalIsPresent),
+                criteria_scores: nextCriteriaScores,
+            };
+            setRows((prev) => prev.map((row) => (
+                row._entityType === scoreModalEntity.entityType && row._entityId === scoreModalEntity.entityId
+                    ? nextRow
+                    : row
+            )));
+            const rowKey = entityKey(scoreModalEntity.entityType, scoreModalEntity.entityId);
+            const nextSnapshot = scoreSnapshotForRow(nextRow, criteria);
+            setScoreDraftOriginalByEntity((prev) => ({ ...(prev || {}), [rowKey]: nextSnapshot }));
+            setScoreDirtyByEntity((prev) => {
+                const next = { ...(prev || {}) };
+                delete next[rowKey];
+                return next;
+            });
+            toast.success('Score saved');
+            closeScoreModal();
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to save score'));
+        } finally {
+            setSavingScoreModal(false);
+        }
+    }, [canEditScoreRow, closeScoreModal, criteria, eventSlug, getAuthHeader, getErrorMessage, roundId, scoreModalDraft, scoreModalEntity, scoreModalIsPresent, scoreModalRow]);
 
     useEffect(() => {
         if (!hasUnsavedChanges) return undefined;
@@ -1318,13 +1401,13 @@ function ScoringContent() {
                 criteria_scores: (() => {
                     const scores = Object.keys(maxByCriteria).reduce((acc, criteriaName) => {
                         const max = maxByCriteria[criteriaName];
-                        const parsed = Number.parseFloat(row.criteria_scores?.[criteriaName]);
-                        const safe = Number.isNaN(parsed)
-                            ? (row.is_present ? -1 : 0)
-                            : Math.min(parsed, max);
-                        acc[criteriaName] = safe;
-                        return acc;
-                    }, {});
+                    const parsed = Number.parseFloat(row.criteria_scores?.[criteriaName]);
+                    const safe = Number.isNaN(parsed)
+                        ? 0
+                        : Math.max(0, Math.min(parsed, max));
+                    acc[criteriaName] = safe;
+                    return acc;
+                }, {});
                     const feedback = String(row?.criteria_scores?.__judge_feedback || '').trim();
                     if (feedback) {
                         scores.__judge_feedback = feedback;
@@ -1926,7 +2009,7 @@ function ScoringContent() {
                                         </Button>
                                     </div>
                                     <div className="flex items-center justify-between rounded-md border border-slate-300 bg-slate-50 px-3 py-2">
-                                        <Label className="text-sm font-semibold">Rubric (Likert 5-point)</Label>
+                                        <Label className="text-sm font-semibold">Rubric (Custom Columns)</Label>
                                         <Switch
                                             checked={Boolean(criterion.rubric)}
                                             onCheckedChange={(checked) => setCriteriaDraft((prev) => prev.map((item) => {
@@ -1941,11 +2024,32 @@ function ScoringContent() {
                                     </div>
                                     {criterion.rubric ? (
                                         <div className="space-y-2">
-                                            {LIKERT_RUBRIC_LEVELS.map((level) => {
-                                                const band = (criterion.rubric?.bands || []).find((item) => Number(item.level) === level.level) || {};
+                                            {sortRubricBandsByLevel(criterion.rubric?.bands || []).map((band, bandIndex) => {
                                                 return (
-                                                    <div key={`${criterion.id}-rubric-${level.level}`} className="grid grid-cols-1 sm:grid-cols-[120px_1fr_1fr] gap-2 items-center">
-                                                        <Label className="text-xs font-semibold">{level.label}</Label>
+                                                    <div key={`${criterion.id}-rubric-${band.level}`} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_1fr_auto] items-center">
+                                                        <Input
+                                                            value={band.label ?? ''}
+                                                            onChange={(e) => setCriteriaDraft((prev) => prev.map((item) => {
+                                                                if (item.id !== criterion.id || !item.rubric) return item;
+                                                                return {
+                                                                    ...item,
+                                                                    rubric: {
+                                                                        ...item.rubric,
+                                                                        bands: reindexRubricBands(
+                                                                            item.rubric.bands.map((rubricBand) => (
+                                                                                Number(rubricBand.level) === Number(band.level)
+                                                                                    ? { ...rubricBand, label: e.target.value }
+                                                                                    : rubricBand
+                                                                            )),
+                                                                            Number.parseFloat(item.max_marks) || 0
+                                                                        ),
+                                                                    },
+                                                                };
+                                                            }))}
+                                                            className="neo-input"
+                                                            placeholder={`Level ${bandIndex + 1}`}
+                                                            disabled={savingCriteria}
+                                                        />
                                                         <Input
                                                             type="number"
                                                             value={band.min_marks ?? ''}
@@ -1955,11 +2059,14 @@ function ScoringContent() {
                                                                     ...item,
                                                                     rubric: {
                                                                         ...item.rubric,
-                                                                        bands: item.rubric.bands.map((rubricBand) => (
-                                                                            Number(rubricBand.level) === level.level
-                                                                                ? { ...rubricBand, min_marks: e.target.value }
-                                                                                : rubricBand
-                                                                        )),
+                                                                        bands: reindexRubricBands(
+                                                                            item.rubric.bands.map((rubricBand) => (
+                                                                                Number(rubricBand.level) === Number(band.level)
+                                                                                    ? { ...rubricBand, min_marks: e.target.value }
+                                                                                    : rubricBand
+                                                                            )),
+                                                                            Number.parseFloat(item.max_marks) || 0
+                                                                        ),
                                                                     },
                                                                 };
                                                             }))}
@@ -1976,11 +2083,14 @@ function ScoringContent() {
                                                                     ...item,
                                                                     rubric: {
                                                                         ...item.rubric,
-                                                                        bands: item.rubric.bands.map((rubricBand) => (
-                                                                            Number(rubricBand.level) === level.level
-                                                                                ? { ...rubricBand, max_marks: e.target.value }
-                                                                                : rubricBand
-                                                                        )),
+                                                                        bands: reindexRubricBands(
+                                                                            item.rubric.bands.map((rubricBand) => (
+                                                                                Number(rubricBand.level) === Number(band.level)
+                                                                                    ? { ...rubricBand, max_marks: e.target.value }
+                                                                                    : rubricBand
+                                                                            )),
+                                                                            Number.parseFloat(item.max_marks) || 0
+                                                                        ),
                                                                     },
                                                                 };
                                                             }))}
@@ -1988,9 +2098,61 @@ function ScoringContent() {
                                                             placeholder="Max"
                                                             disabled={savingCriteria}
                                                         />
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            className="border-2 border-black"
+                                                            onClick={() => setCriteriaDraft((prev) => prev.map((item) => {
+                                                                if (item.id !== criterion.id || !item.rubric) return item;
+                                                                const filteredBands = item.rubric.bands.filter(
+                                                                    (rubricBand) => Number(rubricBand.level) !== Number(band.level)
+                                                                );
+                                                                return {
+                                                                    ...item,
+                                                                    rubric: {
+                                                                        ...item.rubric,
+                                                                        bands: reindexRubricBands(filteredBands, Number.parseFloat(item.max_marks) || 0),
+                                                                    },
+                                                                };
+                                                            }))}
+                                                            disabled={savingCriteria || (criterion.rubric?.bands || []).length <= 1}
+                                                        >
+                                                            <X className="w-4 h-4" />
+                                                        </Button>
                                                     </div>
                                                 );
                                             })}
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                className="border-2 border-black"
+                                                onClick={() => setCriteriaDraft((prev) => prev.map((item) => {
+                                                    if (item.id !== criterion.id || !item.rubric) return item;
+                                                    const currentBands = reindexRubricBands(item.rubric.bands, Number.parseFloat(item.max_marks) || 0);
+                                                    const nextLevel = currentBands.length + 1;
+                                                    return {
+                                                        ...item,
+                                                        rubric: {
+                                                            ...item.rubric,
+                                                            bands: reindexRubricBands(
+                                                                [
+                                                                    ...currentBands,
+                                                                    {
+                                                                        level: nextLevel,
+                                                                        label: `Level ${nextLevel}`,
+                                                                        min_marks: 0,
+                                                                        max_marks: Number.parseFloat(item.max_marks) || 0,
+                                                                    },
+                                                                ],
+                                                                Number.parseFloat(item.max_marks) || 0
+                                                            ),
+                                                        },
+                                                    };
+                                                }))}
+                                                disabled={savingCriteria}
+                                            >
+                                                <Plus className="w-4 h-4 mr-2" /> Add Rubric Column
+                                            </Button>
                                         </div>
                                     ) : null}
                                 </div>
@@ -2724,9 +2886,22 @@ function ScoringContent() {
                         <div className="rounded-md border-2 border-black bg-slate-50 p-3 text-sm">
                             <p className="font-semibold">{scoreModalRow?._name || 'Participant'}</p>
                             <p className="font-mono text-xs text-slate-600">{scoreModalRow?._code || '—'}</p>
-                            {!scoreModalRow?.is_present ? (
+                            {!scoreModalIsPresent ? (
                                 <p className="mt-2 text-xs font-semibold text-orange-700">Participant is marked absent. Scores will be saved as 0.</p>
                             ) : null}
+                        </div>
+                        <div className="rounded-md border border-slate-300 bg-white p-3">
+                            <div className="flex items-center justify-between">
+                                <Label className="font-semibold">Present</Label>
+                                <Switch
+                                    checked={Boolean(scoreModalIsPresent)}
+                                    onCheckedChange={(checked) => {
+                                        setScoreModalShowZeroWarning(false);
+                                        setScoreModalIsPresent(Boolean(checked));
+                                    }}
+                                    disabled={!canEditScoreRow(scoreModalRow) || savingScoreModal}
+                                />
+                            </div>
                         </div>
                         <div className="rounded-md border border-slate-300 bg-white p-3">
                             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Participant Notes</p>
@@ -2734,6 +2909,41 @@ function ScoringContent() {
                                 {String(scoreModalRow?.submission_notes || '').trim() || 'No participant notes provided.'}
                             </p>
                         </div>
+                        {scoreModalSubmissionPreviewUrl ? (
+                            <div className="rounded-md border border-slate-300 bg-white p-3">
+                                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Submission Preview</p>
+                                <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-2">
+                                    {scoreModalSubmissionPreviewType === 'image' ? (
+                                        <img
+                                            src={scoreModalSubmissionPreviewUrl}
+                                            alt="Submission preview"
+                                            className="max-h-64 w-full rounded-md object-contain"
+                                        />
+                                    ) : null}
+                                    {scoreModalSubmissionPreviewType === 'video' ? (
+                                        <video src={scoreModalSubmissionPreviewUrl} controls className="max-h-64 w-full rounded-md" />
+                                    ) : null}
+                                    {scoreModalSubmissionPreviewType === 'pdf' ? (
+                                        <iframe
+                                            src={scoreModalSubmissionPreviewUrl}
+                                            title="Submission PDF preview"
+                                            className="h-72 w-full rounded-md border"
+                                        />
+                                    ) : null}
+                                    {scoreModalSubmissionPreviewType === 'link' ? (
+                                        <p className="text-sm text-slate-700">Preview not available for this file type.</p>
+                                    ) : null}
+                                </div>
+                                <a
+                                    href={scoreModalSubmissionPreviewUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="mt-2 inline-block text-sm font-semibold underline"
+                                >
+                                    Open Submission
+                                </a>
+                            </div>
+                        ) : null}
                         {isSubmissionRound ? (
                             <div className={`rounded-md border p-3 ${
                                 submissionTimingStatus === 'late'
@@ -2763,21 +2973,24 @@ function ScoringContent() {
                                             type="number"
                                             value={scoreModalDraft?.[criterion.name] ?? ''}
                                             onChange={(e) => handleScoreModalDraftChange(criterion.name, e.target.value)}
-                                            disabled={!scoreModalRow?.is_present || !canEditScoreRow(scoreModalRow)}
-                                            className="neo-input h-10 w-full"
+                                            disabled={!scoreModalIsPresent || !canEditScoreRow(scoreModalRow) || savingScoreModal}
+                                            className={`neo-input h-10 w-full ${
+                                                Number(scoreModalDraft?.[criterion.name] ?? 0) === 0 && scoreModalIsPresent
+                                                    ? 'border-orange-400 bg-orange-50 text-orange-800'
+                                                    : ''
+                                            }`}
                                             min={0}
                                             max={criterion.max_marks}
                                         />
                                     </div>
-                                    {criterion?.rubric?.scale === 'likert_5' && Array.isArray(criterion?.rubric?.bands) ? (
+                                    {Array.isArray(criterion?.rubric?.bands) && criterion.rubric.bands.length > 0 ? (
                                         <div className="rounded-md border border-blue-300 bg-blue-50 p-2">
                                             <p className="text-[11px] font-semibold uppercase tracking-wide text-blue-700">Rubric Guide</p>
                                             <div className="mt-1 grid gap-1 text-xs text-blue-900 sm:grid-cols-2">
-                                                {LIKERT_RUBRIC_LEVELS.map((level) => {
-                                                    const band = criterion.rubric.bands.find((item) => Number(item.level) === level.level) || {};
+                                                {sortRubricBandsByLevel(criterion.rubric.bands).map((band, bandIndex) => {
                                                     return (
-                                                        <p key={`${criterion.name}-${level.level}`}>
-                                                            {level.label}: {band.min_marks ?? 0}-{band.max_marks ?? 0}
+                                                        <p key={`${criterion.name}-${band.level}-${bandIndex}`}>
+                                                            {String(band.label || `Level ${bandIndex + 1}`).trim() || `Level ${bandIndex + 1}`}: {band.min_marks ?? 0}-{band.max_marks ?? 0}
                                                         </p>
                                                     );
                                                 })}
@@ -2791,32 +3004,51 @@ function ScoringContent() {
                             <Label className="font-semibold">Judge Feedback (optional)</Label>
                             <Textarea
                                 value={scoreModalDraft?.__judge_feedback ?? ''}
-                                onChange={(e) => handleScoreModalFeedbackChange(e.target.value)}
+                                onChange={(e) => {
+                                    setScoreModalShowZeroWarning(false);
+                                    handleScoreModalFeedbackChange(e.target.value);
+                                }}
                                 className="neo-input min-h-[88px]"
                                 placeholder="Add qualitative feedback for this submission..."
-                                disabled={!canEditScoreRow(scoreModalRow)}
+                                disabled={!canEditScoreRow(scoreModalRow) || savingScoreModal}
                                 maxLength={2000}
                             />
                             <p className="text-[11px] text-slate-600">Saved with score data.</p>
                         </div>
-                        <p className="text-xs font-semibold text-orange-700">Changes are only saved locally</p>
+                        {scoreModalShowZeroWarning ? (
+                            <div className="rounded-md border border-orange-300 bg-orange-50 p-3">
+                                <p className="text-sm font-semibold text-orange-900">One or more criteria have 0 marks. Save anyway?</p>
+                            </div>
+                        ) : null}
+                        <p className="text-xs font-semibold text-orange-700">Confirm saves directly to DB.</p>
                         <div className="flex items-center justify-end gap-2">
                             <Button
                                 type="button"
                                 variant="outline"
                                 className="border-2 border-black"
                                 onClick={closeScoreModal}
+                                disabled={savingScoreModal}
                             >
                                 Cancel
                             </Button>
                             <Button
                                 type="button"
                                 className="bg-primary text-white border-2 border-black shadow-neo"
-                                disabled={!scoreModalRow || !canEditScoreRow(scoreModalRow)}
-                                onClick={saveScoreModalDraft}
+                                disabled={!scoreModalRow || !canEditScoreRow(scoreModalRow) || savingScoreModal}
+                                onClick={() => saveScoreModalDraft({ allowZeroScores: false })}
                             >
-                                Confirm
+                                {savingScoreModal ? 'Saving...' : 'Confirm'}
                             </Button>
+                            {scoreModalShowZeroWarning ? (
+                                <Button
+                                    type="button"
+                                    className="bg-orange-500 text-white border-2 border-black shadow-neo"
+                                    disabled={savingScoreModal}
+                                    onClick={() => saveScoreModalDraft({ allowZeroScores: true })}
+                                >
+                                    {savingScoreModal ? 'Saving...' : 'Save Anyway'}
+                                </Button>
+                            ) : null}
                         </div>
                     </div>
                 </DialogContent>

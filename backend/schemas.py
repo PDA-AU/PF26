@@ -1780,48 +1780,34 @@ class PdaManagedTeamResponse(BaseModel):
     members: List[PdaManagedTeamMemberResponse] = Field(default_factory=list)
 
 
-LIKERT_RUBRIC_LABELS_BY_LEVEL = {
-    1: "Very Poor",
-    2: "Poor",
-    3: "Average",
-    4: "Good",
-    5: "Excellent",
-}
-
-
 class LikertRubricBand(BaseModel):
-    level: int = Field(..., ge=1, le=5)
+    level: int = Field(..., ge=1)
     label: str
     min_marks: float
     max_marks: float
 
     @model_validator(mode="after")
-    def validate_label_for_level(self):
-        expected = LIKERT_RUBRIC_LABELS_BY_LEVEL.get(int(self.level))
-        if str(self.label or "").strip() != expected:
-            raise ValueError(f"Rubric label for level {self.level} must be '{expected}'")
-        return self
-
-    @model_validator(mode="after")
     def validate_min_max(self):
+        if not str(self.label or "").strip():
+            raise ValueError("Rubric band label is required")
         if float(self.min_marks) > float(self.max_marks):
             raise ValueError("Rubric band min_marks must be less than or equal to max_marks")
         return self
 
 
 class LikertRubric(BaseModel):
-    scale: Literal["likert_5"] = "likert_5"
+    scale: str = "likert_custom"
     bands: List[LikertRubricBand]
 
     @field_validator("bands")
     @classmethod
     def validate_bands_shape(cls, value):
         safe = list(value or [])
-        if len(safe) != 5:
-            raise ValueError("Rubric must contain exactly 5 bands")
+        if len(safe) < 1:
+            raise ValueError("Rubric must contain at least one band")
         levels = [int(item.level) for item in safe]
-        if sorted(levels) != [1, 2, 3, 4, 5]:
-            raise ValueError("Rubric bands must include levels 1,2,3,4,5 exactly once")
+        if len(set(levels)) != len(levels):
+            raise ValueError("Rubric levels must be unique")
         return safe
 
 
