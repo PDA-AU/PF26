@@ -65,13 +65,15 @@ const sortRubricBandsByLevel = (bands = []) => (
 const reindexRubricBands = (bands = [], maxMarks = 0) => {
     const sortedBands = sortRubricBandsByLevel(Array.isArray(bands) ? bands : []);
     return sortedBands.map((band, index) => {
-        const parsedMin = Number.parseFloat(band?.min_marks);
-        const parsedMax = Number.parseFloat(band?.max_marks);
+        const hasLabel = band?.label != null;
+        const hasMin = band?.min_marks != null;
+        const hasMax = band?.max_marks != null;
         return {
             level: index + 1,
-            label: String(band?.label || `Level ${index + 1}`).trim() || `Level ${index + 1}`,
-            min_marks: Number.isFinite(parsedMin) ? parsedMin : 0,
-            max_marks: Number.isFinite(parsedMax) ? parsedMax : maxMarks,
+            // Keep draft values as typed (including empty string) so users can clear fields while editing.
+            label: hasLabel ? String(band.label) : `Level ${index + 1}`,
+            min_marks: hasMin ? band.min_marks : '',
+            max_marks: hasMax ? band.max_marks : maxMarks,
         };
     });
 };
@@ -96,7 +98,17 @@ const createDefaultRubric = (maxMarks = 0) => ({
 const normalizeCriterionRubric = (rubric, maxMarks = 0) => {
     if (!rubric || typeof rubric !== 'object') return null;
     const bands = Array.isArray(rubric.bands) ? rubric.bands : buildEqualRubricBands(maxMarks);
-    const normalizedBands = reindexRubricBands(bands, maxMarks);
+    const sortedBands = sortRubricBandsByLevel(bands);
+    const normalizedBands = sortedBands.map((band, index) => {
+        const parsedMin = Number.parseFloat(band?.min_marks);
+        const parsedMax = Number.parseFloat(band?.max_marks);
+        return {
+            level: index + 1,
+            label: String(band?.label || `Level ${index + 1}`).trim() || `Level ${index + 1}`,
+            min_marks: Number.isFinite(parsedMin) ? parsedMin : 0,
+            max_marks: Number.isFinite(parsedMax) ? parsedMax : maxMarks,
+        };
+    });
     return {
         scale: String(rubric.scale || 'likert_custom').trim() || 'likert_custom',
         bands: normalizedBands.length ? normalizedBands : buildEqualRubricBands(maxMarks),
@@ -414,10 +426,10 @@ function ScoringContent() {
     const fileInputRef = useRef(null);
     const pendingDiscardActionRef = useRef(null);
 
-    const getErrorMessage = (error, fallback) => normalizeErrorMessage(
+    const getErrorMessage = useCallback((error, fallback) => normalizeErrorMessage(
         error?.response?.data?.detail ?? error?.response?.data?.message,
         fallback
-    );
+    ), []);
 
     const entityMode = eventInfo?.participant_mode === 'team' ? 'team' : 'user';
 
@@ -574,7 +586,7 @@ function ScoringContent() {
         } finally {
             setLoading(false);
         }
-    }, [applyPanelResponse, eventSlug, getAuthHeader, normalizeRow, roundId]);
+    }, [applyPanelResponse, eventSlug, getAuthHeader, getErrorMessage, normalizeRow, roundId]);
 
     useEffect(() => {
         fetchRoundData();
