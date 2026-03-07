@@ -1721,8 +1721,13 @@ function ScoringContent() {
         if (savingCriteria) return;
         const normalized = criteriaDraft.map((criterion) => ({
             name: String(criterion.name || '').trim(),
-            max_marks: Number.parseFloat(criterion.max_marks),
-            rubric: criterion.rubric ? normalizeCriterionRubric(criterion.rubric, Number.parseFloat(criterion.max_marks) || 0) : null,
+            max_marks: Number.parseInt(String(criterion.max_marks || ''), 10),
+            rubric: criterion.rubric
+                ? normalizeCriterionRubric(
+                    criterion.rubric,
+                    Number.parseInt(String(criterion.max_marks || ''), 10) || 0
+                )
+                : null,
         }));
 
         if (!normalized.length) {
@@ -1741,8 +1746,8 @@ function ScoringContent() {
             return;
         }
 
-        if (normalized.some((criterion) => Number.isNaN(criterion.max_marks) || !Number.isFinite(criterion.max_marks) || criterion.max_marks <= 0)) {
-            toast.error('Max marks must be a number greater than 0');
+        if (normalized.some((criterion) => Number.isNaN(criterion.max_marks) || !Number.isFinite(criterion.max_marks) || !Number.isInteger(criterion.max_marks) || criterion.max_marks <= 0)) {
+            toast.error('Max marks must be a whole number greater than 0');
             return;
         }
         const rubricError = normalized
@@ -1994,17 +1999,21 @@ function ScoringContent() {
                                                 value={criterion.max_marks}
                                                 onChange={(e) => setCriteriaDraft((prev) => prev.map((item) => {
                                                     if (item.id !== criterion.id) return item;
-                                                    const nextMax = Number.parseFloat(e.target.value);
+                                                    const nextRaw = String(e.target.value || '');
+                                                    if (!/^\d*$/.test(nextRaw)) return item;
+                                                    const nextMax = Number.parseInt(nextRaw, 10);
                                                     return {
                                                         ...item,
-                                                        max_marks: e.target.value,
+                                                        max_marks: nextRaw,
                                                         rubric: item.rubric
                                                             ? normalizeCriterionRubric(item.rubric, Number.isFinite(nextMax) ? nextMax : 0)
                                                             : null,
                                                     };
                                                 }))}
-                                                min={0}
-                                                step="0.01"
+                                                min={1}
+                                                step="1"
+                                                inputMode="numeric"
+                                                pattern="[0-9]*"
                                                 placeholder="100"
                                                 className="neo-input"
                                                 disabled={savingCriteria}
@@ -2890,177 +2899,181 @@ function ScoringContent() {
                     closeScoreModal();
                 }}
             >
-                <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-[560px] max-h-[85vh] overflow-y-auto border-2 border-black shadow-neo bg-white">
+                <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-[1100px] max-h-[90vh] overflow-y-auto border-2 border-black shadow-neo bg-white">
                     <DialogHeader>
                         <DialogTitle className="font-heading font-bold text-lg sm:text-xl leading-tight break-words pr-8">Score Evaluation Criteria</DialogTitle>
                     </DialogHeader>
-                    <div className="space-y-4">
-                        <div className="rounded-md border-2 border-black bg-slate-50 p-3 text-sm">
-                            <p className="font-semibold">{scoreModalRow?._name || 'Participant'}</p>
-                            <p className="font-mono text-xs text-slate-600">{scoreModalRow?._code || '—'}</p>
-                            {!scoreModalIsPresent ? (
-                                <p className="mt-2 text-xs font-semibold text-orange-700">Participant is marked absent. Scores will be saved as 0.</p>
+                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+                        <div className="space-y-4">
+                            <div className="rounded-md border-2 border-black bg-slate-50 p-3 text-sm">
+                                <p className="font-semibold">{scoreModalRow?._name || 'Participant'}</p>
+                                <p className="font-mono text-xs text-slate-600">{scoreModalRow?._code || '—'}</p>
+                                {!scoreModalIsPresent ? (
+                                    <p className="mt-2 text-xs font-semibold text-orange-700">Participant is marked absent. Scores will be saved as 0.</p>
+                                ) : null}
+                            </div>
+                            <div className="rounded-md border border-slate-300 bg-white p-3">
+                                <div className="flex items-center justify-between">
+                                    <Label className="font-semibold">Present</Label>
+                                    <Switch
+                                        checked={Boolean(scoreModalIsPresent)}
+                                        onCheckedChange={(checked) => {
+                                            setScoreModalShowZeroWarning(false);
+                                            setScoreModalIsPresent(Boolean(checked));
+                                        }}
+                                        disabled={!canEditScoreRow(scoreModalRow) || savingScoreModal}
+                                    />
+                                </div>
+                            </div>
+                            <div className="rounded-md border border-slate-300 bg-white p-3">
+                                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Participant Notes</p>
+                                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-800">
+                                    {String(scoreModalRow?.submission_notes || '').trim() || 'No participant notes provided.'}
+                                </p>
+                            </div>
+                            {scoreModalSubmissionPreviewUrl ? (
+                                <div className="rounded-md border border-slate-300 bg-white p-3">
+                                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Submission Preview</p>
+                                    <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-2">
+                                        {scoreModalSubmissionPreviewType === 'image' ? (
+                                            <img
+                                                src={scoreModalSubmissionPreviewUrl}
+                                                alt="Submission preview"
+                                                className="max-h-[420px] w-full rounded-md object-contain"
+                                            />
+                                        ) : null}
+                                        {scoreModalSubmissionPreviewType === 'video' ? (
+                                            <video src={scoreModalSubmissionPreviewUrl} controls className="max-h-[420px] w-full rounded-md" />
+                                        ) : null}
+                                        {scoreModalSubmissionPreviewType === 'pdf' ? (
+                                            <iframe
+                                                src={scoreModalSubmissionPreviewUrl}
+                                                title="Submission PDF preview"
+                                                className="h-[420px] w-full rounded-md border"
+                                            />
+                                        ) : null}
+                                        {scoreModalSubmissionPreviewType === 'link' ? (
+                                            <p className="text-sm text-slate-700">Preview not available for this file type.</p>
+                                        ) : null}
+                                    </div>
+                                    <a
+                                        href={scoreModalSubmissionPreviewUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="mt-2 inline-block text-sm font-semibold underline"
+                                    >
+                                        Open Submission
+                                    </a>
+                                </div>
+                            ) : null}
+                            {isSubmissionRound ? (
+                                <div className={`rounded-md border p-3 ${
+                                    submissionTimingStatus === 'late'
+                                        ? 'border-red-300 bg-red-50'
+                                        : submissionTimingStatus === 'on_time'
+                                            ? 'border-green-300 bg-green-50'
+                                            : 'border-slate-300 bg-white'
+                                }`}>
+                                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Submission Time</p>
+                                    <p className="mt-1 text-sm text-slate-800">
+                                        {formatSubmissionTime(scoreModalRow?.submission_submitted_at)}
+                                    </p>
+                                    {submissionTimingStatus === 'late' ? (
+                                        <p className="mt-1 text-xs font-semibold text-red-700">Submitted after deadline</p>
+                                    ) : null}
+                                    {submissionTimingStatus === 'on_time' ? (
+                                        <p className="mt-1 text-xs font-semibold text-green-700">Submitted before deadline</p>
+                                    ) : null}
+                                </div>
                             ) : null}
                         </div>
-                        <div className="rounded-md border border-slate-300 bg-white p-3">
-                            <div className="flex items-center justify-between">
-                                <Label className="font-semibold">Present</Label>
-                                <Switch
-                                    checked={Boolean(scoreModalIsPresent)}
-                                    onCheckedChange={(checked) => {
-                                        setScoreModalShowZeroWarning(false);
-                                        setScoreModalIsPresent(Boolean(checked));
-                                    }}
-                                    disabled={!canEditScoreRow(scoreModalRow) || savingScoreModal}
-                                />
-                            </div>
-                        </div>
-                        <div className="rounded-md border border-slate-300 bg-white p-3">
-                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Participant Notes</p>
-                            <p className="mt-1 whitespace-pre-wrap text-sm text-slate-800">
-                                {String(scoreModalRow?.submission_notes || '').trim() || 'No participant notes provided.'}
-                            </p>
-                        </div>
-                        {scoreModalSubmissionPreviewUrl ? (
-                            <div className="rounded-md border border-slate-300 bg-white p-3">
-                                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Submission Preview</p>
-                                <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-2">
-                                    {scoreModalSubmissionPreviewType === 'image' ? (
-                                        <img
-                                            src={scoreModalSubmissionPreviewUrl}
-                                            alt="Submission preview"
-                                            className="max-h-64 w-full rounded-md object-contain"
-                                        />
-                                    ) : null}
-                                    {scoreModalSubmissionPreviewType === 'video' ? (
-                                        <video src={scoreModalSubmissionPreviewUrl} controls className="max-h-64 w-full rounded-md" />
-                                    ) : null}
-                                    {scoreModalSubmissionPreviewType === 'pdf' ? (
-                                        <iframe
-                                            src={scoreModalSubmissionPreviewUrl}
-                                            title="Submission PDF preview"
-                                            className="h-72 w-full rounded-md border"
-                                        />
-                                    ) : null}
-                                    {scoreModalSubmissionPreviewType === 'link' ? (
-                                        <p className="text-sm text-slate-700">Preview not available for this file type.</p>
-                                    ) : null}
-                                </div>
-                                <a
-                                    href={scoreModalSubmissionPreviewUrl}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="mt-2 inline-block text-sm font-semibold underline"
-                                >
-                                    Open Submission
-                                </a>
-                            </div>
-                        ) : null}
-                        {isSubmissionRound ? (
-                            <div className={`rounded-md border p-3 ${
-                                submissionTimingStatus === 'late'
-                                    ? 'border-red-300 bg-red-50'
-                                    : submissionTimingStatus === 'on_time'
-                                        ? 'border-green-300 bg-green-50'
-                                        : 'border-slate-300 bg-white'
-                            }`}>
-                                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Submission Time</p>
-                                <p className="mt-1 text-sm text-slate-800">
-                                    {formatSubmissionTime(scoreModalRow?.submission_submitted_at)}
-                                </p>
-                                {submissionTimingStatus === 'late' ? (
-                                    <p className="mt-1 text-xs font-semibold text-red-700">Submitted after deadline</p>
-                                ) : null}
-                                {submissionTimingStatus === 'on_time' ? (
-                                    <p className="mt-1 text-xs font-semibold text-green-700">Submitted before deadline</p>
-                                ) : null}
-                            </div>
-                        ) : null}
-                        <div className="space-y-3">
-                            {criteria.map((criterion, index) => (
-                                <div key={`${criterion.name}-${index}`} className="space-y-2 rounded-md border border-slate-300 p-3">
-                                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_140px] sm:items-center">
-                                        <Label className="font-semibold">{criterion.name} (/{criterion.max_marks})</Label>
-                                        <Input
-                                            type="number"
-                                            value={scoreModalDraft?.[criterion.name] ?? ''}
-                                            onChange={(e) => handleScoreModalDraftChange(criterion.name, e.target.value)}
-                                            disabled={!scoreModalIsPresent || !canEditScoreRow(scoreModalRow) || savingScoreModal}
-                                            className={`neo-input h-10 w-full ${
-                                                Number(scoreModalDraft?.[criterion.name] ?? 0) === 0 && scoreModalIsPresent
-                                                    ? 'border-orange-400 bg-orange-50 text-orange-800'
-                                                    : ''
-                                            }`}
-                                            min={0}
-                                            max={criterion.max_marks}
-                                        />
-                                    </div>
-                                    {Array.isArray(criterion?.rubric?.bands) && criterion.rubric.bands.length > 0 ? (
-                                        <div className="rounded-md border border-blue-300 bg-blue-50 p-2">
-                                            <p className="text-[11px] font-semibold uppercase tracking-wide text-blue-700">Rubric Guide</p>
-                                            <div className="mt-1 grid gap-1 text-xs text-blue-900 sm:grid-cols-2">
-                                                {sortRubricBandsByLevel(criterion.rubric.bands).map((band, bandIndex) => {
-                                                    return (
-                                                        <p key={`${criterion.name}-${band.level}-${bandIndex}`}>
-                                                            {String(band.label || `Level ${bandIndex + 1}`).trim() || `Level ${bandIndex + 1}`}: {band.min_marks ?? 0}-{band.max_marks ?? 0}
-                                                        </p>
-                                                    );
-                                                })}
-                                            </div>
+                        <div className="space-y-4">
+                            <div className="max-h-[52vh] space-y-3 overflow-y-auto pr-1">
+                                {criteria.map((criterion, index) => (
+                                    <div key={`${criterion.name}-${index}`} className="space-y-2 rounded-md border border-slate-300 p-3">
+                                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_120px] sm:items-center">
+                                            <Label className="font-semibold">{criterion.name} (/{criterion.max_marks})</Label>
+                                            <Input
+                                                type="number"
+                                                value={scoreModalDraft?.[criterion.name] ?? ''}
+                                                onChange={(e) => handleScoreModalDraftChange(criterion.name, e.target.value)}
+                                                disabled={!scoreModalIsPresent || !canEditScoreRow(scoreModalRow) || savingScoreModal}
+                                                className={`neo-input h-10 w-full text-base ${
+                                                    Number(scoreModalDraft?.[criterion.name] ?? 0) === 0 && scoreModalIsPresent
+                                                        ? 'border-orange-400 bg-orange-50 text-orange-800'
+                                                        : ''
+                                                }`}
+                                                min={0}
+                                                max={criterion.max_marks}
+                                            />
                                         </div>
-                                    ) : null}
-                                </div>
-                            ))}
-                        </div>
-                        <div className="space-y-2 rounded-md border border-slate-300 p-3">
-                            <Label className="font-semibold">Judge Feedback (optional)</Label>
-                            <Textarea
-                                value={scoreModalDraft?.__judge_feedback ?? ''}
-                                onChange={(e) => {
-                                    setScoreModalShowZeroWarning(false);
-                                    handleScoreModalFeedbackChange(e.target.value);
-                                }}
-                                className="neo-input min-h-[88px]"
-                                placeholder="Add qualitative feedback for this submission..."
-                                disabled={!canEditScoreRow(scoreModalRow) || savingScoreModal}
-                                maxLength={2000}
-                            />
-                            <p className="text-[11px] text-slate-600">Saved with score data.</p>
-                        </div>
-                        {scoreModalShowZeroWarning ? (
-                            <div className="rounded-md border border-orange-300 bg-orange-50 p-3">
-                                <p className="text-sm font-semibold text-orange-900">One or more criteria have 0 marks. Save anyway?</p>
+                                        {Array.isArray(criterion?.rubric?.bands) && criterion.rubric.bands.length > 0 ? (
+                                            <div className="rounded-md border border-blue-300 bg-blue-50 p-2">
+                                                <p className="text-[11px] font-semibold uppercase tracking-wide text-blue-700">Rubric Guide</p>
+                                                <div className="mt-1 grid gap-1 text-xs text-blue-900 sm:grid-cols-2">
+                                                    {sortRubricBandsByLevel(criterion.rubric.bands).map((band, bandIndex) => {
+                                                        return (
+                                                            <p key={`${criterion.name}-${band.level}-${bandIndex}`}>
+                                                                {String(band.label || `Level ${bandIndex + 1}`).trim() || `Level ${bandIndex + 1}`}: {band.min_marks ?? 0}-{band.max_marks ?? 0}
+                                                            </p>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                ))}
                             </div>
-                        ) : null}
-                        <p className="text-xs font-semibold text-orange-700">Confirm saves directly to DB.</p>
-                        <div className="flex items-center justify-end gap-2">
-                            <Button
-                                type="button"
-                                variant="outline"
-                                className="border-2 border-black"
-                                onClick={closeScoreModal}
-                                disabled={savingScoreModal}
-                            >
-                                Cancel
-                            </Button>
-                            <Button
-                                type="button"
-                                className="bg-primary text-white border-2 border-black shadow-neo"
-                                disabled={!scoreModalRow || !canEditScoreRow(scoreModalRow) || savingScoreModal}
-                                onClick={() => saveScoreModalDraft({ allowZeroScores: false })}
-                            >
-                                {savingScoreModal ? 'Saving...' : 'Confirm'}
-                            </Button>
+                            <div className="space-y-2 rounded-md border border-slate-300 p-3">
+                                <Label className="font-semibold">Judge Feedback (optional)</Label>
+                                <Textarea
+                                    value={scoreModalDraft?.__judge_feedback ?? ''}
+                                    onChange={(e) => {
+                                        setScoreModalShowZeroWarning(false);
+                                        handleScoreModalFeedbackChange(e.target.value);
+                                    }}
+                                    className="neo-input min-h-[88px]"
+                                    placeholder="Add qualitative feedback for this submission..."
+                                    disabled={!canEditScoreRow(scoreModalRow) || savingScoreModal}
+                                    maxLength={2000}
+                                />
+                                <p className="text-[11px] text-slate-600">Saved with score data.</p>
+                            </div>
                             {scoreModalShowZeroWarning ? (
+                                <div className="rounded-md border border-orange-300 bg-orange-50 p-3">
+                                    <p className="text-sm font-semibold text-orange-900">One or more criteria have 0 marks. Save anyway?</p>
+                                </div>
+                            ) : null}
+                            <p className="text-xs font-semibold text-orange-700">Confirm saves directly to DB.</p>
+                            <div className="flex flex-wrap items-center justify-end gap-2">
                                 <Button
                                     type="button"
-                                    className="bg-orange-500 text-white border-2 border-black shadow-neo"
+                                    variant="outline"
+                                    className="border-2 border-black"
+                                    onClick={closeScoreModal}
                                     disabled={savingScoreModal}
-                                    onClick={() => saveScoreModalDraft({ allowZeroScores: true })}
                                 >
-                                    {savingScoreModal ? 'Saving...' : 'Save Anyway'}
+                                    Cancel
                                 </Button>
-                            ) : null}
+                                <Button
+                                    type="button"
+                                    className="bg-primary text-white border-2 border-black shadow-neo"
+                                    disabled={!scoreModalRow || !canEditScoreRow(scoreModalRow) || savingScoreModal}
+                                    onClick={() => saveScoreModalDraft({ allowZeroScores: false })}
+                                >
+                                    {savingScoreModal ? 'Saving...' : 'Confirm'}
+                                </Button>
+                                {scoreModalShowZeroWarning ? (
+                                    <Button
+                                        type="button"
+                                        className="bg-orange-500 text-white border-2 border-black shadow-neo"
+                                        disabled={savingScoreModal}
+                                        onClick={() => saveScoreModalDraft({ allowZeroScores: true })}
+                                    >
+                                        {savingScoreModal ? 'Saving...' : 'Save Anyway'}
+                                    </Button>
+                                ) : null}
+                            </div>
                         </div>
                     </div>
                 </DialogContent>
