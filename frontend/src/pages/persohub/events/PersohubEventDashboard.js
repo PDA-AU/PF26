@@ -133,6 +133,34 @@ const normalizeSubmissionLockReason = (reason) => {
     if (raw.toLowerCase() === 'round is frozen') return 'Round is closed for submission';
     return raw;
 };
+const MAX_SUBMISSION_FILES = 5;
+const toSubmissionFiles = (submission) => {
+    const files = Array.isArray(submission?.files) ? submission.files : [];
+    const normalized = files
+        .map((item) => ({
+            file_url: String(item?.file_url || '').trim(),
+            file_name: String(item?.file_name || '').trim() || null,
+            file_size_bytes: Number(item?.file_size_bytes || 0),
+            mime_type: String(item?.mime_type || '').trim() || 'application/octet-stream',
+        }))
+        .filter((item) => item.file_url);
+    if (normalized.length > 0) return normalized;
+    const legacyUrl = String(submission?.file_url || '').trim();
+    if (!legacyUrl) return [];
+    return [{
+        file_url: legacyUrl,
+        file_name: String(submission?.file_name || '').trim() || null,
+        file_size_bytes: Number(submission?.file_size_bytes || 0),
+        mime_type: String(submission?.mime_type || '').trim() || 'application/octet-stream',
+    }];
+};
+const formatFileSize = (bytes) => {
+    const value = Number(bytes || 0);
+    if (value <= 0) return '-';
+    if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+    if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
+    return `${value} B`;
+};
 
 const formatEventDate = (value) => {
     if (!value) return '';
@@ -283,7 +311,8 @@ export default function EventDashboard() {
     const [submissionType, setSubmissionType] = useState('file');
     const [submissionLink, setSubmissionLink] = useState('');
     const [submissionNotes, setSubmissionNotes] = useState('');
-    const [submissionFile, setSubmissionFile] = useState(null);
+    const [existingSubmissionFiles, setExistingSubmissionFiles] = useState([]);
+    const [newSubmissionFiles, setNewSubmissionFiles] = useState([]);
     const [isRoundDescriptionExpanded, setIsRoundDescriptionExpanded] = useState(false);
 
     const [copiedReferral, setCopiedReferral] = useState(false);
@@ -981,7 +1010,8 @@ export default function EventDashboard() {
             setSubmissionType(normalizeSubmissionType(data?.submission_type));
             setSubmissionLink(data?.link_url || '');
             setSubmissionNotes(data?.notes || '');
-            setSubmissionFile(null);
+            setExistingSubmissionFiles(toSubmissionFiles(data));
+            setNewSubmissionFiles([]);
             setSubmissionUploadProgress(null);
         } catch (error) {
             setRoundSubmission(null);
@@ -994,7 +1024,8 @@ export default function EventDashboard() {
     useEffect(() => {
         if (!selectedRound) {
             setRoundSubmission(null);
-            setSubmissionFile(null);
+            setExistingSubmissionFiles([]);
+            setNewSubmissionFiles([]);
             setSubmissionLink('');
             setSubmissionNotes('');
             setSubmissionType('file');
@@ -1029,41 +1060,66 @@ export default function EventDashboard() {
                 notes: String(submissionNotes || '').trim() || null,
             };
             if (normalizedSubmissionType === 'file') {
-                if (!submissionFile) {
-                    toast.error('Choose a file to upload');
+                const retainedFiles = existingSubmissionFiles.filter((item) => String(item?.file_url || '').trim());
+                const selectedFiles = newSubmissionFiles.filter(Boolean);
+                const totalFileCount = retainedFiles.length + selectedFiles.length;
+                if (totalFileCount < 1) {
+                    toast.error('Choose at least one file');
                     setSubmittingRoundWork(false);
                     return;
                 }
-                const presignRes = await axios.post(
-                    `${API}/persohub/persohub-events/${eventSlug}/rounds/${selectedRound.id}/submission/presign`,
-                    {
-                        filename: submissionFile.name,
-                        content_type: submissionFile.type,
-                        file_size_bytes: submissionFile.size,
-                    },
-                    { headers: getAuthHeader() }
-                );
-                const { upload_url, public_url, content_type } = presignRes.data || {};
-                setSubmissionUploadProgress(0);
-                await axios.put(upload_url, submissionFile, {
-                    headers: { 'Content-Type': content_type || submissionFile.type },
-                    onUploadProgress: (progressEvent) => {
-                        const totalBytes = Number(progressEvent?.total || 0);
-                        const loadedBytes = Number(progressEvent?.loaded || 0);
-                        if (totalBytes > 0) {
-                            const percent = Math.min(100, Math.max(0, Math.round((loadedBytes / totalBytes) * 100)));
+                if (totalFileCount > MAX_SUBMISSION_FILES) {
+                    toast.error(`You can submit up to ${MAX_SUBMISSION_FILES} files`);
+                    setSubmittingRoundWork(false);
+                    return;
+                }
+                const uploadedFiles = [];
+                if (selectedFiles.length > 0) {
+                    setSubmissionUploadProgress(0);
+                }
+                for (let index = 0; index < selectedFiles.length; index += 1) {
+                    const file = selectedFiles[index];
+                    const presignRes = await axios.post(
+                        `${API}/persohub/persohub-events/${eventSlug}/rounds/${selectedRound.id}/submission/presign`,
+                        {
+                            filename: file.name,
+                            content_type: file.type,
+                            file_size_bytes: file.size,
+                        },
+                        { headers: getAuthHeader() }
+                    );
+                    const { upload_url, public_url, content_type } = presignRes.data || {};
+                    await axios.put(upload_url, file, {
+                        headers: { 'Content-Type': content_type || file.type },
+                        onUploadProgress: (progressEvent) => {
+                            const totalBytes = Number(progressEvent?.total || 0);
+                            const loadedBytes = Number(progressEvent?.loaded || 0);
+                            const fileProgress = totalBytes > 0 ? (loadedBytes / totalBytes) : 0;
+                            const percent = Math.min(
+                                100,
+                                Math.max(0, Math.round(((index + fileProgress) / selectedFiles.length) * 100))
+                            );
                             setSubmissionUploadProgress(percent);
-                        }
-                    },
-                });
+                        },
+                    });
+                    uploadedFiles.push({
+                        file_url: public_url,
+                        file_name: file.name,
+                        file_size_bytes: file.size,
+                        mime_type: file.type || 'application/octet-stream',
+                    });
+                }
+                const mergedFiles = [...retainedFiles, ...uploadedFiles];
+                const firstFile = mergedFiles[0] || {};
                 setSubmissionUploadProgress(100);
                 payload = {
                     ...payload,
                     submission_type: 'file',
-                    file_url: public_url,
-                    file_name: submissionFile.name,
-                    file_size_bytes: submissionFile.size,
-                    mime_type: submissionFile.type,
+                    files: mergedFiles,
+                    file_url: firstFile.file_url || null,
+                    file_name: firstFile.file_name || null,
+                    file_size_bytes: firstFile.file_size_bytes || null,
+                    mime_type: firstFile.mime_type || null,
                     link_url: null,
                 };
             } else {
@@ -1086,12 +1142,13 @@ export default function EventDashboard() {
             );
             setSubmissionSuccessText(
                 normalizeSubmissionType(submissionType) === 'file'
-                    ? 'File uploaded successfully.'
+                    ? 'Files submitted successfully.'
                     : 'Submission link saved successfully.'
             );
             setSubmissionSuccessDialogOpen(true);
             setSelectedRound(null);
-            setSubmissionFile(null);
+            setExistingSubmissionFiles([]);
+            setNewSubmissionFiles([]);
             await fetchData();
         } catch (error) {
             toast.error(getErrorMessage(error, 'Failed to submit round work'));
@@ -1130,7 +1187,8 @@ export default function EventDashboard() {
             setSubmissionType('file');
             setSubmissionLink('');
             setSubmissionNotes('');
-            setSubmissionFile(null);
+            setExistingSubmissionFiles([]);
+            setNewSubmissionFiles([]);
             setSubmissionUploadProgress(null);
             await fetchData();
             toast.success('Submitted work removed');
@@ -2685,13 +2743,18 @@ export default function EventDashboard() {
                                                             <div className="rounded-md border-2 border-black bg-white p-3 text-xs font-medium text-slate-700">
                                                                 <p>Version: {roundSubmission?.version || 1}</p>
                                                                 <p>Type: {roundSubmission?.submission_type || '-'}</p>
-                                                                {roundSubmission?.file_url ? (
-                                                                    <p>
-                                                                        File:
-                                                                        <a className="ml-1 underline" href={roundSubmission.file_url} target="_blank" rel="noreferrer">
-                                                                            {roundSubmission?.file_name || 'Open file'}
-                                                                        </a>
-                                                                    </p>
+                                                                {toSubmissionFiles(roundSubmission).length ? (
+                                                                    <div className="space-y-1">
+                                                                        <p>Files:</p>
+                                                                        {toSubmissionFiles(roundSubmission).map((item, idx) => (
+                                                                            <p key={`${item.file_url}-${idx}`}>
+                                                                                <a className="underline" href={item.file_url} target="_blank" rel="noreferrer">
+                                                                                    {item.file_name || `File ${idx + 1}`}
+                                                                                </a>
+                                                                                <span className="ml-1 text-slate-500">({formatFileSize(item.file_size_bytes)})</span>
+                                                                            </p>
+                                                                        ))}
+                                                                    </div>
                                                                 ) : null}
                                                                 {roundSubmission?.link_url ? (
                                                                     <p>
@@ -2724,21 +2787,46 @@ export default function EventDashboard() {
                                                         </div>
                                                         {normalizeSubmissionType(submissionType) === 'file' ? (
                                                             <div>
-                                                                <Label className="text-xs font-bold uppercase tracking-[0.1em]">File</Label>
+                                                                <Label className="text-xs font-bold uppercase tracking-[0.1em]">Files (max 5)</Label>
                                                                 <Input
                                                                     type="file"
                                                                     accept=".pdf,.ppt,.pptx,.mp4,.mov,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/webp,video/mp4,video/quicktime,application/zip"
-                                                                    multiple={false}
+                                                                    multiple
                                                                     className="neo-input mt-2"
                                                                     disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}
                                                                     onChange={(e) => {
-                                                                        const files = e.target.files || [];
-                                                                        if (files.length > 1) {
-                                                                            toast.error('Please select only one file');
+                                                                        const files = Array.from(e.target.files || []);
+                                                                        const allowedNewCount = Math.max(0, MAX_SUBMISSION_FILES - existingSubmissionFiles.length - newSubmissionFiles.length);
+                                                                        if (files.length > allowedNewCount) {
+                                                                            toast.error(`You can add ${allowedNewCount} more file(s)`);
                                                                         }
-                                                                        setSubmissionFile(files[0] || null);
+                                                                        const accepted = files.slice(0, allowedNewCount);
+                                                                        setNewSubmissionFiles((prev) => [...prev, ...accepted].slice(0, MAX_SUBMISSION_FILES));
+                                                                        e.target.value = '';
                                                                     }}
                                                                 />
+                                                                {existingSubmissionFiles.length > 0 ? (
+                                                                    <div className="mt-2 space-y-1">
+                                                                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-600">Retained Files</p>
+                                                                        {existingSubmissionFiles.map((item, idx) => (
+                                                                            <div key={`${item.file_url}-${idx}`} className="flex items-center justify-between rounded-md border border-slate-200 px-2 py-1 text-xs">
+                                                                                <a className="truncate pr-2 underline" href={item.file_url} target="_blank" rel="noreferrer">{item.file_name || `File ${idx + 1}`}</a>
+                                                                                <Button type="button" variant="outline" className="h-6 px-2 text-xs" onClick={() => setExistingSubmissionFiles((prev) => prev.filter((_, i) => i !== idx))}>Remove</Button>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                ) : null}
+                                                                {newSubmissionFiles.length > 0 ? (
+                                                                    <div className="mt-2 space-y-1">
+                                                                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-600">New Files</p>
+                                                                        {newSubmissionFiles.map((file, idx) => (
+                                                                            <div key={`${file.name}-${file.size}-${idx}`} className="flex items-center justify-between rounded-md border border-slate-200 px-2 py-1 text-xs">
+                                                                                <span className="truncate pr-2">{file.name} ({formatFileSize(file.size)})</span>
+                                                                                <Button type="button" variant="outline" className="h-6 px-2 text-xs" onClick={() => setNewSubmissionFiles((prev) => prev.filter((_, i) => i !== idx))}>Remove</Button>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                ) : null}
                                                             </div>
                                                         ) : (
                                                             <div>
@@ -2764,7 +2852,7 @@ export default function EventDashboard() {
                                                         {submittingRoundWork && normalizeSubmissionType(submissionType) === 'file' && submissionUploadProgress !== null ? (
                                                             <div className="space-y-1">
                                                                 <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
-                                                                    <span>Uploading file...</span>
+                                                                    <span>Uploading files...</span>
                                                                     <span>{submissionUploadProgress}%</span>
                                                                 </div>
                                                                 <div className="h-2 w-full overflow-hidden rounded border border-black bg-white">

@@ -349,6 +349,32 @@ const normalizeErrorMessage = (value, fallback) => {
     }
     return String(value);
 };
+const normalizeSubmissionFiles = (files, legacyUrl, legacyName, legacySize, legacyType) => {
+    const normalized = (Array.isArray(files) ? files : [])
+        .map((item) => ({
+            file_url: String(item?.file_url || '').trim(),
+            file_name: String(item?.file_name || '').trim() || null,
+            file_size_bytes: Number(item?.file_size_bytes || 0),
+            mime_type: String(item?.mime_type || '').trim() || 'application/octet-stream',
+        }))
+        .filter((item) => item.file_url);
+    if (normalized.length > 0) return normalized;
+    const url = String(legacyUrl || '').trim();
+    if (!url) return [];
+    return [{
+        file_url: url,
+        file_name: String(legacyName || '').trim() || null,
+        file_size_bytes: Number(legacySize || 0),
+        mime_type: String(legacyType || '').trim() || 'application/octet-stream',
+    }];
+};
+const formatFileSize = (bytes) => {
+    const value = Number(bytes || 0);
+    if (value <= 0) return '-';
+    if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+    if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
+    return `${value} B`;
+};
 
 const entityKey = (entityType, entityId) => `${String(entityType || '').trim().toLowerCase()}:${Number(entityId)}`;
 
@@ -423,6 +449,7 @@ function ScoringContent() {
     const [unsavedDialogOpen, setUnsavedDialogOpen] = useState(false);
     const [unsavedDialogMessage, setUnsavedDialogMessage] = useState('You have unsaved changes. Continue without saving?');
     const [panelModeDisableConfirmOpen, setPanelModeDisableConfirmOpen] = useState(false);
+    const [submissionFilesDialog, setSubmissionFilesDialog] = useState({ open: false, files: [], participantName: '' });
     const fileInputRef = useRef(null);
     const pendingDiscardActionRef = useRef(null);
     const scoreModalCriterionInputRefs = useRef({});
@@ -436,6 +463,13 @@ function ScoringContent() {
 
     const normalizeRow = useCallback((row) => {
         const entityId = row.entity_id ?? row.participant_id ?? row.id;
+        const submissionFiles = normalizeSubmissionFiles(
+            row.submission_files,
+            row.submission_file_url,
+            row.submission_file_name,
+            row.submission_file_size_bytes,
+            row.submission_file_mime_type
+        );
         return {
             ...row,
             _entityType: row.entity_type || entityMode,
@@ -447,6 +481,7 @@ function ScoringContent() {
             panel_no: row.panel_no == null ? null : Number(row.panel_no),
             panel_name: String(row.panel_name || '').trim() || null,
             is_score_editable_by_current_admin: row.is_score_editable_by_current_admin !== false,
+            submission_files: submissionFiles,
         };
     }, [entityMode]);
 
@@ -668,8 +703,8 @@ function ScoringContent() {
         [scoreModalRow?.submission_submitted_at, round?.submission_deadline]
     );
     const scoreModalSubmissionFileUrl = useMemo(
-        () => String(scoreModalRow?.submission_file_url || '').trim(),
-        [scoreModalRow?.submission_file_url]
+        () => String(scoreModalRow?.submission_files?.[0]?.file_url || scoreModalRow?.submission_file_url || '').trim(),
+        [scoreModalRow?.submission_file_url, scoreModalRow?.submission_files]
     );
     const scoreModalSubmissionLinkUrl = useMemo(
         () => String(scoreModalRow?.submission_link_url || '').trim(),
@@ -702,7 +737,7 @@ function ScoringContent() {
                 if (presenceFilter === 'absent' && row.is_present) return false;
             }
             if (isSubmissionRound && submissionFilter !== 'all') {
-                const hasSubmission = Boolean(row.submission_file_url || row.submission_link_url);
+                const hasSubmission = Boolean((row.submission_files || []).length || row.submission_link_url);
                 if (submissionFilter === 'found' && !hasSubmission) return false;
                 if (submissionFilter === 'missing' && hasSubmission) return false;
             }
@@ -2842,16 +2877,31 @@ function ScoringContent() {
                                         ) : null}
                                         {isSubmissionRound ? (
                                             <td>
-                                                {row.submission_file_url || row.submission_link_url ? (
+                                                {(row.submission_files || []).length || row.submission_link_url ? (
                                                     <div className="flex items-center gap-2">
-                                                        <a
-                                                            href={row.submission_file_url || row.submission_link_url}
-                                                            target="_blank"
-                                                            rel="noreferrer"
-                                                            className="text-xs font-bold underline"
-                                                        >
-                                                            View
-                                                        </a>
+                                                        {(row.submission_files || []).length ? (
+                                                            <Button
+                                                                type="button"
+                                                                variant="outline"
+                                                                className="h-7 border-2 border-black px-2 text-xs font-bold"
+                                                                onClick={() => setSubmissionFilesDialog({
+                                                                    open: true,
+                                                                    files: row.submission_files || [],
+                                                                    participantName: row._name || 'Participant',
+                                                                })}
+                                                            >
+                                                                View Files ({(row.submission_files || []).length})
+                                                            </Button>
+                                                        ) : (
+                                                            <a
+                                                                href={row.submission_link_url}
+                                                                target="_blank"
+                                                                rel="noreferrer"
+                                                                className="text-xs font-bold underline"
+                                                            >
+                                                                View Link
+                                                            </a>
+                                                        )}
                                                         {row.submission_is_locked ? (
                                                             <span className="tag border-2 border-slate-500 bg-slate-100 text-slate-700">Locked</span>
                                                         ) : null}
@@ -2893,6 +2943,36 @@ function ScoringContent() {
                     </table>
                 </div>
             )}
+
+            <Dialog
+                open={submissionFilesDialog.open}
+                onOpenChange={(open) => {
+                    if (open) return;
+                    setSubmissionFilesDialog({ open: false, files: [], participantName: '' });
+                }}
+            >
+                <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-[560px] max-h-[80vh] overflow-y-auto border-2 border-black shadow-neo bg-white">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading font-bold text-lg leading-tight break-words pr-8">
+                            Submission Files - {submissionFilesDialog.participantName || 'Participant'}
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-2">
+                        {(submissionFilesDialog.files || []).map((item, index) => (
+                            <div key={`${item.file_url}-${index}`} className="rounded-md border border-slate-300 p-3 text-sm">
+                                <p className="font-semibold break-all">{item.file_name || `File ${index + 1}`}</p>
+                                <p className="text-xs text-slate-600">{formatFileSize(item.file_size_bytes)} · {item.mime_type || 'application/octet-stream'}</p>
+                                <a href={item.file_url} target="_blank" rel="noreferrer" className="mt-1 inline-block text-xs font-bold underline">
+                                    Open File
+                                </a>
+                            </div>
+                        ))}
+                        {!(submissionFilesDialog.files || []).length ? (
+                            <p className="text-sm text-slate-600">No files found.</p>
+                        ) : null}
+                    </div>
+                </DialogContent>
+            </Dialog>
 
             <Dialog
                 open={scoreModalOpen}

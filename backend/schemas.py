@@ -1993,12 +1993,25 @@ class PdaRoundSubmissionPresignRequest(BaseModel):
     file_size_bytes: int = Field(..., ge=1)
 
 
+class PdaRoundSubmissionFile(BaseModel):
+    file_url: str = Field(..., min_length=1)
+    file_name: Optional[str] = None
+    file_size_bytes: int = Field(..., ge=1)
+    mime_type: str = Field(..., min_length=1)
+
+    @field_validator("file_url", mode="before")
+    @classmethod
+    def normalize_file_url(cls, value):
+        return _normalize_optional_http_url(value, "file_url")
+
+
 class PdaRoundSubmissionUpsertRequest(BaseModel):
     submission_type: PdaManagedRoundSubmissionTypeEnum
     file_url: Optional[str] = None
     file_name: Optional[str] = None
     file_size_bytes: Optional[int] = Field(default=None, ge=1)
     mime_type: Optional[str] = None
+    files: Optional[List[PdaRoundSubmissionFile]] = None
     link_url: Optional[str] = None
     notes: Optional[str] = None
 
@@ -2014,6 +2027,7 @@ class PdaRoundSubmissionAdminUpdate(BaseModel):
     file_name: Optional[str] = None
     file_size_bytes: Optional[int] = Field(default=None, ge=1)
     mime_type: Optional[str] = None
+    files: Optional[List[PdaRoundSubmissionFile]] = None
     link_url: Optional[str] = None
     notes: Optional[str] = None
     is_locked: Optional[bool] = None
@@ -2036,6 +2050,7 @@ class PdaRoundSubmissionResponse(BaseModel):
     file_name: Optional[str] = None
     file_size_bytes: Optional[int] = None
     mime_type: Optional[str] = None
+    files: List[PdaRoundSubmissionFile] = Field(default_factory=list)
     link_url: Optional[str] = None
     notes: Optional[str] = None
     version: int = 0

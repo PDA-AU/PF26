@@ -165,6 +165,53 @@ def _default_round_allowed_mime_types() -> List[str]:
     ]
 
 
+def _normalize_submission_files(files: Any) -> List[Dict[str, Any]]:
+    if not isinstance(files, list):
+        return []
+    normalized: List[Dict[str, Any]] = []
+    for item in files:
+        if not isinstance(item, dict):
+            continue
+        file_url = str(item.get("file_url") or "").strip()
+        if not file_url:
+            continue
+        file_name = str(item.get("file_name") or "").strip() or None
+        mime_type = str(item.get("mime_type") or "").strip().lower()
+        try:
+            file_size_bytes = int(item.get("file_size_bytes") or 0)
+        except (TypeError, ValueError):
+            file_size_bytes = 0
+        normalized.append(
+            {
+                "file_url": file_url,
+                "file_name": file_name,
+                "file_size_bytes": file_size_bytes,
+                "mime_type": mime_type,
+            }
+        )
+    return normalized
+
+
+def _submission_files_from_row(submission: Optional[PdaEventRoundSubmission]) -> List[Dict[str, Any]]:
+    if not submission:
+        return []
+    files = _normalize_submission_files(getattr(submission, "files", None))
+    if files:
+        return files
+    file_url = str(getattr(submission, "file_url", "") or "").strip()
+    if not file_url:
+        return []
+    file_size = int(getattr(submission, "file_size_bytes", 0) or 0)
+    return [
+        {
+            "file_url": file_url,
+            "file_name": str(getattr(submission, "file_name", "") or "").strip() or None,
+            "file_size_bytes": file_size if file_size > 0 else 1,
+            "mime_type": str(getattr(submission, "mime_type", "") or "").strip().lower() or "application/octet-stream",
+        }
+    ]
+
+
 PANEL_TEAM_DISTRIBUTION_MODES = {"team_count", "member_count_weighted"}
 
 
@@ -320,6 +367,8 @@ def _round_submission_payload_for_admin(
     elif round_row.is_frozen:
         lock_reason = "Round is frozen"
 
+    submission_files = _submission_files_from_row(submission)
+    first_file = submission_files[0] if submission_files else None
     return PdaRoundSubmissionAdminListItem(
         id=submission.id if submission else None,
         event_id=event.id,
@@ -331,10 +380,11 @@ def _round_submission_payload_for_admin(
         participant_register_number=str(entity.get("regno_or_code") or ""),
         participant_status=str(entity.get("status") or "Active"),
         submission_type=(submission.submission_type if submission else None),
-        file_url=(submission.file_url if submission else None),
-        file_name=(submission.file_name if submission else None),
-        file_size_bytes=(submission.file_size_bytes if submission else None),
-        mime_type=(submission.mime_type if submission else None),
+        file_url=(first_file.get("file_url") if first_file else None),
+        file_name=(first_file.get("file_name") if first_file else None),
+        file_size_bytes=(first_file.get("file_size_bytes") if first_file else None),
+        mime_type=(first_file.get("mime_type") if first_file else None),
+        files=submission_files,
         link_url=(submission.link_url if submission else None),
         notes=(submission.notes if submission else None),
         version=(int(submission.version or 0) if submission else 0),
@@ -3492,6 +3542,8 @@ def round_participants(
         key = (entity["entity_type"], entity["entity_id"])
         row = score_map.get(key)
         submission_row = submission_map.get(key)
+        submission_files = _submission_files_from_row(submission_row) if submission_row else []
+        first_submission_file = submission_files[0] if submission_files else None
         panel_assignment = assignment_map.get(_panel_entity_key(entity.get("entity_type"), int(entity.get("entity_id"))))
         panel_row = panel_map.get(int(panel_assignment.panel_id)) if panel_assignment and panel_assignment.panel_id is not None else None
         panel_id = int(panel_assignment.panel_id) if panel_assignment and panel_assignment.panel_id is not None else None
@@ -3505,8 +3557,9 @@ def round_participants(
             "is_present": is_present,
             "submission_id": submission_row.id if submission_row else None,
             "submission_type": submission_row.submission_type if submission_row else None,
-            "submission_file_url": submission_row.file_url if submission_row else None,
+            "submission_file_url": first_submission_file.get("file_url") if first_submission_file else None,
             "submission_link_url": submission_row.link_url if submission_row else None,
+            "submission_files": submission_files,
             "submission_submitted_at": submission_row.submitted_at if submission_row else None,
             "submission_notes": submission_row.notes if submission_row else None,
             "submission_is_locked": bool(submission_row.is_locked) if submission_row else False,
@@ -3607,22 +3660,45 @@ def update_round_submission_as_admin(
     max_bytes = max_file_size_mb * 1024 * 1024
 
     next_type = str(updates.get("submission_type") or submission.submission_type or "").lower()
-    next_file_url = str(updates.get("file_url") if "file_url" in updates else (submission.file_url or "")).strip()
+    existing_files = _submission_files_from_row(submission)
+    next_files = _normalize_submission_files(updates.get("files")) if "files" in updates else existing_files
+    if "files" not in updates and "file_url" in updates:
+        legacy_files = _normalize_submission_files(
+            [
+                {
+                    "file_url": updates.get("file_url"),
+                    "file_name": updates.get("file_name"),
+                    "file_size_bytes": updates.get("file_size_bytes"),
+                    "mime_type": updates.get("mime_type"),
+                }
+            ]
+        )
+        if legacy_files:
+            next_files = legacy_files
     next_link_url = str(updates.get("link_url") if "link_url" in updates else (submission.link_url or "")).strip()
-    next_mime_type = str(updates.get("mime_type") if "mime_type" in updates else (submission.mime_type or "")).strip().lower()
-    next_file_size_bytes = updates.get("file_size_bytes", submission.file_size_bytes)
 
     if next_type == "file":
-        if not next_file_url:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file_url is required for file submissions")
-        if not next_mime_type:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mime_type is required for file submissions")
-        if next_mime_type not in allowed_mime_types:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file type")
-        if next_file_size_bytes is None or int(next_file_size_bytes) <= 0:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file_size_bytes is required for file submissions")
-        if int(next_file_size_bytes) > max_bytes:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"File size exceeds {max_file_size_mb} MB limit")
+        if not next_files:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one file is required for file submissions")
+        if len(next_files) > 5:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A maximum of 5 files is allowed")
+        for item in next_files:
+            next_mime_type = str(item.get("mime_type") or "").strip().lower()
+            next_file_size_bytes = int(item.get("file_size_bytes") or 0)
+            if not next_mime_type:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mime_type is required for file submissions")
+            if next_mime_type not in allowed_mime_types:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file type")
+            if next_file_size_bytes <= 0:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file_size_bytes is required for file submissions")
+            if next_file_size_bytes > max_bytes:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"File size exceeds {max_file_size_mb} MB limit")
+        first_file = next_files[0]
+        updates["files"] = next_files
+        updates["file_url"] = first_file.get("file_url")
+        updates["file_name"] = first_file.get("file_name")
+        updates["file_size_bytes"] = first_file.get("file_size_bytes")
+        updates["mime_type"] = first_file.get("mime_type")
         updates.pop("link_url", None)
         submission.link_url = None
     elif next_type == "link":
@@ -3632,6 +3708,7 @@ def update_round_submission_as_admin(
         updates.pop("file_name", None)
         updates.pop("file_size_bytes", None)
         updates.pop("mime_type", None)
+        updates["files"] = []
         submission.file_url = None
         submission.file_name = None
         submission.file_size_bytes = None

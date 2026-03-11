@@ -1456,6 +1456,7 @@ def ensure_pda_event_round_submission_tables(engine):
                     file_name VARCHAR(255),
                     file_size_bytes BIGINT,
                     mime_type VARCHAR(255),
+                    files JSONB,
                     link_url VARCHAR(800),
                     notes TEXT,
                     version INTEGER NOT NULL DEFAULT 1,
@@ -1464,6 +1465,28 @@ def ensure_pda_event_round_submission_tables(engine):
                     updated_at TIMESTAMPTZ,
                     updated_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
                 )
+                """
+            )
+        )
+        conn.execute(text("ALTER TABLE pda_event_round_submissions ADD COLUMN IF NOT EXISTS files JSONB"))
+        conn.execute(text("UPDATE pda_event_round_submissions SET files = '[]'::jsonb WHERE files IS NULL"))
+        conn.execute(
+            text(
+                """
+                UPDATE pda_event_round_submissions
+                SET files = jsonb_build_array(
+                    jsonb_strip_nulls(
+                        jsonb_build_object(
+                            'file_url', file_url,
+                            'file_name', file_name,
+                            'file_size_bytes', file_size_bytes,
+                            'mime_type', mime_type
+                        )
+                    )
+                )
+                WHERE submission_type = 'file'
+                  AND (files IS NULL OR jsonb_array_length(files) = 0)
+                  AND file_url IS NOT NULL
                 """
             )
         )
@@ -2680,6 +2703,7 @@ def ensure_persohub_event_round_submission_tables(engine):
                     file_name VARCHAR(255),
                     file_size_bytes BIGINT,
                     mime_type VARCHAR(255),
+                    files JSONB,
                     link_url VARCHAR(800),
                     notes TEXT,
                     version INTEGER NOT NULL DEFAULT 1,
@@ -2688,6 +2712,28 @@ def ensure_persohub_event_round_submission_tables(engine):
                     updated_at TIMESTAMPTZ,
                     updated_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
                 )
+                """
+            )
+        )
+        conn.execute(text("ALTER TABLE persohub_event_round_submissions ADD COLUMN IF NOT EXISTS files JSONB"))
+        conn.execute(text("UPDATE persohub_event_round_submissions SET files = '[]'::jsonb WHERE files IS NULL"))
+        conn.execute(
+            text(
+                """
+                UPDATE persohub_event_round_submissions
+                SET files = jsonb_build_array(
+                    jsonb_strip_nulls(
+                        jsonb_build_object(
+                            'file_url', file_url,
+                            'file_name', file_name,
+                            'file_size_bytes', file_size_bytes,
+                            'mime_type', mime_type
+                        )
+                    )
+                )
+                WHERE submission_type = 'file'
+                  AND (files IS NULL OR jsonb_array_length(files) = 0)
+                  AND file_url IS NOT NULL
                 """
             )
         )

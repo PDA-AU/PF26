@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 import os
 import random
 import string
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -246,6 +246,54 @@ def _default_round_allowed_mime_types() -> List[str]:
     ]
 
 
+def _normalize_submission_files(files: Any) -> List[Dict[str, Any]]:
+    if not isinstance(files, list):
+        return []
+    normalized: List[Dict[str, Any]] = []
+    for item in files:
+        if not isinstance(item, dict):
+            continue
+        file_url = str(item.get("file_url") or "").strip()
+        if not file_url:
+            continue
+        file_name = str(item.get("file_name") or "").strip() or None
+        mime_type = str(item.get("mime_type") or "").strip().lower()
+        file_size_raw = item.get("file_size_bytes")
+        try:
+            file_size_bytes = int(file_size_raw or 0)
+        except (TypeError, ValueError):
+            file_size_bytes = 0
+        normalized.append(
+            {
+                "file_url": file_url,
+                "file_name": file_name,
+                "file_size_bytes": file_size_bytes,
+                "mime_type": mime_type,
+            }
+        )
+    return normalized
+
+
+def _submission_files_from_row(submission: Optional[PdaEventRoundSubmission]) -> List[Dict[str, Any]]:
+    if not submission:
+        return []
+    files = _normalize_submission_files(getattr(submission, "files", None))
+    if files:
+        return files
+    file_url = str(getattr(submission, "file_url", "") or "").strip()
+    if not file_url:
+        return []
+    file_size = int(getattr(submission, "file_size_bytes", 0) or 0)
+    return [
+        {
+            "file_url": file_url,
+            "file_name": str(getattr(submission, "file_name", "") or "").strip() or None,
+            "file_size_bytes": file_size if file_size > 0 else 1,
+            "mime_type": str(getattr(submission, "mime_type", "") or "").strip().lower() or "application/octet-stream",
+        }
+    ]
+
+
 def _submission_payload(
     round_row: PdaEventRound,
     entity_type: PdaEventEntityType,
@@ -254,6 +302,8 @@ def _submission_payload(
     submission: Optional[PdaEventRoundSubmission],
 ) -> PdaRoundSubmissionResponse:
     lock_reason = _round_submission_lock_reason(round_row, submission)
+    submission_files = _submission_files_from_row(submission)
+    first_file = submission_files[0] if submission_files else None
     return PdaRoundSubmissionResponse(
         id=submission.id if submission else None,
         event_id=int(round_row.event_id),
@@ -262,10 +312,11 @@ def _submission_payload(
         user_id=entity_user_id,
         team_id=entity_team_id,
         submission_type=submission.submission_type if submission else None,
-        file_url=submission.file_url if submission else None,
-        file_name=submission.file_name if submission else None,
-        file_size_bytes=submission.file_size_bytes if submission else None,
-        mime_type=submission.mime_type if submission else None,
+        file_url=first_file.get("file_url") if first_file else None,
+        file_name=first_file.get("file_name") if first_file else None,
+        file_size_bytes=first_file.get("file_size_bytes") if first_file else None,
+        mime_type=first_file.get("mime_type") if first_file else None,
+        files=submission_files,
         link_url=submission.link_url if submission else None,
         notes=submission.notes if submission else None,
         version=int(submission.version or 0) if submission else 0,
@@ -489,25 +540,41 @@ def upsert_my_round_submission(
     max_bytes = max_file_size_mb * 1024 * 1024
 
     if submission_type == "file":
-        file_url = str(data.get("file_url") or "").strip()
-        mime_type = str(data.get("mime_type") or "").strip().lower()
-        file_size_bytes = int(data.get("file_size_bytes") or 0)
-        if not file_url:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file_url is required for file submissions")
-        if not mime_type:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mime_type is required for file submissions")
-        if mime_type not in allowed_mime_types:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file type")
-        if file_size_bytes <= 0:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file_size_bytes is required for file submissions")
-        if file_size_bytes > max_bytes:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"File size exceeds {max_file_size_mb} MB limit")
+        submitted_files = _normalize_submission_files(data.get("files"))
+        if not submitted_files and str(data.get("file_url") or "").strip():
+            submitted_files = _normalize_submission_files(
+                [
+                    {
+                        "file_url": data.get("file_url"),
+                        "file_name": data.get("file_name"),
+                        "file_size_bytes": data.get("file_size_bytes"),
+                        "mime_type": data.get("mime_type"),
+                    }
+                ]
+            )
+        if not submitted_files:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one file is required for file submissions")
+        if len(submitted_files) > 5:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A maximum of 5 files is allowed")
+        for item in submitted_files:
+            mime_type = str(item.get("mime_type") or "").strip().lower()
+            file_size_bytes = int(item.get("file_size_bytes") or 0)
+            if not mime_type:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mime_type is required for file submissions")
+            if mime_type not in allowed_mime_types:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file type")
+            if file_size_bytes <= 0:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file_size_bytes is required for file submissions")
+            if file_size_bytes > max_bytes:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"File size exceeds {max_file_size_mb} MB limit")
+        first_file = submitted_files[0]
         if submission:
             submission.submission_type = "file"
-            submission.file_url = file_url
-            submission.file_name = str(data.get("file_name") or "").strip() or None
-            submission.file_size_bytes = file_size_bytes
-            submission.mime_type = mime_type
+            submission.file_url = first_file.get("file_url")
+            submission.file_name = first_file.get("file_name")
+            submission.file_size_bytes = first_file.get("file_size_bytes")
+            submission.mime_type = first_file.get("mime_type")
+            submission.files = submitted_files
             submission.link_url = None
             submission.notes = str(data.get("notes") or "").strip() or None
             submission.version = int(submission.version or 0) + 1
@@ -520,10 +587,11 @@ def upsert_my_round_submission(
                 user_id=entity_user_id,
                 team_id=entity_team_id,
                 submission_type="file",
-                file_url=file_url,
-                file_name=str(data.get("file_name") or "").strip() or None,
-                file_size_bytes=file_size_bytes,
-                mime_type=mime_type,
+                file_url=first_file.get("file_url"),
+                file_name=first_file.get("file_name"),
+                file_size_bytes=first_file.get("file_size_bytes"),
+                mime_type=first_file.get("mime_type"),
+                files=submitted_files,
                 link_url=None,
                 notes=str(data.get("notes") or "").strip() or None,
                 version=1,
@@ -540,6 +608,7 @@ def upsert_my_round_submission(
             submission.file_name = None
             submission.file_size_bytes = None
             submission.mime_type = None
+            submission.files = []
             submission.link_url = link_url
             submission.notes = str(data.get("notes") or "").strip() or None
             submission.version = int(submission.version or 0) + 1
@@ -556,6 +625,7 @@ def upsert_my_round_submission(
                 file_name=None,
                 file_size_bytes=None,
                 mime_type=None,
+                files=[],
                 link_url=link_url,
                 notes=str(data.get("notes") or "").strip() or None,
                 version=1,
