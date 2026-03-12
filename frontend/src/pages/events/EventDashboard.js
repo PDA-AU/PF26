@@ -2254,7 +2254,7 @@ export default function EventDashboard() {
                                                                 <Label className="text-xs font-bold uppercase tracking-[0.1em]">Files (max 5)</Label>
                                                                 <Input
                                                                     type="file"
-                                                                    accept=".pdf,.ppt,.pptx,.mp4,.mov,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/webp,video/mp4,video/quicktime,application/zip"
+                                                                    accept=".pdf,.ppt,.pptx,.mp3,.mp4,.mov,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/webp,video/mp4,video/quicktime,audio/mpeg,application/zip"
                                                                     multiple
                                                                     className="neo-input mt-2"
                                                                     disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}

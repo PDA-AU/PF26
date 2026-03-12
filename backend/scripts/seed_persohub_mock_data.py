@@ -92,6 +92,7 @@ DEFAULT_ALLOWED_MIME_TYPES = [
     "video/mp4",
     "video/quicktime",
     "application/zip",
+    "audio/mpeg",
 ]
 
 

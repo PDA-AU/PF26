@@ -1861,6 +1861,7 @@ class PdaManagedRoundCreate(BaseModel):
             "video/mp4",
             "video/quicktime",
             "application/zip",
+            "audio/mpeg",
         ]
     )
     max_file_size_mb: int = Field(default=25, ge=1, le=500)

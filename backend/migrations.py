@@ -1437,8 +1437,18 @@ def ensure_pda_event_round_submission_tables(engine):
                         "image/jpeg",
                         "image/webp",
                         "application/zip",
+                        "audio/mpeg",
                     ])
                 },
+            )
+            conn.execute(
+                text(
+                    """
+                    UPDATE pda_event_rounds
+                    SET allowed_mime_types = COALESCE(allowed_mime_types, '[]'::jsonb) || '["audio/mpeg"]'::jsonb
+                    WHERE NOT COALESCE(allowed_mime_types, '[]'::jsonb) @> '["audio/mpeg"]'::jsonb
+                    """
+                )
             )
 
         conn.execute(
@@ -2157,8 +2167,18 @@ def ensure_persohub_event_tables(engine):
                         "video/mp4",
                         "video/quicktime",
                         "application/zip",
+                        "audio/mpeg",
                     ])
                 },
+            )
+            conn.execute(
+                text(
+                    """
+                    UPDATE persohub_event_rounds
+                    SET allowed_mime_types = COALESCE(allowed_mime_types, '[]'::jsonb) || '["audio/mpeg"]'::jsonb
+                    WHERE NOT COALESCE(allowed_mime_types, '[]'::jsonb) @> '["audio/mpeg"]'::jsonb
+                    """
+                )
             )
             conn.execute(
                 text(
@@ -2684,8 +2704,18 @@ def ensure_persohub_event_round_submission_tables(engine):
                         "video/mp4",
                         "video/quicktime",
                         "application/zip",
+                        "audio/mpeg",
                     ])
                 },
+            )
+            conn.execute(
+                text(
+                    """
+                    UPDATE persohub_event_rounds
+                    SET allowed_mime_types = COALESCE(allowed_mime_types, '[]'::jsonb) || '["audio/mpeg"]'::jsonb
+                    WHERE NOT COALESCE(allowed_mime_types, '[]'::jsonb) @> '["audio/mpeg"]'::jsonb
+                    """
+                )
             )
 
         conn.execute(

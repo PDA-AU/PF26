@@ -206,6 +206,7 @@ def _default_round_allowed_mime_types() -> List[str]:
         "video/mp4",
         "video/quicktime",
         "application/zip",
+        "audio/mpeg",
     ]
 
 
