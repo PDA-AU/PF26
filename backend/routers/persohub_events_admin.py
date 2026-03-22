@@ -844,6 +844,7 @@ def _apply_wildcard_metadata(
     registration.wildcard_start_round_no = int(start_round_no)
     registration.wildcard_applied_at = datetime.now(timezone.utc)
     registration.wildcard_applied_by_user_id = int(admin_user_id)
+    registration.eliminated_round_no = None
 
 
 def _sync_event_round_count(db: Session, event_id: int) -> None:
@@ -858,11 +859,32 @@ def _sync_event_round_count(db: Session, event_id: int) -> None:
     )
 
 
-def _mapped_wildcard_start_round_no(old_round_nos: List[int], wildcard_start_round_no: Optional[int]) -> Optional[int]:
-    parsed = int(wildcard_start_round_no or 0) or None
+def _mapped_round_boundary(old_round_nos: List[int], round_no_value: Optional[int]) -> Optional[int]:
+    parsed = int(round_no_value or 0) or None
     if parsed is None:
         return None
     return int(sum(1 for round_no in old_round_nos if int(round_no) < parsed) + 1)
+
+
+def _event_manual_elimination_round_no(db: Session, event_id: int) -> int:
+    active_round = (
+        db.query(PersohubEventRound.round_no)
+        .filter(
+            PersohubEventRound.event_id == event_id,
+            PersohubEventRound.state == PersohubEventRoundState.ACTIVE,
+        )
+        .order_by(PersohubEventRound.round_no.asc(), PersohubEventRound.id.asc())
+        .first()
+    )
+    if active_round and active_round.round_no is not None:
+        return int(active_round.round_no)
+
+    max_round_no = (
+        db.query(func.max(PersohubEventRound.round_no))
+        .filter(PersohubEventRound.event_id == event_id)
+        .scalar()
+    )
+    return int(max_round_no or 0) + 1
 
 
 def _normalize_persohub_event_round_numbers(db: Session, event_id: int) -> bool:
@@ -882,17 +904,20 @@ def _normalize_persohub_event_round_numbers(db: Session, event_id: int) -> bool:
         for row in round_rows
         if int(row.round_no) != int(target_round_nos[int(row.id)])
     ]
-    wildcard_regs = (
+    boundary_regs = (
         db.query(PersohubEventRegistration)
         .filter(
             PersohubEventRegistration.event_id == event_id,
-            PersohubEventRegistration.wildcard_start_round_no.isnot(None),
+            (
+                PersohubEventRegistration.wildcard_start_round_no.isnot(None)
+                | PersohubEventRegistration.eliminated_round_no.isnot(None)
+            ),
         )
         .all()
     )
 
     round_numbers_changed = bool(changed_rows)
-    wildcard_changed = False
+    boundary_changed = False
     if round_numbers_changed:
         for row in changed_rows:
             row.round_no = -int(row.id)
@@ -900,16 +925,21 @@ def _normalize_persohub_event_round_numbers(db: Session, event_id: int) -> bool:
         for row in round_rows:
             row.round_no = int(target_round_nos[int(row.id)])
 
-    for registration in wildcard_regs:
+    for registration in boundary_regs:
         current_start_round_no = int(getattr(registration, "wildcard_start_round_no", 0) or 0) or None
-        mapped_start_round_no = _mapped_wildcard_start_round_no(old_round_nos, current_start_round_no)
+        mapped_start_round_no = _mapped_round_boundary(old_round_nos, current_start_round_no)
         if mapped_start_round_no != current_start_round_no:
             registration.wildcard_start_round_no = mapped_start_round_no
-            wildcard_changed = True
+            boundary_changed = True
+        current_eliminated_round_no = int(getattr(registration, "eliminated_round_no", 0) or 0) or None
+        mapped_eliminated_round_no = _mapped_round_boundary(old_round_nos, current_eliminated_round_no)
+        if mapped_eliminated_round_no != current_eliminated_round_no:
+            registration.eliminated_round_no = mapped_eliminated_round_no
+            boundary_changed = True
 
-    if round_numbers_changed or wildcard_changed:
+    if round_numbers_changed or boundary_changed:
         db.flush()
-    return bool(round_numbers_changed or wildcard_changed)
+    return bool(round_numbers_changed or boundary_changed)
 
 
 def _log_event_admin_action(
@@ -2342,7 +2372,12 @@ def update_participant_status(
     ).first()
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Participant not found")
-    row.status = PersohubEventRegistrationStatus.ACTIVE if normalized == "active" else PersohubEventRegistrationStatus.ELIMINATED
+    if normalized == "active":
+        row.status = PersohubEventRegistrationStatus.ACTIVE
+        row.eliminated_round_no = None
+    else:
+        row.status = PersohubEventRegistrationStatus.ELIMINATED
+        row.eliminated_round_no = _event_manual_elimination_round_no(db, event.id)
     db.commit()
     _log_event_admin_action(
         db,
@@ -2529,13 +2564,23 @@ def update_registration_status_bulk(
         target_status = deduped_updates.get(target_id)
         if target_status is None:
             continue
+        previous_status = row.status
+        previous_eliminated_round_no = row.eliminated_round_no
         next_status = (
             PersohubEventRegistrationStatus.ACTIVE
             if target_status == "Active"
             else PersohubEventRegistrationStatus.ELIMINATED
         )
-        if row.status != next_status:
+        if next_status == PersohubEventRegistrationStatus.ACTIVE:
+            if row.eliminated_round_no is not None:
+                row.eliminated_round_no = None
             row.status = next_status
+        else:
+            next_eliminated_round_no = _event_manual_elimination_round_no(db, event.id)
+            if row.eliminated_round_no != next_eliminated_round_no:
+                row.eliminated_round_no = next_eliminated_round_no
+            row.status = next_status
+        if row.status != previous_status or row.eliminated_round_no != previous_eliminated_round_no:
             updated_count += 1
 
     db.commit()
@@ -3319,6 +3364,7 @@ def update_round(
             absent = (target_score is None) or (not bool(target_score.is_present))
             if eliminate_absent and absent:
                 reg.status = PersohubEventRegistrationStatus.ELIMINATED
+                reg.eliminated_round_no = int(round_row.round_no)
                 continue
             shortlist_regs.append(reg)
 
@@ -3357,11 +3403,21 @@ def update_round(
         if elimination_type == "top_k":
             cutoff = max(0, int(round_row.elimination_value))
             for idx, (reg, _, _) in enumerate(totals):
-                reg.status = PersohubEventRegistrationStatus.ACTIVE if idx < cutoff else PersohubEventRegistrationStatus.ELIMINATED
+                if idx < cutoff:
+                    reg.status = PersohubEventRegistrationStatus.ACTIVE
+                    reg.eliminated_round_no = None
+                else:
+                    reg.status = PersohubEventRegistrationStatus.ELIMINATED
+                    reg.eliminated_round_no = int(round_row.round_no)
         elif elimination_type == "min_score":
             threshold = float(round_row.elimination_value)
             for reg, score, _ in totals:
-                reg.status = PersohubEventRegistrationStatus.ACTIVE if score >= threshold else PersohubEventRegistrationStatus.ELIMINATED
+                if score >= threshold:
+                    reg.status = PersohubEventRegistrationStatus.ACTIVE
+                    reg.eliminated_round_no = None
+                else:
+                    reg.status = PersohubEventRegistrationStatus.ELIMINATED
+                    reg.eliminated_round_no = int(round_row.round_no)
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid elimination type")
 

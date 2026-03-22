@@ -2445,6 +2445,8 @@ def ensure_persohub_event_wildcard_columns(engine):
     with engine.begin() as conn:
         if not _table_exists(conn, "persohub_event_registrations"):
             return
+        if not _column_exists(conn, "persohub_event_registrations", "eliminated_round_no"):
+            conn.execute(text("ALTER TABLE persohub_event_registrations ADD COLUMN eliminated_round_no INTEGER"))
         if not _column_exists(conn, "persohub_event_registrations", "wildcard_seed_score"):
             conn.execute(text("ALTER TABLE persohub_event_registrations ADD COLUMN wildcard_seed_score DOUBLE PRECISION"))
         if not _column_exists(conn, "persohub_event_registrations", "wildcard_start_round_no"):
@@ -2457,6 +2459,12 @@ def ensure_persohub_event_wildcard_columns(engine):
             text(
                 "CREATE INDEX IF NOT EXISTS idx_persohub_event_registration_event_wildcard "
                 "ON persohub_event_registrations(event_id, entity_type, wildcard_start_round_no)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_persohub_event_registration_event_eliminated_round "
+                "ON persohub_event_registrations(event_id, entity_type, eliminated_round_no)"
             )
         )
 
@@ -3122,8 +3130,8 @@ def backfill_persohub_event_round_numbers_once(engine):
         )
 
 
-def _mapped_persohub_wildcard_start_round_no(old_round_nos: List[int], wildcard_start_round_no: Optional[int]) -> Optional[int]:
-    parsed = int(wildcard_start_round_no or 0) or None
+def _mapped_persohub_round_boundary(old_round_nos: List[int], round_no_value: Optional[int]) -> Optional[int]:
+    parsed = int(round_no_value or 0) or None
     if parsed is None:
         return None
     return int(sum(1 for round_no in old_round_nos if int(round_no) < parsed) + 1)
@@ -3177,38 +3185,169 @@ def _normalize_persohub_event_round_numbers_conn(conn, event_id: int) -> bool:
                 {"round_no": int(target_round_nos[int(row.id)]), "round_id": int(row.id)},
             )
 
-    wildcard_rows = conn.execute(
+    registration_rows = conn.execute(
         text(
             """
-            SELECT id, wildcard_start_round_no
+            SELECT id, wildcard_start_round_no, eliminated_round_no
             FROM persohub_event_registrations
             WHERE event_id = :event_id
-              AND wildcard_start_round_no IS NOT NULL
+              AND (
+                wildcard_start_round_no IS NOT NULL
+                OR eliminated_round_no IS NOT NULL
+              )
             """
         ),
         {"event_id": event_id},
     ).fetchall()
-    wildcard_changed = False
-    for row in wildcard_rows:
+    registration_changed = False
+    for row in registration_rows:
         current_start_round_no = int(row.wildcard_start_round_no or 0) or None
-        mapped_start_round_no = _mapped_persohub_wildcard_start_round_no(old_round_nos, current_start_round_no)
-        if mapped_start_round_no != current_start_round_no:
+        mapped_start_round_no = _mapped_persohub_round_boundary(old_round_nos, current_start_round_no)
+        current_eliminated_round_no = int(row.eliminated_round_no or 0) or None
+        mapped_eliminated_round_no = _mapped_persohub_round_boundary(old_round_nos, current_eliminated_round_no)
+        if mapped_start_round_no != current_start_round_no or mapped_eliminated_round_no != current_eliminated_round_no:
             conn.execute(
                 text(
                     """
                     UPDATE persohub_event_registrations
-                    SET wildcard_start_round_no = :wildcard_start_round_no
+                    SET wildcard_start_round_no = :wildcard_start_round_no,
+                        eliminated_round_no = :eliminated_round_no
                     WHERE id = :registration_id
                     """
                 ),
                 {
                     "wildcard_start_round_no": mapped_start_round_no,
+                    "eliminated_round_no": mapped_eliminated_round_no,
                     "registration_id": int(row.id),
                 },
             )
-            wildcard_changed = True
+            registration_changed = True
 
-    return bool(round_numbers_changed or wildcard_changed)
+    return bool(round_numbers_changed or registration_changed)
+
+
+def backfill_persohub_event_eliminated_round_once(engine):
+    marker_key = "migration_backfill_persohub_event_eliminated_round_v1"
+    with engine.begin() as conn:
+        if not _table_exists(conn, "system_config"):
+            return
+        if not _table_exists(conn, "persohub_event_registrations"):
+            return
+        if not _column_exists(conn, "persohub_event_registrations", "eliminated_round_no"):
+            return
+
+        marker_exists = bool(
+            conn.execute(
+                text("SELECT 1 FROM system_config WHERE key = :key"),
+                {"key": marker_key},
+            ).fetchone()
+        )
+        if marker_exists:
+            return
+
+        if _table_exists(conn, "persohub_events") and _table_exists(conn, "persohub_event_rounds"):
+            event_rows = conn.execute(text("SELECT id FROM persohub_events ORDER BY id ASC")).fetchall()
+            for event_row in event_rows:
+                event_id = int(event_row.id)
+                round_rows = conn.execute(
+                    text(
+                        """
+                        SELECT id, round_no, state
+                        FROM persohub_event_rounds
+                        WHERE event_id = :event_id
+                        ORDER BY round_no ASC, id ASC
+                        """
+                    ),
+                    {"event_id": event_id},
+                ).fetchall()
+                if not round_rows:
+                    continue
+                round_nos = [int(row.round_no) for row in round_rows]
+                earliest_revealed_or_completed = next(
+                    (
+                        int(row.round_no)
+                        for row in round_rows
+                        if str(row.state or "").split(".")[-1].lower() in {"completed", "reveal"}
+                    ),
+                    None,
+                )
+                max_round_no_plus_one = int(max(round_nos) + 1)
+
+                registration_rows = conn.execute(
+                    text(
+                        """
+                        SELECT id, entity_type, user_id, team_id
+                        FROM persohub_event_registrations
+                        WHERE event_id = :event_id
+                          AND status = 'ELIMINATED'
+                          AND eliminated_round_no IS NULL
+                        ORDER BY id ASC
+                        """
+                    ),
+                    {"event_id": event_id},
+                ).fetchall()
+                for registration_row in registration_rows:
+                    entity_type = str(registration_row.entity_type or "").upper()
+                    score_rows = conn.execute(
+                        text(
+                            """
+                            SELECT r.round_no,
+                                   COALESCE(s.normalized_score, 0) AS normalized_score,
+                                   COALESCE(s.total_score, 0) AS total_score,
+                                   COALESCE(s.is_present, FALSE) AS is_present
+                            FROM persohub_event_scores s
+                            JOIN persohub_event_rounds r ON r.id = s.round_id
+                            WHERE s.event_id = :event_id
+                              AND s.entity_type = :entity_type
+                              AND (
+                                (:entity_type = 'USER' AND s.user_id = :user_id)
+                                OR
+                                (:entity_type = 'TEAM' AND s.team_id = :team_id)
+                              )
+                            ORDER BY r.round_no ASC, r.id ASC
+                            """
+                        ),
+                        {
+                            "event_id": event_id,
+                            "entity_type": entity_type,
+                            "user_id": registration_row.user_id,
+                            "team_id": registration_row.team_id,
+                        },
+                    ).fetchall()
+                    last_active_round_no = None
+                    for score_row in score_rows:
+                        if bool(score_row.is_present) or float(score_row.normalized_score or 0) > 0 or float(score_row.total_score or 0) > 0:
+                            last_active_round_no = int(score_row.round_no)
+                    if last_active_round_no is not None:
+                        next_round_no = next((round_no for round_no in round_nos if round_no > last_active_round_no), None)
+                        eliminated_round_no = int(next_round_no or max_round_no_plus_one)
+                    else:
+                        eliminated_round_no = int(earliest_revealed_or_completed or (round_nos[0] if round_nos else 1))
+
+                    conn.execute(
+                        text(
+                            """
+                            UPDATE persohub_event_registrations
+                            SET eliminated_round_no = :eliminated_round_no
+                            WHERE id = :registration_id
+                            """
+                        ),
+                        {
+                            "eliminated_round_no": eliminated_round_no,
+                            "registration_id": int(registration_row.id),
+                        },
+                    )
+
+        conn.execute(
+            text(
+                """
+                INSERT INTO system_config (key, value)
+                VALUES (:key, 'done')
+                ON CONFLICT (key) DO UPDATE SET value = 'done'
+                """
+            ),
+            {"key": marker_key},
+        )
 
 
 def resolve_user_identifier_collisions_once(engine):

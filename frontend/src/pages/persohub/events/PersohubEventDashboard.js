@@ -358,7 +358,7 @@ export default function EventDashboard() {
     const paymentId = String(paymentConfig?.payment_id || '').trim();
     const clubOwnerMobile = String(paymentConfig?.club_owner_mobile || '').trim();
     const isPendingRegistration = registrationStatus === 'pending';
-    const isActiveRegistration = registrationStatus === 'active' || registrationStatus === 'eliminated';
+    const isActiveRegistration = registrationStatus === 'active';
     const isWildcardRegistration = Boolean(dashboard?.is_wildcard);
 
     const isLeader = useMemo(() => {
@@ -383,7 +383,7 @@ export default function EventDashboard() {
         if (registrationStatus === 'eliminated') return 'Eliminated';
         return eventProfile?.status || 'Active';
     }, [eventProfile?.status, isRegistered, registrationStatus]);
-    const canViewRoundSubmission = isLoggedIn && isActiveRegistration;
+    const canViewRoundSubmission = isLoggedIn && isRegistered;
     const canEditRoundSubmission = canViewRoundSubmission && (!isTeamEvent || isLeader);
     const participantRoundStatuses = useMemo(() => {
         if (!Array.isArray(roundStatuses) || roundStatuses.length === 0) return [];
@@ -1977,7 +1977,11 @@ export default function EventDashboard() {
                                                                             data-testid={`event-dashboard-round-action-${round.round_no}`}
                                                                         >
                                                                             {roundForDetails?.requires_submission
-                                                                                ? (hasRoundSubmission ? 'View Work' : 'Submit Work')
+                                                                                ? (
+                                                                                    hasRoundSubmission
+                                                                                        ? 'View Work'
+                                                                                        : (normalizeText(round.displayStatus) === 'eliminated' ? 'View Round' : 'Submit Work')
+                                                                                )
                                                                                 : 'View Round'}
                                                                         </Button>
                                                                     ) : null}
@@ -2779,118 +2783,122 @@ export default function EventDashboard() {
                                                             if (!lockReasonText || lockReasonText === 'Round is closed for submission') return null;
                                                             return <p className="text-xs font-bold text-red-600">{lockReasonText}</p>;
                                                         })()}
-                                                        <div>
-                                                            <Label className="text-xs font-bold uppercase tracking-[0.1em]">Submission Type</Label>
-                                                            <Select
-                                                                value={normalizeSubmissionType(submissionType)}
-                                                                onValueChange={(value) => setSubmissionType(normalizeSubmissionType(value))}
-                                                                disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}
-                                                            >
-                                                                <SelectTrigger className="neo-input mt-2"><SelectValue /></SelectTrigger>
-                                                                <SelectContent>
-                                                                    <SelectItem value="file">File Upload</SelectItem>
-                                                                    <SelectItem value="link">External Link</SelectItem>
-                                                                </SelectContent>
-                                                            </Select>
-                                                        </div>
-                                                        {normalizeSubmissionType(submissionType) === 'file' ? (
-                                                            <div>
-                                                                <Label className="text-xs font-bold uppercase tracking-[0.1em]">Files (max 5)</Label>
-                                                                <Input
-                                                                    type="file"
-                                                                    accept=".pdf,.ppt,.pptx,.mp3,.mp4,.mov,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/webp,video/mp4,video/quicktime,audio/mpeg,application/zip"
-                                                                    multiple
-                                                                    className="neo-input mt-2"
-                                                                    disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}
-                                                                    onChange={(e) => {
-                                                                        const files = Array.from(e.target.files || []);
-                                                                        const allowedNewCount = Math.max(0, MAX_SUBMISSION_FILES - existingSubmissionFiles.length - newSubmissionFiles.length);
-                                                                        if (files.length > allowedNewCount) {
-                                                                            toast.error(`You can add ${allowedNewCount} more file(s)`);
-                                                                        }
-                                                                        const accepted = files.slice(0, allowedNewCount);
-                                                                        setNewSubmissionFiles((prev) => [...prev, ...accepted].slice(0, MAX_SUBMISSION_FILES));
-                                                                        e.target.value = '';
-                                                                    }}
-                                                                />
-                                                                {existingSubmissionFiles.length > 0 ? (
-                                                                    <div className="mt-2 space-y-1">
-                                                                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-600">Retained Files</p>
-                                                                        {existingSubmissionFiles.map((item, idx) => (
-                                                                            <div key={`${item.file_url}-${idx}`} className="flex items-center justify-between rounded-md border border-slate-200 px-2 py-1 text-xs">
-                                                                                <a className="truncate pr-2 underline" href={item.file_url} target="_blank" rel="noreferrer">{item.file_name || `File ${idx + 1}`}</a>
-                                                                                <Button type="button" variant="outline" className="h-6 px-2 text-xs" onClick={() => setExistingSubmissionFiles((prev) => prev.filter((_, i) => i !== idx))}>Remove</Button>
-                                                                            </div>
-                                                                        ))}
-                                                                    </div>
-                                                                ) : null}
-                                                                {newSubmissionFiles.length > 0 ? (
-                                                                    <div className="mt-2 space-y-1">
-                                                                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-600">New Files</p>
-                                                                        {newSubmissionFiles.map((file, idx) => (
-                                                                            <div key={`${file.name}-${file.size}-${idx}`} className="flex items-center justify-between rounded-md border border-slate-200 px-2 py-1 text-xs">
-                                                                                <span className="truncate pr-2">{file.name} ({formatFileSize(file.size)})</span>
-                                                                                <Button type="button" variant="outline" className="h-6 px-2 text-xs" onClick={() => setNewSubmissionFiles((prev) => prev.filter((_, i) => i !== idx))}>Remove</Button>
-                                                                            </div>
-                                                                        ))}
-                                                                    </div>
-                                                                ) : null}
-                                                            </div>
-                                                        ) : (
-                                                            <div>
-                                                                <Label className="text-xs font-bold uppercase tracking-[0.1em]">Submission Link</Label>
-                                                                <Input
-                                                                    value={submissionLink}
-                                                                    onChange={(e) => setSubmissionLink(e.target.value)}
-                                                                    placeholder="https://..."
-                                                                    className="neo-input mt-2"
-                                                                    disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}
-                                                                />
-                                                            </div>
-                                                        )}
-                                                        <div>
-                                                            <Label className="text-xs font-bold uppercase tracking-[0.1em]">Notes</Label>
-                                                            <Input
-                                                                value={submissionNotes}
-                                                                onChange={(e) => setSubmissionNotes(e.target.value)}
-                                                                className="neo-input mt-2"
-                                                                disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}
-                                                            />
-                                                        </div>
-                                                        {submittingRoundWork && normalizeSubmissionType(submissionType) === 'file' && submissionUploadProgress !== null ? (
-                                                            <div className="space-y-1">
-                                                                <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
-                                                                    <span>Uploading files...</span>
-                                                                    <span>{submissionUploadProgress}%</span>
+                                                        {normalizeSubmissionLockReason(roundSubmission?.lock_reason) === 'Participant is eliminated for this round' ? null : (
+                                                            <>
+                                                                <div>
+                                                                    <Label className="text-xs font-bold uppercase tracking-[0.1em]">Submission Type</Label>
+                                                                    <Select
+                                                                        value={normalizeSubmissionType(submissionType)}
+                                                                        onValueChange={(value) => setSubmissionType(normalizeSubmissionType(value))}
+                                                                        disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}
+                                                                    >
+                                                                        <SelectTrigger className="neo-input mt-2"><SelectValue /></SelectTrigger>
+                                                                        <SelectContent>
+                                                                            <SelectItem value="file">File Upload</SelectItem>
+                                                                            <SelectItem value="link">External Link</SelectItem>
+                                                                        </SelectContent>
+                                                                    </Select>
                                                                 </div>
-                                                                <div className="h-2 w-full overflow-hidden rounded border border-black bg-white">
-                                                                    <div
-                                                                        className="h-full bg-[#8B5CF6] transition-all duration-200"
-                                                                        style={{ width: `${submissionUploadProgress}%` }}
+                                                                {normalizeSubmissionType(submissionType) === 'file' ? (
+                                                                    <div>
+                                                                        <Label className="text-xs font-bold uppercase tracking-[0.1em]">Files (max 5)</Label>
+                                                                        <Input
+                                                                            type="file"
+                                                                            accept=".pdf,.ppt,.pptx,.mp3,.mp4,.mov,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/webp,video/mp4,video/quicktime,audio/mpeg,application/zip"
+                                                                            multiple
+                                                                            className="neo-input mt-2"
+                                                                            disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}
+                                                                            onChange={(e) => {
+                                                                                const files = Array.from(e.target.files || []);
+                                                                                const allowedNewCount = Math.max(0, MAX_SUBMISSION_FILES - existingSubmissionFiles.length - newSubmissionFiles.length);
+                                                                                if (files.length > allowedNewCount) {
+                                                                                    toast.error(`You can add ${allowedNewCount} more file(s)`);
+                                                                                }
+                                                                                const accepted = files.slice(0, allowedNewCount);
+                                                                                setNewSubmissionFiles((prev) => [...prev, ...accepted].slice(0, MAX_SUBMISSION_FILES));
+                                                                                e.target.value = '';
+                                                                            }}
+                                                                        />
+                                                                        {existingSubmissionFiles.length > 0 ? (
+                                                                            <div className="mt-2 space-y-1">
+                                                                                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-600">Retained Files</p>
+                                                                                {existingSubmissionFiles.map((item, idx) => (
+                                                                                    <div key={`${item.file_url}-${idx}`} className="flex items-center justify-between rounded-md border border-slate-200 px-2 py-1 text-xs">
+                                                                                        <a className="truncate pr-2 underline" href={item.file_url} target="_blank" rel="noreferrer">{item.file_name || `File ${idx + 1}`}</a>
+                                                                                        <Button type="button" variant="outline" className="h-6 px-2 text-xs" onClick={() => setExistingSubmissionFiles((prev) => prev.filter((_, i) => i !== idx))}>Remove</Button>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        ) : null}
+                                                                        {newSubmissionFiles.length > 0 ? (
+                                                                            <div className="mt-2 space-y-1">
+                                                                                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-600">New Files</p>
+                                                                                {newSubmissionFiles.map((file, idx) => (
+                                                                                    <div key={`${file.name}-${file.size}-${idx}`} className="flex items-center justify-between rounded-md border border-slate-200 px-2 py-1 text-xs">
+                                                                                        <span className="truncate pr-2">{file.name} ({formatFileSize(file.size)})</span>
+                                                                                        <Button type="button" variant="outline" className="h-6 px-2 text-xs" onClick={() => setNewSubmissionFiles((prev) => prev.filter((_, i) => i !== idx))}>Remove</Button>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        ) : null}
+                                                                    </div>
+                                                                ) : (
+                                                                    <div>
+                                                                        <Label className="text-xs font-bold uppercase tracking-[0.1em]">Submission Link</Label>
+                                                                        <Input
+                                                                            value={submissionLink}
+                                                                            onChange={(e) => setSubmissionLink(e.target.value)}
+                                                                            placeholder="https://..."
+                                                                            className="neo-input mt-2"
+                                                                            disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}
+                                                                        />
+                                                                    </div>
+                                                                )}
+                                                                <div>
+                                                                    <Label className="text-xs font-bold uppercase tracking-[0.1em]">Notes</Label>
+                                                                    <Input
+                                                                        value={submissionNotes}
+                                                                        onChange={(e) => setSubmissionNotes(e.target.value)}
+                                                                        className="neo-input mt-2"
+                                                                        disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}
                                                                     />
                                                                 </div>
-                                                            </div>
-                                                        ) : null}
-                                                        <Button
-                                                            className="w-full border-2 border-black bg-[#8B5CF6] text-white shadow-neo"
-                                                            disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}
-                                                            onClick={submitRoundWork}
-                                                        >
-                                                            <Upload className="mr-2 h-4 w-4" />
-                                                            {submittingRoundWork
-                                                                ? 'Submitting...'
-                                                                : (roundSubmission?.id ? 'Submitted (can be replaced)' : 'Submit Work')}
-                                                        </Button>
-                                                        {roundSubmission?.id ? (
-                                                            <Button
-                                                                variant="outline"
-                                                                className="w-full border-2 border-black bg-white text-red-700 shadow-neo"
-                                                                disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}
-                                                                onClick={removeRoundSubmission}
-                                                            >
-                                                                {removingRoundWork ? 'Removing...' : 'Remove Submitted Work'}
-                                                            </Button>
-                                                        ) : null}
+                                                                {submittingRoundWork && normalizeSubmissionType(submissionType) === 'file' && submissionUploadProgress !== null ? (
+                                                                    <div className="space-y-1">
+                                                                        <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
+                                                                            <span>Uploading files...</span>
+                                                                            <span>{submissionUploadProgress}%</span>
+                                                                        </div>
+                                                                        <div className="h-2 w-full overflow-hidden rounded border border-black bg-white">
+                                                                            <div
+                                                                                className="h-full bg-[#8B5CF6] transition-all duration-200"
+                                                                                style={{ width: `${submissionUploadProgress}%` }}
+                                                                            />
+                                                                        </div>
+                                                                    </div>
+                                                                ) : null}
+                                                                <Button
+                                                                    className="w-full border-2 border-black bg-[#8B5CF6] text-white shadow-neo"
+                                                                    disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}
+                                                                    onClick={submitRoundWork}
+                                                                >
+                                                                    <Upload className="mr-2 h-4 w-4" />
+                                                                    {submittingRoundWork
+                                                                        ? 'Submitting...'
+                                                                        : (roundSubmission?.id ? 'Submitted (can be replaced)' : 'Submit Work')}
+                                                                </Button>
+                                                                {roundSubmission?.id ? (
+                                                                    <Button
+                                                                        variant="outline"
+                                                                        className="w-full border-2 border-black bg-white text-red-700 shadow-neo"
+                                                                        disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}
+                                                                        onClick={removeRoundSubmission}
+                                                                    >
+                                                                        {removingRoundWork ? 'Removing...' : 'Remove Submitted Work'}
+                                                                    </Button>
+                                                                ) : null}
+                                                            </>
+                                                        )}
                                                     </div>
                                                 )}
                                             </div>

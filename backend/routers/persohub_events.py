@@ -253,6 +253,7 @@ def _resolve_submission_entity(
     event: PersohubEvent,
     user: PdaUser,
     enforce_team_leader: bool = False,
+    require_active: bool = True,
 ) -> Tuple[PersohubEventRegistration, PersohubEventEntityType, Optional[int], Optional[int], Optional[PersohubEventTeam], bool]:
     registration = None
     entity_type = PersohubEventEntityType.USER
@@ -282,10 +283,33 @@ def _resolve_submission_entity(
 
     if not registration:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration not found")
-    _ensure_registration_is_active(registration)
+    if require_active:
+        _ensure_registration_is_active(registration)
     if enforce_team_leader and event.participant_mode == PersohubEventParticipantMode.TEAM and not is_team_leader:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only team leader can submit for this round")
     return registration, entity_type, entity_user_id, entity_team_id, team, is_team_leader
+
+
+def _registration_is_eliminated_for_round(
+    registration: PersohubEventRegistration,
+    round_row: PersohubEventRound,
+) -> bool:
+    eliminated_round_no = int(getattr(registration, "eliminated_round_no", 0) or 0) or None
+    if eliminated_round_no is not None:
+        return int(round_row.round_no or 0) >= eliminated_round_no
+    return registration.status == PersohubEventRegistrationStatus.ELIMINATED
+
+
+def _submission_lock_reason(
+    registration: PersohubEventRegistration,
+    round_row: PersohubEventRound,
+    submission: Optional[PersohubEventRoundSubmission],
+) -> Optional[str]:
+    if registration.status == PersohubEventRegistrationStatus.PENDING:
+        return "Registration is pending confirmation"
+    if _registration_is_eliminated_for_round(registration, round_row):
+        return "Participant is eliminated for this round"
+    return _round_submission_lock_reason(round_row, submission)
 
 
 def _round_submission_lock_reason(round_row: PersohubEventRound, submission: Optional[PersohubEventRoundSubmission]) -> Optional[str]:
@@ -369,13 +393,14 @@ def _submission_files_from_row(submission: Optional[PersohubEventRoundSubmission
 
 
 def _submission_payload(
+    registration: PersohubEventRegistration,
     round_row: PersohubEventRound,
     entity_type: PersohubEventEntityType,
     entity_user_id: Optional[int],
     entity_team_id: Optional[int],
     submission: Optional[PersohubEventRoundSubmission],
 ) -> PersohubRoundSubmissionResponse:
-    lock_reason = _round_submission_lock_reason(round_row, submission)
+    lock_reason = _submission_lock_reason(registration, round_row, submission)
     submission_files = _submission_files_from_row(submission)
     first_file = submission_files[0] if submission_files else None
     return PersohubRoundSubmissionResponse(
@@ -759,7 +784,13 @@ def get_my_round_submission(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
     if not bool(round_row.requires_submission):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Round does not require submission")
-    _, entity_type, entity_user_id, entity_team_id, _, _ = _resolve_submission_entity(db, event, user, enforce_team_leader=False)
+    registration, entity_type, entity_user_id, entity_team_id, _, _ = _resolve_submission_entity(
+        db,
+        event,
+        user,
+        enforce_team_leader=False,
+        require_active=False,
+    )
     submission = db.query(PersohubEventRoundSubmission).filter(
         PersohubEventRoundSubmission.event_id == event.id,
         PersohubEventRoundSubmission.round_id == round_row.id,
@@ -767,7 +798,7 @@ def get_my_round_submission(
         PersohubEventRoundSubmission.user_id == entity_user_id,
         PersohubEventRoundSubmission.team_id == entity_team_id,
     ).first()
-    return _submission_payload(round_row, entity_type, entity_user_id, entity_team_id, submission)
+    return _submission_payload(registration, round_row, entity_type, entity_user_id, entity_team_id, submission)
 
 
 @router.post("/persohub/persohub-events/{slug}/rounds/{round_id}/submission/presign", response_model=PresignResponse)
@@ -785,7 +816,13 @@ def presign_my_round_submission(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Round not found")
     if not bool(round_row.requires_submission):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Round does not require submission")
-    _, entity_type, entity_user_id, entity_team_id, _, _ = _resolve_submission_entity(db, event, user, enforce_team_leader=True)
+    registration, entity_type, entity_user_id, entity_team_id, _, _ = _resolve_submission_entity(
+        db,
+        event,
+        user,
+        enforce_team_leader=True,
+        require_active=False,
+    )
     existing = db.query(PersohubEventRoundSubmission).filter(
         PersohubEventRoundSubmission.event_id == event.id,
         PersohubEventRoundSubmission.round_id == round_row.id,
@@ -793,7 +830,7 @@ def presign_my_round_submission(
         PersohubEventRoundSubmission.user_id == entity_user_id,
         PersohubEventRoundSubmission.team_id == entity_team_id,
     ).first()
-    lock_reason = _round_submission_lock_reason(round_row, existing)
+    lock_reason = _submission_lock_reason(registration, round_row, existing)
     if lock_reason:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=lock_reason)
 
@@ -831,7 +868,13 @@ def upsert_my_round_submission(
     if not bool(round_row.requires_submission):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Round does not require submission")
 
-    _, entity_type, entity_user_id, entity_team_id, _, _ = _resolve_submission_entity(db, event, user, enforce_team_leader=True)
+    registration, entity_type, entity_user_id, entity_team_id, _, _ = _resolve_submission_entity(
+        db,
+        event,
+        user,
+        enforce_team_leader=True,
+        require_active=False,
+    )
     submission = db.query(PersohubEventRoundSubmission).filter(
         PersohubEventRoundSubmission.event_id == event.id,
         PersohubEventRoundSubmission.round_id == round_row.id,
@@ -840,7 +883,7 @@ def upsert_my_round_submission(
         PersohubEventRoundSubmission.team_id == entity_team_id,
     ).first()
 
-    lock_reason = _round_submission_lock_reason(round_row, submission)
+    lock_reason = _submission_lock_reason(registration, round_row, submission)
     if lock_reason:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=lock_reason)
 
@@ -951,7 +994,7 @@ def upsert_my_round_submission(
 
     db.commit()
     db.refresh(submission)
-    return _submission_payload(round_row, entity_type, entity_user_id, entity_team_id, submission)
+    return _submission_payload(registration, round_row, entity_type, entity_user_id, entity_team_id, submission)
 
 
 @router.delete("/persohub/persohub-events/{slug}/rounds/{round_id}/submission", response_model=PersohubRoundSubmissionResponse)
@@ -969,7 +1012,13 @@ def delete_my_round_submission(
     if not bool(round_row.requires_submission):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Round does not require submission")
 
-    _, entity_type, entity_user_id, entity_team_id, _, _ = _resolve_submission_entity(db, event, user, enforce_team_leader=True)
+    registration, entity_type, entity_user_id, entity_team_id, _, _ = _resolve_submission_entity(
+        db,
+        event,
+        user,
+        enforce_team_leader=True,
+        require_active=False,
+    )
     submission = db.query(PersohubEventRoundSubmission).filter(
         PersohubEventRoundSubmission.event_id == event.id,
         PersohubEventRoundSubmission.round_id == round_row.id,
@@ -978,14 +1027,14 @@ def delete_my_round_submission(
         PersohubEventRoundSubmission.team_id == entity_team_id,
     ).first()
 
-    lock_reason = _round_submission_lock_reason(round_row, submission)
+    lock_reason = _submission_lock_reason(registration, round_row, submission)
     if lock_reason:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=lock_reason)
 
     if submission:
         db.delete(submission)
         db.commit()
-    return _submission_payload(round_row, entity_type, entity_user_id, entity_team_id, None)
+    return _submission_payload(registration, round_row, entity_type, entity_user_id, entity_team_id, None)
 
 
 @router.get("/persohub/persohub-events/{slug}/dashboard", response_model=PersohubManagedEventDashboard)
@@ -1812,6 +1861,7 @@ def my_round_status(
     registration_status_text = str(
         registration.status.value if hasattr(registration.status, "value") else registration.status or ""
     ).strip().lower()
+    eliminated_round_no = int(getattr(registration, "eliminated_round_no", 0) or 0) or None
     for round_row in rounds:
         score_row = db.query(PersohubEventScore).filter(
             PersohubEventScore.event_id == event.id,
@@ -1828,7 +1878,7 @@ def my_round_status(
         elif not is_revealed:
             status_label = "Pending"
             is_present = None
-        elif registration.status == PersohubEventRegistrationStatus.ELIMINATED:
+        elif eliminated_round_no is not None and int(round_row.round_no or 0) >= eliminated_round_no:
             status_label = "Eliminated"
             is_present = bool(score_row.is_present) if score_row else None
         else:
@@ -1847,10 +1897,18 @@ def my_round_status(
         statuses.append(
             {
                 "round_no": f"PF{int(round_row.round_no):02d}",
+                "round_id": int(round_row.id),
                 "round_name": round_row.name,
                 "round_state": state_value,
                 "status": status_label,
                 "is_present": is_present,
+                "requires_submission": bool(round_row.requires_submission),
+                "submission_mode": getattr(round_row, "submission_mode", None),
+                "submission_deadline": round_row.submission_deadline.isoformat() if round_row.submission_deadline else None,
+                "allow_late_submission": bool(getattr(round_row, "allow_late_submission", False)),
+                "external_url": str(getattr(round_row, "external_url", "") or "").strip() or None,
+                "external_url_name": str(getattr(round_row, "external_url_name", "") or "").strip() or None,
+                "round_description": str(getattr(round_row, "description", "") or ""),
                 "panel_no": panel_no,
                 "panel_name": panel_name,
                 "panel_link": panel_link,
