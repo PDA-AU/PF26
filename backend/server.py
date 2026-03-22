@@ -45,6 +45,7 @@ from migrations import (
     ensure_pda_event_panel_tables,
     rename_community_event_namespace_to_persohub,
     ensure_persohub_event_tables,
+    ensure_persohub_event_wildcard_columns,
     ensure_event_registration_pending_status,
     ensure_persohub_events_parity_flag,
     ensure_persohub_event_open_columns,
@@ -178,6 +179,7 @@ async def startup_event():
     ensure_pda_event_round_submission_tables(engine)
     ensure_pda_event_panel_tables(engine)
     ensure_persohub_event_tables(engine)
+    ensure_persohub_event_wildcard_columns(engine)
     ensure_event_registration_pending_status(engine)
     ensure_persohub_event_open_columns(engine)
     ensure_persohub_event_round_submission_tables(engine)

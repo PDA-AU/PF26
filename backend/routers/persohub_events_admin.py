@@ -4,7 +4,9 @@ import math
 import re
 import base64
 import hashlib
+import random
 import ssl
+import string
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -85,6 +87,8 @@ from schemas import (
     PersohubRoundSubmissionAdminUpdate,
     PersohubManagedScoreEntry,
     PersohubManagedTeamResponse,
+    PersohubWildcardCandidateResponse,
+    PersohubWildcardCreateRequest,
     EventBulkEmailRequest,
     PersohubRoundPanelListResponse,
     PersohubRoundPanelsUpdateRequest,
@@ -688,6 +692,160 @@ def _status_is_active(value) -> bool:
     return str(value or "").strip().lower() == "active"
 
 
+def _wildcard_candidate_sort_key(item: dict) -> Tuple[int, str, str]:
+    candidate_type = str(item.get("candidate_type") or "").strip().lower()
+    eliminated_priority = 0 if "eliminated" in candidate_type else 1
+    return (
+        eliminated_priority,
+        str(item.get("name") or "").strip().lower(),
+        str(item.get("regno") or "").strip().lower(),
+    )
+
+
+def _make_team_code() -> str:
+    return "".join(random.choices(string.ascii_uppercase + string.digits, k=5))
+
+
+def _make_referral_code() -> str:
+    return "".join(random.choices(string.ascii_uppercase + string.digits, k=5))
+
+
+def _next_event_referral_code(db: Session, event_id: int) -> str:
+    candidate = _make_referral_code()
+    while db.query(PersohubEventRegistration).filter(
+        PersohubEventRegistration.event_id == event_id,
+        PersohubEventRegistration.referral_code == candidate,
+    ).first():
+        candidate = _make_referral_code()
+    return candidate
+
+
+def _event_score_value(score_row: PersohubEventScore, event: PersohubEvent) -> float:
+    if event.participant_mode == PersohubEventParticipantMode.INDIVIDUAL:
+        return float(score_row.normalized_score or 0.0)
+    return float(score_row.total_score or 0.0)
+
+
+def _registration_entity_id(registration: PersohubEventRegistration) -> Optional[int]:
+    if registration.entity_type == PersohubEventEntityType.USER and registration.user_id is not None:
+        return int(registration.user_id)
+    if registration.entity_type == PersohubEventEntityType.TEAM and registration.team_id is not None:
+        return int(registration.team_id)
+    return None
+
+
+def _event_round_no_map(db: Session, event_id: int) -> Dict[int, int]:
+    rows = (
+        db.query(PersohubEventRound.id, PersohubEventRound.round_no)
+        .filter(PersohubEventRound.event_id == event_id)
+        .all()
+    )
+    return {int(row.id): int(row.round_no) for row in rows}
+
+
+def _completed_rounds_count(db: Session, event_id: int) -> int:
+    return int(
+        db.query(PersohubEventRound)
+        .filter(
+            PersohubEventRound.event_id == event_id,
+            PersohubEventRound.state.in_([PersohubEventRoundState.COMPLETED, PersohubEventRoundState.REVEAL]),
+        )
+        .count()
+    )
+
+
+def _effective_score_metrics(
+    db: Session,
+    event: PersohubEvent,
+    *,
+    entity_ids: List[int],
+    round_ids: Optional[List[int]] = None,
+) -> Dict[int, Dict[str, float]]:
+    if not entity_ids:
+        return {}
+
+    normalized_entity_ids = sorted({int(entity_id) for entity_id in entity_ids})
+    round_no_map = _event_round_no_map(db, event.id)
+    entity_type = (
+        PersohubEventEntityType.USER
+        if event.participant_mode == PersohubEventParticipantMode.INDIVIDUAL
+        else PersohubEventEntityType.TEAM
+    )
+
+    registration_query = db.query(PersohubEventRegistration).filter(
+        PersohubEventRegistration.event_id == event.id,
+        PersohubEventRegistration.entity_type == entity_type,
+    )
+    if entity_type == PersohubEventEntityType.USER:
+        registration_query = registration_query.filter(PersohubEventRegistration.user_id.in_(normalized_entity_ids))
+    else:
+        registration_query = registration_query.filter(PersohubEventRegistration.team_id.in_(normalized_entity_ids))
+    registrations = registration_query.all()
+    registration_map = {}
+    for registration in registrations:
+        entity_id = _registration_entity_id(registration)
+        if entity_id is not None:
+            registration_map[entity_id] = registration
+
+    metrics: Dict[int, Dict[str, float]] = {}
+    for entity_id in normalized_entity_ids:
+        registration = registration_map.get(entity_id)
+        metrics[entity_id] = {
+            "cumulative_score": float(getattr(registration, "wildcard_seed_score", 0.0) or 0.0),
+            "rounds_participated": 0.0,
+            "is_wildcard": bool(
+                registration
+                and getattr(registration, "wildcard_start_round_no", None) is not None
+            ),
+            "wildcard_seed_score": float(getattr(registration, "wildcard_seed_score", 0.0) or 0.0),
+            "wildcard_start_round_no": int(getattr(registration, "wildcard_start_round_no", 0) or 0) or None,
+        }
+
+    score_query = db.query(PersohubEventScore).filter(
+        PersohubEventScore.event_id == event.id,
+        PersohubEventScore.entity_type == entity_type,
+    )
+    if entity_type == PersohubEventEntityType.USER:
+        score_query = score_query.filter(PersohubEventScore.user_id.in_(normalized_entity_ids))
+    else:
+        score_query = score_query.filter(PersohubEventScore.team_id.in_(normalized_entity_ids))
+    if round_ids is not None:
+        if round_ids:
+            score_query = score_query.filter(PersohubEventScore.round_id.in_(round_ids))
+        else:
+            score_query = score_query.filter(text("1=0"))
+    score_rows = score_query.all()
+
+    participated_rounds: Dict[int, Set[int]] = {entity_id: set() for entity_id in normalized_entity_ids}
+    for score_row in score_rows:
+        entity_id = int(score_row.user_id) if entity_type == PersohubEventEntityType.USER else int(score_row.team_id)
+        round_no = round_no_map.get(int(score_row.round_id or 0))
+        registration = registration_map.get(entity_id)
+        wildcard_start_round_no = int(getattr(registration, "wildcard_start_round_no", 0) or 0) or None
+        include_in_total = wildcard_start_round_no is None or (round_no is not None and int(round_no) >= wildcard_start_round_no)
+        if include_in_total:
+            metrics[entity_id]["cumulative_score"] += _event_score_value(score_row, event)
+            if bool(score_row.is_present):
+                participated_rounds[entity_id].add(int(score_row.round_id))
+
+    for entity_id, round_set in participated_rounds.items():
+        metrics[entity_id]["rounds_participated"] = int(len(round_set))
+    return metrics
+
+
+def _apply_wildcard_metadata(
+    registration: PersohubEventRegistration,
+    *,
+    wildcard_score: float,
+    start_round_no: int,
+    admin_user_id: int,
+) -> None:
+    registration.wildcard_seed_score = float(wildcard_score)
+    registration.wildcard_start_round_no = int(start_round_no)
+    registration.wildcard_applied_at = datetime.now(timezone.utc)
+    registration.wildcard_applied_by_user_id = int(admin_user_id)
+
+
 def _sync_event_round_count(db: Session, event_id: int) -> None:
     round_count = (
         db.query(PersohubEventRound)
@@ -950,6 +1108,9 @@ def _registered_entities(db: Session, event: PersohubEvent):
                     "referral_code": reg.referral_code,
                     "referred_by": reg.referred_by,
                     "referral_count": int(reg.referral_count or 0),
+                    "is_wildcard": bool(getattr(reg, "wildcard_start_round_no", None) is not None),
+                    "wildcard_seed_score": float(getattr(reg, "wildcard_seed_score", 0.0) or 0.0),
+                    "wildcard_start_round_no": int(getattr(reg, "wildcard_start_round_no", 0) or 0) or None,
                 }
             )
         return payload
@@ -980,6 +1141,9 @@ def _registered_entities(db: Session, event: PersohubEvent):
                 "members_count": int(member_count_map.get(int(team.id), 0)),
                 "status": _registration_status_label(reg.status),
                 "participant_status": _registration_status_label(reg.status),
+                "is_wildcard": bool(getattr(reg, "wildcard_start_round_no", None) is not None),
+                "wildcard_seed_score": float(getattr(reg, "wildcard_seed_score", 0.0) or 0.0),
+                "wildcard_start_round_no": int(getattr(reg, "wildcard_start_round_no", 0) or 0) or None,
             }
         )
     return payload
@@ -1519,38 +1683,12 @@ def event_dashboard(
         department_distribution = dict(dept_counter)
         gender_distribution = dict(gender_counter)
         batch_distribution = dict(batch_counter)
-
-        score_rows = db.execute(
-            text(
-                """
-                SELECT user_id, COALESCE(SUM(normalized_score), 0) AS total
-                FROM persohub_event_scores
-                WHERE event_id = :event_id
-                  AND entity_type = 'USER'
-                  AND user_id IS NOT NULL
-                GROUP BY user_id
-                """
-            ),
-            {"event_id": event.id},
-        ).mappings().all()
-        score_map = {int(row["user_id"]): float(row["total"] or 0.0) for row in score_rows}
-        leaderboard_scores = [float(score_map.get(int(item["entity_id"]), 0.0)) for item in active_entities]
-    else:
-        score_rows = db.execute(
-            text(
-                """
-                SELECT team_id, COALESCE(SUM(total_score), 0) AS total
-                FROM persohub_event_scores
-                WHERE event_id = :event_id
-                  AND entity_type = 'TEAM'
-                  AND team_id IS NOT NULL
-                GROUP BY team_id
-                """
-            ),
-            {"event_id": event.id},
-        ).mappings().all()
-        score_map = {int(row["team_id"]): float(row["total"] or 0.0) for row in score_rows}
-        leaderboard_scores = [float(score_map.get(int(item["entity_id"]), 0.0)) for item in active_entities]
+    active_entity_ids = [int(item["entity_id"]) for item in active_entities if item.get("entity_id") is not None]
+    metrics_map = _effective_score_metrics(db, event, entity_ids=active_entity_ids)
+    leaderboard_scores = [
+        float(metrics_map.get(int(item["entity_id"]), {}).get("cumulative_score", 0.0))
+        for item in active_entities
+    ]
 
     leaderboard_min_score = min(leaderboard_scores) if leaderboard_scores else None
     leaderboard_max_score = max(leaderboard_scores) if leaderboard_scores else None
@@ -1695,6 +1833,432 @@ def event_unregistered_users(
         response.headers["X-Page"] = str(page)
         response.headers["X-Page-Size"] = str(page_size)
     return paged
+
+
+@router.get("/persohub/admin/persohub-events/{slug}/wildcard-candidates", response_model=List[PersohubWildcardCandidateResponse])
+def event_wildcard_candidates(
+    slug: str,
+    search: Optional[str] = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    response: Response = None,
+    _: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    searchable_users = (
+        db.query(PdaUser)
+        .order_by(PdaUser.name.asc().nullslast(), PdaUser.regno.asc())
+        .all()
+    )
+    items: List[dict] = []
+
+    if event.participant_mode == PersohubEventParticipantMode.INDIVIDUAL:
+        registration_rows = (
+            db.query(PersohubEventRegistration, PdaUser)
+            .join(PdaUser, PdaUser.id == PersohubEventRegistration.user_id)
+            .filter(
+                PersohubEventRegistration.event_id == event.id,
+                PersohubEventRegistration.entity_type == PersohubEventEntityType.USER,
+                PersohubEventRegistration.user_id.isnot(None),
+            )
+            .all()
+        )
+        registrations = [registration for registration, _user in registration_rows]
+        registration_map = {int(reg.user_id): reg for reg in registrations if reg.user_id is not None}
+        users_by_id = {int(user.id): user for user in searchable_users}
+        for registration, user in registration_rows:
+            if registration.user_id is None or registration.status != PersohubEventRegistrationStatus.ELIMINATED:
+                continue
+            users_by_id[int(user.id)] = user
+        for user in users_by_id.values():
+            registration = registration_map.get(int(user.id))
+            if registration and registration.status != PersohubEventRegistrationStatus.ELIMINATED:
+                continue
+            items.append(
+                {
+                    "candidate_type": (
+                        "eliminated_user"
+                        if registration and registration.status == PersohubEventRegistrationStatus.ELIMINATED
+                        else "unregistered_user"
+                    ),
+                    "user_id": int(user.id),
+                    "regno": user.regno,
+                    "name": user.name,
+                    "email": user.email,
+                    "department": user.dept,
+                    "gender": user.gender,
+                    "batch": _batch_from_regno(user.regno),
+                    "college": user.college,
+                    "source_team_id": None,
+                    "source_team_name": None,
+                    "source_team_status": (
+                        _registration_status_label(registration.status)
+                        if registration is not None
+                        else None
+                    ),
+                    "selection_group_key": None,
+                    "selection_group_members": [],
+                }
+            )
+    else:
+        membership_rows = (
+            db.query(PersohubEventTeamMember, PersohubEventTeam, PersohubEventRegistration)
+            .join(PersohubEventTeam, PersohubEventTeamMember.team_id == PersohubEventTeam.id)
+            .outerjoin(
+                PersohubEventRegistration,
+                (
+                    (PersohubEventRegistration.event_id == event.id)
+                    & (PersohubEventRegistration.team_id == PersohubEventTeam.id)
+                    & (PersohubEventRegistration.entity_type == PersohubEventEntityType.TEAM)
+                ),
+            )
+            .filter(PersohubEventTeam.event_id == event.id)
+            .all()
+        )
+        membership_by_user_id: Dict[int, dict] = {}
+        team_members_map: Dict[int, List[dict]] = {}
+        for member, team, registration in membership_rows:
+            status_value = _registration_status_label(registration.status) if registration else None
+            user_id = int(member.user_id)
+            membership_by_user_id[user_id] = {
+                "team_id": int(team.id),
+                "team_name": team.team_name,
+                "team_status": status_value,
+                "registration": registration,
+            }
+            team_members_map.setdefault(int(team.id), []).append(
+                {
+                    "user_id": user_id,
+                    "regno": None,
+                    "name": None,
+                }
+            )
+        team_member_user_ids = [item["user_id"] for values in team_members_map.values() for item in values]
+        team_member_users = (
+            db.query(PdaUser.id, PdaUser.regno, PdaUser.name)
+            .filter(PdaUser.id.in_(team_member_user_ids))
+            .all()
+            if team_member_user_ids
+            else []
+        )
+        user_lookup = {int(row.id): {"regno": row.regno, "name": row.name} for row in team_member_users}
+        for team_id, members in team_members_map.items():
+            for item in members:
+                info = user_lookup.get(int(item["user_id"]), {})
+                item["regno"] = info.get("regno")
+                item["name"] = info.get("name")
+            members.sort(key=lambda item: (str(item.get("name") or "").lower(), str(item.get("regno") or "")))
+
+        users_by_id = {int(user.id): user for user in searchable_users}
+        eliminated_member_user_ids = [
+            int(user_id)
+            for user_id, membership in membership_by_user_id.items()
+            if membership.get("registration") is not None
+            and membership["registration"].status == PersohubEventRegistrationStatus.ELIMINATED
+        ]
+        eliminated_member_users = (
+            db.query(PdaUser).filter(PdaUser.id.in_(eliminated_member_user_ids)).all()
+            if eliminated_member_user_ids
+            else []
+        )
+        for user in eliminated_member_users:
+            users_by_id[int(user.id)] = user
+        for user in users_by_id.values():
+            membership = membership_by_user_id.get(int(user.id))
+            if membership is None:
+                items.append(
+                    {
+                        "candidate_type": "unassigned_user",
+                        "user_id": int(user.id),
+                        "regno": user.regno,
+                        "name": user.name,
+                        "email": user.email,
+                        "department": user.dept,
+                        "gender": user.gender,
+                        "batch": _batch_from_regno(user.regno),
+                        "college": user.college,
+                        "source_team_id": None,
+                        "source_team_name": None,
+                        "source_team_status": None,
+                        "selection_group_key": None,
+                        "selection_group_members": [],
+                    }
+                )
+                continue
+            registration = membership.get("registration")
+            if not registration or registration.status != PersohubEventRegistrationStatus.ELIMINATED:
+                continue
+            team_id = int(membership["team_id"])
+            items.append(
+                {
+                    "candidate_type": "eliminated_team_member",
+                    "user_id": int(user.id),
+                    "regno": user.regno,
+                    "name": user.name,
+                    "email": user.email,
+                    "department": user.dept,
+                    "gender": user.gender,
+                    "batch": _batch_from_regno(user.regno),
+                    "college": user.college,
+                    "source_team_id": team_id,
+                    "source_team_name": membership.get("team_name"),
+                    "source_team_status": membership.get("team_status"),
+                    "selection_group_key": f"team:{team_id}",
+                    "selection_group_members": team_members_map.get(team_id, []),
+                }
+            )
+
+    if search:
+        needle = str(search).strip().lower()
+        if needle:
+            items = [
+                item for item in items
+                if needle in " ".join(
+                    [
+                        str(item.get("name") or ""),
+                        str(item.get("regno") or ""),
+                        str(item.get("email") or ""),
+                        str(item.get("department") or ""),
+                        str(item.get("source_team_name") or ""),
+                        str(item.get("candidate_type") or ""),
+                    ]
+                ).lower()
+            ]
+
+    items.sort(key=_wildcard_candidate_sort_key)
+    total = len(items)
+    start = (page - 1) * page_size
+    end = start + page_size
+    paged = items[start:end]
+    if response is not None:
+        response.headers["X-Total-Count"] = str(total)
+        response.headers["X-Page"] = str(page)
+        response.headers["X-Page-Size"] = str(page_size)
+    return paged
+
+
+@router.post("/persohub/admin/persohub-events/{slug}/wildcards")
+def create_wildcard_entry(
+    slug: str,
+    payload: PersohubWildcardCreateRequest,
+    admin: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    rounds_completed = _completed_rounds_count(db, event.id)
+    max_wildcard_score = float(rounds_completed * 100)
+    wildcard_score = float(payload.wildcard_score or 0.0)
+    if wildcard_score < 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="wildcard_score must be >= 0")
+    if rounds_completed == 0 and wildcard_score > 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Wildcard score must be 0 when no rounds are completed")
+    if wildcard_score > max_wildcard_score:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Wildcard score cannot exceed {int(max_wildcard_score)}",
+        )
+    wildcard_start_round_no = int(rounds_completed + 1)
+
+    if event.participant_mode == PersohubEventParticipantMode.INDIVIDUAL:
+        if payload.mode != "individual":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Individual wildcard mode required for this event")
+        user = db.query(PdaUser).filter(PdaUser.id == int(payload.user_id)).first()
+        if not user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        registration = _registration_for_entity(db, event, PersohubEventEntityType.USER, int(user.id))
+        if registration and registration.status != PersohubEventRegistrationStatus.ELIMINATED:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Active or pending participants cannot be wildcarded")
+
+        source_type = "unregistered_user"
+        if registration:
+            registration.status = PersohubEventRegistrationStatus.ACTIVE
+            source_type = "eliminated_user"
+        else:
+            registration = PersohubEventRegistration(
+                event_id=event.id,
+                user_id=int(user.id),
+                team_id=None,
+                entity_type=PersohubEventEntityType.USER,
+                status=PersohubEventRegistrationStatus.ACTIVE,
+                referral_code=_next_event_referral_code(db, event.id),
+                referred_by=None,
+                referral_count=0,
+            )
+            db.add(registration)
+            db.flush()
+        _apply_wildcard_metadata(
+            registration,
+            wildcard_score=wildcard_score,
+            start_round_no=wildcard_start_round_no,
+            admin_user_id=int(admin.id),
+        )
+        db.commit()
+        _log_event_admin_action(
+            db,
+            admin,
+            event,
+            "create_persohub_event_wildcard",
+            method="POST",
+            path=f"/persohub/admin/persohub-events/{slug}/wildcards",
+            meta={
+                "mode": "individual",
+                "source_type": source_type,
+                "source_user_ids": [int(user.id)],
+                "new_entity_id": int(user.id),
+                "wildcard_seed_score": wildcard_score,
+                "wildcard_start_round_no": wildcard_start_round_no,
+            },
+        )
+        return {
+            "message": "Wildcard participant added",
+            "entity_type": "user",
+            "entity_id": int(user.id),
+            "name": user.name,
+        }
+
+    if payload.mode != "team":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Team wildcard mode required for this event")
+
+    member_user_ids = sorted({int(user_id) for user_id in payload.member_user_ids})
+    if not member_user_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one team member is required")
+    if int(payload.team_lead_user_id) not in member_user_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="team_lead_user_id must be one of the selected members")
+    if event.team_min_size and len(member_user_ids) < int(event.team_min_size):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Team must have at least {int(event.team_min_size)} members")
+    if event.team_max_size and len(member_user_ids) > int(event.team_max_size):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Team cannot exceed {int(event.team_max_size)} members")
+
+    users = db.query(PdaUser).filter(PdaUser.id.in_(member_user_ids)).all()
+    user_map = {int(user.id): user for user in users}
+    if len(user_map) != len(member_user_ids):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="One or more selected users were not found")
+
+    membership_rows = (
+        db.query(PersohubEventTeamMember, PersohubEventTeam, PersohubEventRegistration)
+        .join(PersohubEventTeam, PersohubEventTeamMember.team_id == PersohubEventTeam.id)
+        .outerjoin(
+            PersohubEventRegistration,
+            (
+                (PersohubEventRegistration.event_id == event.id)
+                & (PersohubEventRegistration.team_id == PersohubEventTeam.id)
+                & (PersohubEventRegistration.entity_type == PersohubEventEntityType.TEAM)
+            ),
+        )
+        .filter(
+            PersohubEventTeam.event_id == event.id,
+            PersohubEventTeamMember.user_id.in_(member_user_ids),
+        )
+        .all()
+    )
+    membership_by_user_id: Dict[int, Tuple[PersohubEventTeamMember, PersohubEventTeam, Optional[PersohubEventRegistration]]] = {}
+    for member_row, team_row, registration in membership_rows:
+        membership_by_user_id[int(member_row.user_id)] = (member_row, team_row, registration)
+
+    source_team_ids: Set[int] = set()
+    for user_id in member_user_ids:
+        membership_info = membership_by_user_id.get(int(user_id))
+        if not membership_info:
+            continue
+        _member_row, _team_row, registration = membership_info
+        if not registration or registration.status != PersohubEventRegistrationStatus.ELIMINATED:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected users cannot already belong to a current team in this event")
+        source_team_ids.add(int(_team_row.id))
+
+    if source_team_ids:
+        for source_team_id in source_team_ids:
+            source_members = (
+                db.query(PersohubEventTeamMember.user_id)
+                .filter(PersohubEventTeamMember.team_id == source_team_id)
+                .all()
+            )
+            expected_ids = {int(row.user_id) for row in source_members if row.user_id is not None}
+            if not expected_ids.issubset(set(member_user_ids)):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Wildcarding users from an eliminated team requires selecting the full team",
+                )
+
+    team_code = _make_team_code()
+    while db.query(PersohubEventTeam).filter(
+        PersohubEventTeam.event_id == event.id,
+        PersohubEventTeam.team_code == team_code,
+    ).first():
+        team_code = _make_team_code()
+
+    new_team = PersohubEventTeam(
+        event_id=event.id,
+        team_code=team_code,
+        team_name=str(payload.team_name).strip(),
+        team_lead_user_id=int(payload.team_lead_user_id),
+    )
+    db.add(new_team)
+    db.flush()
+
+    for user_id in member_user_ids:
+        membership_info = membership_by_user_id.get(int(user_id))
+        role = "leader" if int(user_id) == int(payload.team_lead_user_id) else "member"
+        if membership_info and int(membership_info[1].id) in source_team_ids:
+            membership_info[0].team_id = int(new_team.id)
+            membership_info[0].role = role
+        else:
+            db.add(
+                PersohubEventTeamMember(
+                    team_id=int(new_team.id),
+                    user_id=int(user_id),
+                    role=role,
+                )
+            )
+
+    if source_team_ids:
+        db.query(PersohubEventInvite).filter(
+            PersohubEventInvite.event_id == event.id,
+            PersohubEventInvite.team_id.in_(sorted(source_team_ids)),
+        ).delete(synchronize_session=False)
+
+    registration = PersohubEventRegistration(
+        event_id=event.id,
+        user_id=None,
+        team_id=int(new_team.id),
+        entity_type=PersohubEventEntityType.TEAM,
+        status=PersohubEventRegistrationStatus.ACTIVE,
+        referral_code=None,
+        referred_by=None,
+        referral_count=0,
+    )
+    _apply_wildcard_metadata(
+        registration,
+        wildcard_score=wildcard_score,
+        start_round_no=wildcard_start_round_no,
+        admin_user_id=int(admin.id),
+    )
+    db.add(registration)
+    db.commit()
+
+    _log_event_admin_action(
+        db,
+        admin,
+        event,
+        "create_persohub_event_wildcard",
+        method="POST",
+        path=f"/persohub/admin/persohub-events/{slug}/wildcards",
+        meta={
+            "mode": "team",
+            "source_type": ("eliminated_team" if source_team_ids else "unassigned_users"),
+            "source_team_ids": sorted(source_team_ids),
+            "source_user_ids": member_user_ids,
+            "new_entity_id": int(new_team.id),
+            "wildcard_seed_score": wildcard_score,
+            "wildcard_start_round_no": wildcard_start_round_no,
+        },
+    )
+    return {
+        "message": "Wildcard team added",
+        "entity_type": "team",
+        "entity_id": int(new_team.id),
+        "name": new_team.team_name,
+    }
 
 
 @router.put("/persohub/admin/persohub-events/{slug}/participants/{user_id}/status")
@@ -2135,11 +2699,14 @@ def participant_rounds(
         round_state_text = str(round_state)
         if round_state_text.isupper():
             round_state_text = round_state_text.title()
+        wildcard_start_round_no = int(getattr(registration, "wildcard_start_round_no", 0) or 0) or None
+        round_number = int(row["round_no"])
+        counts_towards_total = wildcard_start_round_no is None or round_number >= wildcard_start_round_no
 
         items.append(
             {
                 "round_id": int(row["round_id"]),
-                "round_no": f"PF{int(row['round_no']):02d}",
+                "round_no": f"PF{round_number:02d}",
                 "round_name": row["round_name"],
                 "round_state": round_state_text,
                 "status": status_label,
@@ -2147,6 +2714,7 @@ def participant_rounds(
                 "total_score": float(row["total_score"]) if row["total_score"] is not None else None,
                 "normalized_score": float(row["normalized_score"]) if row["normalized_score"] is not None else None,
                 "round_rank": int(row["round_rank"]) if row["round_rank"] is not None else None,
+                "counts_towards_total": bool(counts_towards_total),
             }
         )
     return items
@@ -2177,100 +2745,41 @@ def participant_summary(
     if not registration:
         missing_label = "Participant" if entity_type == PersohubEventEntityType.USER else "Team"
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{missing_label} not found")
-    params = {"event_id": event.id, "entity_id": user_id}
-    if entity_type == PersohubEventEntityType.USER:
-        summary_row = db.execute(
-            text(
-                """
-                WITH active_entities AS (
-                    SELECT user_id AS entity_id
-                    FROM persohub_event_registrations
-                    WHERE event_id = :event_id
-                      AND entity_type = 'USER'
-                      AND status = 'ACTIVE'
-                      AND user_id IS NOT NULL
-                ),
-                active_totals AS (
-                    SELECT
-                        ae.entity_id,
-                        COALESCE(SUM(s.normalized_score), 0) AS total_points
-                    FROM active_entities ae
-                    LEFT JOIN persohub_event_scores s
-                        ON s.event_id = :event_id
-                       AND s.entity_type = 'USER'
-                       AND s.user_id = ae.entity_id
-                    GROUP BY ae.entity_id
-                ),
-                ranked AS (
-                    SELECT
-                        entity_id,
-                        DENSE_RANK() OVER (ORDER BY total_points DESC) AS overall_rank
-                    FROM active_totals
-                ),
-                target_total AS (
-                    SELECT COALESCE(SUM(normalized_score), 0) AS overall_points
-                    FROM persohub_event_scores
-                    WHERE event_id = :event_id
-                      AND entity_type = 'USER'
-                      AND user_id = :entity_id
-                )
-                SELECT
-                    tt.overall_points,
-                    r.overall_rank
-                FROM target_total tt
-                LEFT JOIN ranked r ON r.entity_id = :entity_id
-                """
-            ),
-            params,
-        ).mappings().first()
-    else:
-        summary_row = db.execute(
-            text(
-                """
-                WITH active_entities AS (
-                    SELECT team_id AS entity_id
-                    FROM persohub_event_registrations
-                    WHERE event_id = :event_id
-                      AND entity_type = 'TEAM'
-                      AND status = 'ACTIVE'
-                      AND team_id IS NOT NULL
-                ),
-                active_totals AS (
-                    SELECT
-                        ae.entity_id,
-                        COALESCE(SUM(s.total_score), 0) AS total_points
-                    FROM active_entities ae
-                    LEFT JOIN persohub_event_scores s
-                        ON s.event_id = :event_id
-                       AND s.entity_type = 'TEAM'
-                       AND s.team_id = ae.entity_id
-                    GROUP BY ae.entity_id
-                ),
-                ranked AS (
-                    SELECT
-                        entity_id,
-                        DENSE_RANK() OVER (ORDER BY total_points DESC) AS overall_rank
-                    FROM active_totals
-                ),
-                target_total AS (
-                    SELECT COALESCE(SUM(total_score), 0) AS overall_points
-                    FROM persohub_event_scores
-                    WHERE event_id = :event_id
-                      AND entity_type = 'TEAM'
-                      AND team_id = :entity_id
-                )
-                SELECT
-                    tt.overall_points,
-                    r.overall_rank
-                FROM target_total tt
-                LEFT JOIN ranked r ON r.entity_id = :entity_id
-                """
-            ),
-            params,
-        ).mappings().first()
-    target_total = float((summary_row or {}).get("overall_points") or 0.0)
-    rank_value = (summary_row or {}).get("overall_rank")
-    rank = int(rank_value) if rank_value is not None else None
+    active_entity_ids = [
+        int(entity_id)
+        for entity_id, in (
+            db.query(
+                PersohubEventRegistration.user_id
+                if entity_type == PersohubEventEntityType.USER
+                else PersohubEventRegistration.team_id
+            )
+            .filter(
+                PersohubEventRegistration.event_id == event.id,
+                PersohubEventRegistration.entity_type == entity_type,
+                PersohubEventRegistration.status == PersohubEventRegistrationStatus.ACTIVE,
+            )
+            .all()
+        )
+        if entity_id is not None
+    ]
+    active_metrics = _effective_score_metrics(db, event, entity_ids=active_entity_ids)
+    ordered_active = sorted(
+        active_metrics.items(),
+        key=lambda item: (-float(item[1].get("cumulative_score", 0.0)), int(item[0])),
+    )
+    rank_map: Dict[int, int] = {}
+    previous_score: Optional[float] = None
+    previous_rank = 0
+    for index, (entity_id, metric) in enumerate(ordered_active, start=1):
+        score = float(metric.get("cumulative_score", 0.0))
+        if previous_score is None or score != previous_score:
+            previous_rank = index
+            previous_score = score
+        rank_map[int(entity_id)] = previous_rank
+
+    target_metric = _effective_score_metrics(db, event, entity_ids=[int(user_id)]).get(int(user_id), {})
+    target_total = float(target_metric.get("cumulative_score", 0.0))
+    rank = rank_map.get(int(user_id))
 
     return {
         "participant_id": user_id,
@@ -2762,37 +3271,20 @@ def update_round(
                 .all()
             )
         ]
+        eligible_entity_ids = [
+            int(reg.user_id) if entity_type == PersohubEventEntityType.USER else int(reg.team_id)
+            for reg in shortlist_regs
+        ]
+        effective_totals = _effective_score_metrics(
+            db,
+            event,
+            entity_ids=eligible_entity_ids,
+            round_ids=eligible_round_ids,
+        )
         totals = []
         for reg in shortlist_regs:
             entity_id = int(reg.user_id) if entity_type == PersohubEventEntityType.USER else int(reg.team_id)
-            if entity_type == PersohubEventEntityType.USER:
-                total = db.execute(
-                    text(
-                        """
-                        SELECT COALESCE(SUM(normalized_score), 0)
-                        FROM persohub_event_scores
-                        WHERE event_id = :event_id
-                          AND entity_type = 'USER'
-                          AND user_id = :entity_id
-                          AND round_id = ANY(:round_ids)
-                        """
-                    ),
-                    {"event_id": event.id, "entity_id": entity_id, "round_ids": eligible_round_ids},
-                ).scalar() or 0.0
-            else:
-                total = db.execute(
-                    text(
-                        """
-                        SELECT COALESCE(SUM(total_score), 0)
-                        FROM persohub_event_scores
-                        WHERE event_id = :event_id
-                          AND entity_type = 'TEAM'
-                          AND team_id = :entity_id
-                          AND round_id = ANY(:round_ids)
-                        """
-                    ),
-                    {"event_id": event.id, "entity_id": entity_id, "round_ids": eligible_round_ids},
-                ).scalar() or 0.0
+            total = float(effective_totals.get(entity_id, {}).get("cumulative_score", 0.0))
             totals.append((reg, float(total), entity_id))
 
         totals.sort(key=lambda item: (-item[1], item[2]))
@@ -4697,32 +5189,7 @@ def event_leaderboard(
             ]
 
         entity_ids = [int(item["entity_id"]) for item in entities]
-        if entity_ids and effective_round_ids:
-            score_rows = (
-                db.query(
-                    PersohubEventScore.user_id.label("entity_id"),
-                    func.coalesce(func.sum(PersohubEventScore.normalized_score), 0.0).label("cumulative_score"),
-                    func.coalesce(func.count(func.distinct(PersohubEventScore.round_id)).filter(PersohubEventScore.is_present == True), 0).label("rounds_participated"),  # noqa: E712
-                )
-                .filter(
-                    PersohubEventScore.event_id == event.id,
-                    PersohubEventScore.entity_type == PersohubEventEntityType.USER,
-                    PersohubEventScore.user_id.in_(entity_ids),
-                    PersohubEventScore.round_id.in_(effective_round_ids),
-                )
-                .group_by(PersohubEventScore.user_id)
-                .all()
-            )
-        else:
-            score_rows = []
-        score_map = {
-            int(row.entity_id): {
-                "cumulative_score": float(row.cumulative_score or 0.0),
-                "rounds_participated": int(row.rounds_participated or 0),
-            }
-            for row in score_rows
-            if row.entity_id is not None
-        }
+        score_map = _effective_score_metrics(db, event, entity_ids=entity_ids, round_ids=effective_round_ids)
         for entity in entities:
             user_id = int(entity["entity_id"])
             score_info = score_map.get(user_id, {"cumulative_score": 0.0, "rounds_participated": 0})
@@ -4734,6 +5201,9 @@ def event_leaderboard(
                     "cumulative_score": float(score_info["cumulative_score"]),
                     "attendance_count": int(score_info["rounds_participated"]),
                     "rounds_participated": int(score_info["rounds_participated"]),
+                    "is_wildcard": bool(entity.get("is_wildcard")),
+                    "wildcard_seed_score": float(entity.get("wildcard_seed_score") or 0.0),
+                    "wildcard_start_round_no": entity.get("wildcard_start_round_no"),
                 }
             )
 
@@ -4774,32 +5244,7 @@ def event_leaderboard(
                 ).lower()
             ]
         entity_ids = [int(item["entity_id"]) for item in entities]
-        if entity_ids and effective_round_ids:
-            score_rows = (
-                db.query(
-                    PersohubEventScore.team_id.label("entity_id"),
-                    func.coalesce(func.sum(PersohubEventScore.total_score), 0.0).label("cumulative_score"),
-                    func.coalesce(func.count(func.distinct(PersohubEventScore.round_id)).filter(PersohubEventScore.is_present == True), 0).label("rounds_participated"),  # noqa: E712
-                )
-                .filter(
-                    PersohubEventScore.event_id == event.id,
-                    PersohubEventScore.entity_type == PersohubEventEntityType.TEAM,
-                    PersohubEventScore.team_id.in_(entity_ids),
-                    PersohubEventScore.round_id.in_(effective_round_ids),
-                )
-                .group_by(PersohubEventScore.team_id)
-                .all()
-            )
-        else:
-            score_rows = []
-        score_map = {
-            int(row.entity_id): {
-                "cumulative_score": float(row.cumulative_score or 0.0),
-                "rounds_participated": int(row.rounds_participated or 0),
-            }
-            for row in score_rows
-            if row.entity_id is not None
-        }
+        score_map = _effective_score_metrics(db, event, entity_ids=entity_ids, round_ids=effective_round_ids)
         for entity in entities:
             team_id = int(entity["entity_id"])
             score_info = score_map.get(team_id, {"cumulative_score": 0.0, "rounds_participated": 0})
@@ -4809,6 +5254,9 @@ def event_leaderboard(
                     "cumulative_score": float(score_info["cumulative_score"]),
                     "attendance_count": int(score_info["rounds_participated"]),
                     "rounds_participated": int(score_info["rounds_participated"]),
+                    "is_wildcard": bool(entity.get("is_wildcard")),
+                    "wildcard_seed_score": float(entity.get("wildcard_seed_score") or 0.0),
+                    "wildcard_start_round_no": entity.get("wildcard_start_round_no"),
                 }
             )
         rows.sort(
@@ -5515,7 +5963,7 @@ def export_participants(
         db=db,
     )
     if event.participant_mode == PersohubEventParticipantMode.INDIVIDUAL:
-        headers = ["Register Number", "Name", "Email", "College", "Department", "Gender", "Batch", "Status", "Referral Code", "Referred By", "Referral Count"]
+        headers = ["Register Number", "Name", "Email", "College", "Department", "Gender", "Batch", "Status", "Referral Code", "Referred By", "Referral Count", "Wildcard", "Wildcard Seed Score", "Wildcard Start Round"]
         rows = [
             [
                 e.get("register_number"),
@@ -5529,12 +5977,27 @@ def export_participants(
                 e.get("referral_code"),
                 e.get("referred_by"),
                 e.get("referral_count", 0),
+                "Yes" if e.get("is_wildcard") else "No",
+                e.get("wildcard_seed_score", 0),
+                e.get("wildcard_start_round_no") or "",
             ]
             for e in entities
         ]
     else:
-        headers = ["Entity Type", "Name", "Register/Team Code", "Members Count", "Status"]
-        rows = [[e["entity_type"], e["name"], e["regno_or_code"], e.get("members_count", 1), e.get("status")] for e in entities]
+        headers = ["Entity Type", "Name", "Register/Team Code", "Members Count", "Status", "Wildcard", "Wildcard Seed Score", "Wildcard Start Round"]
+        rows = [
+            [
+                e["entity_type"],
+                e["name"],
+                e["regno_or_code"],
+                e.get("members_count", 1),
+                e.get("status"),
+                "Yes" if e.get("is_wildcard") else "No",
+                e.get("wildcard_seed_score", 0),
+                e.get("wildcard_start_round_no") or "",
+            ]
+            for e in entities
+        ]
     if format == "xlsx":
         content = _export_to_xlsx(headers, rows)
         media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

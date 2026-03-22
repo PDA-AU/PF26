@@ -182,6 +182,35 @@ def _resolve_attendance_metrics(
     return int(present_entry_count), bool(present_entry_count > 0)
 
 
+def _registration_effective_cumulative_score(
+    db: Session,
+    event: PersohubEvent,
+    registration: PersohubEventRegistration,
+) -> float:
+    query = db.query(PersohubEventScore, PersohubEventRound.round_no).join(
+        PersohubEventRound,
+        PersohubEventRound.id == PersohubEventScore.round_id,
+    ).filter(
+        PersohubEventScore.event_id == event.id,
+        PersohubEventScore.entity_type == registration.entity_type,
+    )
+    if registration.entity_type == PersohubEventEntityType.USER:
+        query = query.filter(PersohubEventScore.user_id == registration.user_id)
+    else:
+        query = query.filter(PersohubEventScore.team_id == registration.team_id)
+
+    cumulative_score = float(getattr(registration, "wildcard_seed_score", 0.0) or 0.0)
+    wildcard_start_round_no = int(getattr(registration, "wildcard_start_round_no", 0) or 0) or None
+    for score_row, round_no in query.all():
+        if wildcard_start_round_no is not None and int(round_no or 0) < wildcard_start_round_no:
+            continue
+        if registration.entity_type == PersohubEventEntityType.USER:
+            cumulative_score += float(score_row.normalized_score or 0.0)
+        else:
+            cumulative_score += float(score_row.total_score or 0.0)
+    return float(cumulative_score)
+
+
 def _build_team_response(db: Session, team: PersohubEventTeam) -> PersohubManagedTeamResponse:
     members = (
         db.query(PersohubEventTeamMember, PdaUser)
@@ -1648,19 +1677,7 @@ def my_events(user: PdaUser = Depends(require_pda_user), db: Session = Depends(g
             team_id=reg.team_id,
         )
 
-        cumulative_score = 0.0
-        if reg.user_id:
-            score_rows = db.execute(
-                text("SELECT COALESCE(SUM(total_score), 0) AS total FROM persohub_event_scores WHERE event_id = :event_id AND user_id = :user_id"),
-                {"event_id": event.id, "user_id": reg.user_id},
-            ).fetchone()
-        else:
-            score_rows = db.execute(
-                text("SELECT COALESCE(SUM(total_score), 0) AS total FROM persohub_event_scores WHERE event_id = :event_id AND team_id = :team_id"),
-                {"event_id": event.id, "team_id": reg.team_id},
-            ).fetchone()
-        if score_rows:
-            cumulative_score = float(score_rows[0] or 0.0)
+        cumulative_score = _registration_effective_cumulative_score(db, event, reg)
 
         entity_type = PersohubManagedEntityTypeEnum.USER if reg.user_id else PersohubManagedEntityTypeEnum.TEAM
         entity_id = reg.user_id if reg.user_id else reg.team_id

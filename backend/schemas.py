@@ -2589,6 +2589,66 @@ class PersohubManagedTeamResponse(PdaManagedTeamResponse):
     pass
 
 
+class PersohubWildcardSelectionGroupMemberResponse(BaseModel):
+    user_id: int
+    regno: Optional[str] = None
+    name: Optional[str] = None
+
+
+class PersohubWildcardCandidateResponse(BaseModel):
+    candidate_type: Literal["unregistered_user", "eliminated_user", "unassigned_user", "eliminated_team_member"]
+    user_id: int
+    regno: Optional[str] = None
+    name: Optional[str] = None
+    email: Optional[str] = None
+    department: Optional[str] = None
+    gender: Optional[str] = None
+    batch: Optional[str] = None
+    college: Optional[str] = None
+    source_team_id: Optional[int] = None
+    source_team_name: Optional[str] = None
+    source_team_status: Optional[str] = None
+    selection_group_key: Optional[str] = None
+    selection_group_members: List[PersohubWildcardSelectionGroupMemberResponse] = Field(default_factory=list)
+
+
+class PersohubWildcardCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["individual", "team"]
+    wildcard_score: float = Field(..., ge=0)
+    user_id: Optional[int] = Field(default=None, ge=1)
+    team_name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    member_user_ids: List[int] = Field(default_factory=list)
+    team_lead_user_id: Optional[int] = Field(default=None, ge=1)
+
+    @field_validator("team_name", mode="before")
+    @classmethod
+    def validate_team_name(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+    @model_validator(mode="after")
+    def validate_shape(self):
+        if self.mode == "individual":
+            if self.user_id is None:
+                raise ValueError("user_id is required for individual wildcard")
+            self.team_name = None
+            self.member_user_ids = []
+            self.team_lead_user_id = None
+        else:
+            if not self.team_name:
+                raise ValueError("team_name is required for team wildcard")
+            if not self.member_user_ids:
+                raise ValueError("member_user_ids is required for team wildcard")
+            if self.team_lead_user_id is None:
+                raise ValueError("team_lead_user_id is required for team wildcard")
+            self.user_id = None
+        return self
+
+
 class PersohubManagedRoundCriteria(PdaManagedRoundCriteria):
     pass
 

@@ -31,6 +31,7 @@ export default function EntityDetailsModal({
     const roundsCount = roundStats ? roundStats.length : 0;
     const pointsText = typeof overallPoints === 'number' ? overallPoints.toFixed(2) : '—';
     const rankText = typeof overallRank === 'number' ? overallRank : '—';
+    const isWildcard = Boolean(entity.is_wildcard);
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -83,8 +84,27 @@ export default function EntityDetailsModal({
                                 )}
                                 <div className="flex justify-between">
                                     <span className="font-semibold">Status</span>
-                                    <span>{safeText(statusText)}</span>
+                                    <span className="text-right">
+                                        {safeText(statusText)}
+                                        {isWildcard ? (
+                                            <span className="ml-2 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-800">
+                                                Wildcard
+                                            </span>
+                                        ) : null}
+                                    </span>
                                 </div>
+                                {isWildcard ? (
+                                    <>
+                                        <div className="flex justify-between">
+                                            <span className="font-semibold">Wildcard Seed</span>
+                                            <span>{safeText(entity.wildcard_seed_score)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="font-semibold">Counts From</span>
+                                            <span>{entity.wildcard_start_round_no ? `PF${String(entity.wildcard_start_round_no).padStart(2, '0')}` : '—'}</span>
+                                        </div>
+                                    </>
+                                ) : null}
                                 <div className="flex justify-between">
                                     <span className="font-semibold">Overall Points</span>
                                     <span>{pointsText}</span>
@@ -159,7 +179,7 @@ export default function EntityDetailsModal({
                                             <div>Present: {round.is_present === null ? '—' : round.is_present ? 'Yes' : 'No'}</div>
                                             <div>Round Score: {round.normalized_score ?? '—'}</div>
                                             <div>Round Rank: {round.round_rank ?? '—'}</div>
-                                            <div></div>
+                                            <div>{round.counts_towards_total === false ? 'Excluded from total' : 'Counts toward total'}</div>
                                         </div>
                                     </details>
                                 ))}

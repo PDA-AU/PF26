@@ -657,6 +657,10 @@ class PersohubEventRegistration(Base):
     referral_code = Column(String(16), nullable=True)
     referred_by = Column(String(16), nullable=True)
     referral_count = Column(Integer, nullable=False, default=0)
+    wildcard_seed_score = Column(Float, nullable=True)
+    wildcard_start_round_no = Column(Integer, nullable=True)
+    wildcard_applied_at = Column(DateTime(timezone=True), nullable=True)
+    wildcard_applied_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     registered_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

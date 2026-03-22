@@ -1937,10 +1937,10 @@ export default function EventDashboard() {
                                                                                 href={panelLink}
                                                                                 target="_blank"
                                                                                 rel="noreferrer"
-                                                                                className="mt-1 inline-flex items-center gap-1 text-xs font-bold text-blue-700 underline"
+                                                                                className="mt-2 inline-flex items-center gap-2 rounded-md border-2 border-black bg-[#facc15] px-3 py-2 text-xs font-black uppercase tracking-[0.08em] text-black shadow-[3px_3px_0px_0px_#000000] transition-transform hover:-translate-y-0.5 hover:bg-[#fde047]"
                                                                             >
                                                                                 <ExternalLink className="h-3.5 w-3.5" />
-                                                                                Panel Link
+                                                                                Join Panel
                                                                             </a>
                                                                         ) : null}
                                                                     </div>

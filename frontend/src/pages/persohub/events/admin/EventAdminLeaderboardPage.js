@@ -50,6 +50,12 @@ const DEPARTMENTS = [
     { value: 'Information Technology', label: 'IT' },
 ];
 
+const wildcardBadge = (
+    <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-800">
+        Wildcard
+    </span>
+);
+
 const normalizeRoundState = (value) => String(value || '').trim().toLowerCase();
 const normalizeApiErrorText = (value) => {
     if (value === null || value === undefined) return '';
@@ -757,7 +763,10 @@ function LeaderboardContent() {
                                 <Medal className="w-8 h-8" />
                             </div>
                             <div className="font-bold text-2xl text-gray-600">#2</div>
-                            <h3 className="font-heading font-bold text-xl">{podium[1]?.name}</h3>
+                            <div className="flex flex-wrap items-center justify-center gap-2">
+                                <h3 className="font-heading font-bold text-xl">{podium[1]?.name}</h3>
+                                {podium[1]?.is_wildcard ? wildcardBadge : null}
+                            </div>
                             <p className="text-sm text-gray-600">{podium[1]?.regno_or_code || podium[1]?.register_number}</p>
                             {!isTeamMode ? (
                                 <p className="text-sm text-gray-500 mt-1">
@@ -777,7 +786,10 @@ function LeaderboardContent() {
                                 <Trophy className="w-10 h-10" />
                             </div>
                             <div className="font-bold text-3xl text-yellow-600">#1</div>
-                            <h3 className="font-heading font-bold text-2xl">{podium[0]?.name}</h3>
+                            <div className="flex flex-wrap items-center justify-center gap-2">
+                                <h3 className="font-heading font-bold text-2xl">{podium[0]?.name}</h3>
+                                {podium[0]?.is_wildcard ? wildcardBadge : null}
+                            </div>
                             <p className="text-sm text-gray-600">{podium[0]?.regno_or_code || podium[0]?.register_number}</p>
                             {!isTeamMode ? (
                                 <p className="text-sm text-gray-500 mt-1">
@@ -797,7 +809,10 @@ function LeaderboardContent() {
                                 <Medal className="w-7 h-7" />
                             </div>
                             <div className="font-bold text-xl text-orange-600">#3</div>
-                            <h3 className="font-heading font-bold text-lg">{podium[2]?.name}</h3>
+                            <div className="flex flex-wrap items-center justify-center gap-2">
+                                <h3 className="font-heading font-bold text-lg">{podium[2]?.name}</h3>
+                                {podium[2]?.is_wildcard ? wildcardBadge : null}
+                            </div>
                             <p className="text-sm text-gray-600">{podium[2]?.regno_or_code || podium[2]?.register_number}</p>
                             {!isTeamMode ? (
                                 <p className="text-sm text-gray-500 mt-1">
@@ -857,7 +872,12 @@ function LeaderboardContent() {
                                         {(currentPage - 1) * pageSize + index + 1}
                                     </td>
                                     <td className="font-mono font-bold">{entry.regno_or_code || entry.register_number}</td>
-                                    <td className="font-medium">{entry.name}</td>
+                                    <td className="font-medium">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <span>{entry.name}</span>
+                                            {entry.is_wildcard ? wildcardBadge : null}
+                                        </div>
+                                    </td>
                                     {!isTeamMode ? (
                                         <td className="text-sm">{DEPARTMENTS.find((d) => d.value === entry.department)?.label || entry.department}</td>
                                     ) : null}

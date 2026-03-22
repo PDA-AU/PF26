@@ -11,6 +11,7 @@ import {
     Download,
     ChevronLeft,
     ChevronRight,
+    Plus,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -67,6 +68,7 @@ function ParticipantsContent() {
     const {
         eventInfo,
         eventSlug,
+        refreshEventInfo,
         pushLocalUndo,
         pushSavedUndo,
         warnNonUndoable,
@@ -99,6 +101,20 @@ function ParticipantsContent() {
     const [paymentApprovalLoading, setPaymentApprovalLoading] = useState(false);
     const [paymentApprovalError, setPaymentApprovalError] = useState('');
     const [paymentApprovalAcknowledged, setPaymentApprovalAcknowledged] = useState(false);
+    const [wildcardDialogOpen, setWildcardDialogOpen] = useState(false);
+    const [wildcardLoading, setWildcardLoading] = useState(false);
+    const [wildcardSubmitting, setWildcardSubmitting] = useState(false);
+    const [wildcardSearch, setWildcardSearch] = useState('');
+    const [wildcardCandidates, setWildcardCandidates] = useState([]);
+    const [wildcardCandidatesTotal, setWildcardCandidatesTotal] = useState(0);
+    const [wildcardCandidatesPage, setWildcardCandidatesPage] = useState(1);
+    const [wildcardRoundsCompleted, setWildcardRoundsCompleted] = useState(0);
+    const [wildcardSelectedUserId, setWildcardSelectedUserId] = useState(null);
+    const [wildcardSelectedUserIds, setWildcardSelectedUserIds] = useState([]);
+    const [wildcardSelectedCandidateMap, setWildcardSelectedCandidateMap] = useState({});
+    const [wildcardScore, setWildcardScore] = useState('');
+    const [wildcardTeamName, setWildcardTeamName] = useState('');
+    const [wildcardTeamLeadUserId, setWildcardTeamLeadUserId] = useState('');
     const [filters, setFilters] = useState({
         department: '',
         gender: '',
@@ -110,9 +126,9 @@ function ParticipantsContent() {
 
     const isTeamMode = eventInfo?.participant_mode === 'team';
 
-    const getErrorMessage = (error, fallback) => (
+    const getErrorMessage = useCallback((error, fallback) => (
         error?.response?.data?.detail || error?.response?.data?.message || fallback
-    );
+    ), []);
 
     const fetchRows = useCallback(async () => {
         setLoading(true);
@@ -142,11 +158,64 @@ function ParticipantsContent() {
         } finally {
             setLoading(false);
         }
-    }, [currentPage, eventSlug, filters.batch, filters.department, filters.gender, filters.mit_scope, filters.search, filters.status, getAuthHeader, isTeamMode]);
+    }, [currentPage, eventSlug, filters.batch, filters.department, filters.gender, filters.mit_scope, filters.search, filters.status, getAuthHeader, getErrorMessage, isTeamMode]);
 
     useEffect(() => {
         fetchRows();
     }, [fetchRows]);
+
+    const resetWildcardDialog = useCallback(() => {
+        setWildcardSearch('');
+        setWildcardCandidates([]);
+        setWildcardCandidatesTotal(0);
+        setWildcardCandidatesPage(1);
+        setWildcardSelectedUserId(null);
+        setWildcardSelectedUserIds([]);
+        setWildcardSelectedCandidateMap({});
+        setWildcardScore('');
+        setWildcardTeamName('');
+        setWildcardTeamLeadUserId('');
+        setWildcardRoundsCompleted(0);
+    }, []);
+
+    const fetchWildcardMeta = useCallback(async () => {
+        const response = await axios.get(`${API}/persohub/admin/persohub-events/${eventSlug}/dashboard`, {
+            headers: getAuthHeader(),
+        });
+        setWildcardRoundsCompleted(Number(response.data?.rounds_completed || 0));
+    }, [eventSlug, getAuthHeader]);
+
+    const fetchWildcardCandidates = useCallback(async (searchValue, page = 1) => {
+        setWildcardLoading(true);
+        try {
+            const params = new URLSearchParams();
+            if (searchValue) params.append('search', searchValue);
+            params.append('page', String(page));
+            params.append('page_size', '50');
+            const response = await axios.get(`${API}/persohub/admin/persohub-events/${eventSlug}/wildcard-candidates?${params.toString()}`, {
+                headers: getAuthHeader(),
+            });
+            const data = Array.isArray(response.data) ? response.data : [];
+            setWildcardCandidates((prev) => (page === 1 ? data : [...prev, ...data]));
+            setWildcardCandidatesTotal(Number(response.headers['x-total-count'] || data.length || 0));
+            setWildcardCandidatesPage(page);
+            setWildcardSelectedCandidateMap((prev) => {
+                const next = { ...prev };
+                data.forEach((candidate) => {
+                    next[String(candidate.user_id)] = candidate;
+                });
+                return next;
+            });
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to load wildcard candidates'));
+            if (page === 1) {
+                setWildcardCandidates([]);
+                setWildcardCandidatesTotal(0);
+            }
+        } finally {
+            setWildcardLoading(false);
+        }
+    }, [eventSlug, getAuthHeader, getErrorMessage]);
 
     useEffect(() => {
         const onUndoApplied = (event) => {
@@ -168,6 +237,27 @@ function ParticipantsContent() {
             setCurrentPage(totalPages);
         }
     }, [currentPage, totalPages]);
+
+    useEffect(() => {
+        if (!wildcardDialogOpen) return undefined;
+        let active = true;
+        const load = async () => {
+            try {
+                await fetchWildcardMeta();
+                if (active) {
+                    await fetchWildcardCandidates(wildcardSearch, 1);
+                }
+            } catch (error) {
+                if (active) {
+                    toast.error(getErrorMessage(error, 'Failed to load wildcard dialog'));
+                }
+            }
+        };
+        load();
+        return () => {
+            active = false;
+        };
+    }, [wildcardDialogOpen, fetchWildcardMeta, fetchWildcardCandidates, wildcardSearch, getErrorMessage]);
 
     const handleExport = async (format) => {
         try {
@@ -398,6 +488,136 @@ function ParticipantsContent() {
         return Array.from(values).sort();
     }, [rows]);
 
+    const wildcardMaxScore = Math.max(0, wildcardRoundsCompleted * 100);
+    const wildcardCandidateByUserId = useMemo(
+        () => new Map([
+            ...Object.values(wildcardSelectedCandidateMap).map((candidate) => [Number(candidate.user_id), candidate]),
+            ...wildcardCandidates.map((candidate) => [Number(candidate.user_id), candidate]),
+        ]),
+        [wildcardCandidates, wildcardSelectedCandidateMap]
+    );
+    const wildcardSelectedGroupKeys = useMemo(() => {
+        const keys = new Set();
+        wildcardSelectedUserIds.forEach((userId) => {
+            const candidate = wildcardCandidateByUserId.get(Number(userId));
+            if (candidate?.selection_group_key) {
+                keys.add(candidate.selection_group_key);
+            }
+        });
+        return keys;
+    }, [wildcardCandidateByUserId, wildcardSelectedUserIds]);
+    const wildcardLockedGroupMemberIds = useMemo(() => {
+        const lockedIds = new Set();
+        wildcardSelectedGroupKeys.forEach((groupKey) => {
+            wildcardCandidates.forEach((candidate) => {
+                if (candidate.selection_group_key !== groupKey) return;
+                const members = Array.isArray(candidate.selection_group_members) && candidate.selection_group_members.length > 0
+                    ? candidate.selection_group_members
+                    : [{ user_id: candidate.user_id }];
+                members.forEach((member) => lockedIds.add(Number(member.user_id)));
+            });
+        });
+        return lockedIds;
+    }, [wildcardCandidates, wildcardSelectedGroupKeys]);
+    const wildcardSelectedMembers = useMemo(
+        () => wildcardSelectedUserIds
+            .map((userId) => wildcardCandidateByUserId.get(Number(userId)))
+            .filter(Boolean),
+        [wildcardCandidateByUserId, wildcardSelectedUserIds]
+    );
+    const wildcardHasMore = wildcardCandidates.length < wildcardCandidatesTotal;
+
+    const openWildcardDialog = () => {
+        resetWildcardDialog();
+        setWildcardDialogOpen(true);
+    };
+
+    const closeWildcardDialog = (force = false) => {
+        if (wildcardSubmitting && !force) return;
+        setWildcardDialogOpen(false);
+        resetWildcardDialog();
+    };
+
+    const toggleWildcardTeamCandidate = (candidate) => {
+        const groupMembers = Array.isArray(candidate?.selection_group_members) && candidate.selection_group_members.length > 0
+            ? candidate.selection_group_members.map((member) => Number(member.user_id))
+            : [Number(candidate?.user_id)];
+        const allSelected = groupMembers.every((userId) => wildcardSelectedUserIds.includes(Number(userId)));
+        setWildcardSelectedUserIds((prev) => {
+            const set = new Set(prev.map((value) => Number(value)));
+            if (allSelected) {
+                groupMembers.forEach((userId) => set.delete(Number(userId)));
+            } else {
+                groupMembers.forEach((userId) => set.add(Number(userId)));
+            }
+            return Array.from(set);
+        });
+    };
+
+    const handleWildcardSubmit = async () => {
+        const numericScore = Number(wildcardScore || 0);
+        if (!Number.isFinite(numericScore) || numericScore < 0) {
+            toast.error('Enter a valid wildcard score');
+            return;
+        }
+        if (numericScore > wildcardMaxScore) {
+            toast.error(`Wildcard score cannot exceed ${wildcardMaxScore}`);
+            return;
+        }
+        if (!isTeamMode && !wildcardSelectedUserId) {
+            toast.error('Select a participant to wildcard');
+            return;
+        }
+        if (isTeamMode) {
+            if (wildcardSelectedUserIds.length === 0) {
+                toast.error('Select at least one team member');
+                return;
+            }
+            if (!wildcardTeamName.trim()) {
+                toast.error('Enter a team name');
+                return;
+            }
+            if (!wildcardTeamLeadUserId) {
+                toast.error('Select a team leader');
+                return;
+            }
+        }
+
+        setWildcardSubmitting(true);
+        try {
+            const payload = isTeamMode
+                ? {
+                    mode: 'team',
+                    wildcard_score: numericScore,
+                    team_name: wildcardTeamName.trim(),
+                    member_user_ids: wildcardSelectedUserIds.map((value) => Number(value)),
+                    team_lead_user_id: Number(wildcardTeamLeadUserId),
+                }
+                : {
+                    mode: 'individual',
+                    wildcard_score: numericScore,
+                    user_id: Number(wildcardSelectedUserId),
+                };
+            const response = await axios.post(`${API}/persohub/admin/persohub-events/${eventSlug}/wildcards`, payload, {
+                headers: getAuthHeader(),
+            });
+            toast.success(response.data?.message || 'Wildcard added');
+            closeWildcardDialog(true);
+            await Promise.all([fetchRows(), refreshEventInfo()]);
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to add wildcard'));
+        } finally {
+            setWildcardSubmitting(false);
+        }
+    };
+
+    useEffect(() => {
+        if (!isTeamMode) return;
+        if (!wildcardSelectedUserIds.includes(Number(wildcardTeamLeadUserId))) {
+            setWildcardTeamLeadUserId(wildcardSelectedUserIds[0] ? String(wildcardSelectedUserIds[0]) : '');
+        }
+    }, [isTeamMode, wildcardSelectedUserIds, wildcardTeamLeadUserId]);
+
     const departmentLabel = selectedEntity
         ? (DEPARTMENTS.find((d) => d.value === selectedEntity.department)?.label || selectedEntity.department)
         : '';
@@ -412,6 +632,9 @@ function ParticipantsContent() {
                         <p className="text-gray-600">{totalRows} {isTeamMode ? 'teams' : 'participants'} found</p>
                     </div>
                     <div className="flex gap-2">
+                        <Button onClick={openWildcardDialog} className="border-2 border-black bg-accent text-black shadow-neo hover:bg-accent/90">
+                            <Plus className="w-4 h-4 mr-2" /> Add Wildcard
+                        </Button>
                         <Button onClick={() => handleExport('csv')} variant="outline" className="border-2 border-black shadow-neo">
                             <Download className="w-4 h-4 mr-2" /> CSV
                         </Button>
@@ -606,7 +829,16 @@ function ParticipantsContent() {
                                     onClick={() => openEntityModal(row)}
                                 >
                                     <td className="font-mono font-bold">{row.regno_or_code}</td>
-                                    <td className="font-medium">{row.name}</td>
+                                    <td className="font-medium">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <span>{row.name}</span>
+                                            {row.is_wildcard ? (
+                                                <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-800">
+                                                    Wildcard
+                                                </span>
+                                            ) : null}
+                                        </div>
+                                    </td>
                                     {isTeamMode ? (
                                         <td>{row.members_count || 0}</td>
                                     ) : (
@@ -709,6 +941,194 @@ function ParticipantsContent() {
                     </table>
                 </div>
             )}
+
+            <Dialog
+                open={wildcardDialogOpen}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        closeWildcardDialog();
+                    } else {
+                        setWildcardDialogOpen(true);
+                    }
+                }}
+            >
+                <DialogContent className="border-4 border-black bg-white sm:max-w-3xl">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading font-bold text-xl">
+                            Add {isTeamMode ? 'Wildcard Team' : 'Wildcard Participant'}
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+                            <p className="font-semibold">Completed rounds: {wildcardRoundsCompleted}</p>
+                            <p>Max wildcard score: {wildcardMaxScore}</p>
+                            <p>Previous scores will not count after wildcard. Only wildcard seed + subsequent rounds will be used.</p>
+                        </div>
+
+                        <div className="grid gap-3 md:grid-cols-2">
+                            <div className="space-y-2">
+                                <label className="text-sm font-semibold text-gray-700">Search candidates</label>
+                                <Input
+                                    value={wildcardSearch}
+                                    onChange={(event) => setWildcardSearch(event.target.value)}
+                                    placeholder={isTeamMode ? 'Search users or eliminated teams...' : 'Search users...'}
+                                    className="neo-input"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-sm font-semibold text-gray-700">Wildcard score</label>
+                                <Input
+                                    type="number"
+                                    min="0"
+                                    max={wildcardMaxScore}
+                                    value={wildcardScore}
+                                    onChange={(event) => setWildcardScore(event.target.value)}
+                                    placeholder={`0-${wildcardMaxScore}`}
+                                    className="neo-input"
+                                />
+                            </div>
+                            {isTeamMode ? (
+                                <div className="space-y-2 md:col-span-2">
+                                    <label className="text-sm font-semibold text-gray-700">Wildcard team name</label>
+                                    <Input
+                                        value={wildcardTeamName}
+                                        onChange={(event) => setWildcardTeamName(event.target.value)}
+                                        placeholder="Enter team name"
+                                        className="neo-input"
+                                    />
+                                </div>
+                            ) : null}
+                        </div>
+
+                        <div className="rounded-xl border border-black/10 bg-slate-50 p-3 text-sm text-slate-700">
+                            {isTeamMode
+                                ? `Selected members: ${wildcardSelectedUserIds.length}${eventInfo?.team_min_size ? ` · min ${eventInfo.team_min_size}` : ''}${eventInfo?.team_max_size ? ` · max ${eventInfo.team_max_size}` : ''} · showing ${wildcardCandidates.length} of ${wildcardCandidatesTotal || 0} candidates`
+                                : `Selected participant: ${wildcardSelectedUserId ? wildcardCandidateByUserId.get(Number(wildcardSelectedUserId))?.name || '1 selected' : 'none'}`}
+                        </div>
+
+                        {wildcardSelectedGroupKeys.size > 0 ? (
+                            <div className="rounded-xl border border-blue-300 bg-blue-50 p-3 text-sm text-blue-900">
+                                Users from an eliminated team are selected as a locked full-team move. Deselecting any of them removes the whole source team from this wildcard draft.
+                            </div>
+                        ) : null}
+
+                        <div className="max-h-80 space-y-2 overflow-y-auto rounded-2xl border-2 border-black bg-white p-3">
+                            {wildcardLoading ? (
+                                <p className="text-sm text-gray-600">Loading candidates...</p>
+                            ) : wildcardCandidates.length === 0 ? (
+                                <p className="text-sm text-gray-600">No wildcard candidates found.</p>
+                            ) : wildcardCandidates.map((candidate) => {
+                                const userId = Number(candidate.user_id);
+                                const isSelected = isTeamMode
+                                    ? wildcardSelectedUserIds.includes(userId)
+                                    : Number(wildcardSelectedUserId) === userId;
+                                const isLockedGroupMember = isTeamMode && wildcardLockedGroupMemberIds.has(userId) && candidate.selection_group_key;
+                                return (
+                                    <button
+                                        key={`${candidate.candidate_type}-${userId}`}
+                                        type="button"
+                                        onClick={() => {
+                                            if (isTeamMode) {
+                                                toggleWildcardTeamCandidate(candidate);
+                                            } else {
+                                                setWildcardSelectedUserId(userId);
+                                            }
+                                        }}
+                                        className={`w-full rounded-xl border p-3 text-left transition ${
+                                            isSelected ? 'border-black bg-[#fff3cc]' : 'border-black/10 bg-white hover:bg-slate-50'
+                                        }`}
+                                    >
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div>
+                                                <p className="font-semibold text-sm">{candidate.name} <span className="text-xs text-slate-500">({candidate.regno || '-'})</span></p>
+                                                <p className="text-xs text-slate-600">{candidate.email || 'No email'}{candidate.department ? ` · ${candidate.department}` : ''}{candidate.batch ? ` · ${candidate.batch}` : ''}</p>
+                                                <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
+                                                    <span className="rounded-full border border-black/10 bg-slate-100 px-2 py-0.5 text-slate-700">
+                                                        {String(candidate.candidate_type || '').replaceAll('_', ' ')}
+                                                    </span>
+                                                    {candidate.source_team_name ? (
+                                                        <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-blue-700">
+                                                            {candidate.source_team_name}
+                                                        </span>
+                                                    ) : null}
+                                                    {isLockedGroupMember ? (
+                                                        <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-800">
+                                                            Full team move
+                                                        </span>
+                                                    ) : null}
+                                                </div>
+                                            </div>
+                                            <span className={`mt-1 rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] ${isSelected ? 'border-black bg-black text-white' : 'border-black/20 bg-white text-slate-600'}`}>
+                                                {isSelected ? (isTeamMode ? 'Selected' : 'Chosen') : 'Pick'}
+                                            </span>
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                            {!wildcardLoading && wildcardHasMore ? (
+                                <div className="pt-2 text-center">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="border-2 border-black"
+                                        onClick={() => fetchWildcardCandidates(wildcardSearch, wildcardCandidatesPage + 1)}
+                                    >
+                                        Load More
+                                    </Button>
+                                </div>
+                            ) : null}
+                        </div>
+
+                        {isTeamMode && wildcardSelectedMembers.length > 0 ? (
+                            <div className="space-y-3 rounded-2xl border border-black/10 bg-[#fff8e1] p-4">
+                                <div>
+                                    <h4 className="font-semibold text-sm">Selected Members</h4>
+                                    <p className="text-xs text-slate-600">Choose the team leader from the selected users.</p>
+                                </div>
+                                <Select value={wildcardTeamLeadUserId || undefined} onValueChange={setWildcardTeamLeadUserId}>
+                                    <SelectTrigger className="neo-input">
+                                        <SelectValue placeholder="Select team leader" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {wildcardSelectedMembers.map((candidate) => (
+                                            <SelectItem key={candidate.user_id} value={String(candidate.user_id)}>
+                                                {candidate.name} ({candidate.regno || '-'})
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                <div className="space-y-2">
+                                    {wildcardSelectedMembers.map((candidate) => (
+                                        <div key={`selected-${candidate.user_id}`} className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm">
+                                            <span className="font-medium">{candidate.name}</span>{' '}
+                                            <span className="text-slate-500">({candidate.regno || '-'})</span>
+                                            {String(wildcardTeamLeadUserId) === String(candidate.user_id) ? (
+                                                <span className="ml-2 rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-700">
+                                                    Leader
+                                                </span>
+                                            ) : null}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : null}
+
+                        <div className="flex justify-end gap-2">
+                            <Button type="button" variant="outline" className="border-2 border-black" onClick={closeWildcardDialog} disabled={wildcardSubmitting}>
+                                Cancel
+                            </Button>
+                            <Button
+                                type="button"
+                                className="border-2 border-black bg-black text-white hover:bg-black/90"
+                                onClick={handleWildcardSubmit}
+                                disabled={wildcardSubmitting}
+                            >
+                                {wildcardSubmitting ? 'Adding...' : 'Add Wildcard'}
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
 
             <Dialog
                 open={Boolean(paymentApprovalTarget)}

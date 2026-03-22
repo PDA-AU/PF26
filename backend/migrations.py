@@ -1419,6 +1419,14 @@ def ensure_pda_event_round_submission_tables(engine):
             conn.execute(text("ALTER TABLE pda_event_rounds ADD COLUMN IF NOT EXISTS submission_deadline TIMESTAMPTZ"))
             conn.execute(text("ALTER TABLE pda_event_rounds ADD COLUMN IF NOT EXISTS allow_late_submission BOOLEAN NOT NULL DEFAULT FALSE"))
             conn.execute(text("ALTER TABLE pda_event_rounds ADD COLUMN IF NOT EXISTS allowed_mime_types JSONB"))
+            if _column_udt_name(conn, "pda_event_rounds", "allowed_mime_types") != "jsonb":
+                conn.execute(
+                    text(
+                        "ALTER TABLE pda_event_rounds "
+                        "ALTER COLUMN allowed_mime_types TYPE JSONB "
+                        "USING allowed_mime_types::jsonb"
+                    )
+                )
             conn.execute(text("ALTER TABLE pda_event_rounds ADD COLUMN IF NOT EXISTS max_file_size_mb INTEGER NOT NULL DEFAULT 25"))
             conn.execute(
                 text(
@@ -2139,6 +2147,14 @@ def ensure_persohub_event_tables(engine):
             conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS submission_deadline TIMESTAMPTZ"))
             conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS allow_late_submission BOOLEAN NOT NULL DEFAULT FALSE"))
             conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS allowed_mime_types JSONB"))
+            if _column_udt_name(conn, "persohub_event_rounds", "allowed_mime_types") != "jsonb":
+                conn.execute(
+                    text(
+                        "ALTER TABLE persohub_event_rounds "
+                        "ALTER COLUMN allowed_mime_types TYPE JSONB "
+                        "USING allowed_mime_types::jsonb"
+                    )
+                )
             conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS max_file_size_mb INTEGER NOT NULL DEFAULT 25"))
             conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS panel_mode_enabled BOOLEAN NOT NULL DEFAULT FALSE"))
             conn.execute(
@@ -2425,6 +2441,26 @@ def ensure_persohub_event_tables(engine):
         _update_persohub_event_parity_status_marker(conn)
 
 
+def ensure_persohub_event_wildcard_columns(engine):
+    with engine.begin() as conn:
+        if not _table_exists(conn, "persohub_event_registrations"):
+            return
+        if not _column_exists(conn, "persohub_event_registrations", "wildcard_seed_score"):
+            conn.execute(text("ALTER TABLE persohub_event_registrations ADD COLUMN wildcard_seed_score DOUBLE PRECISION"))
+        if not _column_exists(conn, "persohub_event_registrations", "wildcard_start_round_no"):
+            conn.execute(text("ALTER TABLE persohub_event_registrations ADD COLUMN wildcard_start_round_no INTEGER"))
+        if not _column_exists(conn, "persohub_event_registrations", "wildcard_applied_at"):
+            conn.execute(text("ALTER TABLE persohub_event_registrations ADD COLUMN wildcard_applied_at TIMESTAMPTZ"))
+        if not _column_exists(conn, "persohub_event_registrations", "wildcard_applied_by_user_id"):
+            conn.execute(text("ALTER TABLE persohub_event_registrations ADD COLUMN wildcard_applied_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL"))
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_persohub_event_registration_event_wildcard "
+                "ON persohub_event_registrations(event_id, entity_type, wildcard_start_round_no)"
+            )
+        )
+
+
 PERSOHUB_EVENT_PARITY_STATUS_KEY = "migration_persohub_events_parity_v1"
 PERSOHUB_EVENTS_PARITY_ENABLED_KEY = "persohub_events_parity_enabled"
 PERSOHUB_EVENTS_PARITY_AUTO_ENABLED_ONCE_KEY = "migration_persohub_events_parity_auto_enabled_once_v1"
@@ -2684,6 +2720,14 @@ def ensure_persohub_event_round_submission_tables(engine):
             conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS submission_deadline TIMESTAMPTZ"))
             conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS allow_late_submission BOOLEAN NOT NULL DEFAULT FALSE"))
             conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS allowed_mime_types JSONB"))
+            if _column_udt_name(conn, "persohub_event_rounds", "allowed_mime_types") != "jsonb":
+                conn.execute(
+                    text(
+                        "ALTER TABLE persohub_event_rounds "
+                        "ALTER COLUMN allowed_mime_types TYPE JSONB "
+                        "USING allowed_mime_types::jsonb"
+                    )
+                )
             conn.execute(text("ALTER TABLE persohub_event_rounds ADD COLUMN IF NOT EXISTS max_file_size_mb INTEGER NOT NULL DEFAULT 25"))
             conn.execute(
                 text(
