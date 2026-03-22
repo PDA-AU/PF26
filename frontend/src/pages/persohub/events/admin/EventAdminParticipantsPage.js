@@ -41,6 +41,11 @@ const DEPARTMENTS = [
 
 const GENDERS = ['Male', 'Female'];
 const STATUSES = ['Active', 'Eliminated', 'Pending'];
+const WILDCARD_FILTER_OPTIONS = [
+    { value: 'all', label: 'All Entries' },
+    { value: 'wildcard', label: 'Wildcard Only' },
+    { value: 'non_wildcard', label: 'Non-Wildcard' },
+];
 const formatDateTime = (value) => {
     if (!value) return '-';
     const parsed = new Date(value);
@@ -121,6 +126,7 @@ function ParticipantsContent() {
         batch: '',
         mit_scope: '',
         status: '',
+        wildcard: '',
         search: '',
     });
 
@@ -136,6 +142,7 @@ function ParticipantsContent() {
             const params = new URLSearchParams();
             if (filters.search) params.append('search', filters.search);
             if (filters.status) params.append('status', filters.status);
+            if (filters.wildcard) params.append('wildcard', filters.wildcard);
             if (!isTeamMode) {
                 if (filters.mit_scope) params.append('mit_scope', filters.mit_scope);
                 if (filters.department) params.append('department', filters.department);
@@ -158,7 +165,7 @@ function ParticipantsContent() {
         } finally {
             setLoading(false);
         }
-    }, [currentPage, eventSlug, filters.batch, filters.department, filters.gender, filters.mit_scope, filters.search, filters.status, getAuthHeader, getErrorMessage, isTeamMode]);
+    }, [currentPage, eventSlug, filters.batch, filters.department, filters.gender, filters.mit_scope, filters.search, filters.status, filters.wildcard, getAuthHeader, getErrorMessage, isTeamMode]);
 
     useEffect(() => {
         fetchRows();
@@ -228,7 +235,7 @@ function ParticipantsContent() {
 
     useEffect(() => {
         setCurrentPage(1);
-    }, [filters.batch, filters.department, filters.gender, filters.mit_scope, filters.search, filters.status]);
+    }, [filters.batch, filters.department, filters.gender, filters.mit_scope, filters.search, filters.status, filters.wildcard]);
 
     const totalPages = Math.max(1, Math.ceil(totalRows / PAGE_SIZE));
 
@@ -265,6 +272,7 @@ function ParticipantsContent() {
             params.append('format', format);
             if (filters.search) params.append('search', filters.search);
             if (filters.status) params.append('status', filters.status);
+            if (filters.wildcard) params.append('wildcard', filters.wildcard);
             if (!isTeamMode) {
                 if (filters.mit_scope) params.append('mit_scope', filters.mit_scope);
                 if (filters.department) params.append('department', filters.department);
@@ -300,6 +308,7 @@ function ParticipantsContent() {
             batch: '',
             mit_scope: '',
             status: '',
+            wildcard: '',
             search: '',
         });
         pushLocalUndo({
@@ -478,7 +487,7 @@ function ParticipantsContent() {
         }
     };
 
-    const hasAnyFilters = Boolean(filters.department || filters.gender || filters.batch || filters.mit_scope || filters.status || filters.search);
+    const hasAnyFilters = Boolean(filters.department || filters.gender || filters.batch || filters.mit_scope || filters.status || filters.wildcard || filters.search);
 
     const batchOptions = useMemo(() => {
         const values = new Set();
@@ -644,7 +653,7 @@ function ParticipantsContent() {
                     </div>
                 </div>
 
-                <div className={`grid gap-3 ${isTeamMode ? 'grid-cols-1 md:grid-cols-3' : 'grid-cols-1 md:grid-cols-7'}`}>
+                <div className={`grid gap-3 ${isTeamMode ? 'grid-cols-1 md:grid-cols-4' : 'grid-cols-1 md:grid-cols-8'}`}>
                     <div className={`relative ${isTeamMode ? 'md:col-span-2' : 'md:col-span-2'}`}>
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                         <Input
@@ -781,6 +790,28 @@ function ParticipantsContent() {
                             <SelectItem value="all">All Statuses</SelectItem>
                             {STATUSES.map((status) => (
                                 <SelectItem key={status} value={status}>{status}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+
+                    <Select
+                        value={filters.wildcard || 'all'}
+                        onValueChange={(value) => {
+                            const previous = { ...filters };
+                            const nextValue = value === 'all' ? '' : value;
+                            setFilters((prev) => ({ ...prev, wildcard: nextValue }));
+                            pushLocalUndo({
+                                label: 'Undo wildcard filter change',
+                                undoFn: () => setFilters(previous),
+                            });
+                        }}
+                    >
+                        <SelectTrigger className="neo-input">
+                            <SelectValue placeholder="Wildcard" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {WILDCARD_FILTER_OPTIONS.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                             ))}
                         </SelectContent>
                     </Select>

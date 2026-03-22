@@ -1731,6 +1731,7 @@ def event_participants(
     batch: Optional[str] = None,
     mit_scope: Optional[str] = None,
     status_filter: Optional[str] = Query(None, alias="status"),
+    wildcard_filter: Optional[str] = Query(None, alias="wildcard"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     response: Response = None,
@@ -1756,6 +1757,11 @@ def event_participants(
     if status_filter:
         normalized = str(status_filter or "").strip().lower()
         items = [item for item in items if str(item.get("status") or "").strip().lower() == normalized]
+    normalized_wildcard = str(wildcard_filter or "").strip().lower()
+    if normalized_wildcard in {"wildcard", "yes", "true"}:
+        items = [item for item in items if bool(item.get("is_wildcard"))]
+    elif normalized_wildcard in {"non_wildcard", "non-wildcard", "no", "false"}:
+        items = [item for item in items if not bool(item.get("is_wildcard"))]
     if search:
         needle = search.lower()
         filtered = []
@@ -5115,6 +5121,7 @@ def event_leaderboard(
     gender: Optional[str] = None,
     batch: Optional[str] = None,
     status_filter: Optional[str] = Query(None, alias="status"),
+    wildcard_filter: Optional[str] = Query(None, alias="wildcard"),
     search: Optional[str] = None,
     round_ids: Optional[List[int]] = Query(None),
     sort: Optional[str] = Query("rank"),
@@ -5172,6 +5179,11 @@ def event_leaderboard(
         if status_filter:
             normalized = str(status_filter or "").strip().lower()
             entities = [item for item in entities if str(item.get("status") or "").strip().lower() == normalized]
+        normalized_wildcard = str(wildcard_filter or "").strip().lower()
+        if normalized_wildcard in {"wildcard", "yes", "true"}:
+            entities = [item for item in entities if bool(item.get("is_wildcard"))]
+        elif normalized_wildcard in {"non_wildcard", "non-wildcard", "no", "false"}:
+            entities = [item for item in entities if not bool(item.get("is_wildcard"))]
         if search:
             needle = str(search).lower()
             entities = [
@@ -5230,6 +5242,11 @@ def event_leaderboard(
         if status_filter:
             normalized = str(status_filter or "").strip().lower()
             entities = [item for item in entities if str(item.get("status") or "").strip().lower() == normalized]
+        normalized_wildcard = str(wildcard_filter or "").strip().lower()
+        if normalized_wildcard in {"wildcard", "yes", "true"}:
+            entities = [item for item in entities if bool(item.get("is_wildcard"))]
+        elif normalized_wildcard in {"non_wildcard", "non-wildcard", "no", "false"}:
+            entities = [item for item in entities if not bool(item.get("is_wildcard"))]
         if search:
             needle = str(search).lower()
             entities = [
@@ -5944,6 +5961,7 @@ def export_participants(
     gender: Optional[str] = None,
     batch: Optional[str] = None,
     status_filter: Optional[str] = Query(None, alias="status"),
+    wildcard_filter: Optional[str] = Query(None, alias="wildcard"),
     search: Optional[str] = None,
     _: PdaUser = Depends(require_persohub_event_admin),
     db: Session = Depends(get_db),
@@ -5956,6 +5974,7 @@ def export_participants(
         gender=gender,
         batch=batch,
         status_filter=status_filter,
+        wildcard_filter=wildcard_filter,
         page=1,
         page_size=100000,
         response=None,
@@ -6101,6 +6120,7 @@ def export_leaderboard(
     gender: Optional[str] = None,
     batch: Optional[str] = None,
     status_filter: Optional[str] = Query(None, alias="status"),
+    wildcard_filter: Optional[str] = Query(None, alias="wildcard"),
     search: Optional[str] = None,
     round_ids: Optional[List[int]] = Query(None),
     sort: Optional[str] = Query("rank"),
@@ -6148,6 +6168,7 @@ def export_leaderboard(
         gender=gender,
         batch=batch,
         status_filter=status_filter,
+        wildcard_filter=wildcard_filter,
         search=search,
         round_ids=effective_round_ids,
         sort=sort,

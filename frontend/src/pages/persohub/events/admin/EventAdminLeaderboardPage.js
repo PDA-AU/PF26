@@ -55,6 +55,11 @@ const wildcardBadge = (
         Wildcard
     </span>
 );
+const WILDCARD_FILTER_OPTIONS = [
+    { value: 'all', label: 'All Entries' },
+    { value: 'wildcard', label: 'Wildcard Only' },
+    { value: 'non_wildcard', label: 'Non-Wildcard' },
+];
 
 const normalizeRoundState = (value) => String(value || '').trim().toLowerCase();
 const normalizeApiErrorText = (value) => {
@@ -115,6 +120,7 @@ function LeaderboardContent() {
         gender: '',
         batch: '',
         status: 'Active',
+        wildcard: '',
         search: '',
         roundIds: [],
     });
@@ -134,6 +140,7 @@ function LeaderboardContent() {
             const buildParams = (page) => {
                 const params = new URLSearchParams();
                 if (filters.status) params.append('status', filters.status);
+                if (filters.wildcard) params.append('wildcard', filters.wildcard);
                 if (!isTeamMode) {
                     if (filters.department) params.append('department', filters.department);
                     if (filters.gender) params.append('gender', filters.gender);
@@ -180,7 +187,7 @@ function LeaderboardContent() {
         } finally {
             setLoading(false);
         }
-    }, [eventSlug, filters.batch, filters.department, filters.gender, filters.roundIds, filters.status, getAuthHeader, isTeamMode, sortOption]);
+    }, [eventSlug, filters.batch, filters.department, filters.gender, filters.roundIds, filters.status, filters.wildcard, getAuthHeader, isTeamMode, sortOption]);
 
     const fetchRounds = useCallback(async () => {
         try {
@@ -213,7 +220,7 @@ function LeaderboardContent() {
 
     useEffect(() => {
         setCurrentPage(1);
-    }, [filters.batch, filters.department, filters.gender, filters.roundIds, filters.search, filters.status, sortOption]);
+    }, [filters.batch, filters.department, filters.gender, filters.roundIds, filters.search, filters.status, filters.wildcard, sortOption]);
 
     const frozenNotCompletedRounds = useMemo(
         () => rounds.filter((round) => round.is_frozen && round.state !== 'Completed' && round.state !== 'Reveal'),
@@ -362,6 +369,7 @@ function LeaderboardContent() {
             const params = new URLSearchParams();
             params.append('format', format);
             if (filters.status) params.append('status', filters.status);
+            if (filters.wildcard) params.append('wildcard', filters.wildcard);
             if (!isTeamMode) {
                 if (filters.department) params.append('department', filters.department);
                 if (filters.gender) params.append('gender', filters.gender);
@@ -574,7 +582,7 @@ function LeaderboardContent() {
                     </div>
                 </div>
 
-                <div className={`grid gap-3 ${isTeamMode ? 'grid-cols-1 md:grid-cols-3' : 'grid-cols-1 md:grid-cols-3 lg:grid-cols-6'}`}>
+                <div className={`grid gap-3 ${isTeamMode ? 'grid-cols-1 md:grid-cols-4' : 'grid-cols-1 md:grid-cols-4 lg:grid-cols-7'}`}>
                     <div className={`relative ${isTeamMode ? 'md:col-span-2' : 'md:col-span-3 lg:col-span-2'}`}>
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                         <Input
@@ -678,6 +686,26 @@ function LeaderboardContent() {
                             <SelectItem value="all">All Statuses</SelectItem>
                             <SelectItem value="Active">Active</SelectItem>
                             <SelectItem value="Eliminated">Eliminated</SelectItem>
+                        </SelectContent>
+                    </Select>
+
+                    <Select
+                        value={filters.wildcard || 'all'}
+                        onValueChange={(value) => {
+                            const previous = { ...filters, roundIds: [...(filters.roundIds || [])] };
+                            const nextValue = value === 'all' ? '' : value;
+                            setFilters({ ...previous, wildcard: nextValue });
+                            pushLocalUndo({
+                                label: 'Undo leaderboard wildcard filter',
+                                undoFn: () => setFilters(previous),
+                            });
+                        }}
+                    >
+                        <SelectTrigger className="neo-input"><SelectValue placeholder="Wildcard" /></SelectTrigger>
+                        <SelectContent>
+                            {WILDCARD_FILTER_OPTIONS.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                            ))}
                         </SelectContent>
                     </Select>
 
