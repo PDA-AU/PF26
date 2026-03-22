@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 import json
 import re
 import secrets
@@ -3086,6 +3086,129 @@ def backfill_pda_event_round_count_once(engine):
             ),
             {"key": marker_key},
         )
+
+
+def backfill_persohub_event_round_numbers_once(engine):
+    marker_key = "migration_backfill_persohub_event_round_numbers_v1"
+    with engine.begin() as conn:
+        if not _table_exists(conn, "system_config"):
+            return
+
+        marker_exists = bool(
+            conn.execute(
+                text("SELECT 1 FROM system_config WHERE key = :key"),
+                {"key": marker_key},
+            ).fetchone()
+        )
+        if marker_exists:
+            return
+
+        if _table_exists(conn, "persohub_events") and _table_exists(conn, "persohub_event_rounds"):
+            event_rows = conn.execute(
+                text("SELECT id FROM persohub_events ORDER BY id ASC")
+            ).fetchall()
+            for row in event_rows:
+                _normalize_persohub_event_round_numbers_conn(conn, int(row.id))
+
+        conn.execute(
+            text(
+                """
+                INSERT INTO system_config (key, value)
+                VALUES (:key, 'done')
+                ON CONFLICT (key) DO UPDATE SET value = 'done'
+                """
+            ),
+            {"key": marker_key},
+        )
+
+
+def _mapped_persohub_wildcard_start_round_no(old_round_nos: List[int], wildcard_start_round_no: Optional[int]) -> Optional[int]:
+    parsed = int(wildcard_start_round_no or 0) or None
+    if parsed is None:
+        return None
+    return int(sum(1 for round_no in old_round_nos if int(round_no) < parsed) + 1)
+
+
+def _normalize_persohub_event_round_numbers_conn(conn, event_id: int) -> bool:
+    round_rows = conn.execute(
+        text(
+            """
+            SELECT id, round_no
+            FROM persohub_event_rounds
+            WHERE event_id = :event_id
+            ORDER BY round_no ASC, id ASC
+            """
+        ),
+        {"event_id": event_id},
+    ).fetchall()
+    if not round_rows:
+        return False
+
+    old_round_nos = [int(row.round_no) for row in round_rows]
+    target_round_nos = {int(row.id): index for index, row in enumerate(round_rows, start=1)}
+    changed_round_ids = [
+        int(row.id)
+        for row in round_rows
+        if int(row.round_no) != int(target_round_nos[int(row.id)])
+    ]
+    round_numbers_changed = bool(changed_round_ids)
+
+    if round_numbers_changed:
+        for round_id in changed_round_ids:
+            conn.execute(
+                text(
+                    """
+                    UPDATE persohub_event_rounds
+                    SET round_no = :temp_round_no
+                    WHERE id = :round_id
+                    """
+                ),
+                {"temp_round_no": -int(round_id), "round_id": int(round_id)},
+            )
+        for row in round_rows:
+            conn.execute(
+                text(
+                    """
+                    UPDATE persohub_event_rounds
+                    SET round_no = :round_no
+                    WHERE id = :round_id
+                    """
+                ),
+                {"round_no": int(target_round_nos[int(row.id)]), "round_id": int(row.id)},
+            )
+
+    wildcard_rows = conn.execute(
+        text(
+            """
+            SELECT id, wildcard_start_round_no
+            FROM persohub_event_registrations
+            WHERE event_id = :event_id
+              AND wildcard_start_round_no IS NOT NULL
+            """
+        ),
+        {"event_id": event_id},
+    ).fetchall()
+    wildcard_changed = False
+    for row in wildcard_rows:
+        current_start_round_no = int(row.wildcard_start_round_no or 0) or None
+        mapped_start_round_no = _mapped_persohub_wildcard_start_round_no(old_round_nos, current_start_round_no)
+        if mapped_start_round_no != current_start_round_no:
+            conn.execute(
+                text(
+                    """
+                    UPDATE persohub_event_registrations
+                    SET wildcard_start_round_no = :wildcard_start_round_no
+                    WHERE id = :registration_id
+                    """
+                ),
+                {
+                    "wildcard_start_round_no": mapped_start_round_no,
+                    "registration_id": int(row.id),
+                },
+            )
+            wildcard_changed = True
+
+    return bool(round_numbers_changed or wildcard_changed)
 
 
 def resolve_user_identifier_collisions_once(engine):

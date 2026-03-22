@@ -51,6 +51,7 @@ from migrations import (
     ensure_persohub_event_open_columns,
     ensure_persohub_event_round_submission_tables,
     ensure_persohub_event_panel_tables,
+    backfill_persohub_event_round_numbers_once,
     drop_legacy_persohub_sympo_table,
     backfill_pda_event_round_count_once,
     enforce_pda_event_entity_uniqueness_once,
@@ -184,6 +185,7 @@ async def startup_event():
     ensure_persohub_event_open_columns(engine)
     ensure_persohub_event_round_submission_tables(engine)
     ensure_persohub_event_panel_tables(engine)
+    backfill_persohub_event_round_numbers_once(engine)
     ensure_persohub_events_parity_flag(engine)
     drop_legacy_persohub_sympo_table(engine)
     backfill_pda_event_round_count_once(engine)

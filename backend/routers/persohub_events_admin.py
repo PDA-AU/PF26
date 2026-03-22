@@ -858,6 +858,60 @@ def _sync_event_round_count(db: Session, event_id: int) -> None:
     )
 
 
+def _mapped_wildcard_start_round_no(old_round_nos: List[int], wildcard_start_round_no: Optional[int]) -> Optional[int]:
+    parsed = int(wildcard_start_round_no or 0) or None
+    if parsed is None:
+        return None
+    return int(sum(1 for round_no in old_round_nos if int(round_no) < parsed) + 1)
+
+
+def _normalize_persohub_event_round_numbers(db: Session, event_id: int) -> bool:
+    round_rows = (
+        db.query(PersohubEventRound)
+        .filter(PersohubEventRound.event_id == event_id)
+        .order_by(PersohubEventRound.round_no.asc(), PersohubEventRound.id.asc())
+        .all()
+    )
+    if not round_rows:
+        return False
+
+    old_round_nos = [int(row.round_no) for row in round_rows]
+    target_round_nos = {int(row.id): index for index, row in enumerate(round_rows, start=1)}
+    changed_rows = [
+        row
+        for row in round_rows
+        if int(row.round_no) != int(target_round_nos[int(row.id)])
+    ]
+    wildcard_regs = (
+        db.query(PersohubEventRegistration)
+        .filter(
+            PersohubEventRegistration.event_id == event_id,
+            PersohubEventRegistration.wildcard_start_round_no.isnot(None),
+        )
+        .all()
+    )
+
+    round_numbers_changed = bool(changed_rows)
+    wildcard_changed = False
+    if round_numbers_changed:
+        for row in changed_rows:
+            row.round_no = -int(row.id)
+        db.flush()
+        for row in round_rows:
+            row.round_no = int(target_round_nos[int(row.id)])
+
+    for registration in wildcard_regs:
+        current_start_round_no = int(getattr(registration, "wildcard_start_round_no", 0) or 0) or None
+        mapped_start_round_no = _mapped_wildcard_start_round_no(old_round_nos, current_start_round_no)
+        if mapped_start_round_no != current_start_round_no:
+            registration.wildcard_start_round_no = mapped_start_round_no
+            wildcard_changed = True
+
+    if round_numbers_changed or wildcard_changed:
+        db.flush()
+    return bool(round_numbers_changed or wildcard_changed)
+
+
 def _log_event_admin_action(
     db: Session,
     admin: PdaUser,
@@ -3102,6 +3156,8 @@ def create_round(
         panel_structure_locked=bool(payload.panel_structure_locked),
     )
     db.add(round_row)
+    db.flush()
+    _normalize_persohub_event_round_numbers(db, event.id)
     _sync_event_round_count(db, event.id)
     db.commit()
     db.refresh(round_row)
@@ -3195,6 +3251,9 @@ def update_round(
     )
     if panel_mode_toggled:
         _recompute_round_normalized_scores(db, event, round_row)
+
+    if requested_round_no is not None:
+        _normalize_persohub_event_round_numbers(db, event.id)
 
     shortlist_requested = (
         "elimination_type" in updates
@@ -3378,6 +3437,8 @@ def delete_round(
         PersohubEventRoundSubmission.round_id == round_row.id,
     ).delete(synchronize_session=False)
     db.delete(round_row)
+    db.flush()
+    _normalize_persohub_event_round_numbers(db, event.id)
     _sync_event_round_count(db, event.id)
     db.commit()
     _log_event_admin_action(
