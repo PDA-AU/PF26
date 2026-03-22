@@ -359,6 +359,7 @@ export default function EventDashboard() {
     const clubOwnerMobile = String(paymentConfig?.club_owner_mobile || '').trim();
     const isPendingRegistration = registrationStatus === 'pending';
     const isActiveRegistration = registrationStatus === 'active' || registrationStatus === 'eliminated';
+    const isWildcardRegistration = Boolean(dashboard?.is_wildcard);
 
     const isLeader = useMemo(() => {
         if (!user?.id) return false;
@@ -1641,7 +1642,14 @@ export default function EventDashboard() {
                                     <div className="flex items-center gap-3">
                                         {statusIcon(effectiveStatus)}
                                         <div>
-                                            <h2 className="font-heading text-2xl font-black uppercase tracking-tight">Status: {effectiveStatus}</h2>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <h2 className="font-heading text-2xl font-black uppercase tracking-tight">Status: {effectiveStatus}</h2>
+                                                {isWildcardRegistration ? (
+                                                    <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-800">
+                                                        Wildcard
+                                                    </span>
+                                                ) : null}
+                                            </div>
                                             <p className="text-sm font-medium text-slate-700">
                                                 {isPendingRegistration
                                                     ? (paymentStatus === 'declined'

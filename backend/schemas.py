@@ -2524,6 +2524,7 @@ class PersohubManagedEventResponse(BaseModel):
 class PersohubManagedEventDashboard(BaseModel):
     event: PersohubManagedEventResponse
     is_registered: bool = False
+    is_wildcard: bool = False
     registration_status: PersohubDashboardRegistrationStatusEnum = PersohubDashboardRegistrationStatusEnum.NOT_REGISTERED
     payment_status: PersohubPaymentStatusEnum = PersohubPaymentStatusEnum.NONE
     payment_review_reason: Optional[str] = None

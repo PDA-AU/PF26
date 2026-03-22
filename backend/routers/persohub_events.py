@@ -1060,6 +1060,7 @@ def get_event_dashboard(
     return PersohubManagedEventDashboard(
         event=event_payload,
         is_registered=bool(registration),
+        is_wildcard=bool(registration and getattr(registration, "wildcard_start_round_no", None) is not None),
         registration_status=registration_status,
         payment_status=payment_status,
         payment_review_reason=payment_review_reason,
