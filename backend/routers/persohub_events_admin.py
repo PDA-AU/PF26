@@ -114,6 +114,7 @@ router = APIRouter()
 OFFICIAL_LETTERHEAD_LEFT_LOGO_URL = ""
 OFFICIAL_LETTERHEAD_LEFT_LOGO_PATH = Path(__file__).resolve().parents[1] / "uploads" / "official-left-logo.png"
 OFFICIAL_LETTERHEAD_RIGHT_LOGO_PATH = Path(__file__).resolve().parents[1] / "uploads" / "official-right-logo.png"
+OFFICIAL_WATERMARK_LOGO_PATH = Path(__file__).resolve().parents[1] / "uploads" / "official-watermark-logo.png"
 
 
 def _slugify(value: str) -> str:
@@ -6097,6 +6098,7 @@ def _export_leaderboard_to_pdf(
 
     club_logo_data_uri = _load_remote_image_data_uri(_official_logo_url(db, event))
     right_logo_data_uri = _load_local_image_data_uri(OFFICIAL_LETTERHEAD_RIGHT_LOGO_PATH) or club_logo_data_uri
+    watermark_logo_data_uri = _load_local_image_data_uri(OFFICIAL_WATERMARK_LOGO_PATH) or right_logo_data_uri
     left_logo_data_uri = (
         _load_local_image_data_uri(OFFICIAL_LETTERHEAD_LEFT_LOGO_PATH)
         or _load_remote_image_data_uri(OFFICIAL_LETTERHEAD_LEFT_LOGO_URL)
@@ -6111,10 +6113,10 @@ def _export_leaderboard_to_pdf(
         is_team_mode=is_team_mode,
         left_logo_data_uri=left_logo_data_uri,
         right_logo_data_uri=right_logo_data_uri,
-        watermark_logo_data_uri=right_logo_data_uri,
+        watermark_logo_data_uri=watermark_logo_data_uri,
     )
     rendered_pdf = _render_html_to_pdf(html_content)
-    return _apply_pdf_background_and_footer(rendered_pdf, right_logo_data_uri)
+    return _apply_pdf_background_and_footer(rendered_pdf, watermark_logo_data_uri)
 
 
 @router.get("/persohub/admin/persohub-events/{slug}/export/participants")
