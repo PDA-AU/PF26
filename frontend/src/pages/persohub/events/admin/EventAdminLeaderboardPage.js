@@ -111,6 +111,8 @@ function LeaderboardContent() {
     const [entrySummary, setEntrySummary] = useState(null);
     const [teamMembers, setTeamMembers] = useState([]);
     const [shortlistDialogOpen, setShortlistDialogOpen] = useState(false);
+    const [pdfDialogOpen, setPdfDialogOpen] = useState(false);
+    const [pdfRoundTitle, setPdfRoundTitle] = useState('');
     const [shortlisting, setShortlisting] = useState(false);
     const [exportingFormat, setExportingFormat] = useState('');
     const [eliminationConfig, setEliminationConfig] = useState({ type: 'top_k', value: 10 });
@@ -261,6 +263,17 @@ function LeaderboardContent() {
         }, null),
         [frozenNotCompletedRounds]
     );
+    const defaultPdfRoundTitle = useMemo(() => {
+        let latestCompletedRoundNo = 1;
+        rounds.forEach((round) => {
+            if (normalizeRoundState(round?.state) !== 'completed') return;
+            const currentRoundNo = Number(round?.round_no || 0);
+            if (currentRoundNo > latestCompletedRoundNo) {
+                latestCompletedRoundNo = currentRoundNo;
+            }
+        });
+        return `ROUND ${latestCompletedRoundNo} SHORTLISTED`;
+    }, [rounds]);
 
     const batchOptions = useMemo(() => {
         const values = new Set();
@@ -361,7 +374,7 @@ function LeaderboardContent() {
         }
     };
 
-    const handleExport = async (format) => {
+    const handleExport = async (format, options = {}) => {
         if (exportingFormat) return;
         setExportingFormat(format);
 
@@ -379,6 +392,9 @@ function LeaderboardContent() {
             (filters.roundIds || []).forEach((roundId) => {
                 params.append('round_ids', String(roundId));
             });
+            if (format === 'pdf' && typeof options.roundTitle === 'string') {
+                params.append('round_title', options.roundTitle);
+            }
 
             const response = await axios.get(`${API}/persohub/admin/persohub-events/${eventSlug}/export/leaderboard?${params.toString()}`, {
                 headers: getAuthHeader(),
@@ -395,11 +411,22 @@ function LeaderboardContent() {
             window.URL.revokeObjectURL(url);
 
             toast.success('Leaderboard exported');
+            return true;
         } catch (error) {
             toast.error(getErrorMessage(error, 'Export failed'));
+            return false;
         } finally {
             setExportingFormat('');
         }
+    };
+    const openPdfDialog = useCallback(() => {
+        if (exportingFormat) return;
+        setPdfRoundTitle(defaultPdfRoundTitle);
+        setPdfDialogOpen(true);
+    }, [defaultPdfRoundTitle, exportingFormat]);
+    const handlePdfExport = async () => {
+        const didExport = await handleExport('pdf', { roundTitle: pdfRoundTitle });
+        if (didExport) setPdfDialogOpen(false);
     };
 
     const handleRefresh = () => {
@@ -535,6 +562,36 @@ function LeaderboardContent() {
                 </div>
             ) : null}
 
+            <Dialog open={pdfDialogOpen} onOpenChange={setPdfDialogOpen}>
+                <DialogContent className="border-4 border-black">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading font-bold text-xl">Official PDF Title</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <p className="text-gray-600">
+                            Edit the round title that appears in the official PDF.
+                        </p>
+                        <div className="space-y-2">
+                            <div className="font-bold">PDF Title</div>
+                            <Input
+                                value={pdfRoundTitle}
+                                onChange={(e) => setPdfRoundTitle(e.target.value)}
+                                className="neo-input"
+                                placeholder={defaultPdfRoundTitle}
+                            />
+                        </div>
+                        <div className="flex gap-2">
+                            <Button onClick={() => setPdfDialogOpen(false)} variant="outline" className="flex-1 border-2 border-black">
+                                Cancel
+                            </Button>
+                            <Button onClick={handlePdfExport} disabled={exportingFormat === 'pdf'} className="flex-1 border-2 border-black bg-primary text-white">
+                                {exportingFormat === 'pdf' ? 'Preparing PDF...' : 'Export PDF'}
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
             <div className="neo-card mb-6">
                 <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
                     <div>
@@ -564,7 +621,7 @@ function LeaderboardContent() {
                             <Download className="w-4 h-4 mr-2" /> Excel
                         </Button>
                         <Button
-                            onClick={() => handleExport('pdf')}
+                            onClick={openPdfDialog}
                             disabled={Boolean(exportingFormat)}
                             variant="outline"
                             className="w-full border-2 border-black shadow-neo sm:w-auto"

@@ -1,6 +1,7 @@
 import csv
 import io
 import math
+import mimetypes
 import re
 import base64
 import hashlib
@@ -111,6 +112,8 @@ from utils import log_admin_action, log_persohub_event_action, _upload_bytes_to_
 
 router = APIRouter()
 OFFICIAL_LETTERHEAD_LEFT_LOGO_URL = ""
+OFFICIAL_LETTERHEAD_LEFT_LOGO_PATH = Path(__file__).resolve().parents[1] / "uploads" / "official-left-logo.png"
+OFFICIAL_LETTERHEAD_RIGHT_LOGO_PATH = Path(__file__).resolve().parents[1] / "uploads" / "official-right-logo.png"
 
 
 def _slugify(value: str) -> str:
@@ -5900,10 +5903,41 @@ def _load_remote_image_data_uri(
         return None
 
 
+def _load_local_image_data_uri(image_path: Optional[Path]) -> Optional[str]:
+    if not image_path:
+        return None
+    try:
+        path = Path(image_path)
+        if not path.exists() or not path.is_file():
+            return None
+        image_bytes = path.read_bytes()
+        if not image_bytes:
+            return None
+        suffix = path.suffix.lower()
+        content_type = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".webp": "image/webp",
+            ".gif": "image/gif",
+            ".svg": "image/svg+xml",
+        }.get(suffix)
+        if not content_type:
+            guessed_type, _ = mimetypes.guess_type(str(path))
+            content_type = guessed_type or "application/octet-stream"
+        if not content_type.startswith("image/"):
+            return None
+        encoded = base64.b64encode(image_bytes).decode("ascii")
+        return f"data:{content_type};base64,{encoded}"
+    except Exception:
+        return None
+
+
 def _render_leaderboard_template_html(
     *,
     event: PersohubEvent,
     round_number: int,
+    round_title: str,
     table_headers: List[dict],
     table_rows: List[dict],
     is_team_mode: bool,
@@ -5930,6 +5964,7 @@ def _render_leaderboard_template_html(
     return template.render(
         event_name=str(event.title or "").upper(),
         round_number=round_number,
+        round_title=round_title,
         table_headers=table_headers,
         table_rows=table_rows,
         is_team_mode=is_team_mode,
@@ -6022,8 +6057,14 @@ def _apply_pdf_background_and_footer(pdf_bytes: bytes, watermark_data_uri: Optio
     return out.read()
 
 
-def _export_leaderboard_to_pdf(db: Session, event: PersohubEvent, leaderboard: List[dict]) -> bytes:
+def _export_leaderboard_to_pdf(
+    db: Session,
+    event: PersohubEvent,
+    leaderboard: List[dict],
+    round_title: Optional[str] = None,
+) -> bytes:
     round_number = _official_shortlist_round_number(db, event)
+    resolved_round_title = str(round_title or "").strip() or _official_shortlist_heading(db, event)
     is_team_mode = event.participant_mode == PersohubEventParticipantMode.TEAM
     if is_team_mode:
         headers = [
@@ -6055,19 +6096,25 @@ def _export_leaderboard_to_pdf(db: Session, event: PersohubEvent, leaderboard: L
         } for index, row in enumerate(leaderboard, start=1)]
 
     club_logo_data_uri = _load_remote_image_data_uri(_official_logo_url(db, event))
-    left_logo_data_uri = _load_remote_image_data_uri(OFFICIAL_LETTERHEAD_LEFT_LOGO_URL) or club_logo_data_uri
+    right_logo_data_uri = _load_local_image_data_uri(OFFICIAL_LETTERHEAD_RIGHT_LOGO_PATH) or club_logo_data_uri
+    left_logo_data_uri = (
+        _load_local_image_data_uri(OFFICIAL_LETTERHEAD_LEFT_LOGO_PATH)
+        or _load_remote_image_data_uri(OFFICIAL_LETTERHEAD_LEFT_LOGO_URL)
+        or right_logo_data_uri
+    )
     html_content = _render_leaderboard_template_html(
         event=event,
         round_number=round_number,
+        round_title=resolved_round_title,
         table_headers=headers,
         table_rows=rows,
         is_team_mode=is_team_mode,
         left_logo_data_uri=left_logo_data_uri,
-        right_logo_data_uri=club_logo_data_uri,
-        watermark_logo_data_uri=club_logo_data_uri,
+        right_logo_data_uri=right_logo_data_uri,
+        watermark_logo_data_uri=right_logo_data_uri,
     )
     rendered_pdf = _render_html_to_pdf(html_content)
-    return _apply_pdf_background_and_footer(rendered_pdf, club_logo_data_uri)
+    return _apply_pdf_background_and_footer(rendered_pdf, right_logo_data_uri)
 
 
 @router.get("/persohub/admin/persohub-events/{slug}/export/participants")
@@ -6241,6 +6288,7 @@ def export_leaderboard(
     search: Optional[str] = None,
     round_ids: Optional[List[int]] = Query(None),
     sort: Optional[str] = Query("rank"),
+    round_title: Optional[str] = Query(None),
     _: PdaUser = Depends(require_persohub_event_admin),
     db: Session = Depends(get_db),
 ):
@@ -6431,7 +6479,7 @@ def export_leaderboard(
                 ]
             )
     if format == "pdf":
-        content = _export_leaderboard_to_pdf(db=db, event=event, leaderboard=leaderboard)
+        content = _export_leaderboard_to_pdf(db=db, event=event, leaderboard=leaderboard, round_title=round_title)
         media_type = "application/pdf"
         filename = f"{event.event_code}_leaderboard_official.pdf"
     elif format == "xlsx":
