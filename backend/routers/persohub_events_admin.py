@@ -5786,6 +5786,7 @@ def _build_leaderboard_round_detail_sheet(
     round_row: PersohubEventRound,
     participant_rows: List[dict],
 ) -> Tuple[List[str], List[List[object]]]:
+    present_rows = [row for row in participant_rows if bool(row.get("is_present"))]
     criteria = _criteria_def(round_row)
     criteria_names = [
         str(item.get("name") or "").strip()
@@ -5817,7 +5818,7 @@ def _build_leaderboard_round_detail_sheet(
     headers.extend(["Total Score", "Normalized Score", "Round Rank"])
 
     ranked_rows = sorted(
-        [row for row in participant_rows if bool(row.get("is_present"))],
+        present_rows,
         key=lambda row: (
             -float(row.get("normalized_score") or 0.0),
             str(row.get("name") or "").lower(),
@@ -5837,7 +5838,7 @@ def _build_leaderboard_round_detail_sheet(
         round_rank_map[(entity_type, entity_id)] = prev_rank
 
     rows: List[List[object]] = []
-    for index, row in enumerate(participant_rows, start=1):
+    for index, row in enumerate(present_rows, start=1):
         criteria_scores = row.get("criteria_scores") if isinstance(row.get("criteria_scores"), dict) else {}
         criteria_values: List[object] = []
         for criteria_name in criteria_names:
