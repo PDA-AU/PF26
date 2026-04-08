@@ -6392,7 +6392,7 @@ def export_leaderboard(
     round_ids: Optional[List[int]] = Query(None),
     sort: Optional[str] = Query("rank"),
     round_title: Optional[str] = Query(None),
-    _: PdaUser = Depends(require_persohub_event_admin),
+    admin: PdaUser = Depends(require_persohub_event_admin),
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
@@ -6443,7 +6443,7 @@ def export_leaderboard(
         page=1,
         page_size=10000,
         response=None,
-        _=None,
+        _=admin,
         db=db,
     )
     round_meta = (
@@ -6607,7 +6607,7 @@ def export_leaderboard(
                     slug=slug,
                     round_id=int(round_id),
                     search=None,
-                    admin=_,
+                    admin=admin,
                     db=db,
                 )
                 sheet_headers, sheet_rows = _build_leaderboard_round_detail_sheet(
