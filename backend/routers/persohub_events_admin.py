@@ -5780,6 +5780,107 @@ def _export_to_multi_sheet_xlsx(headers: List[str], sheets: List[Tuple[str, List
     return out.read()
 
 
+def _build_leaderboard_round_detail_sheet(
+    *,
+    event: PersohubEvent,
+    round_row: PersohubEventRound,
+    participant_rows: List[dict],
+) -> Tuple[List[str], List[List[object]]]:
+    criteria = _criteria_def(round_row)
+    criteria_names = [
+        str(item.get("name") or "").strip()
+        for item in criteria
+        if str(item.get("name") or "").strip()
+    ]
+
+    if event.participant_mode == PersohubEventParticipantMode.INDIVIDUAL:
+        headers = [
+            "Si.No",
+            "Register Number",
+            "Name",
+            "Department",
+            "Gender",
+            "Batch",
+            "Status",
+            "Present",
+        ]
+    else:
+        headers = [
+            "Si.No",
+            "Entity Type",
+            "Team Code",
+            "Team Name",
+            "Status",
+            "Present",
+        ]
+    headers.extend(criteria_names)
+    headers.extend(["Total Score", "Normalized Score", "Round Rank"])
+
+    ranked_rows = sorted(
+        [row for row in participant_rows if bool(row.get("is_present"))],
+        key=lambda row: (
+            -float(row.get("normalized_score") or 0.0),
+            str(row.get("name") or "").lower(),
+            str(row.get("regno_or_code") or "").lower(),
+        ),
+    )
+    round_rank_map: Dict[Tuple[str, int], int] = {}
+    prev_score: Optional[float] = None
+    prev_rank = 0
+    for index, row in enumerate(ranked_rows, start=1):
+        score = float(row.get("normalized_score") or 0.0)
+        if prev_score is None or score != prev_score:
+            prev_rank = index
+            prev_score = score
+        entity_id = int(row.get("entity_id") or 0)
+        entity_type = str(row.get("entity_type") or "")
+        round_rank_map[(entity_type, entity_id)] = prev_rank
+
+    rows: List[List[object]] = []
+    for index, row in enumerate(participant_rows, start=1):
+        criteria_scores = row.get("criteria_scores") if isinstance(row.get("criteria_scores"), dict) else {}
+        criteria_values: List[object] = []
+        for criteria_name in criteria_names:
+            raw = criteria_scores.get(criteria_name, 0.0)
+            try:
+                criteria_values.append(float(raw or 0.0))
+            except Exception:
+                criteria_values.append(raw)
+
+        entity_key = (str(row.get("entity_type") or ""), int(row.get("entity_id") or 0))
+        if event.participant_mode == PersohubEventParticipantMode.INDIVIDUAL:
+            export_row: List[object] = [
+                index,
+                row.get("register_number") or row.get("regno_or_code"),
+                row.get("name"),
+                row.get("department"),
+                row.get("gender"),
+                row.get("batch"),
+                row.get("status"),
+                row.get("is_present"),
+            ]
+        else:
+            export_row = [
+                index,
+                row.get("entity_type"),
+                row.get("regno_or_code"),
+                row.get("name"),
+                row.get("status"),
+                row.get("is_present"),
+            ]
+        export_row.extend(criteria_values)
+        export_row.extend(
+            [
+                row.get("total_score"),
+                row.get("normalized_score"),
+                round_rank_map.get(entity_key, "—"),
+            ]
+        )
+        rows.append(export_row)
+
+    return headers, rows
+
+
 def _extract_round_state_text(value) -> str:
     if hasattr(value, "value"):
         return str(value.value or "").strip().lower()
@@ -6485,7 +6586,51 @@ def export_leaderboard(
         media_type = "application/pdf"
         filename = f"{event.event_code}_leaderboard_official.pdf"
     elif format == "xlsx":
-        content = _export_to_xlsx(headers, rows)
+        sheets_data: List[Tuple[str, List[str], List[List[object]]]] = [("Leaderboard", headers, rows)]
+        if ordered_rounds:
+            round_row_map = {
+                int(row.id): row
+                for row in (
+                    db.query(PersohubEventRound)
+                    .filter(
+                        PersohubEventRound.event_id == event.id,
+                        PersohubEventRound.id.in_([round_id for round_id, _round_no in ordered_rounds]),
+                    )
+                    .all()
+                )
+            }
+            for round_id, round_no in ordered_rounds:
+                round_row = round_row_map.get(int(round_id))
+                if not round_row:
+                    continue
+                participant_rows = round_participants(
+                    slug=slug,
+                    round_id=int(round_id),
+                    search=None,
+                    admin=_,
+                    db=db,
+                )
+                sheet_headers, sheet_rows = _build_leaderboard_round_detail_sheet(
+                    event=event,
+                    round_row=round_row,
+                    participant_rows=participant_rows,
+                )
+                sheets_data.append((f"Round {round_no}", sheet_headers, sheet_rows))
+
+        wb = Workbook()
+        default_sheet = wb.active
+        wb.remove(default_sheet)
+        used_titles: Set[str] = set()
+        for sheet_name, sheet_headers, sheet_rows in sheets_data:
+            ws = wb.create_sheet(title=_unique_excel_sheet_title(sheet_name, used_titles, fallback="Sheet"))
+            ws.append(sheet_headers)
+            for row in sheet_rows:
+                ws.append(row)
+
+        out = io.BytesIO()
+        wb.save(out)
+        out.seek(0)
+        content = out.read()
         media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         filename = f"{event.event_code}_leaderboard.xlsx"
     else:
