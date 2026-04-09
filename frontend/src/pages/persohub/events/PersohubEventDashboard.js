@@ -339,6 +339,7 @@ export default function EventDashboard() {
     const isRegistered = Boolean(dashboard?.is_registered);
     const hasTeam = Boolean(dashboard?.team_code);
     const registrationOpen = Boolean(eventInfo?.registration_open);
+    const showRegisterNowButton = eventInfo?.show_register_now_button !== false;
     const registrationAvailable = Boolean(
         dashboard?.registration_available
         ?? eventInfo?.registration_available
@@ -1276,7 +1277,7 @@ export default function EventDashboard() {
                                     <span className="rounded-md border-2 border-black bg-white px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] shadow-neo">
                                         {eventInfo.status}
                                     </span>
-                                    {registrationAvailable ? (
+                                    {registrationAvailable && showRegisterNowButton ? (
                                         <Button
                                             data-testid="event-overview-register-button"
                                             onClick={() => {

@@ -1971,6 +1971,7 @@ def ensure_persohub_event_tables(engine):
                     team_max_size INTEGER,
                     is_visible BOOLEAN NOT NULL DEFAULT TRUE,
                     registration_open BOOLEAN NOT NULL DEFAULT TRUE,
+                    show_register_now_button BOOLEAN NOT NULL DEFAULT TRUE,
                     open_for VARCHAR(8) NOT NULL DEFAULT 'MIT',
                     registration_fee JSONB,
                     seat_availability_enabled BOOLEAN NOT NULL DEFAULT FALSE,
@@ -2003,6 +2004,7 @@ def ensure_persohub_event_tables(engine):
         )
         conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS is_visible BOOLEAN NOT NULL DEFAULT TRUE"))
         conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS registration_open BOOLEAN NOT NULL DEFAULT TRUE"))
+        conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS show_register_now_button BOOLEAN NOT NULL DEFAULT TRUE"))
         conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS open_for VARCHAR(8) NOT NULL DEFAULT 'MIT'"))
         conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS registration_fee JSONB"))
         conn.execute(text("ALTER TABLE persohub_events ADD COLUMN IF NOT EXISTS persohub_access_status VARCHAR(16) NOT NULL DEFAULT 'rejected'"))

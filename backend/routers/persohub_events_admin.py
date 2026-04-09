@@ -1374,6 +1374,7 @@ def create_managed_event(
         persohub_access_status=access_status,
         is_visible=True,
         registration_open=True,
+        show_register_now_button=bool(payload.show_register_now_button),
         open_for=_to_event_open_for(payload.open_for),
         status=PersohubEventStatus.CLOSED,
     )

@@ -42,6 +42,7 @@ const initialForm = {
     round_count: 1,
     team_min_size: '',
     team_max_size: '',
+    show_register_now_button: true,
     registration_fee_enabled: false,
     registration_fee_mit: '0',
     registration_fee_other: '0',
@@ -388,6 +389,7 @@ const toEventForm = (eventRow = {}) => ({
     round_count: Number(eventRow.round_count || 1),
     team_min_size: eventRow.team_min_size ?? '',
     team_max_size: eventRow.team_max_size ?? '',
+    show_register_now_button: eventRow.show_register_now_button !== false,
     registration_fee_enabled: Boolean(eventRow.registration_fee?.enabled),
     registration_fee_mit: String(eventRow.registration_fee?.amounts?.MIT ?? 0),
     registration_fee_other: String(eventRow.registration_fee?.amounts?.Other ?? 0),
@@ -428,6 +430,7 @@ const buildEventPayload = (formState, posterUrl) => ({
     round_count: Number(formState.round_count || 1),
     team_min_size: formState.participant_mode === 'team' ? Number(formState.team_min_size || 1) : null,
     team_max_size: formState.participant_mode === 'team' ? Number(formState.team_max_size || 1) : null,
+    show_register_now_button: Boolean(formState.show_register_now_button),
     registration_fee: formState.registration_fee_enabled ? {
         enabled: true,
         currency: 'INR',
@@ -735,6 +738,18 @@ function EventFormFields({
                     </div>
                 </>
             ) : null}
+            <div className="md:col-span-2 rounded-xl border border-black/10 bg-[#fffdf7] p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <Label className="text-sm font-semibold">Register Now Button</Label>
+                        <p className="mt-1 text-xs text-slate-600">Show or hide the Register Now button on the event dashboard.</p>
+                    </div>
+                    <Switch
+                        checked={Boolean(form.show_register_now_button)}
+                        onCheckedChange={(checked) => setForm((prev) => ({ ...prev, show_register_now_button: Boolean(checked) }))}
+                    />
+                </div>
+            </div>
             <div className="md:col-span-2 rounded-xl border border-black/10 bg-[#fffdf7] p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>

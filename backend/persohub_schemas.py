@@ -310,6 +310,7 @@ class PersohubAdminEventCreateRequest(BaseModel):
     team_min_size: Optional[int] = Field(None, ge=1, le=100)
     team_max_size: Optional[int] = Field(None, ge=1, le=100)
     registration_fee: Optional[PersohubRegistrationFeeConfig] = None
+    show_register_now_button: bool = True
     seat_availability_enabled: bool = False
     seat_capacity: Optional[int] = None
 
@@ -380,6 +381,7 @@ class PersohubAdminEventUpdateRequest(BaseModel):
     team_min_size: Optional[int] = Field(default=None, ge=1, le=100)
     team_max_size: Optional[int] = Field(default=None, ge=1, le=100)
     registration_fee: Optional[PersohubRegistrationFeeConfig] = None
+    show_register_now_button: Optional[bool] = None
     seat_availability_enabled: Optional[bool] = None
     seat_capacity: Optional[int] = None
     is_visible: Optional[bool] = None
@@ -464,6 +466,7 @@ class PersohubAdminEventResponse(BaseModel):
     seat_availability_enabled: bool = False
     seat_capacity: Optional[int] = None
     is_visible: bool = True
+    show_register_now_button: bool = True
     open_for: PersohubAdminEventOpenForEnum = PersohubAdminEventOpenForEnum.MIT
     status: PersohubAdminEventStatusEnum
     sympo_id: Optional[int] = None

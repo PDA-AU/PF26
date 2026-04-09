@@ -599,6 +599,7 @@ class PersohubEvent(Base):
     team_max_size = Column(Integer, nullable=True)
     is_visible = Column(Boolean, nullable=False, default=True)
     registration_open = Column(Boolean, nullable=False, default=True)
+    show_register_now_button = Column(Boolean, nullable=False, default=True)
     open_for = Column(String(8), nullable=False, default="MIT", server_default="MIT")
     registration_fee = Column(JSON, nullable=True)
     persohub_access_status = Column(String(16), nullable=False, default="rejected", server_default="rejected")

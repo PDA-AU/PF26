@@ -2434,6 +2434,7 @@ class PersohubManagedEventCreate(BaseModel):
     community_id: Optional[int] = Field(default=None, ge=1)
     open_for: PersohubManagedEventOpenForEnum = PersohubManagedEventOpenForEnum.MIT
     registration_fee: Optional[PersohubRegistrationFeeConfig] = None
+    show_register_now_button: bool = True
 
     @field_validator("whatsapp_url", mode="before")
     @classmethod
@@ -2458,6 +2459,7 @@ class PersohubManagedEventUpdate(BaseModel):
     team_min_size: Optional[int] = Field(None, ge=1, le=100)
     team_max_size: Optional[int] = Field(None, ge=1, le=100)
     is_visible: Optional[bool] = None
+    show_register_now_button: Optional[bool] = None
     status: Optional[PersohubManagedEventStatusEnum] = None
     open_for: Optional[PersohubManagedEventOpenForEnum] = None
     registration_fee: Optional[PersohubRegistrationFeeConfig] = None
@@ -2507,6 +2509,7 @@ class PersohubManagedEventResponse(BaseModel):
     team_max_size: Optional[int] = None
     is_visible: bool = True
     registration_open: bool = True
+    show_register_now_button: bool = True
     registration_available: bool = True
     open_for: PersohubManagedEventOpenForEnum = PersohubManagedEventOpenForEnum.MIT
     registration_fee: Optional[PersohubRegistrationFeeConfig] = None
