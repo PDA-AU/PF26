@@ -1081,7 +1081,7 @@ export default function PersohubFeedPage() {
                                 className="ph-textarea"
                                 value={postForm.description}
                                 onChange={(event) => setPostForm((prev) => ({ ...prev, description: event.target.value }))}
-                                placeholder="Use #hashtags and @profile mentions"
+                                placeholder="Use Markdown, #hashtags, and @profile mentions"
                                 data-testid="ph-post-description-input"
                             />
                             <label className="ph-muted" htmlFor="ph-post-files">Attachments</label>

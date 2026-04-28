@@ -420,7 +420,7 @@ export default function ItemsAdmin() {
                             name="description"
                             value={itemForm.description}
                             onChange={handleItemChange}
-                            placeholder="Short description"
+                            placeholder="Short description. Markdown supported."
                             rows={4}
                         />
                     </div>

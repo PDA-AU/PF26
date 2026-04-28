@@ -1,7 +1,12 @@
 import React, { useMemo } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkBreaks from 'remark-breaks';
+import remarkGfm from 'remark-gfm';
 
-const splitMentionHashtagTokens = (text) => String(text || '').split(/(@[A-Za-z0-9_.-]+|#[A-Za-z0-9_.-]+)/g);
-const splitUrlTokens = (text) => String(text || '').split(/(https?:\/\/[^\s<>"']+)/g);
+const INTERACTIVE_TOKEN_REGEX = /(https?:\/\/[^\s<>"']+|@[A-Za-z0-9_.-]+|#[A-Za-z0-9_.-]+)/g;
+const INTERACTIVE_SKIP_TAGS = new Set(['a', 'button', 'code', 'pre']);
+
+const joinClassNames = (...values) => values.filter(Boolean).join(' ');
 
 const splitTrailingPunctuation = (value) => {
     let core = String(value || '');
@@ -13,44 +18,51 @@ const splitTrailingPunctuation = (value) => {
     return { core, suffix };
 };
 
-const renderUrlText = (text, keyPrefix) => {
-    const tokens = splitUrlTokens(text);
-    return tokens.filter(Boolean).map((token, index) => {
-        if (!/^https?:\/\//i.test(token)) {
-            return <React.Fragment key={`${keyPrefix}-u-t-${index}`}>{token}</React.Fragment>;
-        }
-        const { core, suffix } = splitTrailingPunctuation(token);
-        if (!core) {
-            return <React.Fragment key={`${keyPrefix}-u-e-${index}`}>{token}</React.Fragment>;
-        }
-        return (
-            <React.Fragment key={`${keyPrefix}-u-l-${index}`}>
-                <a
-                    href={core}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-semibold text-sky-700 underline underline-offset-2 break-all hover:text-sky-800"
-                >
-                    {core}
-                </a>
-                {suffix ? <>{suffix}</> : null}
-            </React.Fragment>
-        );
-    });
-};
+const convertLegacySingleStarBold = (value) => String(value || '').replace(
+    /(^|[([\{<\s])\*([^*\s](?:[^*\n]*?[^*\s])?)\*(?=$|[)\]}>.,!?;:\s])/g,
+    (_, prefix, content) => `${prefix}**${content}**`,
+);
 
-const renderMentionHashtagText = (
-    text,
-    keyPrefix,
-    { onHashtagClick } = {},
-) => {
-    const tokens = splitMentionHashtagTokens(text);
-    return tokens.filter(Boolean).map((token, index) => {
+export const prepareDescriptionMarkdown = (description) => convertLegacySingleStarBold(
+    String(description || '')
+        .replace(/\r/g, '')
+        .replace(/\\n/g, '\n')
+        .split('\n')
+        .map((line) => line.replace(/^(\s*)•\s+/, '$1- '))
+        .join('\n')
+        .trim(),
+);
+
+// Kept as a compatibility export even though the renderer is now markdown-backed.
+export const parseDescriptionBlocks = (description) => prepareDescriptionMarkdown(description);
+
+const renderInteractiveText = (text, keyPrefix, { onHashtagClick } = {}) => String(text || '')
+    .split(INTERACTIVE_TOKEN_REGEX)
+    .filter((token) => token !== '')
+    .map((token, index) => {
+        if (/^https?:\/\//i.test(token)) {
+            const { core, suffix } = splitTrailingPunctuation(token);
+            if (!core) return token;
+            return (
+                <React.Fragment key={`${keyPrefix}-url-${index}`}>
+                    <a
+                        href={core}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-semibold text-sky-700 underline underline-offset-2 break-all hover:text-sky-800"
+                    >
+                        {core}
+                    </a>
+                    {suffix}
+                </React.Fragment>
+            );
+        }
+
         if (token.startsWith('@')) {
             const mentionValue = token.slice(1);
             return (
                 <a
-                    key={`${keyPrefix}-m-${index}`}
+                    key={`${keyPrefix}-mention-${index}`}
                     href={`/persohub/${mentionValue}`}
                     className="font-semibold text-teal-700 underline underline-offset-2 break-all hover:text-teal-800"
                 >
@@ -58,12 +70,13 @@ const renderMentionHashtagText = (
                 </a>
             );
         }
+
         if (token.startsWith('#')) {
             const hashtagValue = token.slice(1);
             if (typeof onHashtagClick === 'function') {
                 return (
                     <button
-                        key={`${keyPrefix}-h-${index}`}
+                        key={`${keyPrefix}-hashtag-${index}`}
                         type="button"
                         className="cursor-pointer border-0 bg-transparent p-0 font-semibold text-orange-700 underline underline-offset-2 break-all hover:text-orange-800"
                         onClick={() => onHashtagClick(hashtagValue)}
@@ -72,9 +85,10 @@ const renderMentionHashtagText = (
                     </button>
                 );
             }
+
             return (
                 <a
-                    key={`${keyPrefix}-h-${index}`}
+                    key={`${keyPrefix}-hashtag-${index}`}
                     href={`/persohub?hashtag=${encodeURIComponent(hashtagValue)}`}
                     className="font-semibold text-orange-700 underline underline-offset-2 break-all hover:text-orange-800"
                 >
@@ -82,137 +96,99 @@ const renderMentionHashtagText = (
                 </a>
             );
         }
-        return (
-            <React.Fragment key={`${keyPrefix}-t-${index}`}>
-                {renderUrlText(token, `${keyPrefix}-t-${index}`)}
-            </React.Fragment>
-        );
+
+        return token;
     });
-};
 
-const renderMarkdownText = (text, keyPrefix, { onHashtagClick } = {}) => {
-    const tokens = String(text || '').split(/(\*\*[^*]+\*\*|\*[^*]+\*|_[^_]+_)/g);
-    return tokens.filter(Boolean).map((token, index) => {
-        if (token.startsWith('**') && token.endsWith('**') && token.length > 4) {
-            return (
-                <strong key={`${keyPrefix}-b2-${index}`} className="font-extrabold text-black">
-                    {renderUrlText(token.slice(2, -2), `${keyPrefix}-b2-${index}`)}
-                </strong>
-            );
-        }
-        if (token.startsWith('*') && token.endsWith('*') && token.length > 2) {
-            return (
-                <strong key={`${keyPrefix}-b-${index}`} className="font-extrabold text-black">
-                    {renderUrlText(token.slice(1, -1), `${keyPrefix}-b-${index}`)}
-                </strong>
-            );
-        }
-        if (token.startsWith('_') && token.endsWith('_') && token.length > 2) {
-            return (
-                <em key={`${keyPrefix}-i-${index}`} className="italic">
-                    {renderUrlText(token.slice(1, -1), `${keyPrefix}-i-${index}`)}
-                </em>
-            );
-        }
-        return (
-            <React.Fragment key={`${keyPrefix}-n-${index}`}>
-                {renderMentionHashtagText(token, `${keyPrefix}-n-${index}`, { onHashtagClick })}
-            </React.Fragment>
-        );
-    });
-};
-
-const renderInlineDescription = (text, keyPrefix, { onHashtagClick } = {}) => {
-    const tokens = splitMentionHashtagTokens(text);
-    return tokens.filter(Boolean).map((token, index) => {
-        if (token.startsWith('@') || token.startsWith('#')) {
-            return (
-                <React.Fragment key={`${keyPrefix}-mh-${index}`}>
-                    {renderMentionHashtagText(token, `${keyPrefix}-mh-${index}`, { onHashtagClick })}
-                </React.Fragment>
-            );
-        }
-        return (
-            <React.Fragment key={`${keyPrefix}-md-${index}`}>
-                {renderMarkdownText(token, `${keyPrefix}-md-${index}`, { onHashtagClick })}
-            </React.Fragment>
-        );
-    });
-};
-
-const splitSentences = (value) => {
-    const normalized = String(value || '').trim();
-    if (!normalized) return [];
-    const chunks = [];
-    let segmentStart = 0;
-
-    const isAlphaNum = (char) => /[A-Za-z0-9]/.test(char);
-    const isWhitespace = (char) => /\s/.test(char);
-
-    for (let index = 0; index < normalized.length; index += 1) {
-        const char = normalized[index];
-        if (!/[.!?]/.test(char)) continue;
-
-        let cursor = index + 1;
-        let sawWhitespace = false;
-        while (cursor < normalized.length) {
-            const lookAheadChar = normalized[cursor];
-            if (isWhitespace(lookAheadChar)) {
-                sawWhitespace = true;
-                cursor += 1;
-                continue;
-            }
-            if (isAlphaNum(lookAheadChar) && sawWhitespace) {
-                const part = normalized.slice(segmentStart, cursor).trim();
-                if (part) chunks.push(part);
-                segmentStart = cursor;
-            }
-            break;
-        }
+const enhanceInteractiveNode = (node, keyPrefix, options) => {
+    if (typeof node === 'string') {
+        return renderInteractiveText(node, keyPrefix, options);
     }
 
-    const tail = normalized.slice(segmentStart).trim();
-    if (tail) chunks.push(tail);
-    return chunks;
+    if (typeof node === 'number' || typeof node === 'boolean' || node == null) {
+        return node;
+    }
+
+    if (!React.isValidElement(node)) {
+        return node;
+    }
+
+    const tagName = typeof node.type === 'string' ? node.type : null;
+    if (tagName && INTERACTIVE_SKIP_TAGS.has(tagName)) {
+        return node;
+    }
+
+    if (node.props?.children == null) {
+        return node;
+    }
+
+    return React.cloneElement(
+        node,
+        undefined,
+        enhanceInteractiveChildren(node.props.children, `${keyPrefix}-child`, options),
+    );
 };
 
-export const parseDescriptionBlocks = (description) => {
-    const source = String(description || '').replace(/\r/g, '').replace(/\\n/g, '\n');
-    const rawLines = source.split('\n');
-    const blocks = [];
-    let listBuffer = [];
+const enhanceInteractiveChildren = (children, keyPrefix, options) => React.Children
+    .toArray(children)
+    .flatMap((child, index) => enhanceInteractiveNode(child, `${keyPrefix}-${index}`, options));
 
-    const flushList = () => {
-        if (!listBuffer.length) return;
-        blocks.push({ type: 'list', items: [...listBuffer] });
-        listBuffer = [];
-    };
-
-    rawLines.forEach((rawLine) => {
-        const line = rawLine.trim();
-        if (!line) {
-            flushList();
-            return;
-        }
-        if (/^(-|\*|•)\s+/.test(line)) {
-            const cleaned = line.replace(/^(-|\*|•)\s+/, '').trim();
-            if (cleaned) listBuffer.push(cleaned);
-            return;
-        }
-        if (/^\d+\.\s+/.test(line)) {
-            const cleaned = line.replace(/^\d+\.\s+/, '').trim();
-            if (cleaned) listBuffer.push(cleaned);
-            return;
-        }
-        flushList();
-        splitSentences(line).forEach((sentence) => {
-            blocks.push({ type: 'text', text: sentence });
-        });
-    });
-
-    flushList();
-    return blocks;
+const deriveOrderedListClassName = (listClassName) => {
+    if (/\blist-decimal\b/.test(listClassName)) {
+        return listClassName;
+    }
+    if (/\blist-disc\b/.test(listClassName)) {
+        return listClassName.replace(/\blist-disc\b/g, 'list-decimal');
+    }
+    return joinClassNames(listClassName, 'list-decimal');
 };
+
+const createMarkdownComponents = ({ listClassName, onHashtagClick }) => ({
+    a: ({ node: _node, href, children, ...props }) => {
+        const safeHref = String(href || '');
+        const external = /^https?:\/\//i.test(safeHref);
+        return (
+            <a
+                {...props}
+                href={safeHref}
+                target={external ? '_blank' : undefined}
+                rel={external ? 'noreferrer' : undefined}
+                className="font-semibold text-sky-700 underline underline-offset-2 break-all hover:text-sky-800"
+            >
+                {children}
+            </a>
+        );
+    },
+    em: ({ node: _node, children, ...props }) => <em {...props} className="italic">{children}</em>,
+    li: ({ node: _node, children, ...props }) => (
+        <li {...props}>
+            {enhanceInteractiveChildren(children, 'desc-li', { onHashtagClick })}
+        </li>
+    ),
+    ol: ({ node: _node, children, className, ...props }) => (
+        <ol
+            {...props}
+            className={joinClassNames(className, deriveOrderedListClassName(listClassName))}
+        >
+            {children}
+        </ol>
+    ),
+    p: ({ node: _node, children, ...props }) => (
+        <p {...props}>
+            {enhanceInteractiveChildren(children, 'desc-p', { onHashtagClick })}
+        </p>
+    ),
+    strong: ({ node: _node, children, ...props }) => (
+        <strong {...props} className="font-extrabold text-black">
+            {children}
+        </strong>
+    ),
+    ul: ({ node: _node, children, className, ...props }) => (
+        <ul {...props} className={joinClassNames(className, listClassName)}>
+            {children}
+        </ul>
+    ),
+});
 
 export default function ParsedDescription({
     description,
@@ -220,36 +196,22 @@ export default function ParsedDescription({
     listClassName = 'list-disc space-y-1 pl-5',
     onHashtagClick,
 }) {
-    const descriptionBlocks = useMemo(() => parseDescriptionBlocks(description), [description]);
+    const markdownSource = useMemo(() => prepareDescriptionMarkdown(description), [description]);
+    const markdownComponents = useMemo(
+        () => createMarkdownComponents({ listClassName, onHashtagClick }),
+        [listClassName, onHashtagClick],
+    );
 
-    if (!descriptionBlocks.length) {
+    if (!markdownSource) {
         return emptyText ? <p>{emptyText}</p> : null;
     }
 
     return (
-        <>
-            {descriptionBlocks.map((block, index) => {
-                if (block.type === 'list') {
-                    return (
-                        <ul key={`desc-list-${index}`} className={listClassName}>
-                            {block.items.map((item, itemIndex) => (
-                                <li key={`desc-list-${index}-${itemIndex}`}>
-                                    {renderInlineDescription(item, `desc-list-${index}-${itemIndex}`, {
-                                        onHashtagClick,
-                                    })}
-                                </li>
-                            ))}
-                        </ul>
-                    );
-                }
-                return (
-                    <p key={`desc-text-${index}`}>
-                        {renderInlineDescription(block.text, `desc-text-${index}`, {
-                            onHashtagClick,
-                        })}
-                    </p>
-                );
-            })}
-        </>
+        <ReactMarkdown
+            remarkPlugins={[remarkGfm, remarkBreaks]}
+            components={markdownComponents}
+        >
+            {markdownSource}
+        </ReactMarkdown>
     );
 }

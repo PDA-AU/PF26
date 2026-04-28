@@ -140,7 +140,11 @@ function EventFormFields({
             </div>
             <div className="md:col-span-2">
                 <Label>Description</Label>
-                <Textarea value={form.description} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} />
+                <Textarea
+                    value={form.description}
+                    onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
+                    placeholder="Markdown supported. Use lists, links, #tags, and @mentions."
+                />
             </div>
             <div>
                 <Label>Start Date</Label>

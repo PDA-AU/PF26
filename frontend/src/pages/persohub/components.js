@@ -1579,7 +1579,7 @@ export const CommunityPostEditModal = ({ open, post, onClose, onSubmit, submitti
                         className="ph-textarea"
                         value={description}
                         onChange={(event) => setDescription(event.target.value)}
-                        placeholder="Use #hashtags and @profile mentions"
+                        placeholder="Use Markdown, #hashtags, and @profile mentions"
                     />
 
                     <p className="ph-muted" style={{ marginBottom: '0.3rem' }}>Content order</p>

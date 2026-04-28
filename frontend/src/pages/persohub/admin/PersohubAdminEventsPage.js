@@ -476,18 +476,19 @@ function EventFormFields({
                     value={form.description}
                     onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
                     rows={8}
+                    placeholder="Markdown supported. Use lists, links, #tags, and @mentions."
                     className="min-h-[180px]"
                 />
                 <div className="mt-2 rounded-lg border border-black/10 bg-slate-50 p-3 text-xs text-slate-600">
-                    <p className="font-semibold uppercase tracking-[0.08em] text-slate-700">Parsing Hints</p>
-                    <p className="mt-1">Use plain text with these formats:</p>
+                    <p className="font-semibold uppercase tracking-[0.08em] text-slate-700">Markdown Supported</p>
+                    <p className="mt-1">Descriptions support markdown plus the existing Persohub shortcuts:</p>
                     <ul className="mt-1 list-disc space-y-1 pl-4">
                         <li><code>*bold text*</code> or <code>**bold text**</code> for bold emphasis.</li>
+                        <li><code>_italic text_</code> for italics.</li>
                         <li><code>@profile_name</code> for mentions (example: <code>@pdawebteam</code>).</li>
                         <li><code>#tag</code> for hashtags (example: <code>#hackathon</code>).</li>
                         <li><code>https://example.com/register</code> for clickable links.</li>
-                        <li>Use a new line to continue content on the next line.</li>
-                        <li>Use an empty line to start a new paragraph block.</li>
+                        <li>Use a new line for a line break and an empty line for a new paragraph.</li>
                         <li>Typed <code>\\n</code> is also treated as a new line.</li>
                         <li><code>- point one</code>, <code>- point two</code> for bullet lists.</li>
                         <li><code>1. step one</code>, <code>2. step two</code> for numbered lines.</li>

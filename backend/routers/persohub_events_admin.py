@@ -5340,6 +5340,7 @@ def event_leaderboard(
                     "wildcard_start_round_no": entity.get("wildcard_start_round_no"),
                 }
             )
+        rows = [row for row in rows if _should_include_leaderboard_row(row)]
 
         rows.sort(
             key=lambda item: (
@@ -5398,6 +5399,7 @@ def event_leaderboard(
                     "wildcard_start_round_no": entity.get("wildcard_start_round_no"),
                 }
             )
+        rows = [row for row in rows if _should_include_leaderboard_row(row)]
         rows.sort(
             key=lambda item: (
                 0 if _status_is_active(item.get("status")) else 1,
@@ -5781,6 +5783,44 @@ def _export_to_multi_sheet_xlsx(headers: List[str], sheets: List[Tuple[str, List
     return out.read()
 
 
+def _build_wildcard_export_sheet(
+    rows: List[dict],
+    *,
+    participant_mode: PersohubEventParticipantMode,
+) -> Tuple[List[str], List[List[object]]]:
+    if participant_mode == PersohubEventParticipantMode.INDIVIDUAL:
+        headers = ["Si.No", "Register Number", "Name", "Status", "Wildcard Seed Score", "Wildcard Start Round"]
+        wildcard_rows = [
+            [
+                index,
+                row.get("register_number") or row.get("regno_or_code"),
+                row.get("name"),
+                row.get("status"),
+                float(row.get("wildcard_seed_score") or 0.0),
+                row.get("wildcard_start_round_no") or "",
+            ]
+            for index, row in enumerate(rows, start=1)
+            if bool(row.get("is_wildcard"))
+        ]
+        return headers, wildcard_rows
+
+    headers = ["Si.No", "Entity Type", "Name", "Register/Team Code", "Status", "Wildcard Seed Score", "Wildcard Start Round"]
+    wildcard_rows = [
+        [
+            index,
+            row.get("entity_type"),
+            row.get("name"),
+            row.get("regno_or_code"),
+            row.get("status"),
+            float(row.get("wildcard_seed_score") or 0.0),
+            row.get("wildcard_start_round_no") or "",
+        ]
+        for index, row in enumerate(rows, start=1)
+        if bool(row.get("is_wildcard"))
+    ]
+    return headers, wildcard_rows
+
+
 def _build_leaderboard_round_detail_sheet(
     *,
     event: PersohubEvent,
@@ -5883,6 +5923,19 @@ def _build_leaderboard_round_detail_sheet(
     return headers, rows
 
 
+def _build_minimal_round_details_sheet(round_rows: List[PersohubEventRound]) -> Tuple[List[str], List[List[object]]]:
+    headers = ["Round ID", "Round No", "Round Name", "Description"]
+    rows: List[List[object]] = []
+    for round_row in round_rows:
+        rows.append([
+            int(round_row.id),
+            int(round_row.round_no),
+            round_row.name,
+            round_row.description or "",
+        ])
+    return headers, rows
+
+
 def _extract_round_state_text(value) -> str:
     if hasattr(value, "value"):
         return str(value.value or "").strip().lower()
@@ -5913,6 +5966,18 @@ def _normalize_leaderboard_sort(sort_value: Optional[str]) -> str:
     if candidate not in allowed:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid sort option: {candidate}")
     return candidate
+
+
+def _should_include_leaderboard_row(row: dict) -> bool:
+    try:
+        cumulative_score = float(row.get("cumulative_score") or 0.0)
+    except Exception:
+        cumulative_score = 0.0
+    try:
+        rounds_participated = int(row.get("rounds_participated") or 0)
+    except Exception:
+        rounds_participated = 0
+    return cumulative_score > 0 or rounds_participated > 0
 
 
 def _apply_leaderboard_sort(rows: List[dict], sort_option: str) -> None:
@@ -6250,6 +6315,10 @@ def export_participants(
         _=None,
         db=db,
     )
+    wildcard_headers, wildcard_rows = _build_wildcard_export_sheet(
+        entities,
+        participant_mode=event.participant_mode,
+    )
     if event.participant_mode == PersohubEventParticipantMode.INDIVIDUAL:
         headers = ["Register Number", "Name", "Email", "College", "Department", "Gender", "Batch", "Status", "Referral Code", "Referred By", "Referral Count", "Wildcard", "Wildcard Seed Score", "Wildcard Start Round"]
         rows = [
@@ -6287,7 +6356,24 @@ def export_participants(
             for e in entities
         ]
     if format == "xlsx":
-        content = _export_to_xlsx(headers, rows)
+        wb = Workbook()
+        default_sheet = wb.active
+        wb.remove(default_sheet)
+        used_titles: Set[str] = set()
+        sheets_data: List[Tuple[str, List[str], List[List[object]]]] = [
+            ("Participants", headers, rows),
+            ("Wildcards", wildcard_headers, wildcard_rows),
+        ]
+        for sheet_name, sheet_headers, sheet_rows in sheets_data:
+            ws = wb.create_sheet(title=_unique_excel_sheet_title(sheet_name, used_titles, fallback="Sheet"))
+            ws.append(sheet_headers)
+            for row in sheet_rows:
+                ws.append(row)
+
+        out = io.BytesIO()
+        wb.save(out)
+        out.seek(0)
+        content = out.read()
         media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         filename = f"{event.event_code}_participants.xlsx"
     else:
@@ -6463,7 +6549,8 @@ def export_leaderboard(
         dynamic_headers.extend([f"R{round_no} Score", f"R{round_no} Rank"])
 
     if event.participant_mode == PersohubEventParticipantMode.INDIVIDUAL:
-        headers = ["Si.No", "Register Number", "Name", "Department", "Gender", "Batch", "Status", "Rounds", "Attendance", "Referral Count"] + dynamic_headers + ["Overall Score", "Overall Rank"]
+        headers = ["Si.No", "Register Number", "Name", "Department", "Gender", "Batch", "Status", "Is Wildcard", "Rounds", "Attendance", "Referral Count"] + dynamic_headers + ["Overall Score", "Overall Rank"]
+        csv_headers = headers + ["Wildcard Seed Score", "Wildcard Start Round"]
         entity_ids = [int(row.get("entity_id")) for row in leaderboard if row.get("entity_id") is not None]
         score_map: Dict[Tuple[int, int], float] = {}
         if entity_ids and effective_round_ids:
@@ -6497,6 +6584,7 @@ def export_leaderboard(
                     round_rank_map[(entity_id, round_id)] = prev_rank
 
         rows = []
+        csv_rows = []
         for index, row in enumerate(leaderboard, start=1):
             entity_id = int(row.get("entity_id") or 0)
             round_columns: List[object] = []
@@ -6516,6 +6604,7 @@ def export_leaderboard(
                     row.get("gender"),
                     row.get("batch"),
                     row.get("status"),
+                    "Yes" if bool(row.get("is_wildcard")) else "No",
                     row.get("rounds_participated", 0),
                     row.get("attendance_count", 0),
                     row.get("referral_count", 0),
@@ -6523,9 +6612,16 @@ def export_leaderboard(
                     row.get("cumulative_score", 0),
                     row.get("rank") if row.get("rank") is not None else "—",
                 ]
+                )
+            csv_rows.append(
+                rows[-1] + [
+                    float(row.get("wildcard_seed_score") or 0.0),
+                    row.get("wildcard_start_round_no") or "",
+                ]
             )
     else:
-        headers = ["Si.No", "Entity Type", "Name", "Register/Team Code", "Status", "Rounds", "Attendance"] + dynamic_headers + ["Overall Score", "Overall Rank"]
+        headers = ["Si.No", "Entity Type", "Name", "Register/Team Code", "Status", "Is Wildcard", "Rounds", "Attendance"] + dynamic_headers + ["Overall Score", "Overall Rank"]
+        csv_headers = headers + ["Wildcard Seed Score", "Wildcard Start Round"]
         entity_ids = [int(row.get("entity_id")) for row in leaderboard if row.get("entity_id") is not None]
         score_map: Dict[Tuple[int, int], float] = {}
         if entity_ids and effective_round_ids:
@@ -6559,6 +6655,7 @@ def export_leaderboard(
                     round_rank_map[(entity_id, round_id)] = prev_rank
 
         rows = []
+        csv_rows = []
         for index, row in enumerate(leaderboard, start=1):
             entity_id = int(row.get("entity_id") or 0)
             round_columns: List[object] = []
@@ -6576,19 +6673,34 @@ def export_leaderboard(
                     row["name"],
                     row["regno_or_code"],
                     row.get("status"),
+                    "Yes" if bool(row.get("is_wildcard")) else "No",
                     row.get("rounds_participated", 0),
                     row["attendance_count"],
                     *round_columns,
                     row["cumulative_score"],
                     row.get("rank") if row.get("rank") is not None else "—",
                 ]
+                )
+            csv_rows.append(
+                rows[-1] + [
+                    float(row.get("wildcard_seed_score") or 0.0),
+                    row.get("wildcard_start_round_no") or "",
+                ]
             )
+    wildcard_headers, wildcard_rows = _build_wildcard_export_sheet(
+        leaderboard,
+        participant_mode=event.participant_mode,
+    )
     if format == "pdf":
         content = _export_leaderboard_to_pdf(db=db, event=event, leaderboard=leaderboard, round_title=round_title)
         media_type = "application/pdf"
         filename = f"{event.event_code}_leaderboard_official.pdf"
     elif format == "xlsx":
-        sheets_data: List[Tuple[str, List[str], List[List[object]]]] = [("Leaderboard", headers, rows)]
+        sheets_data: List[Tuple[str, List[str], List[List[object]]]] = [
+            ("Leaderboard", headers, rows),
+            ("Wildcards", wildcard_headers, wildcard_rows),
+        ]
+        ordered_round_rows: List[PersohubEventRound] = []
         if ordered_rounds:
             round_row_map = {
                 int(row.id): row
@@ -6601,6 +6713,14 @@ def export_leaderboard(
                     .all()
                 )
             }
+            ordered_round_rows = [
+                round_row
+                for round_id, _round_no in ordered_rounds
+                for round_row in [round_row_map.get(int(round_id))]
+                if round_row is not None
+            ]
+            details_headers, details_rows = _build_minimal_round_details_sheet(ordered_round_rows)
+            sheets_data.append(("Round Details", details_headers, details_rows))
             for round_id, round_no in ordered_rounds:
                 round_row = round_row_map.get(int(round_id))
                 if not round_row:
@@ -6636,7 +6756,7 @@ def export_leaderboard(
         media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         filename = f"{event.event_code}_leaderboard.xlsx"
     else:
-        content = _export_to_csv(headers, rows)
+        content = _export_to_csv(csv_headers, csv_rows)
         media_type = "text/csv"
         filename = f"{event.event_code}_leaderboard.csv"
     return StreamingResponse(io.BytesIO(content), media_type=media_type, headers={"Content-Disposition": f"attachment; filename={filename}"})

@@ -95,14 +95,11 @@ fi
 # Create uploads directory
 mkdir -p uploads
 
-# Initialize database tables
-echo "Initializing database tables..."
-python3 -c "
-from database import engine, Base
-from models import User, Round, Score, SystemConfig
-Base.metadata.create_all(bind=engine)
-print('Database tables created successfully!')
-" 2>/dev/null || echo -e "${YELLOW}Database initialization skipped (check connection settings)${NC}"
+# Apply database migrations
+echo "Applying Alembic migrations..."
+alembic -c alembic.ini upgrade head \
+    && echo -e "${GREEN}Database migrations applied successfully${NC}" \
+    || echo -e "${YELLOW}Database migration skipped (check connection settings)${NC}"
 
 deactivate
 

@@ -609,8 +609,12 @@ function RoundsContent() {
                                         setDescription(next);
                                         registerRoundFormUndo('Undo round description edit', () => setDescription(previous));
                                     }}
+                                    placeholder="Markdown supported. Use blank lines, lists, links, #tags, and @mentions."
                                     className="neo-input min-h-[160px] sm:min-h-[190px]"
                                 />
+                                <p className="mt-2 text-xs text-slate-500">
+                                    Markdown is supported. Legacy <code>*bold*</code> also still renders as bold.
+                                </p>
                             </div>
                             <div>
                                 <Label className="font-bold">Round Poster</Label>
