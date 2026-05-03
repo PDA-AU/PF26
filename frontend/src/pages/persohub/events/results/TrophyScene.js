@@ -8,27 +8,59 @@ import trophyUrl from '@/assets/trophy-v1.glb';
 
 const TARGET_HEIGHT = 2.35;
 
-function createPlaceholderTrophy(subdued = false) {
+function createPlaceholderModel(subdued = false) {
     const group = new THREE.Group();
-    const color = subdued ? 0x7dd3fc : 0xfacc15;
-    const metal = new THREE.MeshStandardMaterial({ color, metalness: 0.58, roughness: 0.28 });
-    const dark = new THREE.MeshStandardMaterial({ color: 0x111827, metalness: 0.14, roughness: 0.44 });
-    const silver = new THREE.MeshStandardMaterial({ color: 0xe5e7eb, metalness: 0.35, roughness: 0.36 });
+    const primary = subdued ? 0x38bdf8 : 0x2dd4bf;
+    const secondary = subdued ? 0x7dd3fc : 0xfacc15;
+    const accent = subdued ? 0x818cf8 : 0xf472b6;
 
-    const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.55, 0.9, 36), metal);
-    cup.position.y = 0.72;
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.46, 0.055, 14, 54), metal);
-    ring.position.y = 1.24;
-    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.24, 0.28, 24), silver);
-    stem.position.y = 0.1;
-    const base = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.22, 0.78), dark);
-    base.position.y = -0.16;
-
-    [cup, ring, stem, base].forEach((mesh) => {
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
-        group.add(mesh);
+    const globeMaterial = new THREE.MeshBasicMaterial({
+        color: primary,
+        wireframe: true,
+        transparent: true,
+        opacity: subdued ? 0.46 : 0.58,
     });
+    const shell = new THREE.Mesh(new THREE.IcosahedronGeometry(1.05, 3), globeMaterial);
+    group.add(shell);
+
+    const ringMaterial = new THREE.MeshBasicMaterial({
+        color: secondary,
+        transparent: true,
+        opacity: subdued ? 0.42 : 0.66,
+    });
+    const rings = [
+        [0, 0, 0],
+        [Math.PI / 2, 0, 0],
+        [Math.PI / 2, Math.PI / 2, 0],
+    ].map((rotation) => {
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(1.16, 0.012, 8, 120), ringMaterial);
+        ring.rotation.set(rotation[0], rotation[1], rotation[2]);
+        return ring;
+    });
+    rings.forEach((ring) => group.add(ring));
+
+    const nodeMaterial = new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: 0.9 });
+    const nodePositions = [
+        [0, 1.08, 0],
+        [0, -1.08, 0],
+        [1.08, 0, 0],
+        [-1.08, 0, 0],
+        [0.62, 0.52, 0.62],
+        [-0.62, -0.52, -0.62],
+    ];
+    nodePositions.forEach((position) => {
+        const node = new THREE.Mesh(new THREE.SphereGeometry(0.045, 16, 16), nodeMaterial);
+        node.position.set(position[0], position[1], position[2]);
+        group.add(node);
+    });
+
+    const core = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.34, 1),
+        new THREE.MeshBasicMaterial({ color: accent, wireframe: true, transparent: true, opacity: 0.78 })
+    );
+    group.add(core);
+
+    group.userData.isPlaceholder = true;
     return group;
 }
 
@@ -65,7 +97,7 @@ function disposeObject(object) {
     });
 }
 
-export default function TrophyScene({ subdued = false, className = '' }) {
+export default function TrophyScene({ subdued = false, className = '', modelUrl = '' }) {
     const hostRef = useRef(null);
     const canvasRef = useRef(null);
     const [progress, setProgress] = useState(3);
@@ -130,7 +162,7 @@ export default function TrophyScene({ subdued = false, className = '' }) {
             scene.add(trophyObject);
         };
 
-        installObject(createPlaceholderTrophy(subdued));
+        installObject(createPlaceholderModel(subdued));
 
         const resize = () => {
             if (!host || disposed) return;
@@ -157,44 +189,76 @@ export default function TrophyScene({ subdued = false, className = '' }) {
                 if (!disposed) setProgressVisible(false);
             }, 520);
         };
-        manager.onError = () => {
-            setLoadingLabel('fallback model online');
-            setProgress(100);
-            window.setTimeout(() => {
-                if (!disposed) setProgressVisible(false);
-            }, 520);
-        };
 
         const dracoLoader = new DRACOLoader(manager);
         dracoLoader.setDecoderPath('/draco/');
 
         const loader = new GLTFLoader(manager);
         loader.setDRACOLoader(dracoLoader);
-        loader.load(
-            trophyUrl,
-            (gltf) => {
-                if (disposed) return;
-                const object = gltf.scene;
-                normalizeModel(object);
-                installObject(object);
-            },
-            (event) => {
-                if (!event.total) return;
-                setProgress(Math.max(3, Math.min(99, Math.round((event.loaded / event.total) * 100))));
-            },
-            () => {
-                if (disposed) return;
-                setLoadingLabel('fallback model online');
+        loader.setCrossOrigin('anonymous');
+
+        const uploadedUrl = String(modelUrl || '').trim();
+        const sources = uploadedUrl && uploadedUrl !== trophyUrl
+            ? [
+                { url: uploadedUrl, label: 'loading uploaded model' },
+                { url: trophyUrl, label: 'loading default model' },
+            ]
+            : [{ url: trophyUrl, label: 'loading default model' }];
+
+        const loadSource = (index = 0) => {
+            const source = sources[index];
+            if (!source || disposed) {
+                setLoadingLabel('wireframe fallback online');
                 setProgress(100);
+                window.setTimeout(() => {
+                    if (!disposed) setProgressVisible(false);
+                }, 520);
+                return;
             }
-        );
+
+            setProgressVisible(true);
+            setProgress(index === 0 ? 3 : 45);
+            setLoadingLabel(source.label);
+
+            loader.load(
+                source.url,
+                (gltf) => {
+                    if (disposed) return;
+                    const object = gltf.scene;
+                    normalizeModel(object);
+                    installObject(object);
+                    setProgress(100);
+                    window.setTimeout(() => {
+                        if (!disposed) setProgressVisible(false);
+                    }, 520);
+                },
+                (event) => {
+                    if (!event.total) return;
+                    const pct = Math.max(3, Math.min(99, Math.round((event.loaded / event.total) * 100)));
+                    setProgress(pct);
+                },
+                (error) => {
+                    // Keep this visible in dev tools. Common causes are S3 CORS or unsupported external .gltf assets.
+                    console.warn('Results model failed to load', { url: source.url, error });
+                    loadSource(index + 1);
+                }
+            );
+        };
+
+        loadSource(0);
 
         const clock = new THREE.Clock();
         const animate = () => {
             const t = clock.getElapsedTime();
             if (trophyObject) {
                 trophyObject.position.y = Number(trophyObject.userData.baseY || 0) + Math.sin(t * 0.85) * 0.055;
-                trophyObject.rotation.y = Math.sin(t * 0.28) * 0.12;
+                if (trophyObject.userData.isPlaceholder) {
+                    trophyObject.rotation.x = Math.sin(t * 0.35) * 0.18;
+                    trophyObject.rotation.y = t * 0.28;
+                    trophyObject.rotation.z = Math.cos(t * 0.24) * 0.1;
+                } else {
+                    trophyObject.rotation.y = Math.sin(t * 0.28) * 0.12;
+                }
             }
             controls.update();
             renderer.render(scene, camera);
@@ -213,7 +277,7 @@ export default function TrophyScene({ subdued = false, className = '' }) {
             floor.material.dispose();
             renderer.dispose();
         };
-    }, [subdued]);
+    }, [modelUrl, subdued]);
 
     return (
         <div ref={hostRef} className={`results-trophy-scene ${className}`}>

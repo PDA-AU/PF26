@@ -2486,6 +2486,7 @@ class PersohubManagedEventResultsUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     results_published: bool
     results_caption: Optional[str] = Field(None, max_length=500)
+    results_model_url: Optional[str] = Field(None, max_length=1000)
 
     @field_validator("results_caption", mode="before")
     @classmethod
@@ -2494,6 +2495,11 @@ class PersohubManagedEventResultsUpdate(BaseModel):
             return None
         normalized = str(value).strip()
         return normalized or None
+
+    @field_validator("results_model_url", mode="before")
+    @classmethod
+    def normalize_results_model_url(cls, value):
+        return _normalize_optional_http_url(value, "results_model_url")
 
 
 class PersohubManagedEventResponse(BaseModel):
@@ -2533,6 +2539,7 @@ class PersohubManagedEventResponse(BaseModel):
     seats_left: Optional[int] = None
     results_published: bool = False
     results_caption: Optional[str] = None
+    results_model_url: Optional[str] = None
     status: PersohubManagedEventStatusEnum
     created_at: datetime
 

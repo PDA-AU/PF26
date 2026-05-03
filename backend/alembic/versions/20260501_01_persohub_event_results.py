@@ -28,8 +28,10 @@ def upgrade() -> None:
         ),
     )
     op.add_column("persohub_events", sa.Column("results_caption", sa.Text(), nullable=True))
+    op.add_column("persohub_events", sa.Column("results_model_url", sa.Text(), nullable=True))
 
 
 def downgrade() -> None:
+    op.drop_column("persohub_events", "results_model_url")
     op.drop_column("persohub_events", "results_caption")
     op.drop_column("persohub_events", "results_published")

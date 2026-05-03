@@ -1046,6 +1046,7 @@ def get_event_results(slug: str, db: Session = Depends(get_db)):
         "title": event.title,
         "results_published": bool(getattr(event, "results_published", False)),
         "results_caption": getattr(event, "results_caption", None),
+        "results_model_url": getattr(event, "results_model_url", None),
     }
 
 

@@ -1669,6 +1669,7 @@ def update_managed_event_results(
     event = _get_event_or_404(db, slug)
     event.results_published = bool(payload.results_published)
     event.results_caption = payload.results_caption
+    event.results_model_url = payload.results_model_url
     db.commit()
     db.refresh(event)
     _log_event_admin_action(
@@ -1682,9 +1683,27 @@ def update_managed_event_results(
             "slug": slug,
             "results_published": bool(payload.results_published),
             "has_results_caption": bool(payload.results_caption),
+            "has_results_model_url": bool(payload.results_model_url),
         },
     )
     return PersohubManagedEventResponse.model_validate(event)
+
+
+@router.post("/persohub/admin/persohub-events/{slug}/results/model/presign", response_model=PresignResponse)
+def presign_results_model_upload(
+    slug: str,
+    payload: PresignRequest,
+    _: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    presign = _generate_presigned_put_url(
+        key_prefix=f"persohub_events/{event.slug}/results/models",
+        filename=payload.filename,
+        content_type=payload.content_type,
+        allowed_types=["model/gltf-binary", "model/gltf+json", "application/octet-stream"],
+    )
+    return PresignResponse(**presign)
 
 
 @router.get("/persohub/admin/persohub-events/{slug}/dashboard")

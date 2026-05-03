@@ -51,6 +51,7 @@ export default function PersohubEventResultsPage() {
         return eventTitle ? `${eventTitle} Reveal` : 'Results Reveal';
     }, [data?.title, published]);
     const caption = String(data?.results_caption || '').trim() || fallbackCaption(published);
+    const modelUrl = String(data?.results_model_url || '').trim();
 
     if (loading) {
         return (
@@ -112,7 +113,7 @@ export default function PersohubEventResultsPage() {
 
                 <section className="results-hero" aria-label="Event results hero">
                     <div className="results-trophy-wrap" aria-hidden="true">
-                        <TrophyScene subdued={!published} />
+                        <TrophyScene subdued={!published} modelUrl={modelUrl} />
                     </div>
 
                     <div className="results-copy">
