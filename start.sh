@@ -64,11 +64,7 @@ echo -e "${BLUE}Starting Frontend Server...${NC}"
 cd "$ROOT_DIR/frontend"
 
 # Start React dev server in background
-if command -v yarn &> /dev/null; then
-    yarn start &
-else
-    npm start &
-fi
+npm start &
 FRONTEND_PID=$!
 echo -e "${GREEN}Frontend started (PID: $FRONTEND_PID) on http://localhost:3000${NC}"
 

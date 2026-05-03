@@ -110,11 +110,7 @@ cd ../frontend
 
 # Install Node dependencies
 echo "Installing Node.js dependencies..."
-if command -v yarn &> /dev/null; then
-    yarn install
-else
-    npm install
-fi
+npm install
 
 # Create .env if it doesn't exist
 if [ ! -f ".env" ]; then
