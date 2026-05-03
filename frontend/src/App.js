@@ -38,12 +38,14 @@ import PersohubAdminEventsPage from "@/pages/persohub/admin/PersohubAdminEventsP
 import PersohubAdminPoliciesPage from "@/pages/persohub/admin/PersohubAdminPoliciesPage";
 import PersohubAdminPaymentsPage from "@/pages/persohub/admin/PersohubAdminPaymentsPage";
 import PersohubEventDashboard from "@/pages/persohub/events/PersohubEventDashboard";
+import PersohubEventResultsPage from "@/pages/persohub/events/PersohubEventResultsPage";
 import PersohubEventAdminDashboardPage from "@/pages/persohub/events/admin/EventAdminDashboardPage";
 import PersohubEventAdminAttendancePage from "@/pages/persohub/events/admin/EventAdminAttendancePage";
 import PersohubEventAdminRoundsPage from "@/pages/persohub/events/admin/EventAdminRoundsPage";
 import PersohubEventAdminScoringPage from "@/pages/persohub/events/admin/EventAdminScoringPage";
 import PersohubEventAdminParticipantsPage from "@/pages/persohub/events/admin/EventAdminParticipantsPage";
 import PersohubEventAdminLeaderboardPage from "@/pages/persohub/events/admin/EventAdminLeaderboardPage";
+import PersohubEventAdminResultsPage from "@/pages/persohub/events/admin/EventAdminResultsPage";
 import PersohubEventAdminLogsPage from "@/pages/persohub/events/admin/EventAdminLogsPage";
 import PersohubEventAdminBadgesPage from "@/pages/persohub/events/admin/EventAdminBadgesPage";
 import PersohubEventAdminEmailPage from "@/pages/persohub/events/admin/EventAdminEmailPage";
@@ -285,6 +287,11 @@ function AppRoutes() {
                     <PersohubEventAdminLeaderboardPage />
                 </ProtectedPersohubEventsRoute>
             } />
+            <Route path="/persohub/admin/events/:eventSlug/results" element={
+                <ProtectedPersohubEventsRoute>
+                    <PersohubEventAdminResultsPage />
+                </ProtectedPersohubEventsRoute>
+            } />
             <Route path="/persohub/admin/events/:eventSlug/email" element={
                 <ProtectedPersohubEventsRoute>
                     <PersohubEventAdminEmailPage />
@@ -301,6 +308,7 @@ function AppRoutes() {
                 </ProtectedPersohubEventsRoute>
             } />
             <Route path="/persohub/events/personasync" element={<Navigate to="/persohub?hashtag=PERSONASYNC" replace />} />
+            <Route path="/persohub/events/:eventSlug/results" element={<PersohubEventResultsPage />} />
             <Route path="/persohub/events/:eventSlug" element={<PersohubEventDashboard />} />
             <Route path="/persohub/events/:eventSlug/:profileName" element={<PersohubEventDashboard />} />
             <Route path="/persohub/:profileName" element={<PersohubProfilePage />} />

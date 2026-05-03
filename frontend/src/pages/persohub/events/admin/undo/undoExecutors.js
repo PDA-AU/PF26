@@ -107,6 +107,12 @@ const eventFlagsRestore = async ({ eventSlug, command, getAuthHeader }) => {
             is_visible: command.is_visible,
         }, { headers: getAuthHeader() }));
     }
+    if (typeof command?.results_published === 'boolean' || Object.prototype.hasOwnProperty.call(command || {}, 'results_caption')) {
+        requests.push(axios.put(`${API}/persohub/admin/persohub-events/${eventSlug}/results`, {
+            results_published: Boolean(command.results_published),
+            results_caption: command.results_caption ?? null,
+        }, { headers: getAuthHeader() }));
+    }
     if (!requests.length) return;
     await Promise.all(requests);
 };
