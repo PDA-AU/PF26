@@ -75,6 +75,7 @@ from schemas import (
     PersohubManagedEventCreate,
     PersohubManagedEventRegistrationUpdate,
     PersohubManagedEventResponse,
+    PersohubManagedEventResultsUpdate,
     PersohubManagedEventStatusUpdate,
     PersohubManagedEventVisibilityUpdate,
     PersohubManagedEventUpdate,
@@ -1654,6 +1655,34 @@ def update_managed_event_visibility(
         method="PUT",
         path=f"/persohub/admin/persohub-events/{slug}/visibility",
         meta={"slug": slug, "is_visible": bool(payload.is_visible)},
+    )
+    return PersohubManagedEventResponse.model_validate(event)
+
+
+@router.put("/persohub/admin/persohub-events/{slug}/results", response_model=PersohubManagedEventResponse)
+def update_managed_event_results(
+    slug: str,
+    payload: PersohubManagedEventResultsUpdate,
+    admin: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    event.results_published = bool(payload.results_published)
+    event.results_caption = payload.results_caption
+    db.commit()
+    db.refresh(event)
+    _log_event_admin_action(
+        db,
+        admin,
+        event,
+        "update_persohub_managed_event_results",
+        method="PUT",
+        path=f"/persohub/admin/persohub-events/{slug}/results",
+        meta={
+            "slug": slug,
+            "results_published": bool(payload.results_published),
+            "has_results_caption": bool(payload.results_caption),
+        },
     )
     return PersohubManagedEventResponse.model_validate(event)
 

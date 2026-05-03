@@ -1037,6 +1037,18 @@ def delete_my_round_submission(
     return _submission_payload(registration, round_row, entity_type, entity_user_id, entity_team_id, None)
 
 
+@router.get("/persohub/persohub-events/{slug}/results")
+def get_event_results(slug: str, db: Session = Depends(get_db)):
+    event = _get_event_or_404(db, slug)
+    _ensure_event_visible_for_public_access(event)
+    return {
+        "slug": event.slug,
+        "title": event.title,
+        "results_published": bool(getattr(event, "results_published", False)),
+        "results_caption": getattr(event, "results_caption", None),
+    }
+
+
 @router.get("/persohub/persohub-events/{slug}/dashboard", response_model=PersohubManagedEventDashboard)
 def get_event_dashboard(
     slug: str,

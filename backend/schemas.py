@@ -2482,6 +2482,20 @@ class PersohubManagedEventRegistrationUpdate(PdaManagedEventRegistrationUpdate):
     pass
 
 
+class PersohubManagedEventResultsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    results_published: bool
+    results_caption: Optional[str] = Field(None, max_length=500)
+
+    @field_validator("results_caption", mode="before")
+    @classmethod
+    def normalize_results_caption(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+
 class PersohubManagedEventResponse(BaseModel):
     id: int
     slug: str
@@ -2517,6 +2531,8 @@ class PersohubManagedEventResponse(BaseModel):
     seat_capacity: Optional[int] = None
     seats_occupied: Optional[int] = None
     seats_left: Optional[int] = None
+    results_published: bool = False
+    results_caption: Optional[str] = None
     status: PersohubManagedEventStatusEnum
     created_at: datetime
 
