@@ -208,17 +208,30 @@ function ResultsAdminContent() {
         const load = async () => {
             setParticipantsLoading(true);
             try {
-                const response = await axios.get(`${API}/persohub/admin/persohub-events/${eventSlug}/participants`, {
-                    params: { page: 1, page_size: 200 },
-                    headers: getAuthHeader(),
-                });
+                const pageSize = 200;
+                let page = 1;
+                let total = null;
+                const rows = [];
+                while (mounted) {
+                    const response = await axios.get(`${API}/persohub/admin/persohub-events/${eventSlug}/participants`, {
+                        params: { page, page_size: pageSize },
+                        headers: getAuthHeader(),
+                    });
+                    const payload = Array.isArray(response?.data)
+                        ? response.data
+                        : Array.isArray(response?.data?.items)
+                            ? response.data.items
+                            : [];
+                    rows.push(...payload);
+                    const totalHeader = Number(response?.headers?.['x-total-count']);
+                    if (Number.isFinite(totalHeader) && totalHeader >= 0) {
+                        total = totalHeader;
+                    }
+                    if (payload.length < pageSize || (total !== null && rows.length >= total)) break;
+                    page += 1;
+                }
                 if (!mounted) return;
-                const payload = Array.isArray(response?.data)
-                    ? response.data
-                    : Array.isArray(response?.data?.items)
-                        ? response.data.items
-                        : [];
-                setParticipantRows(payload);
+                setParticipantRows(rows);
             } catch (error) {
                 if (mounted) toast.error(extractErrorMessage(error, 'Failed to load active participants'));
             } finally {
