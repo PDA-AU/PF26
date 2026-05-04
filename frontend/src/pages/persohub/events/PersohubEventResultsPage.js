@@ -955,7 +955,7 @@ function TitleWinnersSection({ nominees, winners, revealed }) {
         const chartRows = Array.isArray(roundHistory)
             ? roundHistory.filter((item) => item?.round_no).map((item) => ({
                 label: `R${item.round_no}`,
-                rank: Number(item.round_rank || 0),
+                rank: Number(item.cumulative_rank || item.round_rank || 0),
             }))
             : [];
         const hasRanks = chartRows.some((item) => Number.isFinite(item.rank) && item.rank > 0);
@@ -1063,7 +1063,7 @@ function TitleWinnersSection({ nominees, winners, revealed }) {
                             </div>
                             <div className="results-winner-chart-shell">
                                 <div className="results-winner-chart-head">
-                                    <span>Roundwise Rank</span>
+                                    <span>Cumulative Rank</span>
                                     <span>{roundHistory.length} rounds</span>
                                 </div>
                                 <WinnerRankChart roundHistory={roundHistory} />
@@ -1072,8 +1072,8 @@ function TitleWinnersSection({ nominees, winners, revealed }) {
                                 {roundHistory.length > 0 ? roundHistory.map((item) => (
                                     <div key={`${winner?.id}-${item.round_id}`} className="results-winner-point-row">
                                         <span>{item.round_name || `Round ${item.round_no}`}</span>
-                                        <strong>{item.round_rank ? `#${item.round_rank}` : '--'}</strong>
-                                        <span>{Number(item.round_score || 0).toFixed(2).replace(/\.00$/, '')} pts</span>
+                                <strong>{item.cumulative_rank ? `#${item.cumulative_rank}` : '--'}</strong>
+                                <span>{Number(item.cumulative_score || 0).toFixed(2).replace(/\.00$/, '')} pts</span>
                                     </div>
                                 )) : (
                                     <div className="results-chart-empty">No performance points yet.</div>
@@ -1143,12 +1143,12 @@ function TitleWinnersSection({ nominees, winners, revealed }) {
                             </div>
                             <div className="results-winner-metric-row">
                                 <article className="results-winner-metric-card">
-                                    <span>Latest Score</span>
-                                    <strong>{latestRound ? Number(latestRound.round_score || 0).toFixed(2).replace(/\.00$/, '') : '--'}</strong>
+                                    <span>Cumulative Score</span>
+                                    <strong>{latestRound ? Number(latestRound.cumulative_score || 0).toFixed(2).replace(/\.00$/, '') : '--'}</strong>
                                 </article>
                                 <article className="results-winner-metric-card">
-                                    <span>Latest Rank</span>
-                                    <strong>{latestRound?.round_rank ? `#${latestRound.round_rank}` : '--'}</strong>
+                                    <span>Cumulative Rank</span>
+                                    <strong>{latestRound?.cumulative_rank ? `#${latestRound.cumulative_rank}` : '--'}</strong>
                                 </article>
                                 <article className="results-winner-metric-card">
                                     <span>Rounds</span>
@@ -1157,7 +1157,7 @@ function TitleWinnersSection({ nominees, winners, revealed }) {
                             </div>
                             <div className="results-winner-chart-shell">
                                 <div className="results-winner-chart-head">
-                                    <span>Roundwise Rank</span>
+                                    <span>Cumulative Rank</span>
                                     <span>{roundHistory.length} rounds</span>
                                 </div>
                                 <WinnerRankChart roundHistory={roundHistory} />
@@ -1166,8 +1166,8 @@ function TitleWinnersSection({ nominees, winners, revealed }) {
                                 {roundHistory.length > 0 ? roundHistory.map((item) => (
                                     <div key={`${nominee?.id}-${item.round_id}`} className="results-winner-point-row">
                                         <span>{item.round_name || `Round ${item.round_no}`}</span>
-                                        <strong>{item.round_rank ? `#${item.round_rank}` : '--'}</strong>
-                                        <span>{Number(item.round_score || 0).toFixed(2).replace(/\.00$/, '')} pts</span>
+                                        <strong>{item.cumulative_rank ? `#${item.cumulative_rank}` : '--'}</strong>
+                                        <span>{Number(item.cumulative_score || 0).toFixed(2).replace(/\.00$/, '')} pts</span>
                                     </div>
                                 )) : (
                                     <div className="results-chart-empty">No published round points yet.</div>
@@ -1341,7 +1341,7 @@ function TitleWinnersSection({ nominees, winners, revealed }) {
                                         <div className="results-holo-roll">{row.rollno_or_code || '-'}</div>
                                         {description ? <p className="results-holo-nominee-description">{description}</p> : null}
                                         <div className="results-holo-nominee-meta">
-                                            <span>{latestRound ? `${Number(latestRound.round_score || 0).toFixed(2).replace(/\.00$/, '')} pts` : 'Awaiting rounds'}</span>
+                                            <span>{latestRound ? `${Number(latestRound.cumulative_score || 0).toFixed(2).replace(/\.00$/, '')} pts` : 'Awaiting rounds'}</span>
                                             <span>{roundHistory.length} rounds visible</span>
                                         </div>
                                         <div className="results-holo-play">

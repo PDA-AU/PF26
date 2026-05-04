@@ -1804,6 +1804,7 @@
 .results-chart-frame {
     width: 100%;
     height: 100%;
+    min-width: 0;
 }
 
 .results-chart-frame .recharts-responsive-container {
@@ -2550,6 +2551,19 @@
         height: 11.5rem;
         border-radius: 0.72rem;
         padding: 0.22rem 0.16rem 0.12rem;
+        overflow: auto;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .results-chart-panel .results-chart-frame {
+        min-width: 23rem;
+    }
+
+    .results-chart-panel .results-pie-chart-shell,
+    .results-chart-panel .results-pyramid-chart,
+    .results-chart-panel .results-heatmap {
+        min-width: 0;
     }
 
     .results-pie-chart-shell {

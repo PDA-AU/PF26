@@ -217,6 +217,7 @@ def _winner_performance_payload(db: Session, event: PersohubEvent, *, entity_typ
                 "published_at": round_row.get("published_at"),
                 "round_rank": int(standing.get("round_rank")) if standing.get("round_rank") is not None else None,
                 "round_score": round(float(standing.get("round_score") or 0.0), 2),
+                "cumulative_rank": int(standing.get("rank")) if standing.get("rank") is not None else None,
                 "cumulative_score": round(float(standing.get("cumulative_score") or 0.0), 2),
             }
         )
