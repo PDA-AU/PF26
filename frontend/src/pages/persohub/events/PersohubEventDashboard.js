@@ -4,6 +4,20 @@ import axios from 'axios';
 import QRCode from 'qrcode';
 import { toast } from 'sonner';
 import {
+    CartesianGrid,
+    Line,
+    LineChart,
+    PolarAngleAxis,
+    PolarGrid,
+    PolarRadiusAxis,
+    Radar,
+    RadarChart,
+    ResponsiveContainer,
+    Tooltip,
+    XAxis,
+    YAxis,
+} from 'recharts';
+import {
     Calendar,
     CheckCircle2,
     Clock3,
@@ -123,6 +137,27 @@ const parseRoundNoValue = (value) => {
     const parsed = Number.parseInt(String(value || '').replace(/\D/g, ''), 10);
     return Number.isFinite(parsed) ? parsed : null;
 };
+
+const formatScoreValue = (value) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return '--';
+    return numeric.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
+};
+
+function ParticipantResultTooltip({ active, payload, label }) {
+    if (!active || !payload || payload.length === 0) return null;
+    return (
+        <div className="rounded-md border-2 border-black bg-white px-3 py-2 text-xs font-bold text-slate-800 shadow-neo">
+            <div className="font-black uppercase tracking-[0.08em] text-slate-500">{label}</div>
+            {payload.map((item) => (
+                <div key={item.dataKey} className="mt-1 flex items-center justify-between gap-4">
+                    <span>{item.name}</span>
+                    <strong>{formatScoreValue(item.value)}</strong>
+                </div>
+            ))}
+        </div>
+    );
+}
 
 const normalizeSubmissionType = (value) => (
     String(value || '').trim().toLowerCase() === 'link' ? 'link' : 'file'
@@ -244,6 +279,7 @@ export default function EventDashboard() {
     const [dashboard, setDashboard] = useState(null);
     const [eventProfile, setEventProfile] = useState(null);
     const [roundStatuses, setRoundStatuses] = useState([]);
+    const [participantResults, setParticipantResults] = useState(null);
     const [loading, setLoading] = useState(true);
     const [participantAccessClosed, setParticipantAccessClosed] = useState(false);
 
@@ -416,6 +452,47 @@ export default function EventDashboard() {
         });
         return { byNo, byName };
     }, [publishedRounds]);
+    const participantResultLookup = useMemo(() => {
+        const byId = new Map();
+        const byNo = new Map();
+        const byName = new Map();
+        const rows = Array.isArray(participantResults?.rounds) ? participantResults.rounds : [];
+        rows.forEach((round) => {
+            const roundId = Number(round?.round_id || 0);
+            if (roundId > 0) byId.set(roundId, round);
+            const roundNo = parseRoundNoValue(round?.round_no);
+            if (roundNo !== null && !byNo.has(roundNo)) byNo.set(roundNo, round);
+            const nameKey = normalizeText(round?.round_name);
+            if (nameKey && !byName.has(nameKey)) byName.set(nameKey, round);
+        });
+        return { byId, byNo, byName };
+    }, [participantResults?.rounds]);
+    const participantResultCards = useMemo(() => (
+        Array.isArray(participantResults?.participant_cards)
+            ? participantResults.participant_cards.filter((card) => card && card.key)
+            : []
+    ), [participantResults?.participant_cards]);
+    const participantChartRows = useMemo(() => {
+        const rows = Array.isArray(participantResults?.rounds) ? participantResults.rounds : [];
+        return rows
+            .map((round) => {
+                const standing = round?.standing && typeof round.standing === 'object' ? round.standing : null;
+                if (!standing) return null;
+                const roundNo = Number(round?.round_no || 0);
+                return {
+                    label: roundNo > 0 ? `R${roundNo}` : String(round?.round_name || 'Round'),
+                    round_name: round?.round_name || '',
+                    score: Number(standing?.round_score || 0),
+                    cumulative_score: Number(standing?.cumulative_score || 0),
+                    rank: standing?.round_rank ? Number(standing.round_rank) : null,
+                };
+            })
+            .filter(Boolean);
+    }, [participantResults?.rounds]);
+    const hasParticipantChartData = participantChartRows.length > 0;
+    const participantMaxRank = useMemo(() => (
+        Math.max(...participantChartRows.map((row) => Number(row.rank || 0)), 1)
+    ), [participantChartRows]);
     const eventDateLabel = useMemo(
         () => getEventDateLabel(eventInfo?.start_date, eventInfo?.end_date),
         [eventInfo?.start_date, eventInfo?.end_date]
@@ -537,21 +614,24 @@ export default function EventDashboard() {
             if (!shouldFetchParticipantData) {
                 setEventProfile(null);
                 setRoundStatuses([]);
+                setParticipantResults(null);
                 return { eventInfo: nextEvent, dashboard: nextDashboard, is_registered: Boolean(nextDashboard?.is_registered) };
             }
 
             if (!nextDashboard) {
                 setEventProfile(null);
                 setRoundStatuses([]);
+                setParticipantResults(null);
                 return { eventInfo: nextEvent, dashboard: null, is_registered: false };
             }
 
             if (nextDashboard?.is_registered) {
-                const [profileRes, roundsRes] = await Promise.allSettled([
+                const [profileRes, roundsRes, resultsRes] = await Promise.allSettled([
                     nextEvent?.participant_mode === 'individual'
                         ? axios.get(`${API}/persohub/persohub-events/${eventSlug}/me`, { headers: resolvedAuthHeader })
                         : Promise.resolve({ data: null }),
-                    axios.get(`${API}/persohub/persohub-events/${eventSlug}/my-rounds`, { headers: resolvedAuthHeader })
+                    axios.get(`${API}/persohub/persohub-events/${eventSlug}/my-rounds`, { headers: resolvedAuthHeader }),
+                    axios.get(`${API}/persohub/persohub-events/${eventSlug}/my-results`, { headers: resolvedAuthHeader })
                 ]);
 
                 if (profileRes.status === 'fulfilled') {
@@ -575,9 +655,21 @@ export default function EventDashboard() {
                     }
                     setRoundStatuses([]);
                 }
+
+                if (resultsRes.status === 'fulfilled') {
+                    setParticipantResults(resultsRes.value.data || null);
+                } else {
+                    const statusCode = resultsRes.reason?.response?.status;
+                    const detail = String(resultsRes.reason?.response?.data?.detail || '');
+                    if (statusCode === 403 && detail === 'Event is closed') {
+                        setParticipantAccessClosed(true);
+                    }
+                    setParticipantResults(null);
+                }
             } else {
                 setEventProfile(null);
                 setRoundStatuses([]);
+                setParticipantResults(null);
             }
             return { eventInfo: nextEvent, dashboard: nextDashboard, is_registered: Boolean(nextDashboard?.is_registered) };
         } catch (error) {
@@ -586,6 +678,7 @@ export default function EventDashboard() {
             setDashboard(null);
             setEventProfile(null);
             setRoundStatuses([]);
+            setParticipantResults(null);
             toast.error(getErrorMessage(error, 'Failed to load event'));
             return { eventInfo: null, dashboard: null, is_registered: false };
         } finally {
@@ -1933,86 +2026,111 @@ export default function EventDashboard() {
                                                             round_poster: round?.round_poster || null,
                                                         };
                                                         const roundForDetails = linkedRound || fallbackRound;
+                                                        const resultRound = (
+                                                            (round?.round_id ? participantResultLookup.byId.get(Number(round.round_id)) : null)
+                                                            || (roundNoKey !== null ? participantResultLookup.byNo.get(roundNoKey) : null)
+                                                            || participantResultLookup.byName.get(roundNameKey)
+                                                            || null
+                                                        );
+                                                        const standing = resultRound?.standing && typeof resultRound.standing === 'object'
+                                                            ? resultRound.standing
+                                                            : null;
+                                                        const hasPublishedScore = Boolean(resultRound && standing);
                                                         return (
-                                                            <div key={`${round.round_no}-${round.round_name}`} className="flex flex-wrap items-start justify-between gap-3 rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
-                                                                <div className="flex w-full items-start gap-3 sm:w-auto">
-                                                                    <div className="inline-flex h-11 w-11 items-center justify-center rounded-md border-2 border-black bg-[#8B5CF6] font-heading text-sm font-black text-white shadow-neo">
-                                                                        {String(round.round_no || '').slice(-2)}
-                                                                    </div>
-                                                                    <div className="min-w-0 flex-1">
-                                                                        <div className="flex flex-wrap items-start gap-2">
-                                                                            <p className="font-heading text-lg font-black uppercase tracking-tight">{round.round_name}</p>
+                                                            <article key={`${round.round_no}-${round.round_name}`} className="rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
+                                                                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                                                                    <div className="flex min-w-0 items-start gap-3">
+                                                                        <div className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border-2 border-black bg-[#8B5CF6] font-heading text-sm font-black text-white shadow-neo">
+                                                                            {String(round.round_no || '').slice(-2)}
                                                                         </div>
-                                                                        {submissionDeadlineLabel ? (
-                                                                            <div className="mt-1">
-                                                                                <span className="inline-flex max-w-full break-words rounded-md border-2 border-black bg-[#fee2e2] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] leading-tight text-red-700">
-                                                                                    Deadline: {submissionDeadlineLabel}
-                                                                                </span>
+                                                                        <div className="min-w-0 flex-1">
+                                                                            <div className="flex flex-wrap items-start gap-2">
+                                                                                <p className="font-heading text-lg font-black uppercase tracking-tight">{round.round_name}</p>
+                                                                                <span className="rounded-md border-2 border-black bg-white px-2 py-1 text-[10px] font-black uppercase tracking-[0.1em] text-black shadow-neo">{round.round_no}</span>
                                                                             </div>
-                                                                        ) : null}
-                                                                        <p className="text-xs font-medium uppercase tracking-[0.1em] text-slate-600">{round.round_no}</p>
-                                                                        {panelNo !== null ? (
-                                                                            <p className="mt-1 text-xs font-semibold uppercase tracking-[0.08em] text-slate-700">
-                                                                                Panel No: {panelNo}
-                                                                            </p>
-                                                                        ) : null}
-                                                                        {panelName ? (
-                                                                            <p className="mt-1 text-xs font-semibold uppercase tracking-[0.08em] text-slate-700">
-                                                                                Panel Name: {panelName}
-                                                                            </p>
-                                                                        ) : null}
-                                                                        {panelTimeLabel ? (
-                                                                            <p className="mt-1 text-xs font-semibold uppercase tracking-[0.08em] text-slate-700">
-                                                                                Panel Time: {panelTimeLabel}
-                                                                            </p>
-                                                                        ) : null}
-                                                                        {panelLink ? (
-                                                                            <a
-                                                                                href={panelLink}
-                                                                                target="_blank"
-                                                                                rel="noreferrer"
-                                                                                className="mt-2 inline-flex items-center gap-2 rounded-md border-2 border-black bg-[#facc15] px-3 py-2 text-xs font-black uppercase tracking-[0.08em] text-black shadow-[3px_3px_0px_0px_#000000] transition-transform hover:-translate-y-0.5 hover:bg-[#fde047]"
-                                                                            >
-                                                                                <ExternalLink className="h-3.5 w-3.5" />
-                                                                                Join Panel
-                                                                            </a>
-                                                                        ) : null}
-                                                                    </div>
-                                                                </div>
-                                                                <div className="flex flex-wrap items-center justify-end gap-2">
-                                                                    <div className="flex items-center gap-2 rounded-md border-2 border-black bg-white px-3 py-2 shadow-neo">
-                                                                        {statusIcon(round.displayStatus)}
-                                                                        <span className="text-xs font-bold uppercase tracking-[0.12em] text-black">{round.displayStatus}</span>
-                                                                    </div>
-                                                                    {attendance ? (
-                                                                        <div className={`flex items-center gap-2 rounded-md border-2 border-black px-3 py-2 shadow-neo ${attendance.badgeClassName}`}>
-                                                                            {attendance.icon}
-                                                                            <span className="text-xs font-bold uppercase tracking-[0.12em]">{attendance.label}</span>
+                                                                            {submissionDeadlineLabel ? (
+                                                                                <div className="mt-2">
+                                                                                    <span className="inline-flex max-w-full break-words rounded-md border-2 border-black bg-[#fee2e2] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] leading-tight text-red-700">
+                                                                                        Deadline: {submissionDeadlineLabel}
+                                                                                    </span>
+                                                                                </div>
+                                                                            ) : null}
+                                                                            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs font-semibold uppercase tracking-[0.08em] text-slate-700">
+                                                                                {panelNo !== null ? <span>Panel No: {panelNo}</span> : null}
+                                                                                {panelName ? <span>Panel Name: {panelName}</span> : null}
+                                                                                {panelTimeLabel ? <span>Panel Time: {panelTimeLabel}</span> : null}
+                                                                            </div>
+                                                                            {panelLink ? (
+                                                                                <a
+                                                                                    href={panelLink}
+                                                                                    target="_blank"
+                                                                                    rel="noreferrer"
+                                                                                    className="mt-3 inline-flex items-center gap-2 rounded-md border-2 border-black bg-[#facc15] px-3 py-2 text-xs font-black uppercase tracking-[0.08em] text-black shadow-[3px_3px_0px_0px_#000000] transition-transform hover:-translate-y-0.5 hover:bg-[#fde047]"
+                                                                                >
+                                                                                    <ExternalLink className="h-3.5 w-3.5" />
+                                                                                    Join Panel
+                                                                                </a>
+                                                                            ) : null}
                                                                         </div>
-                                                                    ) : null}
-                                                                    {roundForDetails ? (
-                                                                        <Button
-                                                                            type="button"
-                                                                            variant="outline"
-                                                                            className={`border-2 border-black text-black shadow-neo ${
-                                                                                linkedRound?.requires_submission && hasRoundSubmission
-                                                                                    ? 'bg-[#22C55E] hover:bg-[#16A34A]'
-                                                                                    : 'bg-[#FDE047]'
-                                                                            }`}
-                                                                            onClick={() => setSelectedRound(roundForDetails)}
-                                                                            data-testid={`event-dashboard-round-action-${round.round_no}`}
-                                                                        >
-                                                                            {roundForDetails?.requires_submission
-                                                                                ? (
-                                                                                    hasRoundSubmission
-                                                                                        ? 'View Work'
-                                                                                        : (normalizeText(round.displayStatus) === 'eliminated' ? 'View Round' : 'Submit Work')
-                                                                                )
-                                                                                : 'View Round'}
-                                                                        </Button>
-                                                                    ) : null}
+                                                                    </div>
+
+                                                                    <div className="grid w-full gap-2 sm:grid-cols-3 xl:max-w-md">
+                                                                        <div className="rounded-md border-2 border-black bg-white p-3 shadow-neo">
+                                                                            <p className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-500">Status</p>
+                                                                            <div className="mt-2 flex items-center gap-2 text-sm font-black uppercase tracking-[0.08em] text-black">
+                                                                                {statusIcon(round.displayStatus)}
+                                                                                {round.displayStatus}
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className={`rounded-md border-2 border-black p-3 shadow-neo ${attendance?.badgeClassName || 'bg-white text-slate-700'}`}>
+                                                                            <p className="text-[10px] font-black uppercase tracking-[0.12em] opacity-75">Attendance</p>
+                                                                            <div className="mt-2 flex items-center gap-2 text-sm font-black uppercase tracking-[0.08em]">
+                                                                                {attendance?.icon || <Clock3 className="h-5 w-5" />}
+                                                                                {attendance?.label || 'Pending'}
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className="rounded-md border-2 border-black bg-[#FDE047] p-3 shadow-neo">
+                                                                            <p className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-700">Round Score</p>
+                                                                            <div className="mt-1 font-heading text-2xl font-black text-black">
+                                                                                {hasPublishedScore ? formatScoreValue(standing.round_score) : '--'}
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className="rounded-md border-2 border-black bg-[#DBEAFE] p-3 shadow-neo">
+                                                                            <p className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-700">Round Rank</p>
+                                                                            <div className="mt-1 font-heading text-2xl font-black text-black">
+                                                                                {hasPublishedScore && standing.round_rank ? `#${standing.round_rank}` : '--'}
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className="rounded-md border-2 border-black bg-[#CCFBF1] p-3 shadow-neo">
+                                                                            <p className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-700">Total</p>
+                                                                            <div className="mt-1 font-heading text-2xl font-black text-black">
+                                                                                {hasPublishedScore ? formatScoreValue(standing.cumulative_score) : '--'}
+                                                                            </div>
+                                                                        </div>
+                                                                        {roundForDetails ? (
+                                                                            <Button
+                                                                                type="button"
+                                                                                variant="outline"
+                                                                                className={`h-full min-h-16 border-2 border-black text-black shadow-neo ${
+                                                                                    linkedRound?.requires_submission && hasRoundSubmission
+                                                                                        ? 'bg-[#22C55E] hover:bg-[#16A34A]'
+                                                                                        : 'bg-white hover:bg-[#FDE047]'
+                                                                                }`}
+                                                                                onClick={() => setSelectedRound(roundForDetails)}
+                                                                                data-testid={`event-dashboard-round-action-${round.round_no}`}
+                                                                            >
+                                                                                {roundForDetails?.requires_submission
+                                                                                    ? (
+                                                                                        hasRoundSubmission
+                                                                                            ? 'View Work'
+                                                                                            : (normalizeText(round.displayStatus) === 'eliminated' ? 'View Round' : 'Submit Work')
+                                                                                    )
+                                                                                    : 'View Round'}
+                                                                            </Button>
+                                                                        ) : null}
+                                                                    </div>
                                                                 </div>
-                                                            </div>
+                                                            </article>
                                                         );
                                                     })}
                                                 </div>
@@ -2022,6 +2140,111 @@ export default function EventDashboard() {
                                                 </div>
                                             )}
                                         </div>
+                                        {participantResultCards.length > 0 || hasParticipantChartData ? (
+                                            <div className="mt-5 rounded-md border-4 border-black bg-white p-5 shadow-[8px_8px_0px_0px_#000000]">
+                                                <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                                                    <div>
+                                                        <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-500">Published Results</p>
+                                                        <h3 className="font-heading text-2xl font-black uppercase tracking-tight">Your Event Highlights</h3>
+                                                        <p className="mt-1 max-w-2xl text-sm font-medium text-slate-600">
+                                                            These cards use the same published result snapshots as the public results page, scoped to your participant or team entry.
+                                                        </p>
+                                                    </div>
+                                                    {participantResults?.wrapped_summary?.performance_trend ? (
+                                                        <div className="w-fit rounded-md border-2 border-black bg-[#DBEAFE] px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-black shadow-neo">
+                                                            {String(participantResults.wrapped_summary.performance_trend).replace(/_/g, ' ')}
+                                                        </div>
+                                                    ) : null}
+                                                </div>
+                                                <div className="-mx-5 mt-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-5 pb-3 sm:mx-0 sm:grid sm:snap-none sm:grid-cols-2 sm:overflow-visible sm:px-0 sm:pb-0 xl:grid-cols-3">
+                                                    {participantResultCards.map((card) => {
+                                                        const tone = String(card?.tone || '').toLowerCase();
+                                                        const toneClass = tone === 'gold'
+                                                            ? 'bg-[#FEF3C7]'
+                                                            : tone === 'teal'
+                                                                ? 'bg-[#CCFBF1]'
+                                                                : tone === 'lime'
+                                                                    ? 'bg-[#ECFCCB]'
+                                                                    : tone === 'coral' || tone === 'rose'
+                                                                        ? 'bg-[#FFE4E6]'
+                                                                        : tone === 'blue'
+                                                                            ? 'bg-[#DBEAFE]'
+                                                                            : 'bg-[#F8FAFC]';
+                                                        return (
+                                                            <article key={card.key} className={`min-w-[82%] snap-start rounded-md border-2 border-black p-4 shadow-neo sm:min-w-0 ${toneClass}`}>
+                                                                <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-600">{card.label}</p>
+                                                                <div className="mt-2 font-heading text-2xl font-black text-black">{card.value ?? '--'}</div>
+                                                                {card.subtext ? (
+                                                                    <p className="mt-1 text-xs font-bold uppercase tracking-[0.08em] text-slate-600">{card.subtext}</p>
+                                                                ) : null}
+                                                                {card.description ? (
+                                                                    <p className="mt-3 text-sm font-medium leading-relaxed text-slate-700">{card.description}</p>
+                                                                ) : null}
+                                                            </article>
+                                                        );
+                                                    })}
+                                                </div>
+                                                {hasParticipantChartData ? (
+                                                    <div className="mt-5 grid gap-4 xl:grid-cols-3">
+                                                        <article className="rounded-md border-2 border-black bg-[#F8FAFC] p-4 shadow-neo">
+                                                            <div>
+                                                                <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">Score Chart</p>
+                                                                <h4 className="font-heading text-lg font-black uppercase tracking-tight">Score Progression</h4>
+                                                                <p className="mt-1 text-xs font-medium text-slate-600">Round score and cumulative score across published rounds.</p>
+                                                            </div>
+                                                            <div className="mt-4 h-64 min-w-0">
+                                                                <ResponsiveContainer width="100%" height="100%">
+                                                                    <LineChart data={participantChartRows} margin={{ top: 8, right: 12, left: -16, bottom: 0 }}>
+                                                                        <CartesianGrid stroke="rgba(15,23,42,0.12)" vertical={false} />
+                                                                        <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={11} />
+                                                                        <YAxis tickLine={false} axisLine={false} fontSize={11} />
+                                                                        <Tooltip content={<ParticipantResultTooltip />} />
+                                                                        <Line type="monotone" name="Round Score" dataKey="score" stroke="#8B5CF6" strokeWidth={3} dot={{ r: 3 }} />
+                                                                        <Line type="monotone" name="Total" dataKey="cumulative_score" stroke="#0EA5E9" strokeWidth={3} dot={{ r: 3 }} />
+                                                                    </LineChart>
+                                                                </ResponsiveContainer>
+                                                            </div>
+                                                        </article>
+                                                        <article className="rounded-md border-2 border-black bg-[#FFF7ED] p-4 shadow-neo">
+                                                            <div>
+                                                                <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">Rank Chart</p>
+                                                                <h4 className="font-heading text-lg font-black uppercase tracking-tight">Rank Movement</h4>
+                                                                <p className="mt-1 text-xs font-medium text-slate-600">Lower is better. The axis is reversed to make upward movement visible.</p>
+                                                            </div>
+                                                            <div className="mt-4 h-64 min-w-0">
+                                                                <ResponsiveContainer width="100%" height="100%">
+                                                                    <LineChart data={participantChartRows} margin={{ top: 8, right: 12, left: -16, bottom: 0 }}>
+                                                                        <CartesianGrid stroke="rgba(15,23,42,0.12)" vertical={false} />
+                                                                        <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={11} />
+                                                                        <YAxis reversed domain={[1, participantMaxRank]} tickLine={false} axisLine={false} fontSize={11} allowDataOverflow />
+                                                                        <Tooltip content={<ParticipantResultTooltip />} />
+                                                                        <Line type="monotone" name="Rank" dataKey="rank" stroke="#F97316" strokeWidth={3} dot={{ r: 3 }} connectNulls />
+                                                                    </LineChart>
+                                                                </ResponsiveContainer>
+                                                            </div>
+                                                        </article>
+                                                        <article className="rounded-md border-2 border-black bg-[#F0FDFA] p-4 shadow-neo">
+                                                            <div>
+                                                                <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">Radar</p>
+                                                                <h4 className="font-heading text-lg font-black uppercase tracking-tight">Round Rank Radar</h4>
+                                                                <p className="mt-1 text-xs font-medium text-slate-600">A compact view of your rank footprint over the result timeline.</p>
+                                                            </div>
+                                                            <div className="mt-4 h-64 min-w-0">
+                                                                <ResponsiveContainer width="100%" height="100%">
+                                                                    <RadarChart data={participantChartRows} outerRadius="72%">
+                                                                        <PolarGrid stroke="rgba(15,23,42,0.16)" />
+                                                                        <PolarAngleAxis dataKey="label" tick={{ fill: '#334155', fontSize: 11 }} />
+                                                                        <PolarRadiusAxis angle={90} domain={[1, participantMaxRank]} reversed tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} />
+                                                                        <Tooltip content={<ParticipantResultTooltip />} />
+                                                                        <Radar name="Rank" dataKey="rank" stroke="#14B8A6" fill="#14B8A6" fillOpacity={0.2} strokeWidth={3} />
+                                                                    </RadarChart>
+                                                                </ResponsiveContainer>
+                                                            </div>
+                                                        </article>
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                        ) : null}
                                     </div>
                                 </section>
                             </>

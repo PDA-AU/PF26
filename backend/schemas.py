@@ -2728,6 +2728,7 @@ class PersohubParticipantResultsResponse(BaseModel):
     title: str
     rounds: List[Dict[str, Any]] = Field(default_factory=list)
     wrapped_summary: Optional[Dict[str, Any]] = None
+    participant_cards: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class PersohubManagedEventResponse(BaseModel):

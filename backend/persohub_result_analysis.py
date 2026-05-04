@@ -1396,9 +1396,93 @@ def build_participant_results_payload(db: Session, event: PersohubEvent, *, enti
             ),
             None,
         )
+    participant_cards = []
+    if isinstance(wrapped_summary, dict) and wrapped_summary:
+        def _round_label(round_no: Any) -> Optional[str]:
+            try:
+                parsed = int(round_no)
+            except Exception:
+                return None
+            return f"Round {parsed}"
+
+        participant_cards = [
+            {
+                "key": "final_rank",
+                "label": "Final Rank",
+                "value": f"#{int(wrapped_summary['rank'])}" if wrapped_summary.get("rank") is not None else "--",
+                "subtext": "Overall standing",
+                "description": "Your final position after all published result rounds were combined.",
+                "tone": "gold",
+            },
+            {
+                "key": "total_score",
+                "label": "Total Score",
+                "value": round(float(wrapped_summary.get("cumulative_score") or 0.0), 2),
+                "subtext": f"{int(wrapped_summary.get('rounds_participated') or 0)} scored rounds",
+                "description": "The cumulative score currently visible to you from published round snapshots.",
+                "tone": "blue",
+            },
+            {
+                "key": "average_round_score",
+                "label": "Average Score",
+                "value": round(float(wrapped_summary.get("average_round_score") or 0.0), 2),
+                "subtext": "Published rounds",
+                "description": "Average round score across the rounds that are visible in the results reveal.",
+                "tone": "teal",
+            },
+            {
+                "key": "best_rank",
+                "label": "Best Rank",
+                "value": f"#{int(wrapped_summary['best_rank'])}" if wrapped_summary.get("best_rank") is not None else "--",
+                "subtext": f"Avg rank {wrapped_summary.get('average_rank') or '--'}",
+                "description": "Your strongest rank in any published round, compared with your average rank.",
+                "tone": "lime",
+            },
+            {
+                "key": "best_round",
+                "label": "Best Round",
+                "value": _round_label(wrapped_summary.get("best_round")) or "--",
+                "subtext": "Highest round score",
+                "description": "The round where your score peaked in the published result timeline.",
+                "tone": "coral",
+            },
+            {
+                "key": "consistency",
+                "label": "Consistency",
+                "value": f"{round(float(wrapped_summary.get('consistency_score') or 0.0), 1)}%",
+                "subtext": str(wrapped_summary.get("performance_trend") or "STABLE").replace("_", " ").title(),
+                "description": "A stability indicator based on variation across your published round scores.",
+                "tone": "rose",
+            },
+        ]
+        comeback_round = _round_label(wrapped_summary.get("biggest_comeback_round"))
+        if comeback_round:
+            participant_cards.append(
+                {
+                    "key": "biggest_comeback",
+                    "label": "Biggest Comeback",
+                    "value": comeback_round,
+                    "subtext": "Strongest rank gain",
+                    "description": "The round where your rank improved the most compared with the previous published round.",
+                    "tone": "gold",
+                }
+            )
+        eliminated_round = _round_label(wrapped_summary.get("eliminated_round"))
+        if eliminated_round:
+            participant_cards.append(
+                {
+                    "key": "eliminated_round",
+                    "label": "Eliminated",
+                    "value": eliminated_round,
+                    "subtext": "Final active round",
+                    "description": "The round where your event status moved out of active contention.",
+                    "tone": "slate",
+                }
+            )
     return {
         "slug": event.slug,
         "title": event.title,
         "rounds": rounds,
         "wrapped_summary": wrapped_summary,
+        "participant_cards": participant_cards,
     }
