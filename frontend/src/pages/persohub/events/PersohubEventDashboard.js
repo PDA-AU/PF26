@@ -320,6 +320,7 @@ export default function EventDashboard() {
 
     const isLoggedIn = Boolean(user);
     const infoPath = useMemo(() => `/persohub/events/${eventSlug}`, [eventSlug]);
+    const resultsPath = useMemo(() => `/persohub/events/${eventSlug}/results`, [eventSlug]);
 
     const normalizedRouteProfile = useMemo(() => String(profileName || '').trim().toLowerCase(), [profileName]);
     const myProfileRaw = useMemo(() => String(user?.profile_name || '').trim(), [user?.profile_name]);
@@ -361,6 +362,7 @@ export default function EventDashboard() {
     const isPendingRegistration = registrationStatus === 'pending';
     const isActiveRegistration = registrationStatus === 'active';
     const isWildcardRegistration = Boolean(dashboard?.is_wildcard);
+    const resultsPublished = Boolean(eventInfo?.results_published);
 
     const isLeader = useMemo(() => {
         if (!user?.id) return false;
@@ -1425,6 +1427,29 @@ export default function EventDashboard() {
                                     )}
                                 </div>
                             </div>
+                        </div>
+                    </section>
+                ) : null}
+
+                {!isParticipantRoute && resultsPublished ? (
+                    <section className="mt-7 rounded-md border-4 border-black bg-[#11131a] p-6 text-white shadow-[8px_8px_0px_0px_#000000]">
+                        <div className="flex flex-wrap items-center justify-between gap-4">
+                            <div>
+                                <p className="font-mono text-xs font-bold uppercase tracking-[0.16em] text-[#FDE047]">Official Results</p>
+                                <h2 className="mt-1 font-heading text-3xl font-black uppercase tracking-tight">Results are live</h2>
+                                <p className="mt-2 text-sm font-medium text-slate-200">
+                                    View the published results, title winners, nominees, and round snapshots.
+                                </p>
+                            </div>
+                            <Link to={resultsPath} className="inline-block">
+                                <Button
+                                    data-testid="event-dashboard-go-results-button"
+                                    className="border-2 border-black bg-[#FDE047] text-black shadow-neo hover:bg-[#fde68a]"
+                                >
+                                    <Eye className="mr-2 h-4 w-4" />
+                                    Go to Results Page
+                                </Button>
+                            </Link>
                         </div>
                     </section>
                 ) : null}

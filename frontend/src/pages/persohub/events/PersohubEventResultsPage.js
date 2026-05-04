@@ -866,6 +866,41 @@ function TitleWinnersSection({ nominees, winners, revealed }) {
     const [activeWinnerVideo, setActiveWinnerVideo] = useState(false);
     const [activeNominee, setActiveNominee] = useState(null);
     const [activeNomineeVideo, setActiveNomineeVideo] = useState(false);
+    const [revealedWinnerKeys, setRevealedWinnerKeys] = useState(() => new Set());
+    const [recentlyRevealedWinnerKey, setRecentlyRevealedWinnerKey] = useState('');
+
+    const orderedWinners = useMemo(() => (
+        Array.isArray(winners)
+            ? winners
+            : []
+    ), [winners]);
+
+    const winnerRevealKey = useMemo(
+        () => orderedWinners.map((row) => `${row?.id || row?.entity_id || ''}:${row?.precedence_rank || ''}`).join('|'),
+        [orderedWinners]
+    );
+
+    useEffect(() => {
+        setRevealedWinnerKeys(new Set());
+        setRecentlyRevealedWinnerKey('');
+    }, [revealed, winnerRevealKey]);
+
+    const winnerCardKey = (winner) => String(winner?.id || `${winner?.entity_type || 'winner'}:${winner?.entity_id || ''}:${winner?.precedence_rank || ''}`);
+
+    const toggleWinnerReveal = (winner) => {
+        const key = winnerCardKey(winner);
+        setRevealedWinnerKeys((current) => {
+            const next = new Set(current);
+            if (next.has(key)) {
+                next.delete(key);
+                setRecentlyRevealedWinnerKey('');
+            } else {
+                next.add(key);
+                setRecentlyRevealedWinnerKey(key);
+            }
+            return next;
+        });
+    };
 
     const publishedRoundHistory = (item) => (
         Array.isArray(item?.performance?.round_history)
@@ -1174,7 +1209,7 @@ function TitleWinnersSection({ nominees, winners, revealed }) {
                                 <p>Nominees are live. Winners appear after the admin reveal toggle is enabled.</p>
                             </div>
                         </div>
-                    ) : winners.length === 0 ? (
+                    ) : orderedWinners.length === 0 ? (
                         <div className="results-pending-card is-wide">
                             <Clock3 size={18} />
                             <div>
@@ -1183,44 +1218,80 @@ function TitleWinnersSection({ nominees, winners, revealed }) {
                             </div>
                         </div>
                     ) : (
-                        <div className="results-holo-grid results-holo-grid-winners">
-                            {winners.map((row) => {
+                        <>
+                            <div className="results-winner-reveal-bar">
+                                <span>{revealedWinnerKeys.size} / {orderedWinners.length} revealed</span>
+                            </div>
+                            <div className="results-holo-grid results-holo-grid-winners">
+                            {orderedWinners.map((row) => {
                                 const key = `winner-${row.id || row.entity_id}`;
+                                const revealKey = winnerCardKey(row);
+                                const isCardRevealed = revealedWinnerKeys.has(revealKey);
+                                const isFreshReveal = isCardRevealed && revealKey === recentlyRevealedWinnerKey;
                                 return (
-                                    <button
-                                        type="button"
-                                        className={`results-holo-card results-holo-card-winner ${winnerToneClass(row.precedence_rank)} ${row?.is_wildcard ? 'is-wildcard' : ''}`}
+                                    <article
+                                        className={`results-holo-card results-holo-card-winner results-winner-flip-card ${winnerToneClass(row.precedence_rank)} ${row?.is_wildcard ? 'is-wildcard' : ''} ${isCardRevealed ? 'is-revealed' : 'is-locked'} ${isFreshReveal ? 'is-celebrating' : ''}`}
                                         key={key}
-                                        onClick={() => {
-                                            setActiveWinner(row);
-                                            setActiveWinnerVideo(false);
-                                        }}
                                     >
-                                        <div className="results-holo-rank-pill">#{row.precedence_rank || '-'}</div>
-                                        <div className="results-holo-title">{row.title_name}</div>
-                                        <div className="results-holo-photo results-holo-photo-winner">
-                                            {row.resolved_photo_url ? (
-                                                <img src={row.resolved_photo_url} alt={row.display_name} loading="lazy" />
-                                            ) : (
-                                                <div className="results-holo-photo-fallback"><Trophy size={26} /></div>
-                                            )}
+                                        <div className="results-winner-flip-inner">
+                                            <div className="results-winner-flip-face results-winner-flip-back">
+                                                <div className="results-holo-rank-pill">#{row.precedence_rank || '-'}</div>
+                                                <div className="results-holo-title">{row.title_name}</div>
+                                                <div className="results-holo-photo results-holo-photo-winner">
+                                                    {row.resolved_photo_url ? (
+                                                        <img src={row.resolved_photo_url} alt={row.display_name} loading="lazy" />
+                                                    ) : (
+                                                        <div className="results-holo-photo-fallback"><Trophy size={26} /></div>
+                                                    )}
+                                                </div>
+                                                <div className="results-holo-name results-holo-name-winner">
+                                                    {row.display_name}
+                                                    {row?.is_wildcard ? <span className="results-wildcard-tag is-inline">Wildcard</span> : null}
+                                                </div>
+                                                <div className="results-holo-roll results-holo-roll-winner">{row.rollno_or_code || '-'}</div>
+                                                <div className="results-holo-winner-meta">
+                                                    <span>{row?.performance?.total_score ?? '--'} pts</span>
+                                                    <span>{row?.performance?.overall_rank ? `Overall #${row.performance.overall_rank}` : 'Winner'}</span>
+                                                </div>
+                                                <div className="results-winner-card-actions">
+                                                    <button
+                                                        type="button"
+                                                        className="results-holo-play results-holo-play-winner"
+                                                        onClick={() => {
+                                                            setActiveWinner(row);
+                                                            setActiveWinnerVideo(false);
+                                                        }}
+                                                    >
+                                                        <Play size={13} /> Open
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        className="results-winner-toggle-button is-unreveal"
+                                                        onClick={() => toggleWinnerReveal(row)}
+                                                    >
+                                                        Unreveal
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div className="results-winner-flip-face results-winner-flip-front">
+                                                <div className="results-holo-rank-pill">#{row.precedence_rank || '-'}</div>
+                                                <Lock size={24} />
+                                                <strong>{row.title_name}</strong>
+                                                <button
+                                                    type="button"
+                                                    className="results-winner-toggle-button"
+                                                    onClick={() => toggleWinnerReveal(row)}
+                                                >
+                                                    <Sparkles size={13} /> Reveal
+                                                </button>
+                                            </div>
                                         </div>
-                                        <div className="results-holo-name results-holo-name-winner">
-                                            {row.display_name}
-                                            {row?.is_wildcard ? <span className="results-wildcard-tag is-inline">Wildcard</span> : null}
-                                        </div>
-                                        <div className="results-holo-roll results-holo-roll-winner">{row.rollno_or_code || '-'}</div>
-                                        <div className="results-holo-winner-meta">
-                                            <span>{row?.performance?.total_score ?? '--'} pts</span>
-                                            <span>{row?.performance?.overall_rank ? `Overall #${row.performance.overall_rank}` : 'Winner'}</span>
-                                        </div>
-                                        <div className="results-holo-play results-holo-play-winner">
-                                            <Play size={13} /> Open
-                                        </div>
-                                    </button>
+                                        {isFreshReveal ? <div className="results-winner-confetti" aria-hidden="true" /> : null}
+                                    </article>
                                 );
                             })}
-                        </div>
+                            </div>
+                        </>
                     )}
                 </section>
 
