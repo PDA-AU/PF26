@@ -14,7 +14,8 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const MAX_CAPTION_LENGTH = 500;
 const MAX_MODEL_SIZE_BYTES = 8 * 1024 * 1024;
 const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
-const MAX_VIDEO_SIZE_BYTES = 40 * 1024 * 1024;
+const MAX_VIDEO_SIZE_BYTES = 250 * 1024 * 1024;
+const MULTIPART_VIDEO_THRESHOLD_BYTES = 100 * 1024 * 1024;
 const WINNER_THEME_OPTIONS = [
     { value: '', label: 'Auto / rank default' },
     { value: 'wildcard', label: 'Wildcard' },
@@ -158,6 +159,7 @@ function ResultsAdminContent() {
     const [finalistPhotoFile, setFinalistPhotoFile] = useState(null);
     const [finalistVideoFile, setFinalistVideoFile] = useState(null);
     const [finalistSaving, setFinalistSaving] = useState(false);
+    const [finalistUploadProgress, setFinalistUploadProgress] = useState(null);
     const [finalistDescription, setFinalistDescription] = useState('');
     const [finalistContentText, setFinalistContentText] = useState('');
 
@@ -374,19 +376,105 @@ function ResultsAdminContent() {
         setModelFile(file);
     };
 
-    const uploadFileViaPresign = async ({ endpoint, file, fallbackTypes }) => {
+    const uploadFileViaPresign = async ({ endpoint, file, fallbackTypes, onProgress = null }) => {
         if (!file) return null;
         const contentType = file.type || fallbackTypes[0] || 'application/octet-stream';
         const presignRes = await axios.post(
             endpoint,
-            { filename: file.name, content_type: contentType },
+            { filename: file.name, content_type: contentType, size_bytes: file.size },
             { headers: getAuthHeader() }
         );
         const { upload_url, public_url, content_type } = presignRes.data || {};
         await axios.put(upload_url, file, {
             headers: { 'Content-Type': content_type || contentType },
+            onUploadProgress: (event) => {
+                if (typeof onProgress !== 'function') return;
+                const loaded = Number(event.loaded || 0);
+                const total = Number(event.total || file.size || 0);
+                onProgress(total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0);
+            },
         });
+        if (typeof onProgress === 'function') onProgress(100);
         return public_url || null;
+    };
+
+    const uploadVideoFile = async ({ file, onProgress }) => {
+        if (!file) return null;
+        const contentType = file.type || 'video/mp4';
+        const baseEndpoint = `${API}/persohub/admin/persohub-events/${eventSlug}/results/finalists/video`;
+        if (file.size <= MULTIPART_VIDEO_THRESHOLD_BYTES) {
+            return uploadFileViaPresign({
+                endpoint: `${baseEndpoint}/presign`,
+                file,
+                fallbackTypes: ['video/mp4'],
+                onProgress,
+            });
+        }
+
+        let initPayload = null;
+        try {
+            const initRes = await axios.post(
+                `${baseEndpoint}/multipart/init`,
+                { filename: file.name, content_type: contentType, size_bytes: file.size },
+                { headers: getAuthHeader() }
+            );
+            initPayload = initRes.data || {};
+            const partSize = Number(initPayload.part_size || 10 * 1024 * 1024);
+            const totalParts = Math.ceil(file.size / partSize);
+            const partProgress = new Array(totalParts).fill(0);
+            const completedParts = [];
+
+            for (let index = 0; index < totalParts; index += 1) {
+                const partNumber = index + 1;
+                const start = index * partSize;
+                const end = Math.min(file.size, start + partSize);
+                const blob = file.slice(start, end);
+                const partUrlRes = await axios.post(
+                    `${baseEndpoint}/multipart/part-url`,
+                    { key: initPayload.key, upload_id: initPayload.upload_id, part_number: partNumber },
+                    { headers: getAuthHeader() }
+                );
+                const uploadRes = await axios.put(partUrlRes.data.upload_url, blob, {
+                    headers: { 'Content-Type': contentType },
+                    onUploadProgress: (event) => {
+                        partProgress[index] = Number(event.loaded || 0);
+                        const uploaded = partProgress.reduce((sum, value) => sum + value, 0);
+                        if (typeof onProgress === 'function') {
+                            onProgress(Math.min(99, Math.round((uploaded / file.size) * 100)));
+                        }
+                    },
+                });
+                const etag = uploadRes.headers?.etag || uploadRes.headers?.ETag;
+                if (!etag) throw new Error('Missing multipart ETag');
+                partProgress[index] = blob.size;
+                completedParts.push({ part_number: partNumber, etag });
+                if (typeof onProgress === 'function') {
+                    const uploaded = partProgress.reduce((sum, value) => sum + value, 0);
+                    onProgress(Math.min(99, Math.round((uploaded / file.size) * 100)));
+                }
+            }
+
+            const completeRes = await axios.post(
+                `${baseEndpoint}/multipart/complete`,
+                { key: initPayload.key, upload_id: initPayload.upload_id, parts: completedParts },
+                { headers: getAuthHeader() }
+            );
+            if (typeof onProgress === 'function') onProgress(100);
+            return completeRes.data?.public_url || null;
+        } catch (error) {
+            if (initPayload?.key && initPayload?.upload_id) {
+                try {
+                    await axios.post(
+                        `${baseEndpoint}/multipart/abort`,
+                        { key: initPayload.key, upload_id: initPayload.upload_id },
+                        { headers: getAuthHeader() }
+                    );
+                } catch (_abortError) {
+                    // Best effort cleanup; preserve the original upload error for the UI.
+                }
+            }
+            throw error;
+        }
     };
 
     const saveResults = async ({ publishedOverride = null, successMessage = 'Results settings saved' } = {}) => {
@@ -620,10 +708,10 @@ function ResultsAdminContent() {
                 });
             }
             if (finalistVideoFile) {
-                videoUrl = await uploadFileViaPresign({
-                    endpoint: `${API}/persohub/admin/persohub-events/${eventSlug}/results/finalists/video/presign`,
+                setFinalistUploadProgress({ label: 'Uploading video', percent: 0 });
+                videoUrl = await uploadVideoFile({
                     file: finalistVideoFile,
-                    fallbackTypes: ['video/mp4'],
+                    onProgress: (percent) => setFinalistUploadProgress({ label: 'Uploading video', percent }),
                 });
             }
             const payload = {
@@ -650,6 +738,7 @@ function ResultsAdminContent() {
             toast.error(extractErrorMessage(error, 'Failed to save finalist'));
         } finally {
             setFinalistSaving(false);
+            setFinalistUploadProgress(null);
         }
     };
 
@@ -1104,7 +1193,7 @@ function ResultsAdminContent() {
                                     event.target.value = '';
                                     if (!file) return;
                                     if (file.size > MAX_VIDEO_SIZE_BYTES) {
-                                        toast.error('Video must be 40 MB or smaller');
+                                        toast.error('Video must be 250 MB or smaller');
                                         return;
                                     }
                                     setFinalistVideoFile(file);
@@ -1125,6 +1214,20 @@ function ResultsAdminContent() {
                         {finalistPhotoFile ? `Photo: ${finalistPhotoFile.name}. ` : ''}
                         {finalistVideoFile ? `Video: ${finalistVideoFile.name}` : ''}
                     </p>
+                ) : null}
+                {finalistUploadProgress ? (
+                    <div className="rounded-md border-2 border-black bg-white p-3">
+                        <div className="mb-2 flex items-center justify-between text-xs font-black uppercase tracking-[0.08em] text-slate-700">
+                            <span>{finalistUploadProgress.label}</span>
+                            <span>{finalistUploadProgress.percent}%</span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+                            <div
+                                className="h-full rounded-full bg-primary transition-all"
+                                style={{ width: `${Math.max(0, Math.min(100, finalistUploadProgress.percent || 0))}%` }}
+                            />
+                        </div>
+                    </div>
                 ) : null}
                 <div className="flex gap-2">
                     <Button onClick={saveFinalist} disabled={finalistSaving} className="border-2 border-black bg-primary text-white shadow-neo">

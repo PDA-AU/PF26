@@ -2,6 +2,7 @@ import csv
 import io
 import math
 import mimetypes
+import os
 import re
 import base64
 import hashlib
@@ -74,6 +75,13 @@ from schemas import (
     PersohubManagedBadgeResponse,
     PresignRequest,
     PresignResponse,
+    MultipartAbortRequest,
+    MultipartCompleteRequest,
+    MultipartCompleteResponse,
+    MultipartInitRequest,
+    MultipartInitResponse,
+    MultipartPartUrlRequest,
+    MultipartPartUrlResponse,
     PersohubManagedEntityTypeEnum,
     PersohubManagedEventCreate,
     PersohubManagedEventRegistrationUpdate,
@@ -123,9 +131,13 @@ from security import (
     require_persohub_root_community_admin,
     require_persohub_community,
 )
-from utils import log_admin_action, log_persohub_event_action, _upload_bytes_to_s3, _generate_presigned_put_url
+from utils import S3_BUCKET_NAME, S3_CLIENT, _build_s3_url, log_admin_action, log_persohub_event_action, _upload_bytes_to_s3, _generate_presigned_put_url
 
 router = APIRouter()
+RESULTS_FINALIST_VIDEO_MAX_BYTES = 250 * 1024 * 1024
+RESULTS_FINALIST_VIDEO_MULTIPART_THRESHOLD_BYTES = 100 * 1024 * 1024
+RESULTS_FINALIST_VIDEO_PART_SIZE_BYTES = 10 * 1024 * 1024
+RESULTS_FINALIST_VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime", "application/octet-stream"]
 OFFICIAL_LETTERHEAD_LEFT_LOGO_URL = ""
 OFFICIAL_LETTERHEAD_LEFT_LOGO_PATH = Path(__file__).resolve().parents[1] / "uploads" / "official-left-logo.png"
 OFFICIAL_LETTERHEAD_RIGHT_LOGO_PATH = Path(__file__).resolve().parents[1] / "uploads" / "official-right-logo.png"
@@ -2542,13 +2554,125 @@ def presign_results_finalist_video_upload(
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
+    if payload.size_bytes is not None and int(payload.size_bytes) > RESULTS_FINALIST_VIDEO_MAX_BYTES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Video must be 250 MB or smaller")
     presign = _generate_presigned_put_url(
         key_prefix=f"persohub_events/{event.slug}/results/finalists/videos",
         filename=payload.filename,
         content_type=payload.content_type,
-        allowed_types=["video/mp4", "video/webm", "video/quicktime", "application/octet-stream"],
+        allowed_types=RESULTS_FINALIST_VIDEO_TYPES,
     )
     return PresignResponse(**presign)
+
+
+@router.post("/persohub/admin/persohub-events/{slug}/results/finalists/video/multipart/init", response_model=MultipartInitResponse)
+def init_results_finalist_video_multipart_upload(
+    slug: str,
+    payload: MultipartInitRequest,
+    _: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    if not S3_CLIENT or not S3_BUCKET_NAME:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="S3 not configured")
+    if payload.content_type not in RESULTS_FINALIST_VIDEO_TYPES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file type")
+    if int(payload.size_bytes) > RESULTS_FINALIST_VIDEO_MAX_BYTES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Video must be 250 MB or smaller")
+
+    extension = Path(payload.filename).suffix.lower()
+    key = f"persohub_events/{event.slug}/results/finalists/videos/{os.urandom(16).hex()}{extension}"
+    try:
+        response = S3_CLIENT.create_multipart_upload(
+            Bucket=S3_BUCKET_NAME,
+            Key=key,
+            ContentType=payload.content_type,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to initialize multipart upload") from exc
+
+    return MultipartInitResponse(
+        upload_mode="multipart",
+        key=key,
+        upload_id=response["UploadId"],
+        public_url=_build_s3_url(key),
+        part_size=RESULTS_FINALIST_VIDEO_PART_SIZE_BYTES,
+    )
+
+
+@router.post("/persohub/admin/persohub-events/{slug}/results/finalists/video/multipart/part-url", response_model=MultipartPartUrlResponse)
+def presign_results_finalist_video_multipart_part(
+    slug: str,
+    payload: MultipartPartUrlRequest,
+    _: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    _get_event_or_404(db, slug)
+    if not S3_CLIENT or not S3_BUCKET_NAME:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="S3 not configured")
+    try:
+        upload_url = S3_CLIENT.generate_presigned_url(
+            "upload_part",
+            Params={
+                "Bucket": S3_BUCKET_NAME,
+                "Key": payload.key,
+                "UploadId": payload.upload_id,
+                "PartNumber": int(payload.part_number),
+            },
+            ExpiresIn=900,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to generate part URL") from exc
+    return MultipartPartUrlResponse(upload_url=upload_url, part_number=int(payload.part_number))
+
+
+@router.post("/persohub/admin/persohub-events/{slug}/results/finalists/video/multipart/complete", response_model=MultipartCompleteResponse)
+def complete_results_finalist_video_multipart_upload(
+    slug: str,
+    payload: MultipartCompleteRequest,
+    _: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    _get_event_or_404(db, slug)
+    if not S3_CLIENT or not S3_BUCKET_NAME:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="S3 not configured")
+    if not payload.parts:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Multipart parts required")
+    parts = [
+        {"ETag": item.etag, "PartNumber": int(item.part_number)}
+        for item in sorted(payload.parts, key=lambda part: int(part.part_number))
+    ]
+    try:
+        S3_CLIENT.complete_multipart_upload(
+            Bucket=S3_BUCKET_NAME,
+            Key=payload.key,
+            UploadId=payload.upload_id,
+            MultipartUpload={"Parts": parts},
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to complete multipart upload") from exc
+    return MultipartCompleteResponse(public_url=_build_s3_url(payload.key), key=payload.key)
+
+
+@router.post("/persohub/admin/persohub-events/{slug}/results/finalists/video/multipart/abort")
+def abort_results_finalist_video_multipart_upload(
+    slug: str,
+    payload: MultipartAbortRequest,
+    _: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    _get_event_or_404(db, slug)
+    if not S3_CLIENT or not S3_BUCKET_NAME:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="S3 not configured")
+    try:
+        S3_CLIENT.abort_multipart_upload(
+            Bucket=S3_BUCKET_NAME,
+            Key=payload.key,
+            UploadId=payload.upload_id,
+        )
+    except Exception:
+        pass
+    return {"message": "Multipart upload aborted"}
 
 
 @router.get("/persohub/admin/persohub-events/{slug}/dashboard")

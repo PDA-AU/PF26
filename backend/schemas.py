@@ -361,6 +361,7 @@ class PdaPasswordChangeResponse(BaseModel):
 class PresignRequest(BaseModel):
     filename: str = Field(..., min_length=1)
     content_type: str = Field(..., min_length=1)
+    size_bytes: Optional[int] = Field(default=None, ge=1)
 
 
 class PresignResponse(BaseModel):
@@ -368,6 +369,52 @@ class PresignResponse(BaseModel):
     public_url: str
     key: str
     content_type: str
+
+
+class MultipartInitRequest(BaseModel):
+    filename: str = Field(..., min_length=1)
+    content_type: str = Field(..., min_length=1)
+    size_bytes: int = Field(..., ge=1)
+
+
+class MultipartInitResponse(BaseModel):
+    upload_mode: Literal["multipart"]
+    key: str
+    upload_id: str
+    public_url: str
+    part_size: int
+
+
+class MultipartPartUrlRequest(BaseModel):
+    key: str = Field(..., min_length=1)
+    upload_id: str = Field(..., min_length=1)
+    part_number: int = Field(..., ge=1)
+
+
+class MultipartPartUrlResponse(BaseModel):
+    upload_url: str
+    part_number: int
+
+
+class MultipartPart(BaseModel):
+    part_number: int = Field(..., ge=1)
+    etag: str = Field(..., min_length=1)
+
+
+class MultipartCompleteRequest(BaseModel):
+    key: str = Field(..., min_length=1)
+    upload_id: str = Field(..., min_length=1)
+    parts: List[MultipartPart] = Field(default_factory=list)
+
+
+class MultipartCompleteResponse(BaseModel):
+    public_url: str
+    key: str
+
+
+class MultipartAbortRequest(BaseModel):
+    key: str = Field(..., min_length=1)
+    upload_id: str = Field(..., min_length=1)
 
 
 class PdaPdfPreviewGenerateRequest(BaseModel):
