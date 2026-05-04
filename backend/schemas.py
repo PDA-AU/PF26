@@ -2545,6 +2545,7 @@ class PersohubResultFinalistUpsertRequest(BaseModel):
     photo_url: Optional[str] = Field(default=None, max_length=1000)
     video_url: Optional[str] = Field(default=None, max_length=1000)
     content: Optional[Dict[str, Any]] = None
+    sort_order: Optional[int] = Field(default=None, ge=1, le=9999)
 
     @field_validator("photo_url", mode="before")
     @classmethod
@@ -2582,6 +2583,7 @@ class PersohubResultTitleAdminResponse(BaseModel):
 class PersohubResultFinalistAdminResponse(BaseModel):
     id: int
     finalist: PersohubResultEntityCard
+    sort_order: int
     created_at: datetime
 
 

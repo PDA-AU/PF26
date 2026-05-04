@@ -1305,6 +1305,26 @@ def _build_result_entity_card(
     )
 
 
+def _result_finalist_media_map(db: Session, event_id: int) -> Dict[Tuple[str, int], Dict[str, Any]]:
+    rows = (
+        db.query(PersohubEventResultFinalist)
+        .filter(PersohubEventResultFinalist.event_id == event_id)
+        .all()
+    )
+    media_map: Dict[Tuple[str, int], Dict[str, Any]] = {}
+    for row in rows:
+        entity_type = "user" if row.entity_type == PersohubEventEntityType.USER else "team"
+        entity_id = int(row.user_id if entity_type == "user" else row.team_id or 0)
+        if entity_id <= 0:
+            continue
+        media_map[(entity_type, entity_id)] = {
+            "photo_url": row.photo_url,
+            "video_url": row.video_url,
+            "content": row.content if isinstance(row.content, dict) else None,
+        }
+    return media_map
+
+
 def _round_scoring_entities(db: Session, event: PersohubEvent, round_row: PersohubEventRound):
     entities = _registered_entities(db, event)
     if not (round_row.is_frozen or round_row.state in {PersohubEventRoundState.COMPLETED, PersohubEventRoundState.REVEAL}):
@@ -1947,6 +1967,7 @@ def list_results_titles(
 ):
     event = _get_event_or_404(db, slug)
     lookup = _entity_lookup_map(db, event)
+    finalist_media_map = _result_finalist_media_map(db, event.id)
     rows = (
         db.query(PersohubEventResultTitle)
         .filter(PersohubEventResultTitle.event_id == event.id)
@@ -1959,13 +1980,21 @@ def list_results_titles(
         entity_id = int(row.user_id if entity_type == "user" else row.team_id or 0)
         if entity_id <= 0:
             continue
+        finalist_media = finalist_media_map.get((entity_type, entity_id), {})
         response.append(
             PersohubResultTitleAdminResponse(
                 id=int(row.id),
                 title_name=str(row.title_name or ""),
                 theme_key=str(row.theme_key or "").strip() or None,
                 precedence_rank=int(row.precedence_rank or 0),
-                winner=_build_result_entity_card(entity_type=entity_type, entity_id=entity_id, lookup=lookup),
+                winner=_build_result_entity_card(
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    lookup=lookup,
+                    photo_url=finalist_media.get("photo_url"),
+                    video_url=finalist_media.get("video_url"),
+                    content=finalist_media.get("content") if isinstance(finalist_media.get("content"), dict) else None,
+                ),
             )
         )
     return response
@@ -1983,6 +2012,14 @@ def create_results_title(
     entity_type, entity_id = _validate_result_entity(payload.entity_type.value, payload.user_id, payload.team_id)
     if (entity_type, entity_id) not in lookup:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected entity is not an active registered participant")
+    finalist_exists = db.query(PersohubEventResultFinalist.id).filter(
+        PersohubEventResultFinalist.event_id == event.id,
+        PersohubEventResultFinalist.entity_type == (PersohubEventEntityType.USER if entity_type == "user" else PersohubEventEntityType.TEAM),
+        PersohubEventResultFinalist.user_id == (entity_id if entity_type == "user" else None),
+        PersohubEventResultFinalist.team_id == (entity_id if entity_type == "team" else None),
+    ).first()
+    if not finalist_exists:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Winner must be chosen from the finalists pool")
     if entity_type == "user" and event.participant_mode != PersohubEventParticipantMode.INDIVIDUAL:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Team event requires team entity")
     if entity_type == "team" and event.participant_mode != PersohubEventParticipantMode.TEAM:
@@ -2011,6 +2048,7 @@ def create_results_title(
     db.add(row)
     db.commit()
     db.refresh(row)
+    finalist_media = _result_finalist_media_map(db, event.id).get((entity_type, entity_id), {})
     _log_event_admin_action(
         db,
         admin,
@@ -2025,7 +2063,14 @@ def create_results_title(
         title_name=str(row.title_name or ""),
         theme_key=str(row.theme_key or "").strip() or None,
         precedence_rank=int(row.precedence_rank or 0),
-        winner=_build_result_entity_card(entity_type=entity_type, entity_id=entity_id, lookup=lookup),
+        winner=_build_result_entity_card(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            lookup=lookup,
+            photo_url=finalist_media.get("photo_url"),
+            video_url=finalist_media.get("video_url"),
+            content=finalist_media.get("content") if isinstance(finalist_media.get("content"), dict) else None,
+        ),
     )
 
 
@@ -2048,6 +2093,14 @@ def update_results_title(
     entity_type, entity_id = _validate_result_entity(payload.entity_type.value, payload.user_id, payload.team_id)
     if (entity_type, entity_id) not in lookup:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected entity is not an active registered participant")
+    finalist_exists = db.query(PersohubEventResultFinalist.id).filter(
+        PersohubEventResultFinalist.event_id == event.id,
+        PersohubEventResultFinalist.entity_type == (PersohubEventEntityType.USER if entity_type == "user" else PersohubEventEntityType.TEAM),
+        PersohubEventResultFinalist.user_id == (entity_id if entity_type == "user" else None),
+        PersohubEventResultFinalist.team_id == (entity_id if entity_type == "team" else None),
+    ).first()
+    if not finalist_exists:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Winner must be chosen from the finalists pool")
     duplicate_name = db.query(PersohubEventResultTitle.id).filter(
         PersohubEventResultTitle.event_id == event.id,
         PersohubEventResultTitle.id != row.id,
@@ -2070,6 +2123,7 @@ def update_results_title(
     row.team_id = entity_id if entity_type == "team" else None
     db.commit()
     db.refresh(row)
+    finalist_media = _result_finalist_media_map(db, event.id).get((entity_type, entity_id), {})
     _log_event_admin_action(
         db,
         admin,
@@ -2084,7 +2138,14 @@ def update_results_title(
         title_name=str(row.title_name or ""),
         theme_key=str(row.theme_key or "").strip() or None,
         precedence_rank=int(row.precedence_rank or 0),
-        winner=_build_result_entity_card(entity_type=entity_type, entity_id=entity_id, lookup=lookup),
+        winner=_build_result_entity_card(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            lookup=lookup,
+            photo_url=finalist_media.get("photo_url"),
+            video_url=finalist_media.get("video_url"),
+            content=finalist_media.get("content") if isinstance(finalist_media.get("content"), dict) else None,
+        ),
     )
 
 
@@ -2127,7 +2188,7 @@ def list_results_finalists(
     rows = (
         db.query(PersohubEventResultFinalist)
         .filter(PersohubEventResultFinalist.event_id == event.id)
-        .order_by(PersohubEventResultFinalist.created_at.asc(), PersohubEventResultFinalist.id.asc())
+        .order_by(PersohubEventResultFinalist.sort_order.asc(), PersohubEventResultFinalist.created_at.asc(), PersohubEventResultFinalist.id.asc())
         .all()
     )
     response: List[PersohubResultFinalistAdminResponse] = []
@@ -2147,6 +2208,7 @@ def list_results_finalists(
                     video_url=row.video_url,
                     content=row.content if isinstance(row.content, dict) else None,
                 ),
+                sort_order=int(row.sort_order or 1),
                 created_at=row.created_at or datetime.now(timezone.utc),
             )
         )
@@ -2173,6 +2235,13 @@ def create_results_finalist(
     ).first()
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Finalist already exists")
+    max_sort_order = int(
+        db.query(func.max(PersohubEventResultFinalist.sort_order))
+        .filter(PersohubEventResultFinalist.event_id == event.id)
+        .scalar()
+        or 0
+    )
+    next_sort_order = int(payload.sort_order or max_sort_order + 1)
     row = PersohubEventResultFinalist(
         event_id=event.id,
         entity_type=PersohubEventEntityType.USER if entity_type == "user" else PersohubEventEntityType.TEAM,
@@ -2181,6 +2250,7 @@ def create_results_finalist(
         photo_url=payload.photo_url,
         video_url=payload.video_url,
         content=payload.content if isinstance(payload.content, dict) else None,
+        sort_order=next_sort_order,
     )
     db.add(row)
     db.commit()
@@ -2195,6 +2265,7 @@ def create_results_finalist(
             video_url=row.video_url,
             content=row.content if isinstance(row.content, dict) else None,
         ),
+        sort_order=int(row.sort_order or 1),
         created_at=row.created_at or datetime.now(timezone.utc),
     )
 
@@ -2221,9 +2292,15 @@ def update_results_finalist(
     row.entity_type = PersohubEventEntityType.USER if entity_type == "user" else PersohubEventEntityType.TEAM
     row.user_id = entity_id if entity_type == "user" else None
     row.team_id = entity_id if entity_type == "team" else None
-    row.photo_url = payload.photo_url
+    next_photo_url = payload.photo_url
+    default_photo_url = (lookup.get((entity_type, entity_id)) or {}).get("profile_picture")
+    if row.photo_url is None and next_photo_url and default_photo_url and next_photo_url == default_photo_url:
+        next_photo_url = None
+    row.photo_url = next_photo_url
     row.video_url = payload.video_url
     row.content = payload.content if isinstance(payload.content, dict) else None
+    if payload.sort_order is not None:
+        row.sort_order = int(payload.sort_order)
     db.commit()
     db.refresh(row)
     return PersohubResultFinalistAdminResponse(
@@ -2236,6 +2313,7 @@ def update_results_finalist(
             video_url=row.video_url,
             content=row.content if isinstance(row.content, dict) else None,
         ),
+        sort_order=int(row.sort_order or 1),
         created_at=row.created_at or datetime.now(timezone.utc),
     )
 

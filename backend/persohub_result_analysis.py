@@ -1051,6 +1051,22 @@ def build_event_results_snapshot(db: Session, event: PersohubEvent, published_ro
         if entity_id > 0 and bool(entity_map.get((entity_type, entity_id), {}).get("is_wildcard")):
             wildcard_winners += 1
 
+    department_counter: Counter[str] = Counter()
+    batch_counter: Counter[str] = Counter()
+    for entity in participating_entities:
+        if event.participant_mode == PersohubEventParticipantMode.TEAM:
+            department_counter["Teams"] += 1
+            batch_counter["Teams"] += 1
+            continue
+        department = str(entity.get("department") or "").strip() or "Unknown"
+        batch = str(entity.get("batch") or "").strip() or "Unknown"
+        department_counter[department] += 1
+        batch_counter[batch] += 1
+    department_labels = list(department_counter.keys())
+    department_values = [float(department_counter[label]) for label in department_labels]
+    batch_labels = list(batch_counter.keys())
+    batch_values = [float(batch_counter[label]) for label in batch_labels]
+
     charts = {
         "round_average_scores": {
             "type": "line",
@@ -1076,28 +1092,29 @@ def build_event_results_snapshot(db: Session, event: PersohubEvent, published_ro
                 }
             ],
         },
-        "qualification_funnel": {
-            "type": "area",
-            "labels": ["Registered", "Active", "Present", "Advanced", "Finalists", "Winners"],
+        "department_distribution": {
+            "type": "pie",
+            "labels": department_labels,
             "series": [
                 {
-                    "key": "participants",
+                    "key": "departments",
                     "label": "Participants",
-                    "data": [
-                        float(registered_count),
-                        float(active_count),
-                        float(latest_round_snapshot.get("participation", {}).get("present") or 0),
-                        float(latest_round_snapshot.get("participation", {}).get("advanced") or 0),
-                        float(finalists_count),
-                        float(winners_count),
-                    ],
-                    "palette_key": "gold",
+                    "data": department_values,
+                    "palette_key": "blue",
                 }
             ],
-            "meta": {
-                "area_type": "stepAfter",
-                "stroke_width": 3,
-            },
+        },
+        "batch_distribution": {
+            "type": "pie",
+            "labels": batch_labels,
+            "series": [
+                {
+                    "key": "batches",
+                    "label": "Participants",
+                    "data": batch_values,
+                    "palette_key": "teal",
+                }
+            ],
         },
         "round_elimination_trend": {
             "type": "bar",

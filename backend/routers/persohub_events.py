@@ -155,7 +155,7 @@ def _results_entity_lookup(db: Session, event: PersohubEvent) -> Dict[Tuple[str,
             .filter(
                 PersohubEventRegistration.event_id == event.id,
                 PersohubEventRegistration.entity_type == PersohubEventEntityType.USER,
-                PersohubEventRegistration.status == PersohubEventRegistrationStatus.ACTIVE,
+                PersohubEventRegistration.user_id.isnot(None),
             )
             .all()
         )
@@ -176,7 +176,7 @@ def _results_entity_lookup(db: Session, event: PersohubEvent) -> Dict[Tuple[str,
         .filter(
             PersohubEventRegistration.event_id == event.id,
             PersohubEventRegistration.entity_type == PersohubEventEntityType.TEAM,
-            PersohubEventRegistration.status == PersohubEventRegistrationStatus.ACTIVE,
+            PersohubEventRegistration.team_id.isnot(None),
         )
         .all()
     )
@@ -1145,7 +1145,7 @@ def get_event_results(slug: str, db: Session = Depends(get_db)):
     finalist_rows = (
         db.query(PersohubEventResultFinalist)
         .filter(PersohubEventResultFinalist.event_id == event.id)
-        .order_by(PersohubEventResultFinalist.created_at.asc(), PersohubEventResultFinalist.id.asc())
+        .order_by(PersohubEventResultFinalist.sort_order.asc(), PersohubEventResultFinalist.created_at.asc(), PersohubEventResultFinalist.id.asc())
         .all()
     )
     finalists_by_entity: Dict[Tuple[str, int], Dict[str, Any]] = {}
@@ -1165,9 +1165,16 @@ def get_event_results(slug: str, db: Session = Depends(get_db)):
             "default_image_url": source.get("default_image_url"),
             "resolved_photo_url": row.photo_url or source.get("default_image_url"),
             "resolved_video_url": row.video_url,
+            "content": row.content if isinstance(row.content, dict) else None,
             "is_wildcard": bool(source.get("is_wildcard")),
             "wildcard_seed_score": float(source.get("wildcard_seed_score") or 0.0) if source.get("wildcard_seed_score") is not None else None,
             "wildcard_start_round_no": int(source.get("wildcard_start_round_no") or 0) or None,
+            "performance": _winner_performance_payload(
+                db,
+                event,
+                entity_type=entity_type,
+                entity_id=entity_id,
+            ),
         }
         nominees.append(payload)
         finalists_by_entity[(entity_type, entity_id)] = payload
@@ -1238,6 +1245,7 @@ def get_event_results(slug: str, db: Session = Depends(get_db)):
                 "default_image_url": source.get("default_image_url"),
                 "resolved_photo_url": finalist_media.get("resolved_photo_url") or source.get("default_image_url"),
                 "resolved_video_url": finalist_media.get("resolved_video_url"),
+                "content": finalist_media.get("content") if isinstance(finalist_media.get("content"), dict) else None,
                 "is_wildcard": bool(source.get("is_wildcard")),
                 "wildcard_seed_score": float(source.get("wildcard_seed_score") or 0.0) if source.get("wildcard_seed_score") is not None else None,
                 "wildcard_start_round_no": int(source.get("wildcard_start_round_no") or 0) or None,

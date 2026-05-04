@@ -158,6 +158,7 @@ function ResultsAdminContent() {
     const [finalistPhotoFile, setFinalistPhotoFile] = useState(null);
     const [finalistVideoFile, setFinalistVideoFile] = useState(null);
     const [finalistSaving, setFinalistSaving] = useState(false);
+    const [finalistDescription, setFinalistDescription] = useState('');
     const [finalistContentText, setFinalistContentText] = useState('');
 
     const [highlightRows, setHighlightRows] = useState([]);
@@ -301,9 +302,27 @@ function ResultsAdminContent() {
         [entityOptions]
     );
 
+    const finalistEntityOptions = useMemo(() => (
+        finalistRows
+            .map((row) => {
+                const finalist = row?.finalist || {};
+                const entityType = String(finalist?.entity_type || '').toLowerCase();
+                const entityId = Number(finalist?.entity_id || 0);
+                if (!entityType || entityId <= 0) return null;
+                return {
+                    key: `${entityType}:${entityId}`,
+                    label: `${finalist.display_name || 'Unknown'} (${finalist.rollno_or_code || '-'})`,
+                    entity_type: entityType,
+                    entity_id: entityId,
+                    searchText: `${finalist.display_name || ''} ${finalist.rollno_or_code || ''} ${entityType}`.toLowerCase(),
+                };
+            })
+            .filter(Boolean)
+    ), [finalistRows]);
+
     const selectedTitleEntity = useMemo(
-        () => entityOptions.find((opt) => opt.key === titleEntityKey) || null,
-        [entityOptions, titleEntityKey]
+        () => finalistEntityOptions.find((opt) => opt.key === titleEntityKey) || null,
+        [finalistEntityOptions, titleEntityKey]
     );
 
     const selectedFinalistEntity = useMemo(
@@ -544,7 +563,7 @@ function ResultsAdminContent() {
     const editTitle = (row) => {
         const winner = row?.winner || {};
         const entityKey = `${winner.entity_type}:${winner.entity_id}`;
-        const matchedOption = entityOptions.find((opt) => opt.key === entityKey);
+        const matchedOption = finalistEntityOptions.find((opt) => opt.key === entityKey);
         setEditingTitleId(row.id);
         setTitleName(row.title_name || '');
         setTitleThemeKey(row.theme_key || '');
@@ -571,18 +590,26 @@ function ResultsAdminContent() {
         setFinalistVideoUrl('');
         setFinalistPhotoFile(null);
         setFinalistVideoFile(null);
+        setFinalistDescription('');
         setFinalistContentText('');
     };
 
     const saveFinalist = async () => {
         if (!selectedFinalistEntity) {
-            toast.error('Select an active participant/team');
+            toast.error('Select a finalist');
             return;
         }
         setFinalistSaving(true);
         try {
             const parsedContent = parseJsonContent('Finalist content', finalistContentText);
             if (!parsedContent.ok) return;
+            const contentValue = parsedContent.value ? { ...parsedContent.value } : {};
+            const descriptionValue = String(finalistDescription || '').trim();
+            if (descriptionValue) {
+                contentValue.description = descriptionValue;
+            } else {
+                delete contentValue.description;
+            }
             let photoUrl = String(finalistPhotoUrl || '').trim() || null;
             let videoUrl = String(finalistVideoUrl || '').trim() || null;
             if (finalistPhotoFile) {
@@ -605,7 +632,10 @@ function ResultsAdminContent() {
                 team_id: selectedFinalistEntity.entity_type === 'team' ? selectedFinalistEntity.entity_id : null,
                 photo_url: photoUrl,
                 video_url: videoUrl,
-                content: parsedContent.value,
+                content: Object.keys(contentValue).length > 0 ? contentValue : null,
+                sort_order: editingFinalistId
+                    ? (finalistRows.find((row) => row.id === editingFinalistId)?.sort_order || 1)
+                    : (finalistRows.length > 0 ? Math.max(...finalistRows.map((row) => Number(row.sort_order || 0))) + 1 : 1),
             };
             if (editingFinalistId) {
                 await axios.put(`${API}/persohub/admin/persohub-events/${eventSlug}/results/finalists/${editingFinalistId}`, payload, { headers: getAuthHeader() });
@@ -634,7 +664,11 @@ function ResultsAdminContent() {
         setFinalistVideoUrl(finalist.resolved_video_url || '');
         setFinalistPhotoFile(null);
         setFinalistVideoFile(null);
-        setFinalistContentText(finalist?.content ? JSON.stringify(finalist.content, null, 2) : '');
+        const content = finalist?.content && typeof finalist.content === 'object' ? finalist.content : null;
+        setFinalistDescription(content?.description || '');
+        const extraContent = content ? { ...content } : null;
+        if (extraContent) delete extraContent.description;
+        setFinalistContentText(extraContent && Object.keys(extraContent).length > 0 ? JSON.stringify(extraContent, null, 2) : '');
     };
 
     const removeFinalist = async (id) => {
@@ -644,6 +678,40 @@ function ResultsAdminContent() {
             await loadFinalists();
         } catch (error) {
             toast.error(extractErrorMessage(error, 'Failed to remove finalist'));
+        }
+    };
+
+    const buildFinalistPayloadFromRow = (row, sortOrder) => ({
+        entity_type: row?.finalist?.entity_type || null,
+        user_id: row?.finalist?.entity_type === 'user' ? row.finalist.entity_id : null,
+        team_id: row?.finalist?.entity_type === 'team' ? row.finalist.entity_id : null,
+        photo_url: row?.finalist?.resolved_photo_url || null,
+        video_url: row?.finalist?.resolved_video_url || null,
+        content: row?.finalist?.content || null,
+        sort_order: sortOrder,
+    });
+
+    const moveFinalist = async (rowIndex, direction) => {
+        const swapIndex = rowIndex + direction;
+        if (rowIndex < 0 || swapIndex < 0 || swapIndex >= finalistRows.length) return;
+        const current = finalistRows[rowIndex];
+        const target = finalistRows[swapIndex];
+        try {
+            await Promise.all([
+                axios.put(
+                    `${API}/persohub/admin/persohub-events/${eventSlug}/results/finalists/${current.id}`,
+                    buildFinalistPayloadFromRow(current, target.sort_order),
+                    { headers: getAuthHeader() }
+                ),
+                axios.put(
+                    `${API}/persohub/admin/persohub-events/${eventSlug}/results/finalists/${target.id}`,
+                    buildFinalistPayloadFromRow(target, current.sort_order),
+                    { headers: getAuthHeader() }
+                ),
+            ]);
+            await loadFinalists();
+        } catch (error) {
+            toast.error(extractErrorMessage(error, 'Failed to reorder finalists'));
         }
     };
 
@@ -891,14 +959,14 @@ function ResultsAdminContent() {
                             setTitleEntityQuery(nextValue);
                             setTitleEntityKey('');
                         }}
-                        options={activeEntityOptions}
+                        options={finalistEntityOptions}
                         selectedOption={selectedTitleEntity}
                         onSelect={(option) => {
                             setTitleEntityKey(option.key);
                             setTitleEntityQuery(option.label);
                         }}
-                        placeholder="Search active participant/team"
-                        loading={participantsLoading}
+                        placeholder="Search finalist pool"
+                        loading={finalistsLoading}
                     />
                     <input
                         value={titleName}
@@ -999,6 +1067,13 @@ function ResultsAdminContent() {
                         placeholder="Video URL (optional)"
                         className="rounded-md border-2 border-black px-3 py-2 text-sm"
                     />
+                    <Textarea
+                        value={finalistDescription}
+                        onChange={(event) => setFinalistDescription(event.target.value)}
+                        rows={4}
+                        placeholder="Description shown below name and roll no. in the winner modal"
+                        className="border-2 border-black bg-white text-sm shadow-none focus-visible:ring-2 focus-visible:ring-black md:col-span-2"
+                    />
                     <div className="grid gap-2 sm:grid-cols-2">
                         <label className="inline-flex cursor-pointer items-center justify-center rounded-md border-2 border-black bg-white px-3 py-2 text-xs font-bold">
                             <UploadCloud className="mr-2 h-4 w-4" /> Upload Photo
@@ -1041,7 +1116,7 @@ function ResultsAdminContent() {
                         value={finalistContentText}
                         onChange={(event) => setFinalistContentText(event.target.value)}
                         rows={4}
-                        placeholder='Content JSON (optional), e.g. {"quote":"Finalist note"}'
+                        placeholder='Extra content JSON (optional), e.g. {"quote":"Finalist note"}'
                         className="border-2 border-black bg-white text-sm shadow-none focus-visible:ring-2 focus-visible:ring-black md:col-span-2"
                     />
                 </div>
@@ -1064,6 +1139,7 @@ function ResultsAdminContent() {
                     <table className="min-w-full text-sm">
                         <thead className="bg-slate-900 text-left text-white">
                             <tr>
+                                <th className="px-4 py-3 font-black uppercase">Order</th>
                                 <th className="px-4 py-3 font-black uppercase">Entity</th>
                                 <th className="px-4 py-3 font-black uppercase">Photo</th>
                                 <th className="px-4 py-3 font-black uppercase">Video</th>
@@ -1073,11 +1149,12 @@ function ResultsAdminContent() {
                         </thead>
                         <tbody>
                             {finalistsLoading ? (
-                                <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-500">Loading finalists...</td></tr>
+                                <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-500">Loading finalists...</td></tr>
                             ) : finalistRows.length === 0 ? (
-                                <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-500">No finalists added yet.</td></tr>
-                            ) : finalistRows.map((row) => (
+                                <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-500">No finalists added yet.</td></tr>
+                            ) : finalistRows.map((row, index) => (
                                 <tr key={row.id} className="border-t border-black/10">
+                                    <td className="px-4 py-3 font-bold">#{row.sort_order || index + 1}</td>
                                     <td className="px-4 py-3">{row?.finalist?.display_name} ({row?.finalist?.rollno_or_code || '-'})</td>
                                     <td className="px-4 py-3">
                                         {row?.finalist?.resolved_photo_url
@@ -1096,6 +1173,24 @@ function ResultsAdminContent() {
                                     </td>
                                     <td className="px-4 py-3">
                                         <div className="flex gap-2">
+                                            <div className="flex flex-col gap-1">
+                                                <Button
+                                                    variant="outline"
+                                                    className="border-2 border-black shadow-neo px-2"
+                                                    onClick={() => moveFinalist(index, -1)}
+                                                    disabled={index === 0}
+                                                >
+                                                    <ChevronUp className="h-3.5 w-3.5" />
+                                                </Button>
+                                                <Button
+                                                    variant="outline"
+                                                    className="border-2 border-black shadow-neo px-2"
+                                                    onClick={() => moveFinalist(index, 1)}
+                                                    disabled={index === finalistRows.length - 1}
+                                                >
+                                                    <ChevronDown className="h-3.5 w-3.5" />
+                                                </Button>
+                                            </div>
                                             <Button variant="outline" className="border-2 border-black shadow-neo" onClick={() => editFinalist(row)}>Edit</Button>
                                             <Button variant="outline" className="border-2 border-black shadow-neo" onClick={() => removeFinalist(row.id)}>
                                                 <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete
@@ -1198,7 +1293,7 @@ function ResultsAdminContent() {
                                 <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-500">Loading highlights...</td></tr>
                             ) : highlightRows.length === 0 ? (
                                 <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-500">No highlights added yet.</td></tr>
-                            ) : highlightRows.map((row) => (
+                            ) : highlightRows.map((row, index) => (
                                 <tr key={row.id} className="border-t border-black/10">
                                     <td className="px-4 py-3 font-bold">#{row.sort_order}</td>
                                     <td className="px-4 py-3">{row.emoji ? `${row.emoji} ` : ''}{row.tag || '—'}</td>

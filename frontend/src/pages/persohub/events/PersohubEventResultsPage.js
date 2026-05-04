@@ -23,9 +23,12 @@ import {
     AreaChart,
     Bar,
     BarChart,
+    Cell,
     CartesianGrid,
     Line,
     LineChart,
+    Pie,
+    PieChart,
     PolarAngleAxis,
     PolarGrid,
     PolarRadiusAxis,
@@ -183,19 +186,154 @@ function ResultsHeatmap({ chart }) {
     );
 }
 
+function ResultsPyramidChart({ chart, ariaLabel }) {
+    const labels = Array.isArray(chart?.labels) ? chart.labels : [];
+    const values = Array.isArray(chart?.series?.[0]?.data) ? chart.series[0].data : [];
+    const color = chartColor(chart?.series?.[0]?.palette_key);
+    const maxValue = Math.max(...values.map((item) => Number(item || 0)), 1);
+
+    if (labels.length === 0 || values.length === 0) {
+        return <div className="results-chart-empty">No chart data yet.</div>;
+    }
+
+    return (
+        <div className="results-pyramid-chart" role="img" aria-label={ariaLabel}>
+            {labels.map((label, index) => {
+                const value = Number(values[index] || 0);
+                const width = `${Math.max((value / maxValue) * 100, 14)}%`;
+                return (
+                    <div key={label} className="results-pyramid-row">
+                        <div className="results-pyramid-label">{label}</div>
+                        <div className="results-pyramid-bar-shell">
+                            <div className="results-pyramid-bar" style={{ width, backgroundColor: color }}>
+                                <span>{value}</span>
+                            </div>
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+function ResultsPieChart({ chart, ariaLabel }) {
+    const labels = Array.isArray(chart?.labels) ? chart.labels : [];
+    const values = Array.isArray(chart?.series?.[0]?.data) ? chart.series[0].data : [];
+    const paletteCycle = ['gold', 'teal', 'coral', 'blue', 'lime', 'rose', 'slate'];
+    const rows = labels.map((label, index) => ({
+        name: label,
+        value: Number(values[index] || 0),
+        color: chartColor(paletteCycle[index % paletteCycle.length]),
+    })).filter((item) => item.value > 0);
+
+    if (rows.length === 0) {
+        return <div className="results-chart-empty">No chart data yet.</div>;
+    }
+
+    return (
+        <div className="results-pie-chart-shell" role="img" aria-label={ariaLabel}>
+            <div className="results-pie-chart-visual">
+                <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                        <Tooltip content={<ResultsTooltip />} />
+                        <Pie
+                            data={rows}
+                            dataKey="value"
+                            nameKey="name"
+                            cx="50%"
+                            cy="50%"
+                            outerRadius="82%"
+                            innerRadius="48%"
+                            paddingAngle={2}
+                        >
+                            {rows.map((entry) => (
+                                <Cell key={entry.name} fill={entry.color} />
+                            ))}
+                        </Pie>
+                    </PieChart>
+                </ResponsiveContainer>
+            </div>
+            <div className="results-pie-chart-legend">
+                {rows.map((row) => (
+                    <div key={row.name} className="results-pie-chart-legend-row">
+                        <span className="results-pie-chart-legend-dot" style={{ backgroundColor: row.color }} />
+                        <span className="results-pie-chart-legend-label">{row.name}</span>
+                        <strong className="results-pie-chart-legend-value">{row.value}</strong>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+function ResultsDistributionSwitcher({ charts }) {
+    const [mode, setMode] = useState('department');
+    const chart = mode === 'batch' ? charts?.batch : charts?.department;
+    const ariaLabel = mode === 'batch' ? 'Batch distribution chart' : 'Department distribution chart';
+
+    return (
+        <>
+            <div className="results-round-switcher results-storyboard-switcher" role="tablist" aria-label="Distribution type">
+                <button
+                    type="button"
+                    className={`results-switch-pill ${mode === 'department' ? 'is-active' : ''}`}
+                    onClick={() => setMode('department')}
+                >
+                    Department
+                </button>
+                <button
+                    type="button"
+                    className={`results-switch-pill ${mode === 'batch' ? 'is-active' : ''}`}
+                    onClick={() => setMode('batch')}
+                >
+                    Batch
+                </button>
+            </div>
+            <div className="results-chart-panel">
+                <ResultsChart chart={chart} ariaLabel={ariaLabel} />
+            </div>
+        </>
+    );
+}
+
 function ResultsChart({ chart, ariaLabel }) {
     const chartId = useId();
     const rows = useMemo(() => toChartRows(chart), [chart]);
     const series = Array.isArray(chart?.series) ? chart.series : [];
     const labels = Array.isArray(chart?.labels) ? chart.labels : [];
-    const yMin = Number.isFinite(Number(chart?.meta?.y_min)) ? Number(chart.meta.y_min) : 'auto';
-    const yMax = Number.isFinite(Number(chart?.meta?.y_max)) ? Number(chart.meta.y_max) : 'auto';
+    const forceScoreProgressionDomain = String(ariaLabel || '').toLowerCase().includes('round score progression');
+    const yMin = forceScoreProgressionDomain
+        ? 50
+        : Number.isFinite(Number(chart?.meta?.y_min))
+            ? Number(chart.meta.y_min)
+            : 'auto';
+    const yMax = forceScoreProgressionDomain
+        ? 100
+        : Number.isFinite(Number(chart?.meta?.y_max))
+            ? Number(chart.meta.y_max)
+            : 'auto';
     const yDomain = [yMin, yMax];
 
     if (chart?.type === 'heatmap') {
         return (
             <div className="results-chart-frame" aria-label={ariaLabel}>
                 <ResultsHeatmap chart={chart} />
+            </div>
+        );
+    }
+
+    if (chart?.type === 'pyramid') {
+        return (
+            <div className="results-chart-frame" aria-label={ariaLabel}>
+                <ResultsPyramidChart chart={chart} ariaLabel={ariaLabel} />
+            </div>
+        );
+    }
+
+    if (chart?.type === 'pie') {
+        return (
+            <div className="results-chart-frame" aria-label={ariaLabel}>
+                <ResultsPieChart chart={chart} ariaLabel={ariaLabel} />
             </div>
         );
     }
@@ -256,7 +394,7 @@ function ResultsChart({ chart, ariaLabel }) {
                         </defs>
                         <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
                         <XAxis dataKey="label" stroke="rgba(248,250,252,0.58)" tickLine={false} axisLine={false} fontSize={11} />
-                        <YAxis stroke="rgba(248,250,252,0.4)" tickLine={false} axisLine={false} fontSize={11} domain={yDomain} />
+                        <YAxis stroke="rgba(248,250,252,0.4)" tickLine={false} axisLine={false} fontSize={11} domain={yDomain} allowDataOverflow />
                         <Tooltip content={<ResultsTooltip />} cursor={{ stroke: 'rgba(255,255,255,0.12)' }} />
                         <Area
                             type={areaType}
@@ -280,7 +418,7 @@ function ResultsChart({ chart, ariaLabel }) {
                     <BarChart data={rows} margin={{ top: 8, right: 12, left: -12, bottom: 0 }}>
                         <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
                         <XAxis dataKey="label" stroke="rgba(248,250,252,0.58)" tickLine={false} axisLine={false} fontSize={11} />
-                        <YAxis stroke="rgba(248,250,252,0.4)" tickLine={false} axisLine={false} fontSize={11} domain={yDomain} />
+                        <YAxis stroke="rgba(248,250,252,0.4)" tickLine={false} axisLine={false} fontSize={11} domain={yDomain} allowDataOverflow />
                         <Tooltip content={<ResultsTooltip />} cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
                         {series.map((item) => (
                             <Bar
@@ -313,7 +451,7 @@ function ResultsChart({ chart, ariaLabel }) {
                         </defs>
                         <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
                         <XAxis dataKey="label" stroke="rgba(248,250,252,0.58)" tickLine={false} axisLine={false} fontSize={11} />
-                        <YAxis stroke="rgba(248,250,252,0.4)" tickLine={false} axisLine={false} fontSize={11} reversed={isRankChart} domain={isRankChart ? undefined : yDomain} />
+                        <YAxis stroke="rgba(248,250,252,0.4)" tickLine={false} axisLine={false} fontSize={11} reversed={isRankChart} domain={isRankChart ? undefined : yDomain} allowDataOverflow={!isRankChart} />
                         <Tooltip content={<ResultsTooltip />} cursor={{ stroke: 'rgba(255,255,255,0.12)' }} />
                         <Area
                             type="monotone"
@@ -336,7 +474,7 @@ function ResultsChart({ chart, ariaLabel }) {
                 <LineChart data={rows} margin={{ top: 8, right: 12, left: -12, bottom: 0 }}>
                     <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
                     <XAxis dataKey="label" stroke="rgba(248,250,252,0.58)" tickLine={false} axisLine={false} fontSize={11} />
-                    <YAxis stroke="rgba(248,250,252,0.4)" tickLine={false} axisLine={false} fontSize={11} reversed={isRankChart} domain={isRankChart ? undefined : yDomain} />
+                    <YAxis stroke="rgba(248,250,252,0.4)" tickLine={false} axisLine={false} fontSize={11} reversed={isRankChart} domain={isRankChart ? undefined : yDomain} allowDataOverflow={!isRankChart} />
                     <Tooltip content={<ResultsTooltip />} cursor={{ stroke: 'rgba(255,255,255,0.12)' }} />
                     {series.map((item) => (
                         <Line
@@ -695,6 +833,8 @@ function LoaderDeck() {
 function HighlightCard({ item }) {
     const participant = item?.participant || null;
     const imageUrl = participant?.resolved_photo_url || participant?.default_image_url || '';
+    const participantName = String(participant?.display_name || '').trim();
+    const participantRoll = String(participant?.rollno_or_code || '').trim();
     const paletteKey = String(item?.content?.palette_key || 'blue').trim().toLowerCase();
     return (
         <article className={`results-highlight-card palette-${paletteKey}`}>
@@ -708,11 +848,11 @@ function HighlightCard({ item }) {
             {participant ? (
                 <div className="results-highlight-participant">
                     <div className="results-highlight-avatar">
-                        {imageUrl ? <img src={imageUrl} alt={participant.display_name} /> : <span>{String(participant.display_name || '?').slice(0, 1)}</span>}
+                        {imageUrl ? <img src={imageUrl} alt={participantName || 'Participant'} /> : <span>{String(participantName || '?').slice(0, 1)}</span>}
                     </div>
                     <div className="results-highlight-participant-copy">
-                        <strong>{participant.display_name}</strong>
-                        <span>{participant.rollno_or_code}</span>
+                        <strong>{participantName || 'Participant'}</strong>
+                        <span>{participantRoll || '-'}</span>
                     </div>
                 </div>
             ) : null}
@@ -723,6 +863,20 @@ function HighlightCard({ item }) {
 function TitleWinnersSection({ nominees, winners, revealed }) {
     const [videoUrl, setVideoUrl] = useState('');
     const [activeWinner, setActiveWinner] = useState(null);
+    const [activeWinnerVideo, setActiveWinnerVideo] = useState(false);
+    const [activeNominee, setActiveNominee] = useState(null);
+    const [activeNomineeVideo, setActiveNomineeVideo] = useState(false);
+
+    const publishedRoundHistory = (item) => (
+        Array.isArray(item?.performance?.round_history)
+            ? item.performance.round_history.filter((round) => round?.round_no)
+            : []
+    );
+
+    const latestPublishedRound = (item) => {
+        const rows = publishedRoundHistory(item);
+        return rows.length > 0 ? rows[rows.length - 1] : null;
+    };
 
     const winnerToneClass = (precedenceRank) => {
         if (precedenceRank === 1) return 'tone-rank-1';
@@ -736,30 +890,30 @@ function TitleWinnersSection({ nominees, winners, revealed }) {
     const winnerCertificateTheme = (winner) => {
         const themeKey = String(winner?.theme_key || '').trim().toLowerCase();
         if (themeKey === 'wildcard') {
-            return { className: 'certificate-theme-wildcard', seal: 'Wildcard Citation' };
+            return { className: 'certificate-theme-wildcard', label: 'Wildcard' };
         }
         if (themeKey === 'orator') {
-            return { className: 'certificate-theme-orator', seal: 'Orator Distinction' };
+            return { className: 'certificate-theme-orator', label: 'Featured Title' };
         }
         if (themeKey === 'performer') {
-            return { className: 'certificate-theme-performer', seal: 'Stage Distinction' };
+            return { className: 'certificate-theme-performer', label: 'Featured Title' };
         }
         if (themeKey === 'creative') {
-            return { className: 'certificate-theme-creative', seal: 'Creative Distinction' };
+            return { className: 'certificate-theme-creative', label: 'Featured Title' };
         }
         if (themeKey === 'classic') {
-            return { className: 'certificate-theme-classic', seal: 'Official Title' };
+            return { className: 'certificate-theme-classic', label: 'Official Title' };
         }
         if (themeKey === 'grand') {
-            return { className: 'certificate-theme-grand', seal: 'Premier Title' };
+            return { className: 'certificate-theme-grand', label: 'Official Title' };
         }
         if (winner?.is_wildcard) {
-            return { className: 'certificate-theme-wildcard', seal: 'Wildcard Citation' };
+            return { className: 'certificate-theme-wildcard', label: 'Wildcard' };
         }
         if ((winner?.precedence_rank || 0) === 1) {
-            return { className: 'certificate-theme-grand', seal: 'Premier Title' };
+            return { className: 'certificate-theme-grand', label: 'Official Title' };
         }
-        return { className: 'certificate-theme-classic', seal: 'Official Title' };
+        return { className: 'certificate-theme-classic', label: 'Official Title' };
     };
 
     const WinnerRankChart = ({ roundHistory }) => {
@@ -808,6 +962,7 @@ function TitleWinnersSection({ nominees, winners, revealed }) {
         const performance = winner?.performance || {};
         const roundHistory = Array.isArray(performance?.round_history) ? performance.round_history : [];
         const certificateTheme = winnerCertificateTheme(winner);
+        const winnerDescription = String(winner?.content?.description || '').trim();
         return (
             <div className="results-winner-modal" onClick={onClose}>
                 <div className={`results-winner-modal-card ${winnerToneClass(winner?.precedence_rank)} ${certificateTheme.className}`} onClick={(event) => event.stopPropagation()}>
@@ -816,20 +971,18 @@ function TitleWinnersSection({ nominees, winners, revealed }) {
                     </button>
                     <div className="results-winner-modal-grid">
                         <div className="results-winner-media-panel">
-                            <div className="results-winner-certificate-head">
-                                <div className="results-winner-certificate-topline">
-                                    <span>Persohub Event Title</span>
-                                    <span>{certificateTheme.seal}</span>
-                                </div>
-                                <div className="results-winner-modal-title">{winner?.title_name}</div>
-                                <div className="results-winner-modal-rank">Rank #{winner?.precedence_rank || '-'} • Official Citation</div>
+                            <div className="results-winner-certificate-topline">
+                                <span>{certificateTheme.label}</span>
+                                <span>Rank #{winner?.precedence_rank || '-'}</span>
                             </div>
+                            <div className="results-winner-modal-title">{winner?.title_name}</div>
                             <div className="results-winner-media-frame">
-                                {winner?.resolved_video_url ? (
+                                {activeWinnerVideo && winner?.resolved_video_url ? (
                                     <video
                                         src={winner.resolved_video_url}
                                         poster={winner.resolved_photo_url || winner.default_image_url || undefined}
                                         controls
+                                        autoPlay
                                         playsInline
                                         className="results-winner-media-video"
                                     />
@@ -839,14 +992,20 @@ function TitleWinnersSection({ nominees, winners, revealed }) {
                                     <div className="results-winner-media-fallback"><Trophy size={34} /></div>
                                 )}
                             </div>
+                            {winner?.resolved_video_url ? (
+                                <button type="button" className="results-winner-media-play" onClick={() => setActiveWinnerVideo((value) => !value)}>
+                                    <Play size={13} />
+                                    {activeWinnerVideo ? 'Show Photo' : 'Play Video'}
+                                </button>
+                            ) : null}
                             <div className="results-winner-media-caption">
                                 <strong>
                                     {winner?.display_name}
                                     {winner?.is_wildcard ? <span className="results-wildcard-tag is-inline">Wildcard</span> : null}
                                 </strong>
                                 <span>{winner?.rollno_or_code || '-'}</span>
+                                {winnerDescription ? <p>{winnerDescription}</p> : null}
                             </div>
-                            <div className="results-winner-certificate-seal">{certificateTheme.seal}</div>
                         </div>
                         <div className="results-winner-insights-panel">
                             <div className="results-winner-insights-head">
@@ -863,8 +1022,8 @@ function TitleWinnersSection({ nominees, winners, revealed }) {
                                     <strong>{performance?.overall_rank ? `#${performance.overall_rank}` : '--'}</strong>
                                 </article>
                                 <article className="results-winner-metric-card">
-                                    <span>Trend</span>
-                                    <strong>{performance?.performance_trend || '--'}</strong>
+                                    <span>Rounds</span>
+                                    <strong>{roundHistory.length || '--'}</strong>
                                 </article>
                             </div>
                             <div className="results-winner-chart-shell">
@@ -892,6 +1051,105 @@ function TitleWinnersSection({ nominees, winners, revealed }) {
         );
     };
 
+    const NomineeDetailModal = ({ nominee, onClose }) => {
+        if (!nominee) return null;
+        const performance = nominee?.performance || {};
+        const roundHistory = publishedRoundHistory(nominee);
+        const latestRound = latestPublishedRound(nominee);
+        const description = String(nominee?.content?.description || '').trim();
+        return (
+            <div className="results-winner-modal" onClick={onClose}>
+                <div className={`results-winner-modal-card tone-rank-default ${nominee?.is_wildcard ? 'certificate-theme-wildcard' : 'certificate-theme-classic'}`} onClick={(event) => event.stopPropagation()}>
+                    <button type="button" className="results-winner-modal-close" onClick={onClose} aria-label="Close nominee details">
+                        <X size={16} />
+                    </button>
+                    <div className="results-winner-modal-grid">
+                        <div className="results-winner-media-panel">
+                            <div className="results-winner-certificate-topline">
+                                <span>{nominee?.is_wildcard ? 'Wildcard Nominee' : 'Nominee'}</span>
+                                <span>{latestRound?.round_no ? `Latest R${latestRound.round_no}` : 'Published rounds'}</span>
+                            </div>
+                            <div className="results-winner-modal-title">{nominee?.display_name}</div>
+                            <div className="results-winner-media-frame">
+                                {activeNomineeVideo && nominee?.resolved_video_url ? (
+                                    <video
+                                        src={nominee.resolved_video_url}
+                                        poster={nominee.resolved_photo_url || nominee.default_image_url || undefined}
+                                        controls
+                                        autoPlay
+                                        playsInline
+                                        className="results-winner-media-video"
+                                    />
+                                ) : nominee?.resolved_photo_url ? (
+                                    <img src={nominee.resolved_photo_url} alt={nominee.display_name} className="results-winner-media-image" />
+                                ) : (
+                                    <div className="results-winner-media-fallback"><Trophy size={34} /></div>
+                                )}
+                            </div>
+                            {nominee?.resolved_video_url ? (
+                                <button type="button" className="results-winner-media-play" onClick={() => setActiveNomineeVideo((value) => !value)}>
+                                    <Play size={13} />
+                                    {activeNomineeVideo ? 'Show Photo' : 'Play Video'}
+                                </button>
+                            ) : null}
+                            <div className="results-winner-media-caption">
+                                <strong>
+                                    {nominee?.display_name}
+                                    {nominee?.is_wildcard ? <span className="results-wildcard-tag is-inline">Wildcard</span> : null}
+                                </strong>
+                                <span>{nominee?.rollno_or_code || '-'}</span>
+                                {description ? <p>{description}</p> : null}
+                            </div>
+                        </div>
+                        <div className="results-winner-insights-panel">
+                            <div className="results-winner-insights-head">
+                                <p className="results-section-kicker">Nominee Performance</p>
+                                <h3>Published Rounds</h3>
+                            </div>
+                            <div className="results-winner-metric-row">
+                                <article className="results-winner-metric-card">
+                                    <span>Latest Score</span>
+                                    <strong>{latestRound ? Number(latestRound.round_score || 0).toFixed(2).replace(/\.00$/, '') : '--'}</strong>
+                                </article>
+                                <article className="results-winner-metric-card">
+                                    <span>Latest Rank</span>
+                                    <strong>{latestRound?.round_rank ? `#${latestRound.round_rank}` : '--'}</strong>
+                                </article>
+                                <article className="results-winner-metric-card">
+                                    <span>Rounds</span>
+                                    <strong>{roundHistory.length || '--'}</strong>
+                                </article>
+                            </div>
+                            <div className="results-winner-chart-shell">
+                                <div className="results-winner-chart-head">
+                                    <span>Roundwise Rank</span>
+                                    <span>{roundHistory.length} rounds</span>
+                                </div>
+                                <WinnerRankChart roundHistory={roundHistory} />
+                            </div>
+                            <div className="results-winner-points-list">
+                                {roundHistory.length > 0 ? roundHistory.map((item) => (
+                                    <div key={`${nominee?.id}-${item.round_id}`} className="results-winner-point-row">
+                                        <span>{item.round_name || `Round ${item.round_no}`}</span>
+                                        <strong>{item.round_rank ? `#${item.round_rank}` : '--'}</strong>
+                                        <span>{Number(item.round_score || 0).toFixed(2).replace(/\.00$/, '')} pts</span>
+                                    </div>
+                                )) : (
+                                    <div className="results-chart-empty">No published round points yet.</div>
+                                )}
+                            </div>
+                            {performance?.total_score !== null && performance?.total_score !== undefined ? (
+                                <div className="results-winner-media-caption">
+                                    <span>Final total: {performance.total_score}</span>
+                                </div>
+                            ) : null}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     return (
         <section className="results-board-section results-hologram-section">
             <div className="results-section-head">
@@ -899,7 +1157,6 @@ function TitleWinnersSection({ nominees, winners, revealed }) {
                     <p className="results-section-kicker">Title Spotlight</p>
                     <h2>Title Winners & Nominees</h2>
                 </div>
-                <p>Nominees remain visible. Winners unlock only after official reveal.</p>
             </div>
             <div className="results-holo-stack">
                 <section className="results-holo-block results-holo-block-winners">
@@ -934,7 +1191,10 @@ function TitleWinnersSection({ nominees, winners, revealed }) {
                                         type="button"
                                         className={`results-holo-card results-holo-card-winner ${winnerToneClass(row.precedence_rank)} ${row?.is_wildcard ? 'is-wildcard' : ''}`}
                                         key={key}
-                                        onClick={() => setActiveWinner(row)}
+                                        onClick={() => {
+                                            setActiveWinner(row);
+                                            setActiveWinnerVideo(false);
+                                        }}
                                     >
                                         <div className="results-holo-rank-pill">#{row.precedence_rank || '-'}</div>
                                         <div className="results-holo-title">{row.title_name}</div>
@@ -955,7 +1215,7 @@ function TitleWinnersSection({ nominees, winners, revealed }) {
                                             <span>{row?.performance?.overall_rank ? `Overall #${row.performance.overall_rank}` : 'Winner'}</span>
                                         </div>
                                         <div className="results-holo-play results-holo-play-winner">
-                                            <Play size={13} /> View Winner Card
+                                            <Play size={13} /> Open
                                         </div>
                                     </button>
                                 );
@@ -980,11 +1240,22 @@ function TitleWinnersSection({ nominees, winners, revealed }) {
                             </div>
                         </div>
                     ) : (
-                        <div className="results-holo-grid">
+                        <div className="results-holo-grid results-holo-grid-nominees">
                             {nominees.map((row) => {
                                 const key = `nominee-${row.id || row.entity_id}`;
+                                const roundHistory = publishedRoundHistory(row);
+                                const latestRound = latestPublishedRound(row);
+                                const description = String(row?.content?.description || '').trim();
                                 return (
-                                    <article className={`results-holo-card ${row?.is_wildcard ? 'is-wildcard' : ''}`} key={key}>
+                                    <button
+                                        type="button"
+                                        className={`results-holo-card results-holo-card-nominee ${row?.is_wildcard ? 'is-wildcard' : ''}`}
+                                        key={key}
+                                        onClick={() => {
+                                            setActiveNominee(row);
+                                            setActiveNomineeVideo(false);
+                                        }}
+                                    >
                                         <div className="results-holo-photo">
                                             {row.resolved_photo_url ? (
                                                 <img src={row.resolved_photo_url} alt={row.display_name} loading="lazy" />
@@ -997,12 +1268,15 @@ function TitleWinnersSection({ nominees, winners, revealed }) {
                                             {row?.is_wildcard ? <span className="results-wildcard-tag is-inline">Wildcard</span> : null}
                                         </div>
                                         <div className="results-holo-roll">{row.rollno_or_code || '-'}</div>
-                                        {row.resolved_video_url ? (
-                                            <button type="button" className="results-holo-play" onClick={() => setVideoUrl(row.resolved_video_url)}>
-                                                <Play size={13} /> Play
-                                            </button>
-                                        ) : null}
-                                    </article>
+                                        {description ? <p className="results-holo-nominee-description">{description}</p> : null}
+                                        <div className="results-holo-nominee-meta">
+                                            <span>{latestRound ? `${Number(latestRound.round_score || 0).toFixed(2).replace(/\.00$/, '')} pts` : 'Awaiting rounds'}</span>
+                                            <span>{roundHistory.length} rounds visible</span>
+                                        </div>
+                                        <div className="results-holo-play">
+                                            <Play size={13} /> Open
+                                        </div>
+                                    </button>
                                 );
                             })}
                         </div>
@@ -1019,6 +1293,7 @@ function TitleWinnersSection({ nominees, winners, revealed }) {
             ) : null}
 
             {activeWinner ? <WinnerDetailModal winner={activeWinner} onClose={() => setActiveWinner(null)} /> : null}
+            {activeNominee ? <NomineeDetailModal nominee={activeNominee} onClose={() => setActiveNominee(null)} /> : null}
         </section>
     );
 }
@@ -1078,11 +1353,11 @@ export default function PersohubEventResultsPage() {
             ariaLabel: 'Round score progression chart',
         },
         {
-            key: 'qualification_funnel',
-            title: 'Qualification Funnel',
-            hint: 'Field reduction',
+            key: 'field_distribution',
+            title: 'Field Distribution',
+            hint: 'Department / batch',
             icon: Sparkles,
-            ariaLabel: 'Qualification funnel chart',
+            ariaLabel: 'Field distribution chart',
         },
         {
             key: 'round_elimination_trend',
@@ -1210,12 +1485,11 @@ export default function PersohubEventResultsPage() {
 
                 <section className="results-board-section">
                     <div className="results-section-head">
-                        <div>
-                            <p className="results-section-kicker">Timeline</p>
-                            <h2>Round Reveal</h2>
-                        </div>
-                        <p>Each round holds focus on one reveal card at a time. Published rounds unlock the visual breakdown, while future rounds stay sealed.</p>
-                    </div>
+                <div>
+                    <p className="results-section-kicker">Timeline</p>
+                    <h2>Round Reveal</h2>
+                </div>
+            </div>
                     <div className="results-timeline-shell">
                         <div className="results-timeline-line" />
                         <div className="results-timeline-glow" />
@@ -1241,16 +1515,11 @@ export default function PersohubEventResultsPage() {
 
                 <section className="results-board-section">
                     <div className="results-section-head">
-                        <div>
-                            <p className="results-section-kicker">Event Insights</p>
-                            <h2>{finalSnapshot ? 'Final Storyboard' : 'Final Reveal Pending'}</h2>
-                        </div>
-                        <p>
-                            {finalSnapshot
-                                ? 'The full event snapshot is now live with progression, field reduction, elimination, score distribution, and difficulty trends.'
-                                : 'Round results can publish early. The full event infographic unlocks after final results are published.'}
-                        </p>
-                    </div>
+                <div>
+                    <p className="results-section-kicker">Event Insights</p>
+                    <h2>{finalSnapshot ? 'Final Storyboard' : 'Final Reveal Pending'}</h2>
+                </div>
+            </div>
 
                     {finalSnapshot ? (
                         <>
@@ -1272,9 +1541,16 @@ export default function PersohubEventResultsPage() {
                                                 <h3>{item.title}</h3>
                                                 <span><Icon size={14} /> {item.hint}</span>
                                             </div>
-                                            <div className="results-chart-panel">
-                                                <ResultsChart chart={finalSnapshot?.charts?.[item.key]} ariaLabel={item.ariaLabel} />
-                                            </div>
+                                            {item.key === 'field_distribution' ? (
+                                                <ResultsDistributionSwitcher charts={{
+                                                    department: finalSnapshot?.charts?.department_distribution,
+                                                    batch: finalSnapshot?.charts?.batch_distribution,
+                                                }} />
+                                            ) : (
+                                                <div className="results-chart-panel">
+                                                    <ResultsChart chart={finalSnapshot?.charts?.[item.key]} ariaLabel={item.ariaLabel} />
+                                                </div>
+                                            )}
                                         </article>
                                     );
                                 })}
@@ -1297,7 +1573,6 @@ export default function PersohubEventResultsPage() {
                             <Clock3 size={18} />
                             <div>
                                 <strong>Final event insights are still locked.</strong>
-                                <p>Publish each completed round first, then release the final event snapshot to unlock the analysis storyboard.</p>
                             </div>
                         </div>
                     )}
