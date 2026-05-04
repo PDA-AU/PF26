@@ -611,8 +611,10 @@ class PersohubEvent(Base):
     seat_availability_enabled = Column(Boolean, nullable=False, default=False)
     seat_capacity = Column(Integer, nullable=True)
     results_published = Column(Boolean, nullable=False, default=False, server_default="false")
+    results_winners_revealed = Column(Boolean, nullable=False, default=False, server_default="false")
     results_caption = Column(Text, nullable=True)
     results_model_url = Column(Text, nullable=True)
+    event_results_snapshot = Column(JSON, nullable=True)
     status = Column(SQLEnum(PdaEventStatus), nullable=False, default=PdaEventStatus.CLOSED)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -744,6 +746,66 @@ class PersohubEventRound(Base):
     panel_team_distribution_mode = Column(String(32), nullable=False, default="team_count")
     panel_structure_locked = Column(Boolean, nullable=False, default=False)
     is_frozen = Column(Boolean, default=False)
+    results_published = Column(Boolean, nullable=False, default=False, server_default="false")
+    results_published_at = Column(DateTime(timezone=True), nullable=True)
+    results_snapshot = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PersohubEventResultTitle(Base):
+    __tablename__ = "persohub_event_result_titles"
+    __table_args__ = (
+        UniqueConstraint("event_id", "title_name", name="uq_persohub_result_title_event_name"),
+        UniqueConstraint("event_id", "precedence_rank", name="uq_persohub_result_title_event_rank"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("persohub_events.id", ondelete="CASCADE"), nullable=False, index=True)
+    title_name = Column(String(255), nullable=False)
+    theme_key = Column(String(64), nullable=True)
+    precedence_rank = Column(Integer, nullable=False)
+    entity_type = Column(SQLEnum(PdaEventEntityType), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    team_id = Column(Integer, ForeignKey("persohub_event_teams.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PersohubEventResultFinalist(Base):
+    __tablename__ = "persohub_event_result_finalists"
+    __table_args__ = (
+        UniqueConstraint("event_id", "entity_type", "user_id", name="uq_persohub_result_finalist_event_user"),
+        UniqueConstraint("event_id", "entity_type", "team_id", name="uq_persohub_result_finalist_event_team"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("persohub_events.id", ondelete="CASCADE"), nullable=False, index=True)
+    entity_type = Column(SQLEnum(PdaEventEntityType), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    team_id = Column(Integer, ForeignKey("persohub_event_teams.id", ondelete="SET NULL"), nullable=True, index=True)
+    photo_url = Column(Text, nullable=True)
+    video_url = Column(Text, nullable=True)
+    content = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PersohubEventResultHighlight(Base):
+    __tablename__ = "persohub_event_result_highlights"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("persohub_events.id", ondelete="CASCADE"), nullable=False, index=True)
+    emoji = Column(String(32), nullable=True)
+    tag = Column(String(120), nullable=True)
+    title = Column(String(255), nullable=False)
+    quantity = Column(String(120), nullable=True)
+    description = Column(Text, nullable=True)
+    entity_type = Column(SQLEnum(PdaEventEntityType), nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    team_id = Column(Integer, ForeignKey("persohub_event_teams.id", ondelete="SET NULL"), nullable=True, index=True)
+    content = Column(JSON, nullable=True)
+    sort_order = Column(Integer, nullable=False, default=1, server_default="1")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

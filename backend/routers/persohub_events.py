@@ -31,12 +31,16 @@ from models import (
     PersohubEventInviteStatus,
     PersohubEventRound,
     PersohubEventRoundState,
+    PersohubEventResultTitle,
+    PersohubEventResultFinalist,
+    PersohubEventResultHighlight,
     PersohubEventAttendance,
     PersohubEventScore,
     PersohubEventRoundSubmission,
     PersohubEventRoundPanel,
     PersohubEventRoundPanelAssignment,
 )
+from persohub_result_analysis import build_event_results_snapshot, build_participant_results_payload, build_public_round_card
 from schemas import (
     PersohubManagedAchievement,
     PersohubManagedCertificateResponse,
@@ -57,6 +61,7 @@ from schemas import (
     PersohubManagedTeamJoin,
     PersohubManagedTeamMemberResponse,
     PersohubManagedTeamResponse,
+    PersohubParticipantResultsResponse,
 )
 from security import (
     is_persohub_event_access_approved,
@@ -139,6 +144,92 @@ def _next_event_referral_code(db: Session, event_id: int) -> str:
     ).first():
         candidate = _make_referral_code()
     return candidate
+
+
+def _results_entity_lookup(db: Session, event: PersohubEvent) -> Dict[Tuple[str, int], Dict[str, Any]]:
+    lookup: Dict[Tuple[str, int], Dict[str, Any]] = {}
+    if event.participant_mode == PersohubEventParticipantMode.INDIVIDUAL:
+        rows = (
+            db.query(PersohubEventRegistration, PdaUser)
+            .join(PdaUser, PersohubEventRegistration.user_id == PdaUser.id)
+            .filter(
+                PersohubEventRegistration.event_id == event.id,
+                PersohubEventRegistration.entity_type == PersohubEventEntityType.USER,
+                PersohubEventRegistration.status == PersohubEventRegistrationStatus.ACTIVE,
+            )
+            .all()
+        )
+        for registration, user in rows:
+            lookup[("user", int(user.id))] = {
+                "display_name": user.name,
+                "rollno_or_code": user.regno,
+                "default_image_url": user.image_url,
+                "is_wildcard": bool(getattr(registration, "wildcard_start_round_no", None) is not None),
+                "wildcard_seed_score": float(getattr(registration, "wildcard_seed_score", 0.0) or 0.0),
+                "wildcard_start_round_no": int(getattr(registration, "wildcard_start_round_no", 0) or 0) or None,
+            }
+        return lookup
+
+    rows = (
+        db.query(PersohubEventRegistration, PersohubEventTeam)
+        .join(PersohubEventTeam, PersohubEventRegistration.team_id == PersohubEventTeam.id)
+        .filter(
+            PersohubEventRegistration.event_id == event.id,
+            PersohubEventRegistration.entity_type == PersohubEventEntityType.TEAM,
+            PersohubEventRegistration.status == PersohubEventRegistrationStatus.ACTIVE,
+        )
+        .all()
+    )
+    for registration, team in rows:
+        lookup[("team", int(team.id))] = {
+            "display_name": team.team_name,
+            "rollno_or_code": team.team_code,
+            "default_image_url": None,
+            "is_wildcard": bool(getattr(registration, "wildcard_start_round_no", None) is not None),
+            "wildcard_seed_score": float(getattr(registration, "wildcard_seed_score", 0.0) or 0.0),
+            "wildcard_start_round_no": int(getattr(registration, "wildcard_start_round_no", 0) or 0) or None,
+        }
+    return lookup
+
+
+def _winner_performance_payload(db: Session, event: PersohubEvent, *, entity_type: str, entity_id: int) -> Dict[str, Any]:
+    raw_payload = build_participant_results_payload(
+        db,
+        event,
+        entity_type=entity_type,
+        entity_id=entity_id,
+    )
+    wrapped_summary = raw_payload.get("wrapped_summary") if isinstance(raw_payload, dict) else {}
+    wrapped_summary = wrapped_summary if isinstance(wrapped_summary, dict) else {}
+    rounds = raw_payload.get("rounds") if isinstance(raw_payload, dict) else []
+    rounds = rounds if isinstance(rounds, list) else []
+
+    round_history: List[Dict[str, Any]] = []
+    for round_row in rounds:
+        if not isinstance(round_row, dict):
+            continue
+        standing = round_row.get("standing") if isinstance(round_row.get("standing"), dict) else {}
+        round_history.append(
+            {
+                "round_id": int(round_row.get("round_id") or 0),
+                "round_no": int(round_row.get("round_no") or 0),
+                "round_name": round_row.get("round_name"),
+                "published_at": round_row.get("published_at"),
+                "round_rank": int(standing.get("round_rank")) if standing.get("round_rank") is not None else None,
+                "round_score": round(float(standing.get("round_score") or 0.0), 2),
+                "cumulative_score": round(float(standing.get("cumulative_score") or 0.0), 2),
+            }
+        )
+
+    return {
+        "total_score": round(float(wrapped_summary.get("cumulative_score") or 0.0), 2) if wrapped_summary else None,
+        "overall_rank": int(wrapped_summary.get("rank")) if wrapped_summary.get("rank") is not None else None,
+        "performance_trend": wrapped_summary.get("performance_trend"),
+        "best_rank": int(wrapped_summary.get("best_rank")) if wrapped_summary.get("best_rank") is not None else None,
+        "average_round_score": round(float(wrapped_summary.get("average_round_score") or 0.0), 2) if wrapped_summary else None,
+        "rounds_survived": int(wrapped_summary.get("rounds_survived") or 0) if wrapped_summary else 0,
+        "round_history": round_history,
+    }
 
 
 def _resolve_attendance_metrics(
@@ -1041,13 +1132,176 @@ def delete_my_round_submission(
 def get_event_results(slug: str, db: Session = Depends(get_db)):
     event = _get_event_or_404(db, slug)
     _ensure_event_visible_for_public_access(event)
+    entity_lookup = _results_entity_lookup(db, event)
+    round_rows = (
+        db.query(PersohubEventRound)
+        .filter(
+            PersohubEventRound.event_id == event.id,
+            PersohubEventRound.state != PersohubEventRoundState.DRAFT,
+        )
+        .order_by(PersohubEventRound.round_no.asc(), PersohubEventRound.id.asc())
+        .all()
+    )
+    finalist_rows = (
+        db.query(PersohubEventResultFinalist)
+        .filter(PersohubEventResultFinalist.event_id == event.id)
+        .order_by(PersohubEventResultFinalist.created_at.asc(), PersohubEventResultFinalist.id.asc())
+        .all()
+    )
+    finalists_by_entity: Dict[Tuple[str, int], Dict[str, Any]] = {}
+    nominees: List[Dict[str, Any]] = []
+    for row in finalist_rows:
+        entity_type = "user" if row.entity_type == PersohubEventEntityType.USER else "team"
+        entity_id = int(row.user_id if entity_type == "user" else row.team_id or 0)
+        source = entity_lookup.get((entity_type, entity_id))
+        if entity_id <= 0 or not source:
+            continue
+        payload = {
+            "id": int(row.id),
+            "entity_id": entity_id,
+            "entity_type": entity_type,
+            "display_name": source.get("display_name"),
+            "rollno_or_code": source.get("rollno_or_code"),
+            "default_image_url": source.get("default_image_url"),
+            "resolved_photo_url": row.photo_url or source.get("default_image_url"),
+            "resolved_video_url": row.video_url,
+            "is_wildcard": bool(source.get("is_wildcard")),
+            "wildcard_seed_score": float(source.get("wildcard_seed_score") or 0.0) if source.get("wildcard_seed_score") is not None else None,
+            "wildcard_start_round_no": int(source.get("wildcard_start_round_no") or 0) or None,
+        }
+        nominees.append(payload)
+        finalists_by_entity[(entity_type, entity_id)] = payload
+
+    highlight_rows = (
+        db.query(PersohubEventResultHighlight)
+        .filter(PersohubEventResultHighlight.event_id == event.id)
+        .order_by(PersohubEventResultHighlight.sort_order.asc(), PersohubEventResultHighlight.id.asc())
+        .all()
+    )
+    result_highlights: List[Dict[str, Any]] = []
+    for row in highlight_rows:
+        participant = None
+        if row.entity_type in {PersohubEventEntityType.USER, PersohubEventEntityType.TEAM}:
+            entity_type = "user" if row.entity_type == PersohubEventEntityType.USER else "team"
+            entity_id = int(row.user_id if entity_type == "user" else row.team_id or 0)
+            source = entity_lookup.get((entity_type, entity_id))
+            finalist_media = finalists_by_entity.get((entity_type, entity_id)) or {}
+            if entity_id > 0 and source:
+                participant = {
+                    "entity_id": entity_id,
+                    "entity_type": entity_type,
+                    "display_name": source.get("display_name"),
+                    "rollno_or_code": source.get("rollno_or_code"),
+                    "default_image_url": source.get("default_image_url"),
+                    "resolved_photo_url": finalist_media.get("resolved_photo_url") or source.get("default_image_url"),
+                    "resolved_video_url": finalist_media.get("resolved_video_url"),
+                    "is_wildcard": bool(source.get("is_wildcard")),
+                }
+        result_highlights.append(
+            {
+                "id": int(row.id),
+                "emoji": str(row.emoji or "").strip() or None,
+                "tag": str(row.tag or "").strip() or None,
+                "title": str(row.title or ""),
+                "quantity": str(row.quantity or "").strip() or None,
+                "description": str(row.description or "").strip() or None,
+                "participant": participant,
+                "content": row.content if isinstance(row.content, dict) else None,
+                "sort_order": int(row.sort_order or 1),
+            }
+        )
+
+    title_rows = (
+        db.query(PersohubEventResultTitle)
+        .filter(PersohubEventResultTitle.event_id == event.id)
+        .order_by(PersohubEventResultTitle.precedence_rank.asc(), PersohubEventResultTitle.id.asc())
+        .all()
+    )
+    title_winners: List[Dict[str, Any]] = []
+    for row in title_rows:
+        entity_type = "user" if row.entity_type == PersohubEventEntityType.USER else "team"
+        entity_id = int(row.user_id if entity_type == "user" else row.team_id or 0)
+        source = entity_lookup.get((entity_type, entity_id))
+        if entity_id <= 0 or not source:
+            continue
+        finalist_media = finalists_by_entity.get((entity_type, entity_id)) or {}
+        title_winners.append(
+            {
+                "id": int(row.id),
+                "title_name": row.title_name,
+                "theme_key": str(row.theme_key or "").strip() or None,
+                "precedence_rank": int(row.precedence_rank or 0),
+                "entity_id": entity_id,
+                "entity_type": entity_type,
+                "display_name": source.get("display_name"),
+                "rollno_or_code": source.get("rollno_or_code"),
+                "default_image_url": source.get("default_image_url"),
+                "resolved_photo_url": finalist_media.get("resolved_photo_url") or source.get("default_image_url"),
+                "resolved_video_url": finalist_media.get("resolved_video_url"),
+                "is_wildcard": bool(source.get("is_wildcard")),
+                "wildcard_seed_score": float(source.get("wildcard_seed_score") or 0.0) if source.get("wildcard_seed_score") is not None else None,
+                "wildcard_start_round_no": int(source.get("wildcard_start_round_no") or 0) or None,
+                "performance": _winner_performance_payload(
+                    db,
+                    event,
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                ),
+            }
+    )
+
+    winners_revealed = bool(getattr(event, "results_winners_revealed", False))
+    published_round_rows = [round_row for round_row in round_rows if bool(getattr(round_row, "results_published", False))]
+    final_snapshot = getattr(event, "event_results_snapshot", None) if bool(getattr(event, "results_published", False)) else None
+    required_storyboard_charts = {
+        "rank_movement",
+        "score_progression",
+        "qualification_funnel",
+        "round_elimination_trend",
+        "round_distribution_heatmap",
+        "round_average_scores",
+    }
+    snapshot_charts = final_snapshot.get("charts") if isinstance(final_snapshot, dict) else None
+    if bool(getattr(event, "results_published", False)) and published_round_rows:
+        if not isinstance(snapshot_charts, dict) or not required_storyboard_charts.issubset(set(snapshot_charts.keys())):
+            final_snapshot = build_event_results_snapshot(db, event, published_round_rows)
     return {
         "slug": event.slug,
         "title": event.title,
         "results_published": bool(getattr(event, "results_published", False)),
+        "results_winners_revealed": winners_revealed,
         "results_caption": getattr(event, "results_caption", None),
         "results_model_url": getattr(event, "results_model_url", None),
+        "nominees": nominees,
+        "title_winners": title_winners if winners_revealed else [],
+        "result_highlights": result_highlights,
+        "rounds": [build_public_round_card(round_row) for round_row in round_rows],
+        "final_event_snapshot": final_snapshot,
     }
+
+
+@router.get("/persohub/persohub-events/{slug}/my-results", response_model=PersohubParticipantResultsResponse)
+def get_my_event_results(
+    slug: str,
+    user: PdaUser = Depends(require_pda_user),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    _ensure_event_visible_for_public_access(event)
+    if event.participant_mode == PersohubEventParticipantMode.INDIVIDUAL:
+        registration = db.query(PersohubEventRegistration).filter(
+            PersohubEventRegistration.event_id == event.id,
+            PersohubEventRegistration.entity_type == PersohubEventEntityType.USER,
+            PersohubEventRegistration.user_id == user.id,
+        ).first()
+        if not registration:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registration not found")
+        return build_participant_results_payload(db, event, entity_type="user", entity_id=int(user.id))
+
+    team = _get_user_team_for_event(db, event.id, user.id)
+    if not team:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+    return build_participant_results_payload(db, event, entity_type="team", entity_id=int(team.id))
 
 
 @router.get("/persohub/persohub-events/{slug}/dashboard", response_model=PersohubManagedEventDashboard)

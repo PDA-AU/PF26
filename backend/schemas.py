@@ -1959,6 +1959,9 @@ class PdaManagedRoundResponse(BaseModel):
     panel_team_distribution_mode: PdaManagedPanelTeamDistributionModeEnum = PdaManagedPanelTeamDistributionModeEnum.TEAM_COUNT
     panel_structure_locked: bool = False
     is_frozen: bool
+    results_published: bool = False
+    results_published_at: Optional[datetime] = None
+    results_snapshot: Optional[Dict[str, Any]] = None
     created_at: datetime
 
     class Config:
@@ -1983,6 +1986,9 @@ class PdaEventPublicRoundResponse(BaseModel):
     allow_late_submission: bool = False
     allowed_mime_types: Optional[List[str]] = Field(default_factory=list)
     max_file_size_mb: int = 25
+    results_published: bool = False
+    results_published_at: Optional[datetime] = None
+    results_snapshot: Optional[Dict[str, Any]] = None
 
     class Config:
         from_attributes = True
@@ -2502,6 +2508,179 @@ class PersohubManagedEventResultsUpdate(BaseModel):
         return _normalize_optional_http_url(value, "results_model_url")
 
 
+class PersohubResultsWinnersRevealUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    results_winners_revealed: bool
+
+
+class PersohubResultTitleUpsertRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title_name: str = Field(..., min_length=1, max_length=255)
+    theme_key: Optional[str] = Field(default=None, max_length=64)
+    precedence_rank: int = Field(..., ge=1, le=9999)
+    entity_type: PersohubManagedEntityTypeEnum
+    user_id: Optional[int] = Field(default=None, ge=1)
+    team_id: Optional[int] = Field(default=None, ge=1)
+
+    @field_validator("title_name", mode="before")
+    @classmethod
+    def normalize_title_name(cls, value):
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("title_name is required")
+        return normalized
+
+    @field_validator("theme_key", mode="before")
+    @classmethod
+    def normalize_theme_key(cls, value):
+        normalized = str(value or "").strip().lower()
+        return normalized or None
+
+
+class PersohubResultFinalistUpsertRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    entity_type: PersohubManagedEntityTypeEnum
+    user_id: Optional[int] = Field(default=None, ge=1)
+    team_id: Optional[int] = Field(default=None, ge=1)
+    photo_url: Optional[str] = Field(default=None, max_length=1000)
+    video_url: Optional[str] = Field(default=None, max_length=1000)
+    content: Optional[Dict[str, Any]] = None
+
+    @field_validator("photo_url", mode="before")
+    @classmethod
+    def normalize_photo_url(cls, value):
+        return _normalize_optional_http_url(value, "photo_url", max_length=1000)
+
+    @field_validator("video_url", mode="before")
+    @classmethod
+    def normalize_video_url(cls, value):
+        return _normalize_optional_http_url(value, "video_url", max_length=1000)
+
+
+class PersohubResultEntityCard(BaseModel):
+    entity_id: int
+    entity_type: PersohubManagedEntityTypeEnum
+    display_name: str
+    rollno_or_code: str
+    default_image_url: Optional[str] = None
+    resolved_photo_url: Optional[str] = None
+    resolved_video_url: Optional[str] = None
+    content: Optional[Dict[str, Any]] = None
+    is_wildcard: bool = False
+    wildcard_seed_score: Optional[float] = None
+    wildcard_start_round_no: Optional[int] = None
+
+
+class PersohubResultTitleAdminResponse(BaseModel):
+    id: int
+    title_name: str
+    theme_key: Optional[str] = None
+    precedence_rank: int
+    winner: PersohubResultEntityCard
+
+
+class PersohubResultFinalistAdminResponse(BaseModel):
+    id: int
+    finalist: PersohubResultEntityCard
+    created_at: datetime
+
+
+class PersohubResultHighlightUpsertRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    emoji: Optional[str] = Field(default=None, max_length=32)
+    tag: Optional[str] = Field(default=None, max_length=120)
+    title: str = Field(..., min_length=1, max_length=255)
+    entity_type: Optional[PersohubManagedEntityTypeEnum] = None
+    user_id: Optional[int] = Field(default=None, ge=1)
+    team_id: Optional[int] = Field(default=None, ge=1)
+    quantity: Optional[str] = Field(default=None, max_length=120)
+    description: Optional[str] = Field(default=None, max_length=600)
+    content: Optional[Dict[str, Any]] = None
+    sort_order: int = Field(default=1, ge=1, le=9999)
+
+    @field_validator("emoji", "tag", "title", "quantity", "description", mode="before")
+    @classmethod
+    def normalize_highlight_strings(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
+    @model_validator(mode="after")
+    def validate_highlight_entity(self):
+        if self.entity_type == PersohubManagedEntityTypeEnum.USER and not self.user_id:
+            raise ValueError("user_id is required for user entity_type")
+        if self.entity_type == PersohubManagedEntityTypeEnum.TEAM and not self.team_id:
+            raise ValueError("team_id is required for team entity_type")
+        if self.entity_type is None:
+            self.user_id = None
+            self.team_id = None
+        return self
+
+
+class PersohubResultHighlightAdminResponse(BaseModel):
+    id: int
+    emoji: Optional[str] = None
+    tag: Optional[str] = None
+    title: str
+    quantity: Optional[str] = None
+    description: Optional[str] = None
+    sort_order: int
+    participant: Optional[PersohubResultEntityCard] = None
+    content: Optional[Dict[str, Any]] = None
+    created_at: datetime
+
+
+class PersohubResultsRoundPublishUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    publish: bool
+
+
+class PersohubResultMetricCard(BaseModel):
+    key: str
+    label: str
+    value: Any
+    tone: Optional[str] = None
+    palette_key: Optional[str] = None
+    subtext: Optional[str] = None
+
+
+class PersohubResultChartSeries(BaseModel):
+    key: str
+    label: str
+    data: List[float] = Field(default_factory=list)
+    palette_key: Optional[str] = None
+
+
+class PersohubResultChartPayload(BaseModel):
+    type: str
+    labels: List[str] = Field(default_factory=list)
+    series: List[PersohubResultChartSeries] = Field(default_factory=list)
+
+
+class PersohubRoundResultsAdminItem(BaseModel):
+    round_id: int
+    round_no: int
+    name: str
+    state: str
+    is_frozen: bool = False
+    publishable: bool = False
+    results_published: bool = False
+    results_published_at: Optional[datetime] = None
+    score_rows_count: int = 0
+    present_count: int = 0
+    total_count: int = 0
+    snapshot_summary: Optional[Dict[str, Any]] = None
+
+
+class PersohubParticipantResultsResponse(BaseModel):
+    slug: str
+    title: str
+    rounds: List[Dict[str, Any]] = Field(default_factory=list)
+    wrapped_summary: Optional[Dict[str, Any]] = None
+
+
 class PersohubManagedEventResponse(BaseModel):
     id: int
     slug: str
@@ -2538,8 +2717,10 @@ class PersohubManagedEventResponse(BaseModel):
     seats_occupied: Optional[int] = None
     seats_left: Optional[int] = None
     results_published: bool = False
+    results_winners_revealed: bool = False
     results_caption: Optional[str] = None
     results_model_url: Optional[str] = None
+    event_results_snapshot: Optional[Dict[str, Any]] = None
     status: PersohubManagedEventStatusEnum
     created_at: datetime
 

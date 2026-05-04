@@ -61,6 +61,9 @@ from models import (
     PersohubEventRoundSubmission,
     PersohubEventInvite,
     PersohubEventLog,
+    PersohubEventResultTitle,
+    PersohubEventResultFinalist,
+    PersohubEventResultHighlight,
     PersohubClub,
     PersohubCommunity,
 )
@@ -76,6 +79,16 @@ from schemas import (
     PersohubManagedEventRegistrationUpdate,
     PersohubManagedEventResponse,
     PersohubManagedEventResultsUpdate,
+    PersohubResultsWinnersRevealUpdate,
+    PersohubResultsRoundPublishUpdate,
+    PersohubRoundResultsAdminItem,
+    PersohubResultTitleUpsertRequest,
+    PersohubResultFinalistUpsertRequest,
+    PersohubResultHighlightUpsertRequest,
+    PersohubResultTitleAdminResponse,
+    PersohubResultFinalistAdminResponse,
+    PersohubResultHighlightAdminResponse,
+    PersohubResultEntityCard,
     PersohubManagedEventStatusUpdate,
     PersohubManagedEventVisibilityUpdate,
     PersohubManagedEventUpdate,
@@ -103,6 +116,7 @@ from schemas import (
 )
 from emailer import send_bulk_email, send_email_async
 from email_bulk import render_email_template, derive_text_from_html, extract_batch
+from persohub_result_analysis import build_event_results_snapshot, build_round_results_snapshot
 from security import (
     get_persohub_admin_context,
     require_persohub_event_admin,
@@ -1238,6 +1252,59 @@ def _registered_entities(db: Session, event: PersohubEvent):
     return payload
 
 
+def _entity_lookup_map(db: Session, event: PersohubEvent) -> Dict[Tuple[str, int], Dict[str, Any]]:
+    entities = _registered_entities(db, event)
+    lookup: Dict[Tuple[str, int], Dict[str, Any]] = {}
+    for row in entities:
+        entity_type = str(row.get("entity_type") or "").strip().lower()
+        entity_id = int(row.get("entity_id") or 0)
+        if entity_type in {"user", "team"} and entity_id > 0:
+            lookup[(entity_type, entity_id)] = row
+    return lookup
+
+
+def _validate_result_entity(payload_entity_type: str, user_id: Optional[int], team_id: Optional[int]) -> Tuple[str, int]:
+    entity_type = str(payload_entity_type or "").strip().lower()
+    if entity_type == "user":
+        if not user_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user_id is required for user entity_type")
+        return "user", int(user_id)
+    if entity_type == "team":
+        if not team_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="team_id is required for team entity_type")
+        return "team", int(team_id)
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="entity_type must be user or team")
+
+
+def _build_result_entity_card(
+    *,
+    entity_type: str,
+    entity_id: int,
+    lookup: Dict[Tuple[str, int], Dict[str, Any]],
+    photo_url: Optional[str] = None,
+    video_url: Optional[str] = None,
+    content: Optional[Dict[str, Any]] = None,
+) -> PersohubResultEntityCard:
+    source = lookup.get((entity_type, int(entity_id))) or {}
+    display_name = str(source.get("name") or "Unknown").strip() or "Unknown"
+    rollno_or_code = str(source.get("regno_or_code") or "-").strip() or "-"
+    default_image_url = source.get("profile_picture") if entity_type == "user" else None
+    resolved_photo_url = photo_url or default_image_url
+    return PersohubResultEntityCard(
+        entity_id=int(entity_id),
+        entity_type=PersohubManagedEntityTypeEnum.USER if entity_type == "user" else PersohubManagedEntityTypeEnum.TEAM,
+        display_name=display_name,
+        rollno_or_code=rollno_or_code,
+        default_image_url=default_image_url,
+        resolved_photo_url=resolved_photo_url,
+        resolved_video_url=video_url,
+        content=content,
+        is_wildcard=bool(source.get("is_wildcard")),
+        wildcard_seed_score=float(source.get("wildcard_seed_score") or 0.0) if source.get("wildcard_seed_score") is not None else None,
+        wildcard_start_round_no=int(source.get("wildcard_start_round_no") or 0) or None,
+    )
+
+
 def _round_scoring_entities(db: Session, event: PersohubEvent, round_row: PersohubEventRound):
     entities = _registered_entities(db, event)
     if not (round_row.is_frozen or round_row.state in {PersohubEventRoundState.COMPLETED, PersohubEventRoundState.REVEAL}):
@@ -1667,6 +1734,22 @@ def update_managed_event_results(
     db: Session = Depends(get_db),
 ):
     event = _get_event_or_404(db, slug)
+    publishable_rounds = (
+        db.query(PersohubEventRound)
+        .filter(PersohubEventRound.event_id == event.id)
+        .order_by(PersohubEventRound.round_no.asc(), PersohubEventRound.id.asc())
+        .all()
+    )
+    publishable_rounds = [round_row for round_row in publishable_rounds if _is_results_publishable_round(round_row)]
+    if bool(payload.results_published):
+        unpublished_rounds = [round_row for round_row in publishable_rounds if not bool(getattr(round_row, "results_published", False))]
+        if unpublished_rounds:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Publish all completed rounds first: {[int(round_row.round_no) for round_row in unpublished_rounds]}",
+            )
+        if publishable_rounds:
+            event.event_results_snapshot = build_event_results_snapshot(db, event, publishable_rounds)
     event.results_published = bool(payload.results_published)
     event.results_caption = payload.results_caption
     event.results_model_url = payload.results_model_url
@@ -1689,6 +1772,133 @@ def update_managed_event_results(
     return PersohubManagedEventResponse.model_validate(event)
 
 
+@router.get("/persohub/admin/persohub-events/{slug}/results/rounds", response_model=List[PersohubRoundResultsAdminItem])
+def list_results_rounds(
+    slug: str,
+    _: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    round_rows = (
+        db.query(PersohubEventRound)
+        .filter(PersohubEventRound.event_id == event.id)
+        .order_by(PersohubEventRound.round_no.asc(), PersohubEventRound.id.asc())
+        .all()
+    )
+    return [_results_round_summary(db, event, round_row) for round_row in round_rows]
+
+
+@router.put("/persohub/admin/persohub-events/{slug}/results/rounds/{round_id}", response_model=PersohubRoundResultsAdminItem)
+def update_results_round_publish_state(
+    slug: str,
+    round_id: int,
+    payload: PersohubResultsRoundPublishUpdate,
+    admin: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    round_row = _get_event_round_or_404(db, event.id, round_id)
+    if not _is_results_publishable_round(round_row):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only completed, reveal, or frozen rounds can be published")
+
+    if bool(payload.publish):
+        round_row.results_snapshot = build_round_results_snapshot(db, event, round_row)
+        round_row.results_published = True
+        round_row.results_published_at = datetime.now(timezone.utc)
+        if bool(getattr(event, "results_published", False)):
+            publishable_rounds = (
+                db.query(PersohubEventRound)
+                .filter(PersohubEventRound.event_id == event.id)
+                .order_by(PersohubEventRound.round_no.asc(), PersohubEventRound.id.asc())
+                .all()
+            )
+            publishable_rounds = [row for row in publishable_rounds if _is_results_publishable_round(row) and bool(getattr(row, "results_published", False))]
+            if publishable_rounds:
+                event.event_results_snapshot = build_event_results_snapshot(db, event, publishable_rounds)
+        action_name = "publish_persohub_event_results_round"
+    else:
+        round_row.results_published = False
+        round_row.results_published_at = None
+        round_row.results_snapshot = None
+        if bool(getattr(event, "results_published", False)):
+            event.results_published = False
+            event.event_results_snapshot = None
+        action_name = "unpublish_persohub_event_results_round"
+
+    db.commit()
+    db.refresh(round_row)
+    db.refresh(event)
+    _log_event_admin_action(
+        db,
+        admin,
+        event,
+        action_name,
+        method="PUT",
+        path=f"/persohub/admin/persohub-events/{slug}/results/rounds/{round_id}",
+        meta={
+            "round_id": int(round_id),
+            "round_no": int(round_row.round_no),
+            "publish": bool(payload.publish),
+        },
+    )
+    return _results_round_summary(db, event, round_row)
+
+
+@router.post("/persohub/admin/persohub-events/{slug}/results/rounds/refresh", response_model=List[PersohubRoundResultsAdminItem])
+def refresh_results_round_snapshots(
+    slug: str,
+    admin: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    round_rows = (
+        db.query(PersohubEventRound)
+        .filter(PersohubEventRound.event_id == event.id)
+        .order_by(PersohubEventRound.round_no.asc(), PersohubEventRound.id.asc())
+        .all()
+    )
+
+    refreshed_rounds: List[int] = []
+    for round_row in round_rows:
+        if not _is_results_publishable_round(round_row):
+            continue
+        if not bool(getattr(round_row, "results_published", False)):
+            continue
+        round_row.results_snapshot = build_round_results_snapshot(db, event, round_row)
+        round_row.results_published_at = datetime.now(timezone.utc)
+        refreshed_rounds.append(int(round_row.round_no))
+
+    if bool(getattr(event, "results_published", False)):
+        publishable_live_rounds = [
+            row for row in round_rows
+            if _is_results_publishable_round(row) and bool(getattr(row, "results_published", False))
+        ]
+        event.event_results_snapshot = (
+            build_event_results_snapshot(db, event, publishable_live_rounds)
+            if publishable_live_rounds
+            else None
+        )
+
+    db.commit()
+    db.refresh(event)
+    for round_row in round_rows:
+        db.refresh(round_row)
+
+    _log_event_admin_action(
+        db,
+        admin,
+        event,
+        "refresh_persohub_event_results_round_snapshots",
+        method="POST",
+        path=f"/persohub/admin/persohub-events/{slug}/results/rounds/refresh",
+        meta={
+            "refreshed_round_nos": refreshed_rounds,
+            "refreshed_count": len(refreshed_rounds),
+        },
+    )
+    return [_results_round_summary(db, event, round_row) for round_row in round_rows]
+
+
 @router.post("/persohub/admin/persohub-events/{slug}/results/model/presign", response_model=PresignResponse)
 def presign_results_model_upload(
     slug: str,
@@ -1702,6 +1912,563 @@ def presign_results_model_upload(
         filename=payload.filename,
         content_type=payload.content_type,
         allowed_types=["model/gltf-binary", "model/gltf+json", "application/octet-stream"],
+    )
+    return PresignResponse(**presign)
+
+
+@router.put("/persohub/admin/persohub-events/{slug}/results/winners-reveal", response_model=PersohubManagedEventResponse)
+def update_results_winners_reveal(
+    slug: str,
+    payload: PersohubResultsWinnersRevealUpdate,
+    admin: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    event.results_winners_revealed = bool(payload.results_winners_revealed)
+    db.commit()
+    db.refresh(event)
+    _log_event_admin_action(
+        db,
+        admin,
+        event,
+        "update_persohub_results_winners_reveal",
+        method="PUT",
+        path=f"/persohub/admin/persohub-events/{slug}/results/winners-reveal",
+        meta={"results_winners_revealed": bool(payload.results_winners_revealed)},
+    )
+    return PersohubManagedEventResponse.model_validate(event)
+
+
+@router.get("/persohub/admin/persohub-events/{slug}/results/titles", response_model=List[PersohubResultTitleAdminResponse])
+def list_results_titles(
+    slug: str,
+    _: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    lookup = _entity_lookup_map(db, event)
+    rows = (
+        db.query(PersohubEventResultTitle)
+        .filter(PersohubEventResultTitle.event_id == event.id)
+        .order_by(PersohubEventResultTitle.precedence_rank.asc(), PersohubEventResultTitle.id.asc())
+        .all()
+    )
+    response: List[PersohubResultTitleAdminResponse] = []
+    for row in rows:
+        entity_type = "user" if row.entity_type == PersohubEventEntityType.USER else "team"
+        entity_id = int(row.user_id if entity_type == "user" else row.team_id or 0)
+        if entity_id <= 0:
+            continue
+        response.append(
+            PersohubResultTitleAdminResponse(
+                id=int(row.id),
+                title_name=str(row.title_name or ""),
+                theme_key=str(row.theme_key or "").strip() or None,
+                precedence_rank=int(row.precedence_rank or 0),
+                winner=_build_result_entity_card(entity_type=entity_type, entity_id=entity_id, lookup=lookup),
+            )
+        )
+    return response
+
+
+@router.post("/persohub/admin/persohub-events/{slug}/results/titles", response_model=PersohubResultTitleAdminResponse)
+def create_results_title(
+    slug: str,
+    payload: PersohubResultTitleUpsertRequest,
+    admin: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    lookup = _entity_lookup_map(db, event)
+    entity_type, entity_id = _validate_result_entity(payload.entity_type.value, payload.user_id, payload.team_id)
+    if (entity_type, entity_id) not in lookup:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected entity is not an active registered participant")
+    if entity_type == "user" and event.participant_mode != PersohubEventParticipantMode.INDIVIDUAL:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Team event requires team entity")
+    if entity_type == "team" and event.participant_mode != PersohubEventParticipantMode.TEAM:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Individual event requires user entity")
+    exists_name = db.query(PersohubEventResultTitle.id).filter(
+        PersohubEventResultTitle.event_id == event.id,
+        func.lower(PersohubEventResultTitle.title_name) == payload.title_name.lower(),
+    ).first()
+    if exists_name:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Title name already exists")
+    exists_rank = db.query(PersohubEventResultTitle.id).filter(
+        PersohubEventResultTitle.event_id == event.id,
+        PersohubEventResultTitle.precedence_rank == int(payload.precedence_rank),
+    ).first()
+    if exists_rank:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Precedence rank already exists")
+    row = PersohubEventResultTitle(
+        event_id=event.id,
+        title_name=payload.title_name,
+        theme_key=payload.theme_key,
+        precedence_rank=int(payload.precedence_rank),
+        entity_type=PersohubEventEntityType.USER if entity_type == "user" else PersohubEventEntityType.TEAM,
+        user_id=entity_id if entity_type == "user" else None,
+        team_id=entity_id if entity_type == "team" else None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    _log_event_admin_action(
+        db,
+        admin,
+        event,
+        "create_persohub_results_title",
+        method="POST",
+        path=f"/persohub/admin/persohub-events/{slug}/results/titles",
+        meta={"title_id": int(row.id), "title_name": row.title_name, "precedence_rank": int(row.precedence_rank)},
+    )
+    return PersohubResultTitleAdminResponse(
+        id=int(row.id),
+        title_name=str(row.title_name or ""),
+        theme_key=str(row.theme_key or "").strip() or None,
+        precedence_rank=int(row.precedence_rank or 0),
+        winner=_build_result_entity_card(entity_type=entity_type, entity_id=entity_id, lookup=lookup),
+    )
+
+
+@router.put("/persohub/admin/persohub-events/{slug}/results/titles/{title_id}", response_model=PersohubResultTitleAdminResponse)
+def update_results_title(
+    slug: str,
+    title_id: int,
+    payload: PersohubResultTitleUpsertRequest,
+    admin: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    row = db.query(PersohubEventResultTitle).filter(
+        PersohubEventResultTitle.event_id == event.id,
+        PersohubEventResultTitle.id == title_id,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Result title not found")
+    lookup = _entity_lookup_map(db, event)
+    entity_type, entity_id = _validate_result_entity(payload.entity_type.value, payload.user_id, payload.team_id)
+    if (entity_type, entity_id) not in lookup:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected entity is not an active registered participant")
+    duplicate_name = db.query(PersohubEventResultTitle.id).filter(
+        PersohubEventResultTitle.event_id == event.id,
+        PersohubEventResultTitle.id != row.id,
+        func.lower(PersohubEventResultTitle.title_name) == payload.title_name.lower(),
+    ).first()
+    if duplicate_name:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Title name already exists")
+    duplicate_rank = db.query(PersohubEventResultTitle.id).filter(
+        PersohubEventResultTitle.event_id == event.id,
+        PersohubEventResultTitle.id != row.id,
+        PersohubEventResultTitle.precedence_rank == int(payload.precedence_rank),
+    ).first()
+    if duplicate_rank:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Precedence rank already exists")
+    row.title_name = payload.title_name
+    row.theme_key = payload.theme_key
+    row.precedence_rank = int(payload.precedence_rank)
+    row.entity_type = PersohubEventEntityType.USER if entity_type == "user" else PersohubEventEntityType.TEAM
+    row.user_id = entity_id if entity_type == "user" else None
+    row.team_id = entity_id if entity_type == "team" else None
+    db.commit()
+    db.refresh(row)
+    _log_event_admin_action(
+        db,
+        admin,
+        event,
+        "update_persohub_results_title",
+        method="PUT",
+        path=f"/persohub/admin/persohub-events/{slug}/results/titles/{title_id}",
+        meta={"title_id": int(row.id)},
+    )
+    return PersohubResultTitleAdminResponse(
+        id=int(row.id),
+        title_name=str(row.title_name or ""),
+        theme_key=str(row.theme_key or "").strip() or None,
+        precedence_rank=int(row.precedence_rank or 0),
+        winner=_build_result_entity_card(entity_type=entity_type, entity_id=entity_id, lookup=lookup),
+    )
+
+
+@router.delete("/persohub/admin/persohub-events/{slug}/results/titles/{title_id}")
+def delete_results_title(
+    slug: str,
+    title_id: int,
+    admin: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    row = db.query(PersohubEventResultTitle).filter(
+        PersohubEventResultTitle.event_id == event.id,
+        PersohubEventResultTitle.id == title_id,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Result title not found")
+    db.delete(row)
+    db.commit()
+    _log_event_admin_action(
+        db,
+        admin,
+        event,
+        "delete_persohub_results_title",
+        method="DELETE",
+        path=f"/persohub/admin/persohub-events/{slug}/results/titles/{title_id}",
+        meta={"title_id": int(title_id)},
+    )
+    return {"message": "Result title deleted"}
+
+
+@router.get("/persohub/admin/persohub-events/{slug}/results/finalists", response_model=List[PersohubResultFinalistAdminResponse])
+def list_results_finalists(
+    slug: str,
+    _: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    lookup = _entity_lookup_map(db, event)
+    rows = (
+        db.query(PersohubEventResultFinalist)
+        .filter(PersohubEventResultFinalist.event_id == event.id)
+        .order_by(PersohubEventResultFinalist.created_at.asc(), PersohubEventResultFinalist.id.asc())
+        .all()
+    )
+    response: List[PersohubResultFinalistAdminResponse] = []
+    for row in rows:
+        entity_type = "user" if row.entity_type == PersohubEventEntityType.USER else "team"
+        entity_id = int(row.user_id if entity_type == "user" else row.team_id or 0)
+        if entity_id <= 0:
+            continue
+        response.append(
+            PersohubResultFinalistAdminResponse(
+                id=int(row.id),
+                finalist=_build_result_entity_card(
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    lookup=lookup,
+                    photo_url=row.photo_url,
+                    video_url=row.video_url,
+                    content=row.content if isinstance(row.content, dict) else None,
+                ),
+                created_at=row.created_at or datetime.now(timezone.utc),
+            )
+        )
+    return response
+
+
+@router.post("/persohub/admin/persohub-events/{slug}/results/finalists", response_model=PersohubResultFinalistAdminResponse)
+def create_results_finalist(
+    slug: str,
+    payload: PersohubResultFinalistUpsertRequest,
+    admin: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    lookup = _entity_lookup_map(db, event)
+    entity_type, entity_id = _validate_result_entity(payload.entity_type.value, payload.user_id, payload.team_id)
+    if (entity_type, entity_id) not in lookup:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected entity is not an active registered participant")
+    existing = db.query(PersohubEventResultFinalist.id).filter(
+        PersohubEventResultFinalist.event_id == event.id,
+        PersohubEventResultFinalist.entity_type == (PersohubEventEntityType.USER if entity_type == "user" else PersohubEventEntityType.TEAM),
+        PersohubEventResultFinalist.user_id == (entity_id if entity_type == "user" else None),
+        PersohubEventResultFinalist.team_id == (entity_id if entity_type == "team" else None),
+    ).first()
+    if existing:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Finalist already exists")
+    row = PersohubEventResultFinalist(
+        event_id=event.id,
+        entity_type=PersohubEventEntityType.USER if entity_type == "user" else PersohubEventEntityType.TEAM,
+        user_id=entity_id if entity_type == "user" else None,
+        team_id=entity_id if entity_type == "team" else None,
+        photo_url=payload.photo_url,
+        video_url=payload.video_url,
+        content=payload.content if isinstance(payload.content, dict) else None,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return PersohubResultFinalistAdminResponse(
+        id=int(row.id),
+        finalist=_build_result_entity_card(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            lookup=lookup,
+            photo_url=row.photo_url,
+            video_url=row.video_url,
+            content=row.content if isinstance(row.content, dict) else None,
+        ),
+        created_at=row.created_at or datetime.now(timezone.utc),
+    )
+
+
+@router.put("/persohub/admin/persohub-events/{slug}/results/finalists/{finalist_id}", response_model=PersohubResultFinalistAdminResponse)
+def update_results_finalist(
+    slug: str,
+    finalist_id: int,
+    payload: PersohubResultFinalistUpsertRequest,
+    _: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    row = db.query(PersohubEventResultFinalist).filter(
+        PersohubEventResultFinalist.event_id == event.id,
+        PersohubEventResultFinalist.id == finalist_id,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Finalist not found")
+    lookup = _entity_lookup_map(db, event)
+    entity_type, entity_id = _validate_result_entity(payload.entity_type.value, payload.user_id, payload.team_id)
+    if (entity_type, entity_id) not in lookup:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected entity is not an active registered participant")
+    row.entity_type = PersohubEventEntityType.USER if entity_type == "user" else PersohubEventEntityType.TEAM
+    row.user_id = entity_id if entity_type == "user" else None
+    row.team_id = entity_id if entity_type == "team" else None
+    row.photo_url = payload.photo_url
+    row.video_url = payload.video_url
+    row.content = payload.content if isinstance(payload.content, dict) else None
+    db.commit()
+    db.refresh(row)
+    return PersohubResultFinalistAdminResponse(
+        id=int(row.id),
+        finalist=_build_result_entity_card(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            lookup=lookup,
+            photo_url=row.photo_url,
+            video_url=row.video_url,
+            content=row.content if isinstance(row.content, dict) else None,
+        ),
+        created_at=row.created_at or datetime.now(timezone.utc),
+    )
+
+
+@router.delete("/persohub/admin/persohub-events/{slug}/results/finalists/{finalist_id}")
+def delete_results_finalist(
+    slug: str,
+    finalist_id: int,
+    _: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    row = db.query(PersohubEventResultFinalist).filter(
+        PersohubEventResultFinalist.event_id == event.id,
+        PersohubEventResultFinalist.id == finalist_id,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Finalist not found")
+    db.delete(row)
+    db.commit()
+    return {"message": "Finalist deleted"}
+
+
+@router.get("/persohub/admin/persohub-events/{slug}/results/highlights", response_model=List[PersohubResultHighlightAdminResponse])
+def list_results_highlights(
+    slug: str,
+    _: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    lookup = _entity_lookup_map(db, event)
+    rows = (
+        db.query(PersohubEventResultHighlight)
+        .filter(PersohubEventResultHighlight.event_id == event.id)
+        .order_by(PersohubEventResultHighlight.sort_order.asc(), PersohubEventResultHighlight.id.asc())
+        .all()
+    )
+    response: List[PersohubResultHighlightAdminResponse] = []
+    for row in rows:
+        participant = None
+        if row.entity_type in {PersohubEventEntityType.USER, PersohubEventEntityType.TEAM}:
+            entity_type = "user" if row.entity_type == PersohubEventEntityType.USER else "team"
+            entity_id = int(row.user_id if entity_type == "user" else row.team_id or 0)
+            if entity_id > 0 and (entity_type, entity_id) in lookup:
+                participant = _build_result_entity_card(entity_type=entity_type, entity_id=entity_id, lookup=lookup)
+        response.append(
+            PersohubResultHighlightAdminResponse(
+                id=int(row.id),
+                emoji=str(row.emoji or "").strip() or None,
+                tag=str(row.tag or "").strip() or None,
+                title=str(row.title or ""),
+                quantity=str(row.quantity or "").strip() or None,
+                description=str(row.description or "").strip() or None,
+                sort_order=int(row.sort_order or 1),
+                participant=participant,
+                content=row.content if isinstance(row.content, dict) else None,
+                created_at=row.created_at or datetime.now(timezone.utc),
+            )
+        )
+    return response
+
+
+@router.post("/persohub/admin/persohub-events/{slug}/results/highlights", response_model=PersohubResultHighlightAdminResponse)
+def create_results_highlight(
+    slug: str,
+    payload: PersohubResultHighlightUpsertRequest,
+    admin: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    lookup = _entity_lookup_map(db, event)
+    entity_type = None
+    entity_id = None
+    if payload.entity_type is not None:
+        entity_type, entity_id = _validate_result_entity(payload.entity_type.value, payload.user_id, payload.team_id)
+        if (entity_type, entity_id) not in lookup:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected participant is not registered for this event")
+    row = PersohubEventResultHighlight(
+        event_id=event.id,
+        emoji=payload.emoji,
+        tag=payload.tag,
+        title=payload.title,
+        quantity=payload.quantity,
+        description=payload.description,
+        entity_type=PersohubEventEntityType.USER if entity_type == "user" else PersohubEventEntityType.TEAM if entity_type == "team" else None,
+        user_id=entity_id if entity_type == "user" else None,
+        team_id=entity_id if entity_type == "team" else None,
+        content=payload.content if isinstance(payload.content, dict) else None,
+        sort_order=int(payload.sort_order or 1),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    _log_event_admin_action(
+        db,
+        admin,
+        event,
+        "create_persohub_results_highlight",
+        method="POST",
+        path=f"/persohub/admin/persohub-events/{slug}/results/highlights",
+        meta={"highlight_id": int(row.id), "title": row.title},
+    )
+    participant = _build_result_entity_card(entity_type=entity_type, entity_id=entity_id, lookup=lookup) if entity_type and entity_id else None
+    return PersohubResultHighlightAdminResponse(
+        id=int(row.id),
+        emoji=str(row.emoji or "").strip() or None,
+        tag=str(row.tag or "").strip() or None,
+        title=str(row.title or ""),
+        quantity=str(row.quantity or "").strip() or None,
+        description=str(row.description or "").strip() or None,
+        sort_order=int(row.sort_order or 1),
+        participant=participant,
+        content=row.content if isinstance(row.content, dict) else None,
+        created_at=row.created_at or datetime.now(timezone.utc),
+    )
+
+
+@router.put("/persohub/admin/persohub-events/{slug}/results/highlights/{highlight_id}", response_model=PersohubResultHighlightAdminResponse)
+def update_results_highlight(
+    slug: str,
+    highlight_id: int,
+    payload: PersohubResultHighlightUpsertRequest,
+    admin: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    row = db.query(PersohubEventResultHighlight).filter(
+        PersohubEventResultHighlight.event_id == event.id,
+        PersohubEventResultHighlight.id == highlight_id,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Result highlight not found")
+    lookup = _entity_lookup_map(db, event)
+    entity_type = None
+    entity_id = None
+    if payload.entity_type is not None:
+        entity_type, entity_id = _validate_result_entity(payload.entity_type.value, payload.user_id, payload.team_id)
+        if (entity_type, entity_id) not in lookup:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected participant is not registered for this event")
+    row.emoji = payload.emoji
+    row.tag = payload.tag
+    row.title = payload.title
+    row.quantity = payload.quantity
+    row.description = payload.description
+    row.entity_type = PersohubEventEntityType.USER if entity_type == "user" else PersohubEventEntityType.TEAM if entity_type == "team" else None
+    row.user_id = entity_id if entity_type == "user" else None
+    row.team_id = entity_id if entity_type == "team" else None
+    row.content = payload.content if isinstance(payload.content, dict) else None
+    row.sort_order = int(payload.sort_order or 1)
+    db.commit()
+    db.refresh(row)
+    _log_event_admin_action(
+        db,
+        admin,
+        event,
+        "update_persohub_results_highlight",
+        method="PUT",
+        path=f"/persohub/admin/persohub-events/{slug}/results/highlights/{highlight_id}",
+        meta={"highlight_id": int(row.id)},
+    )
+    participant = _build_result_entity_card(entity_type=entity_type, entity_id=entity_id, lookup=lookup) if entity_type and entity_id else None
+    return PersohubResultHighlightAdminResponse(
+        id=int(row.id),
+        emoji=str(row.emoji or "").strip() or None,
+        tag=str(row.tag or "").strip() or None,
+        title=str(row.title or ""),
+        quantity=str(row.quantity or "").strip() or None,
+        description=str(row.description or "").strip() or None,
+        sort_order=int(row.sort_order or 1),
+        participant=participant,
+        content=row.content if isinstance(row.content, dict) else None,
+        created_at=row.created_at or datetime.now(timezone.utc),
+    )
+
+
+@router.delete("/persohub/admin/persohub-events/{slug}/results/highlights/{highlight_id}")
+def delete_results_highlight(
+    slug: str,
+    highlight_id: int,
+    admin: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    row = db.query(PersohubEventResultHighlight).filter(
+        PersohubEventResultHighlight.event_id == event.id,
+        PersohubEventResultHighlight.id == highlight_id,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Result highlight not found")
+    db.delete(row)
+    db.commit()
+    _log_event_admin_action(
+        db,
+        admin,
+        event,
+        "delete_persohub_results_highlight",
+        method="DELETE",
+        path=f"/persohub/admin/persohub-events/{slug}/results/highlights/{highlight_id}",
+        meta={"highlight_id": int(highlight_id)},
+    )
+    return {"message": "Result highlight deleted"}
+
+
+@router.post("/persohub/admin/persohub-events/{slug}/results/finalists/photo/presign", response_model=PresignResponse)
+def presign_results_finalist_photo_upload(
+    slug: str,
+    payload: PresignRequest,
+    _: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    presign = _generate_presigned_put_url(
+        key_prefix=f"persohub_events/{event.slug}/results/finalists/photos",
+        filename=payload.filename,
+        content_type=payload.content_type,
+        allowed_types=["image/png", "image/jpeg", "image/jpg", "image/webp"],
+    )
+    return PresignResponse(**presign)
+
+
+@router.post("/persohub/admin/persohub-events/{slug}/results/finalists/video/presign", response_model=PresignResponse)
+def presign_results_finalist_video_upload(
+    slug: str,
+    payload: PresignRequest,
+    _: PdaUser = Depends(require_persohub_event_admin),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_or_404(db, slug)
+    presign = _generate_presigned_put_url(
+        key_prefix=f"persohub_events/{event.slug}/results/finalists/videos",
+        filename=payload.filename,
+        content_type=payload.content_type,
+        allowed_types=["video/mp4", "video/webm", "video/quicktime", "application/octet-stream"],
     )
     return PresignResponse(**presign)
 
@@ -5988,6 +6755,66 @@ def _extract_round_state_text(value) -> str:
     if hasattr(value, "value"):
         return str(value.value or "").strip().lower()
     return str(value or "").strip().lower()
+
+
+def _is_results_publishable_round(round_row: PersohubEventRound) -> bool:
+    state_text = _extract_round_state_text(round_row.state)
+    return bool(round_row.is_frozen) or state_text in {"completed", "reveal"}
+
+
+def _results_round_summary(db: Session, event: PersohubEvent, round_row: PersohubEventRound) -> dict:
+    entity_type = (
+        PersohubEventEntityType.USER
+        if event.participant_mode == PersohubEventParticipantMode.INDIVIDUAL
+        else PersohubEventEntityType.TEAM
+    )
+    total_count = db.query(PersohubEventRegistration).filter(
+        PersohubEventRegistration.event_id == event.id,
+        PersohubEventRegistration.entity_type == entity_type,
+    ).count()
+    score_rows = (
+        db.query(PersohubEventScore)
+        .filter(
+            PersohubEventScore.event_id == event.id,
+            PersohubEventScore.round_id == round_row.id,
+            PersohubEventScore.entity_type == entity_type,
+        )
+        .all()
+    )
+    present_count = sum(1 for row in score_rows if bool(row.is_present))
+    snapshot = round_row.results_snapshot if isinstance(round_row.results_snapshot, dict) else None
+    snapshot_summary = None
+    if snapshot:
+        participation = snapshot.get("participation") if isinstance(snapshot.get("participation"), dict) else {}
+        score_analytics = snapshot.get("score_analytics") if isinstance(snapshot.get("score_analytics"), dict) else {}
+        snapshot_summary = {
+            "participation": {
+                "total": participation.get("total"),
+                "present": participation.get("present"),
+                "advanced": participation.get("advanced"),
+                "elimination_rate": participation.get("elimination_rate"),
+            },
+            "score_analytics": {
+                "average": score_analytics.get("average"),
+                "maximum": score_analytics.get("maximum"),
+                "minimum": score_analytics.get("minimum"),
+            },
+            "top_scorer": snapshot.get("top_scorer"),
+        }
+    return {
+        "round_id": int(round_row.id),
+        "round_no": int(round_row.round_no),
+        "name": round_row.name,
+        "state": _extract_round_state_text(round_row.state),
+        "is_frozen": bool(round_row.is_frozen),
+        "publishable": _is_results_publishable_round(round_row),
+        "results_published": bool(getattr(round_row, "results_published", False)),
+        "results_published_at": round_row.results_published_at,
+        "score_rows_count": len(score_rows),
+        "present_count": int(present_count),
+        "total_count": int(total_count),
+        "snapshot_summary": snapshot_summary,
+    }
 
 
 def _official_shortlist_round_number(db: Session, event: PersohubEvent) -> int:
