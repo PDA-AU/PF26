@@ -1753,16 +1753,16 @@ export default function EventDashboard() {
 
                         {isRegistered ? (
                             <>
-                                <section className={`mt-7 rounded-md border-4 border-black p-6 shadow-[8px_8px_0px_0px_#000000] ${
+                                <section className={`mt-7 min-w-0 overflow-hidden rounded-md border-4 border-black p-3 shadow-neo sm:p-6 sm:shadow-[8px_8px_0px_0px_#000000] ${
                                     isPendingRegistration
                                         ? (paymentStatus === 'declined' ? 'bg-red-50' : 'bg-amber-50')
                                         : (String(effectiveStatus).toLowerCase() === 'eliminated' ? 'bg-red-50' : 'bg-green-50')
                                 }`}>
-                                    <div className="flex items-center gap-3">
+                                    <div className="flex min-w-0 items-center gap-3">
                                         {statusIcon(effectiveStatus)}
-                                        <div>
-                                            <div className="flex flex-wrap items-center gap-2">
-                                                <h2 className="font-heading text-2xl font-black uppercase tracking-tight">Status: {effectiveStatus}</h2>
+                                        <div className="min-w-0">
+                                            <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                                <h2 className="min-w-0 break-words font-heading text-2xl font-black uppercase tracking-tight">Status: {effectiveStatus}</h2>
                                                 {isWildcardRegistration ? (
                                                     <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-800">
                                                         Wildcard
@@ -1806,9 +1806,9 @@ export default function EventDashboard() {
                                     ) : null}
                                 </section>
 
-                                <section className="mt-7 grid gap-6 lg:grid-cols-3">
-                                    <div className="space-y-6 lg:col-span-1">
-                                        <div className="rounded-md border-4 border-black bg-white p-5 shadow-[8px_8px_0px_0px_#000000]">
+                                <section className="mt-7 grid min-w-0 gap-6 lg:grid-cols-3">
+                                    <div className="min-w-0 space-y-6 overflow-hidden lg:col-span-1">
+                                        <div className="min-w-0 overflow-hidden rounded-md border-4 border-black bg-white p-3 shadow-neo sm:p-5 sm:shadow-[8px_8px_0px_0px_#000000]">
                                             {!isTeamEvent ? (
                                                 <>
                                                     <div className="text-center">
@@ -1984,9 +1984,9 @@ export default function EventDashboard() {
                                         </div>
                                     </div>
 
-                                    <div className="lg:col-span-2">
-                                        <div className="rounded-md border-4 border-black bg-white p-5 shadow-[8px_8px_0px_0px_#000000]">
-                                            <h3 className="font-heading text-2xl font-black uppercase tracking-tight">Round Status</h3>
+                                    <div className="min-w-0 overflow-hidden lg:col-span-2">
+                                        <div className="min-w-0 overflow-hidden rounded-md border-4 border-black bg-white p-3 shadow-neo sm:p-5 sm:shadow-[8px_8px_0px_0px_#000000]">
+                                            <h3 className="break-words font-heading text-2xl font-black uppercase tracking-tight">Round Status</h3>
                                             {participantRoundStatuses.length > 0 ? (
                                                 <div className="mt-4 space-y-3">
                                                     {participantRoundStatuses.map((round) => {
@@ -2037,15 +2037,15 @@ export default function EventDashboard() {
                                                             : null;
                                                         const hasPublishedScore = Boolean(resultRound && standing);
                                                         return (
-                                                            <article key={`${round.round_no}-${round.round_name}`} className="rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
-                                                                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                                                            <article key={`${round.round_no}-${round.round_name}`} className="min-w-0 overflow-hidden rounded-md border-2 border-black bg-[#fffdf0] p-3 shadow-neo sm:p-4">
+                                                                <div className="flex min-w-0 flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                                                                     <div className="flex min-w-0 items-start gap-3">
                                                                         <div className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border-2 border-black bg-[#8B5CF6] font-heading text-sm font-black text-white shadow-neo">
                                                                             {String(round.round_no || '').slice(-2)}
                                                                         </div>
                                                                         <div className="min-w-0 flex-1">
-                                                                            <div className="flex flex-wrap items-start gap-2">
-                                                                                <p className="font-heading text-lg font-black uppercase tracking-tight">{round.round_name}</p>
+                                                                            <div className="flex min-w-0 flex-wrap items-start gap-2">
+                                                                                <p className="min-w-0 break-words font-heading text-lg font-black uppercase tracking-tight">{round.round_name}</p>
                                                                                 <span className="rounded-md border-2 border-black bg-white px-2 py-1 text-[10px] font-black uppercase tracking-[0.1em] text-black shadow-neo">{round.round_no}</span>
                                                                             </div>
                                                                             {submissionDeadlineLabel ? (
@@ -2055,10 +2055,10 @@ export default function EventDashboard() {
                                                                                     </span>
                                                                                 </div>
                                                                             ) : null}
-                                                                            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs font-semibold uppercase tracking-[0.08em] text-slate-700">
-                                                                                {panelNo !== null ? <span>Panel No: {panelNo}</span> : null}
-                                                                                {panelName ? <span>Panel Name: {panelName}</span> : null}
-                                                                                {panelTimeLabel ? <span>Panel Time: {panelTimeLabel}</span> : null}
+                                                                            <div className="mt-2 flex min-w-0 flex-wrap gap-x-4 gap-y-1 text-xs font-semibold uppercase tracking-[0.08em] text-slate-700">
+                                                                                {panelNo !== null ? <span className="max-w-full break-words">Panel No: {panelNo}</span> : null}
+                                                                                {panelName ? <span className="max-w-full break-words">Panel Name: {panelName}</span> : null}
+                                                                                {panelTimeLabel ? <span className="max-w-full break-words">Panel Time: {panelTimeLabel}</span> : null}
                                                                             </div>
                                                                             {panelLink ? (
                                                                                 <a
@@ -2074,34 +2074,34 @@ export default function EventDashboard() {
                                                                         </div>
                                                                     </div>
 
-                                                                    <div className="grid w-full gap-2 sm:grid-cols-3 xl:max-w-md">
-                                                                        <div className="rounded-md border-2 border-black bg-white p-3 shadow-neo">
+                                                                    <div className="grid w-full min-w-0 gap-2 sm:grid-cols-2 xl:max-w-md xl:grid-cols-3">
+                                                                        <div className="min-w-0 rounded-md border-2 border-black bg-white p-3 shadow-neo">
                                                                             <p className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-500">Status</p>
                                                                             <div className="mt-2 flex items-center gap-2 text-sm font-black uppercase tracking-[0.08em] text-black">
                                                                                 {statusIcon(round.displayStatus)}
                                                                                 {round.displayStatus}
                                                                             </div>
                                                                         </div>
-                                                                        <div className={`rounded-md border-2 border-black p-3 shadow-neo ${attendance?.badgeClassName || 'bg-white text-slate-700'}`}>
+                                                                        <div className={`min-w-0 rounded-md border-2 border-black p-3 shadow-neo ${attendance?.badgeClassName || 'bg-white text-slate-700'}`}>
                                                                             <p className="text-[10px] font-black uppercase tracking-[0.12em] opacity-75">Attendance</p>
                                                                             <div className="mt-2 flex items-center gap-2 text-sm font-black uppercase tracking-[0.08em]">
                                                                                 {attendance?.icon || <Clock3 className="h-5 w-5" />}
                                                                                 {attendance?.label || 'Pending'}
                                                                             </div>
                                                                         </div>
-                                                                        <div className="rounded-md border-2 border-black bg-[#FDE047] p-3 shadow-neo">
+                                                                        <div className="min-w-0 rounded-md border-2 border-black bg-[#FDE047] p-3 shadow-neo">
                                                                             <p className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-700">Round Score</p>
                                                                             <div className="mt-1 font-heading text-2xl font-black text-black">
                                                                                 {hasPublishedScore ? formatScoreValue(standing.round_score) : '--'}
                                                                             </div>
                                                                         </div>
-                                                                        <div className="rounded-md border-2 border-black bg-[#DBEAFE] p-3 shadow-neo">
+                                                                        <div className="min-w-0 rounded-md border-2 border-black bg-[#DBEAFE] p-3 shadow-neo">
                                                                             <p className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-700">Round Rank</p>
                                                                             <div className="mt-1 font-heading text-2xl font-black text-black">
                                                                                 {hasPublishedScore && standing.round_rank ? `#${standing.round_rank}` : '--'}
                                                                             </div>
                                                                         </div>
-                                                                        <div className="rounded-md border-2 border-black bg-[#CCFBF1] p-3 shadow-neo">
+                                                                        <div className="min-w-0 rounded-md border-2 border-black bg-[#CCFBF1] p-3 shadow-neo">
                                                                             <p className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-700">Total</p>
                                                                             <div className="mt-1 font-heading text-2xl font-black text-black">
                                                                                 {hasPublishedScore ? formatScoreValue(standing.cumulative_score) : '--'}
@@ -2141,11 +2141,11 @@ export default function EventDashboard() {
                                             )}
                                         </div>
                                         {participantResultCards.length > 0 || hasParticipantChartData ? (
-                                            <div className="mt-5 rounded-md border-4 border-black bg-white p-5 shadow-[8px_8px_0px_0px_#000000]">
+                                            <div className="mt-5 min-w-0 overflow-hidden rounded-md border-4 border-black bg-white p-3 shadow-neo sm:p-5 sm:shadow-[8px_8px_0px_0px_#000000]">
                                                 <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
                                                     <div>
                                                         <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-500">Published Results</p>
-                                                        <h3 className="font-heading text-2xl font-black uppercase tracking-tight">Your Event Highlights</h3>
+                                                        <h3 className="break-words font-heading text-2xl font-black uppercase tracking-tight">Your Event Highlights</h3>
                                                         <p className="mt-1 max-w-2xl text-sm font-medium text-slate-600">
                                                             These cards use the same published result snapshots as the public results page, scoped to your participant or team entry.
                                                         </p>
@@ -2156,7 +2156,14 @@ export default function EventDashboard() {
                                                         </div>
                                                     ) : null}
                                                 </div>
-                                                <div className="-mx-5 mt-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-5 pb-3 sm:mx-0 sm:grid sm:snap-none sm:grid-cols-2 sm:overflow-visible sm:px-0 sm:pb-0 xl:grid-cols-3">
+                                                <div className="mt-3 flex items-center justify-between gap-3 sm:hidden">
+                                                    <span className="text-[11px] font-black uppercase tracking-[0.14em] text-slate-500">Swipe cards</span>
+                                                    <span className="text-[11px] font-bold text-slate-500">{participantResultCards.length} cards</span>
+                                                </div>
+                                                <div
+                                                    className="-mx-3 mt-3 flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain scroll-smooth px-3 pb-4 no-scrollbar sm:mx-0 sm:grid sm:snap-none sm:grid-cols-2 sm:overflow-visible sm:px-0 sm:pb-0 xl:grid-cols-3"
+                                                    aria-label="Participant result highlight carousel"
+                                                >
                                                     {participantResultCards.map((card) => {
                                                         const tone = String(card?.tone || '').toLowerCase();
                                                         const toneClass = tone === 'gold'
@@ -2171,7 +2178,7 @@ export default function EventDashboard() {
                                                                             ? 'bg-[#DBEAFE]'
                                                                             : 'bg-[#F8FAFC]';
                                                         return (
-                                                            <article key={card.key} className={`min-w-[82%] snap-start rounded-md border-2 border-black p-4 shadow-neo sm:min-w-0 ${toneClass}`}>
+                                                            <article key={card.key} className={`flex min-h-48 basis-[84%] shrink-0 snap-center flex-col overflow-hidden rounded-md border-2 border-black p-4 shadow-neo sm:min-h-0 sm:basis-auto ${toneClass}`}>
                                                                 <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-600">{card.label}</p>
                                                                 <div className="mt-2 font-heading text-2xl font-black text-black">{card.value ?? '--'}</div>
                                                                 {card.subtext ? (
@@ -2185,8 +2192,16 @@ export default function EventDashboard() {
                                                     })}
                                                 </div>
                                                 {hasParticipantChartData ? (
-                                                    <div className="mt-5 grid gap-4 xl:grid-cols-3">
-                                                        <article className="rounded-md border-2 border-black bg-[#F8FAFC] p-4 shadow-neo">
+                                                    <>
+                                                        <div className="mt-5 flex items-center justify-between gap-3 sm:hidden">
+                                                            <span className="text-[11px] font-black uppercase tracking-[0.14em] text-slate-500">Swipe charts</span>
+                                                            <span className="text-[11px] font-bold text-slate-500">3 charts</span>
+                                                        </div>
+                                                        <div
+                                                            className="-mx-3 mt-3 flex snap-x snap-mandatory gap-4 overflow-x-auto overscroll-x-contain scroll-smooth px-3 pb-4 no-scrollbar md:mx-0 md:grid md:snap-none md:grid-cols-2 md:overflow-visible md:px-0 md:pb-0 xl:grid-cols-3"
+                                                            aria-label="Participant result chart carousel"
+                                                        >
+                                                        <article className="min-w-0 basis-[88%] shrink-0 snap-center overflow-hidden rounded-md border-2 border-black bg-[#F8FAFC] p-4 shadow-neo sm:basis-[78%] md:basis-auto">
                                                             <div>
                                                                 <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">Score Chart</p>
                                                                 <h4 className="font-heading text-lg font-black uppercase tracking-tight">Score Progression</h4>
@@ -2205,7 +2220,7 @@ export default function EventDashboard() {
                                                                 </ResponsiveContainer>
                                                             </div>
                                                         </article>
-                                                        <article className="rounded-md border-2 border-black bg-[#FFF7ED] p-4 shadow-neo">
+                                                        <article className="min-w-0 basis-[88%] shrink-0 snap-center overflow-hidden rounded-md border-2 border-black bg-[#FFF7ED] p-4 shadow-neo sm:basis-[78%] md:basis-auto">
                                                             <div>
                                                                 <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">Rank Chart</p>
                                                                 <h4 className="font-heading text-lg font-black uppercase tracking-tight">Rank Movement</h4>
@@ -2223,7 +2238,7 @@ export default function EventDashboard() {
                                                                 </ResponsiveContainer>
                                                             </div>
                                                         </article>
-                                                        <article className="rounded-md border-2 border-black bg-[#F0FDFA] p-4 shadow-neo">
+                                                        <article className="min-w-0 basis-[88%] shrink-0 snap-center overflow-hidden rounded-md border-2 border-black bg-[#F0FDFA] p-4 shadow-neo sm:basis-[78%] md:basis-auto">
                                                             <div>
                                                                 <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">Radar</p>
                                                                 <h4 className="font-heading text-lg font-black uppercase tracking-tight">Round Rank Radar</h4>
@@ -2241,7 +2256,8 @@ export default function EventDashboard() {
                                                                 </ResponsiveContainer>
                                                             </div>
                                                         </article>
-                                                    </div>
+                                                        </div>
+                                                    </>
                                                 ) : null}
                                             </div>
                                         ) : null}
