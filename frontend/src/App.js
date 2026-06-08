@@ -1,4 +1,4 @@
-import React from "react";
+import React, { lazy, Suspense } from "react";
 import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
@@ -7,48 +7,50 @@ import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { PersohubActorProvider } from "@/context/PersohubActorContext";
 import { PersohubAdminAuthProvider, usePersohubAdminAuth } from "@/context/PersohubAdminAuthContext";
 
-// Pages
+// Landing page stays eager so first paint isn't gated on a chunk fetch.
 import PdaHome from "@/pages/PdaHome";
-import ItemsAdmin from "@/pages/HomeAdmin/ItemsAdmin";
-import UsersAdmin from "@/pages/HomeAdmin/UsersAdmin";
-import TeamAdmin from "@/pages/HomeAdmin/TeamAdmin";
-import GalleryAdmin from "@/pages/HomeAdmin/GalleryAdmin";
-import SuperAdmin from "@/pages/HomeAdmin/SuperAdmin";
-import LogsAdmin from "@/pages/HomeAdmin/LogsAdmin";
-import RecruitmentsAdmin from "@/pages/HomeAdmin/RecruitmentsAdmin";
-import EmailAdmin from "@/pages/HomeAdmin/EmailAdmin";
-import CCAdmin from "@/pages/HomeAdmin/CCAdmin";
-import BadgesAdmin from "@/pages/HomeAdmin/BadgesAdmin";
-import PersohubPaymentsAdminPage from "@/pages/HomeAdmin/PersohubPaymentsAdminPage";
-import PdaLogin from "@/pages/pda/PdaLogin";
-import PdaRecruit from "@/pages/pda/PdaRecruit";
-import PdaSignup from "@/pages/pda/PdaSignup";
-import PdaProfile from "@/pages/pda/PdaProfile";
-import PdaVerifyEmail from "@/pages/pda/VerifyEmail";
-import PdaForgotPassword from "@/pages/pda/ForgotPassword";
-import PdaResetPassword from "@/pages/pda/ResetPassword";
-import PersohubFeedPage from "@/pages/persohub/PersohubFeedPage";
-import PersohubPostPage from "@/pages/persohub/PersohubPostPage";
-import PersohubProfilePage from "@/pages/persohub/PersohubProfilePage";
-import ChakravyuhaTmpEditorPage from "@/pages/persohub/tmp/ChakravyuhaTmpEditorPage";
-import PersohubAdminEntryPage from "@/pages/persohub/admin/PersohubAdminEntryPage";
-import PersohubAdminProfilePage from "@/pages/persohub/admin/PersohubAdminProfilePage";
-import PersohubAdminCommunitiesPage from "@/pages/persohub/admin/PersohubAdminCommunitiesPage";
-import PersohubAdminEventsPage from "@/pages/persohub/admin/PersohubAdminEventsPage";
-import PersohubAdminPoliciesPage from "@/pages/persohub/admin/PersohubAdminPoliciesPage";
-import PersohubAdminPaymentsPage from "@/pages/persohub/admin/PersohubAdminPaymentsPage";
-import PersohubEventDashboard from "@/pages/persohub/events/PersohubEventDashboard";
-import PersohubEventResultsPage from "@/pages/persohub/events/PersohubEventResultsPage";
-import PersohubEventAdminDashboardPage from "@/pages/persohub/events/admin/EventAdminDashboardPage";
-import PersohubEventAdminAttendancePage from "@/pages/persohub/events/admin/EventAdminAttendancePage";
-import PersohubEventAdminRoundsPage from "@/pages/persohub/events/admin/EventAdminRoundsPage";
-import PersohubEventAdminScoringPage from "@/pages/persohub/events/admin/EventAdminScoringPage";
-import PersohubEventAdminParticipantsPage from "@/pages/persohub/events/admin/EventAdminParticipantsPage";
-import PersohubEventAdminLeaderboardPage from "@/pages/persohub/events/admin/EventAdminLeaderboardPage";
-import PersohubEventAdminResultsPage from "@/pages/persohub/events/admin/EventAdminResultsPage";
-import PersohubEventAdminLogsPage from "@/pages/persohub/events/admin/EventAdminLogsPage";
-import PersohubEventAdminBadgesPage from "@/pages/persohub/events/admin/EventAdminBadgesPage";
-import PersohubEventAdminEmailPage from "@/pages/persohub/events/admin/EventAdminEmailPage";
+
+// Lazy pages — each becomes its own webpack chunk, fetched on first visit.
+const ItemsAdmin = lazy(() => import("@/pages/HomeAdmin/ItemsAdmin"));
+const UsersAdmin = lazy(() => import("@/pages/HomeAdmin/UsersAdmin"));
+const TeamAdmin = lazy(() => import("@/pages/HomeAdmin/TeamAdmin"));
+const GalleryAdmin = lazy(() => import("@/pages/HomeAdmin/GalleryAdmin"));
+const SuperAdmin = lazy(() => import("@/pages/HomeAdmin/SuperAdmin"));
+const LogsAdmin = lazy(() => import("@/pages/HomeAdmin/LogsAdmin"));
+const RecruitmentsAdmin = lazy(() => import("@/pages/HomeAdmin/RecruitmentsAdmin"));
+const EmailAdmin = lazy(() => import("@/pages/HomeAdmin/EmailAdmin"));
+const CCAdmin = lazy(() => import("@/pages/HomeAdmin/CCAdmin"));
+const BadgesAdmin = lazy(() => import("@/pages/HomeAdmin/BadgesAdmin"));
+const PersohubPaymentsAdminPage = lazy(() => import("@/pages/HomeAdmin/PersohubPaymentsAdminPage"));
+const PdaLogin = lazy(() => import("@/pages/pda/PdaLogin"));
+const PdaRecruit = lazy(() => import("@/pages/pda/PdaRecruit"));
+const PdaSignup = lazy(() => import("@/pages/pda/PdaSignup"));
+const PdaProfile = lazy(() => import("@/pages/pda/PdaProfile"));
+const PdaVerifyEmail = lazy(() => import("@/pages/pda/VerifyEmail"));
+const PdaForgotPassword = lazy(() => import("@/pages/pda/ForgotPassword"));
+const PdaResetPassword = lazy(() => import("@/pages/pda/ResetPassword"));
+const PersohubFeedPage = lazy(() => import("@/pages/persohub/PersohubFeedPage"));
+const PersohubPostPage = lazy(() => import("@/pages/persohub/PersohubPostPage"));
+const PersohubProfilePage = lazy(() => import("@/pages/persohub/PersohubProfilePage"));
+const ChakravyuhaTmpEditorPage = lazy(() => import("@/pages/persohub/tmp/ChakravyuhaTmpEditorPage"));
+const PersohubAdminEntryPage = lazy(() => import("@/pages/persohub/admin/PersohubAdminEntryPage"));
+const PersohubAdminProfilePage = lazy(() => import("@/pages/persohub/admin/PersohubAdminProfilePage"));
+const PersohubAdminCommunitiesPage = lazy(() => import("@/pages/persohub/admin/PersohubAdminCommunitiesPage"));
+const PersohubAdminEventsPage = lazy(() => import("@/pages/persohub/admin/PersohubAdminEventsPage"));
+const PersohubAdminPoliciesPage = lazy(() => import("@/pages/persohub/admin/PersohubAdminPoliciesPage"));
+const PersohubAdminPaymentsPage = lazy(() => import("@/pages/persohub/admin/PersohubAdminPaymentsPage"));
+const PersohubEventDashboard = lazy(() => import("@/pages/persohub/events/PersohubEventDashboard"));
+const PersohubEventResultsPage = lazy(() => import("@/pages/persohub/events/PersohubEventResultsPage"));
+const PersohubEventAdminDashboardPage = lazy(() => import("@/pages/persohub/events/admin/EventAdminDashboardPage"));
+const PersohubEventAdminAttendancePage = lazy(() => import("@/pages/persohub/events/admin/EventAdminAttendancePage"));
+const PersohubEventAdminRoundsPage = lazy(() => import("@/pages/persohub/events/admin/EventAdminRoundsPage"));
+const PersohubEventAdminScoringPage = lazy(() => import("@/pages/persohub/events/admin/EventAdminScoringPage"));
+const PersohubEventAdminParticipantsPage = lazy(() => import("@/pages/persohub/events/admin/EventAdminParticipantsPage"));
+const PersohubEventAdminLeaderboardPage = lazy(() => import("@/pages/persohub/events/admin/EventAdminLeaderboardPage"));
+const PersohubEventAdminResultsPage = lazy(() => import("@/pages/persohub/events/admin/EventAdminResultsPage"));
+const PersohubEventAdminLogsPage = lazy(() => import("@/pages/persohub/events/admin/EventAdminLogsPage"));
+const PersohubEventAdminBadgesPage = lazy(() => import("@/pages/persohub/events/admin/EventAdminBadgesPage"));
+const PersohubEventAdminEmailPage = lazy(() => import("@/pages/persohub/events/admin/EventAdminEmailPage"));
 
 // Protected Route Components
 const ProtectedPdaRoute = ({ children, requirePf = false, requireHome = false, requireSuperAdmin = false, requireEvents = false }) => {
@@ -168,6 +170,7 @@ const ProtectedPersohubOwnerRoute = ({ children }) => {
 
 function AppRoutes() {
     return (
+        <Suspense fallback={<LoadingState fullScreen />}>
         <Routes>
             {/* Public Routes */}
             <Route path="/" element={<PdaHome />} />
@@ -316,6 +319,7 @@ function AppRoutes() {
             {/* Catch all */}
             <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </Suspense>
     );
 }
 
