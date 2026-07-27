@@ -1503,7 +1503,7 @@ def ensure_pda_event_round_submission_tables(engine):
                     )
                 )
                 WHERE submission_type = 'file'
-                  AND (files IS NULL OR jsonb_array_length(files) = 0)
+                  AND (files IS NULL OR jsonb_array_length(files::jsonb) = 0)
                   AND file_url IS NOT NULL
                 """
             )
@@ -2816,7 +2816,7 @@ def ensure_persohub_event_round_submission_tables(engine):
                     )
                 )
                 WHERE submission_type = 'file'
-                  AND (files IS NULL OR jsonb_array_length(files) = 0)
+                  AND (files IS NULL OR jsonb_array_length(files::jsonb) = 0)
                   AND file_url IS NOT NULL
                 """
             )
@@ -4798,18 +4798,24 @@ def ensure_badge_catalog_refactor(engine):
         pda_exists = _table_exists(conn, "pda_event_badges")
         persohub_exists = _table_exists(conn, "persohub_event_badges")
 
-        if pda_exists or persohub_exists:
+        if pda_exists:
             conn.execute(
                 text(
                     """
                     INSERT INTO badges (badge_name, image_url)
-                    SELECT DISTINCT t.title, t.image_url
-                    FROM (
-                        SELECT title, image_url FROM pda_event_badges
-                        UNION ALL
-                        SELECT title, image_url FROM persohub_event_badges
-                    ) t
-                    WHERE trim(COALESCE(t.title, '')) <> ''
+                    SELECT DISTINCT title, image_url FROM pda_event_badges
+                    WHERE trim(COALESCE(title, '')) <> ''
+                    ON CONFLICT DO NOTHING
+                    """
+                )
+            )
+        if persohub_exists:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO badges (badge_name, image_url)
+                    SELECT DISTINCT title, image_url FROM persohub_event_badges
+                    WHERE trim(COALESCE(title, '')) <> ''
                     ON CONFLICT DO NOTHING
                     """
                 )

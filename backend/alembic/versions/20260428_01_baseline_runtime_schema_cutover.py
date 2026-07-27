@@ -75,7 +75,10 @@ def upgrade() -> None:
 
     # Preserve the original runtime ordering to minimize behavior drift.
     rename_community_event_namespace_to_persohub(engine)
-    Base.metadata.create_all(bind=bind)
+
+    # create_all must run on its own connection (not the alembic bind) to avoid
+    # DDL lock conflicts with the engine.begin() calls in the ensure_* functions below.
+    Base.metadata.create_all(engine)
 
     ensure_pda_users_table(engine)
     ensure_pda_users_dob_column(engine)
@@ -98,6 +101,7 @@ def upgrade() -> None:
     ensure_pda_events_open_for_column(engine)
     ensure_pda_event_round_submission_tables(engine)
     ensure_pda_event_panel_tables(engine)
+    ensure_persohub_tables(engine)
     ensure_persohub_event_tables(engine)
     ensure_persohub_event_wildcard_columns(engine)
     ensure_event_registration_pending_status(engine)
@@ -109,7 +113,6 @@ def upgrade() -> None:
     ensure_persohub_events_parity_flag(engine)
     drop_legacy_persohub_sympo_table(engine)
     backfill_pda_event_round_count_once(engine)
-    ensure_persohub_tables(engine)
     ensure_persohub_admins_table(engine)
     ensure_persohub_club_admins_table(engine)
     ensure_persohub_owner_policy_refactor(engine)
@@ -126,5 +129,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
-    Base.metadata.drop_all(bind=bind)
+    engine = op.get_bind().engine
+    Base.metadata.drop_all(engine)

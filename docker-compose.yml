@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
+    platform: linux/arm64
     container_name: pf26-postgres
     restart: unless-stopped
     environment:
@@ -16,6 +17,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "0.5"
 
   backend:
     build: ./backend
@@ -38,18 +44,28 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "0.5"
 
   frontend:
     build:
       context: ./frontend
       args:
-        REACT_APP_BACKEND_URL: ${SITE_URL:-http://localhost}
+        VITE_BACKEND_URL: ${SITE_URL:-http://localhost}
     container_name: pf26-frontend
     restart: unless-stopped
     expose:
       - "80"
     depends_on:
       - backend
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: "0.25"
 
   caddy:
     image: caddy:2-alpine
@@ -67,6 +83,11 @@ services:
     depends_on:
       - backend
       - frontend
+    deploy:
+      resources:
+        limits:
+          memory: 64m
+          cpus: "0.25"
 
 volumes:
   postgres_data:

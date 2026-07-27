@@ -1,0 +1,3401 @@
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
+import axios from 'axios';
+import QRCode from 'qrcode';
+import { toast } from 'sonner';
+import {
+    CartesianGrid,
+    Line,
+    LineChart,
+    PolarAngleAxis,
+    PolarGrid,
+    PolarRadiusAxis,
+    Radar,
+    RadarChart,
+    ResponsiveContainer,
+    Tooltip,
+    XAxis,
+    YAxis,
+} from 'recharts';
+import {
+    Calendar,
+    CheckCircle2,
+    Clock3,
+    Copy,
+    Download,
+    Eye,
+    EyeOff,
+    ExternalLink,
+    Upload,
+    LogIn,
+    QrCode,
+    Trash2,
+    UserMinus,
+    UserX,
+    UserPlus,
+    Users,
+    XCircle
+} from 'lucide-react';
+
+import { useAuth } from '@/context/AuthContext';
+import PdaHeader from '@/components/layout/PdaHeader';
+import PdaFooter from '@/components/layout/PdaFooter';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Textarea } from '@/components/ui/textarea';
+import ParsedDescription from '@/components/common/ParsedDescription';
+import PosterCarousel from '@/components/common/PosterCarousel';
+import { parsePosterAssets, posterAspectRatioToCss, resolvePosterUrl } from '@/utils/posterAssets';
+
+const API = `${import.meta.env.VITE_BACKEND_URL}/api`;
+
+const DEPARTMENTS = [
+    { value: 'Artificial Intelligence and Data Science', label: 'AI & Data Science' },
+    { value: 'Aerospace Engineering', label: 'Aerospace Engineering' },
+    { value: 'Automobile Engineering', label: 'Automobile Engineering' },
+    { value: 'Computer Technology', label: 'Computer Technology' },
+    { value: 'Electronics and Communication Engineering', label: 'ECE' },
+    { value: 'Electronics and Instrumentation Engineering', label: 'EIE' },
+    { value: 'Production Technology', label: 'Production Technology' },
+    { value: 'Robotics and Automation', label: 'Robotics & Automation' },
+    { value: 'Rubber and Plastics Technology', label: 'Rubber & Plastics' },
+    { value: 'Information Technology', label: 'Information Technology' }
+];
+const DEPARTMENT_OTHER = 'OTHER';
+
+const GENDERS = [
+    { value: 'Male', label: 'Male' },
+    { value: 'Female', label: 'Female' }
+];
+const COLLEGES = [
+    { value: 'MIT', label: 'MIT' },
+    { value: 'OTHER', label: 'Other' }
+];
+
+const authInputClass = 'h-11 border-2 border-black bg-white text-sm shadow-neo focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2';
+const authSelectTriggerClass = 'h-11 border-2 border-black bg-white text-sm shadow-neo focus:ring-2 focus:ring-black focus:ring-offset-2';
+const authSelectContentClass = 'border-2 border-black bg-white shadow-[4px_4px_0px_0px_#000000]';
+
+const statusIcon = (value) => {
+    const normalized = String(value || '').toLowerCase();
+    if (normalized === 'active') return <CheckCircle2 className="h-5 w-5 text-green-600" />;
+    if (normalized === 'eliminated' || normalized === 'absent') return <XCircle className="h-5 w-5 text-red-600" />;
+    return <Clock3 className="h-5 w-5 text-slate-500" />;
+};
+
+const attendanceMeta = (isPresent) => {
+    if (isPresent === true) {
+        return {
+            label: 'Present',
+            icon: <CheckCircle2 className="h-5 w-5 text-emerald-600" />,
+            badgeClassName: 'bg-[#ecfdf5] text-emerald-700'
+        };
+    }
+    if (isPresent === false) {
+        return {
+            label: 'Absent',
+            icon: <XCircle className="h-5 w-5 text-red-600" />,
+            badgeClassName: 'bg-[#fef2f2] text-red-700'
+        };
+    }
+    return null;
+};
+
+const normalizeText = (value) => String(value || '').trim().toLowerCase();
+
+const titleCaseStatus = (value) => {
+    const normalized = normalizeText(value);
+    if (!normalized) return '';
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+};
+
+const getRoundStatusLabel = (round, effectiveStatus) => {
+    const roundState = normalizeText(round?.round_state);
+    const roundStatus = normalizeText(round?.status);
+    const fallbackCompletedStatus = normalizeText(effectiveStatus) === 'eliminated' ? 'Eliminated' : 'Active';
+
+    if (roundState === 'draft') return null;
+    if (roundState === 'published') return 'Pending';
+    if (roundState === 'active') return 'In Progress';
+    if (roundState === 'completed' || roundState === 'reveal') {
+        if (roundStatus === 'active' || roundStatus === 'eliminated' || roundStatus === 'pending') {
+            return titleCaseStatus(roundStatus);
+        }
+        return fallbackCompletedStatus;
+    }
+    if (roundStatus === 'active' || roundStatus === 'eliminated' || roundStatus === 'pending') {
+        return titleCaseStatus(roundStatus);
+    }
+    return null;
+};
+
+const parseRoundNoValue = (value) => {
+    const parsed = Number.parseInt(String(value || '').replace(/\D/g, ''), 10);
+    return Number.isFinite(parsed) ? parsed : null;
+};
+
+const formatScoreValue = (value) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return '--';
+    return numeric.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
+};
+
+function ParticipantResultTooltip({ active, payload, label }) {
+    if (!active || !payload || payload.length === 0) return null;
+    return (
+        <div className="rounded-md border-2 border-black bg-white px-3 py-2 text-xs font-bold text-slate-800 shadow-neo">
+            <div className="font-black uppercase tracking-[0.08em] text-slate-500">{label}</div>
+            {payload.map((item) => (
+                <div key={item.dataKey} className="mt-1 flex items-center justify-between gap-4">
+                    <span>{item.name}</span>
+                    <strong>{formatScoreValue(item.value)}</strong>
+                </div>
+            ))}
+        </div>
+    );
+}
+
+const normalizeSubmissionType = (value) => (
+    String(value || '').trim().toLowerCase() === 'link' ? 'link' : 'file'
+);
+const normalizeSubmissionLockReason = (reason) => {
+    const raw = String(reason || '').trim();
+    if (!raw) return '';
+    if (raw.toLowerCase() === 'round is frozen') return 'Round is closed for submission';
+    return raw;
+};
+const MAX_SUBMISSION_FILES = 5;
+const toSubmissionFiles = (submission) => {
+    const files = Array.isArray(submission?.files) ? submission.files : [];
+    const normalized = files
+        .map((item) => ({
+            file_url: String(item?.file_url || '').trim(),
+            file_name: String(item?.file_name || '').trim() || null,
+            file_size_bytes: Number(item?.file_size_bytes || 0),
+            mime_type: String(item?.mime_type || '').trim() || 'application/octet-stream',
+        }))
+        .filter((item) => item.file_url);
+    if (normalized.length > 0) return normalized;
+    const legacyUrl = String(submission?.file_url || '').trim();
+    if (!legacyUrl) return [];
+    return [{
+        file_url: legacyUrl,
+        file_name: String(submission?.file_name || '').trim() || null,
+        file_size_bytes: Number(submission?.file_size_bytes || 0),
+        mime_type: String(submission?.mime_type || '').trim() || 'application/octet-stream',
+    }];
+};
+const formatFileSize = (bytes) => {
+    const value = Number(bytes || 0);
+    if (value <= 0) return '-';
+    if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+    if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
+    return `${value} B`;
+};
+
+const formatEventDate = (value) => {
+    if (!value) return '';
+    const dateValue = String(value).trim().slice(0, 10);
+    if (!dateValue) return '';
+    const parsed = new Date(`${dateValue}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return dateValue;
+    return parsed.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
+const getEventDateLabel = (startDate, endDate) => {
+    const start = formatEventDate(startDate);
+    const end = formatEventDate(endDate);
+    if (start && end) {
+        if (start === end) return `Date: ${start}`;
+        return `${start} - ${end}`;
+    }
+    if (start) return `Starts: ${start}`;
+    if (end) return `Ends: ${end}`;
+    return 'Date: TBA';
+};
+
+const formatDateTimeValue = (value) => {
+    if (!value) return '';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return String(value);
+    return parsed.toLocaleString(undefined, {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+};
+
+const formatDateTimeIst = (value) => {
+    if (!value) return '';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return String(value);
+    return `${parsed.toLocaleString('en-IN', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+        timeZone: 'Asia/Kolkata',
+    })} IST`;
+};
+
+const formatMoney = (amount, currency = 'INR') => {
+    const parsed = Number(amount || 0);
+    if (!Number.isFinite(parsed)) return `0 ${currency}`;
+    return `${parsed} ${currency}`;
+};
+
+const parseSeatCapacityValue = (value) => {
+    const parsed = Number.parseInt(String(value || '').trim(), 10);
+    if (!Number.isFinite(parsed) || parsed < 1) return 100;
+    return parsed;
+};
+
+const EVENT_POSTER_RATIO_PRIORITY = ['A4-portrait', 'A4-landscape', '4:5', '5:4', '1:1', '2:1'];
+
+const sortPosterAssetsByPriority = (assets = []) => {
+    const rank = new Map(EVENT_POSTER_RATIO_PRIORITY.map((ratio, index) => [ratio, index]));
+    return [...assets].sort((left, right) => {
+        const leftRank = rank.has(left?.aspect_ratio) ? rank.get(left.aspect_ratio) : 999;
+        const rightRank = rank.has(right?.aspect_ratio) ? rank.get(right.aspect_ratio) : 999;
+        return leftRank - rightRank;
+    });
+};
+
+export default function EventDashboard() {
+    const { eventSlug, profileName } = useParams();
+    const navigate = useNavigate();
+    const { user, login, register, getAuthHeader } = useAuth();
+
+    const [eventInfo, setEventInfo] = useState(null);
+    const [publishedRounds, setPublishedRounds] = useState([]);
+    const [dashboard, setDashboard] = useState(null);
+    const [eventProfile, setEventProfile] = useState(null);
+    const [roundStatuses, setRoundStatuses] = useState([]);
+    const [participantResults, setParticipantResults] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [participantAccessClosed, setParticipantAccessClosed] = useState(false);
+
+    const [registrationDialogOpen, setRegistrationDialogOpen] = useState(false);
+    const [registerConfirmed, setRegisterConfirmed] = useState(false);
+    const [registering, setRegistering] = useState(false);
+
+    const [authDialogOpen, setAuthDialogOpen] = useState(false);
+    const [authTab, setAuthTab] = useState('login');
+    const [authLoading, setAuthLoading] = useState(false);
+    const [signupLoading, setSignupLoading] = useState(false);
+    const [showAuthPassword, setShowAuthPassword] = useState(false);
+    const [showAuthConfirmPassword, setShowAuthConfirmPassword] = useState(false);
+    const [loginForm, setLoginForm] = useState({ regno: '', password: '' });
+    const [signupForm, setSignupForm] = useState({
+        name: '',
+        profile_name: '',
+        regno: '',
+        email: '',
+        dob: '',
+        gender: '',
+        phno: '',
+        deptChoice: '',
+        deptOther: '',
+        collegeChoice: 'MIT',
+        collegeOther: '',
+        password: '',
+        confirmPassword: ''
+    });
+    const [registrationCtaModalOpen, setRegistrationCtaModalOpen] = useState(false);
+    const [registrationCtaVariant, setRegistrationCtaVariant] = useState('registered');
+    const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+    const [paymentScreenshot, setPaymentScreenshot] = useState(null);
+    const [paymentComment, setPaymentComment] = useState('');
+    const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+    const [paymentUploadProgress, setPaymentUploadProgress] = useState(null);
+
+    const [teamName, setTeamName] = useState('');
+    const [teamCode, setTeamCode] = useState('');
+    const [inviteRegno, setInviteRegno] = useState('');
+    const [creatingTeam, setCreatingTeam] = useState(false);
+    const [joiningTeam, setJoiningTeam] = useState(false);
+    const [inviting, setInviting] = useState(false);
+    const [leaveTeamLoading, setLeaveTeamLoading] = useState(false);
+    const [removeMemberLoading, setRemoveMemberLoading] = useState(false);
+    const [deleteTeamLoading, setDeleteTeamLoading] = useState(false);
+    const [leaveTeamDialogOpen, setLeaveTeamDialogOpen] = useState(false);
+    const [deleteTeamDialogOpen, setDeleteTeamDialogOpen] = useState(false);
+    const [removeMemberDialog, setRemoveMemberDialog] = useState({ open: false, userId: null, name: '' });
+
+    const [qrDialogOpen, setQrDialogOpen] = useState(false);
+    const [qrImageUrl, setQrImageUrl] = useState('');
+    const [qrLoading, setQrLoading] = useState(false);
+    const [slugQrDialogOpen, setSlugQrDialogOpen] = useState(false);
+    const [slugQrImageUrl, setSlugQrImageUrl] = useState('');
+    const [slugQrLoading, setSlugQrLoading] = useState(false);
+    const [selectedRound, setSelectedRound] = useState(null);
+    const [roundSubmission, setRoundSubmission] = useState(null);
+    const [loadingSubmission, setLoadingSubmission] = useState(false);
+    const [submittingRoundWork, setSubmittingRoundWork] = useState(false);
+    const [removingRoundWork, setRemovingRoundWork] = useState(false);
+    const [submissionUploadProgress, setSubmissionUploadProgress] = useState(null);
+    const [submissionSuccessDialogOpen, setSubmissionSuccessDialogOpen] = useState(false);
+    const [submissionSuccessText, setSubmissionSuccessText] = useState('');
+    const [submissionType, setSubmissionType] = useState('file');
+    const [submissionLink, setSubmissionLink] = useState('');
+    const [submissionNotes, setSubmissionNotes] = useState('');
+    const [existingSubmissionFiles, setExistingSubmissionFiles] = useState([]);
+    const [newSubmissionFiles, setNewSubmissionFiles] = useState([]);
+    const [isRoundDescriptionExpanded, setIsRoundDescriptionExpanded] = useState(false);
+
+    const [copiedReferral, setCopiedReferral] = useState(false);
+    const maxDobDate = useMemo(() => new Date().toISOString().slice(0, 10), []);
+
+    const isLoggedIn = Boolean(user);
+    const infoPath = useMemo(() => `/persohub/events/${eventSlug}`, [eventSlug]);
+    const resultsPath = useMemo(() => `/persohub/events/${eventSlug}/results`, [eventSlug]);
+
+    const normalizedRouteProfile = useMemo(() => String(profileName || '').trim().toLowerCase(), [profileName]);
+    const myProfileRaw = useMemo(() => String(user?.profile_name || '').trim(), [user?.profile_name]);
+    const normalizedMyProfile = useMemo(() => myProfileRaw.toLowerCase(), [myProfileRaw]);
+
+    const isParticipantRoute = Boolean(profileName);
+    const hasUserProfile = Boolean(normalizedMyProfile);
+    const isParticipantOwner = isLoggedIn && hasUserProfile && normalizedMyProfile === normalizedRouteProfile;
+    const participantPath = useMemo(() => {
+        if (!eventSlug || !myProfileRaw) return '';
+        return `/persohub/events/${eventSlug}/${myProfileRaw}`;
+    }, [eventSlug, myProfileRaw]);
+
+    const shouldFetchParticipantData = isParticipantRoute && isParticipantOwner;
+
+    const isTeamEvent = eventInfo?.participant_mode === 'team';
+    const isRegistered = Boolean(dashboard?.is_registered);
+    const hasTeam = Boolean(dashboard?.team_code);
+    const registrationOpen = Boolean(eventInfo?.registration_open);
+    const showRegisterNowButton = eventInfo?.show_register_now_button !== false;
+    const registrationAvailable = Boolean(
+        dashboard?.registration_available
+        ?? eventInfo?.registration_available
+        ?? eventInfo?.registration_open
+    );
+    const registrationBlockedByApproval = Boolean(registrationOpen && !registrationAvailable);
+    const confirmationMatches = registerConfirmed;
+    const registrationStatus = String(dashboard?.registration_status || (isRegistered ? 'active' : 'not_registered')).toLowerCase();
+    const paymentStatus = String(dashboard?.payment_status || 'none').toLowerCase();
+    const paymentRequired = Boolean(dashboard?.payment_required);
+    const payableAmount = Number(dashboard?.payable_amount || 0);
+    const feeKey = dashboard?.fee_key || null;
+    const feeCurrency = String(eventInfo?.registration_fee?.currency || 'INR');
+    const paymentConfig = dashboard?.payment_config || {};
+    const paymentReviewReason = String(dashboard?.payment_review_reason || '').trim();
+    const paymentQrImage = String(paymentConfig?.payment_url_image || '').trim();
+    const paymentId = String(paymentConfig?.payment_id || '').trim();
+    const clubOwnerMobile = String(paymentConfig?.club_owner_mobile || '').trim();
+    const isPendingRegistration = registrationStatus === 'pending';
+    const isActiveRegistration = registrationStatus === 'active';
+    const isWildcardRegistration = Boolean(dashboard?.is_wildcard);
+    const resultsPublished = Boolean(eventInfo?.results_published);
+
+    const isLeader = useMemo(() => {
+        if (!user?.id) return false;
+        const members = dashboard?.team_members || [];
+        return members.some((member) => member.user_id === user.id && String(member.role).toLowerCase() === 'leader');
+    }, [dashboard?.team_members, user?.id]);
+    const canSubmitPayment = (
+        Boolean(isLoggedIn)
+        && Boolean(paymentRequired)
+        && payableAmount > 0
+        && Boolean(registrationAvailable)
+        && (!isTeamEvent || isLeader)
+    );
+    const registrationCtaLabel = isPendingRegistration
+        ? 'Pending Confirmation'
+        : (isRegistered ? 'Registered' : 'Register Now');
+
+    const effectiveStatus = useMemo(() => {
+        if (!isRegistered) return 'Not Registered';
+        if (registrationStatus === 'pending') return 'Pending Confirmation';
+        if (registrationStatus === 'eliminated') return 'Eliminated';
+        return eventProfile?.status || 'Active';
+    }, [eventProfile?.status, isRegistered, registrationStatus]);
+    const canViewRoundSubmission = isLoggedIn && isRegistered;
+    const canEditRoundSubmission = canViewRoundSubmission && (!isTeamEvent || isLeader);
+    const participantRoundStatuses = useMemo(() => {
+        if (!Array.isArray(roundStatuses) || roundStatuses.length === 0) return [];
+        return roundStatuses
+            .map((round) => {
+                const displayStatus = getRoundStatusLabel(round, effectiveStatus);
+                if (!displayStatus) return null;
+                return {
+                    ...round,
+                    displayStatus,
+                };
+            })
+            .filter(Boolean);
+    }, [effectiveStatus, roundStatuses]);
+    const participantRoundLookup = useMemo(() => {
+        const byNo = new Map();
+        const byName = new Map();
+        (publishedRounds || []).forEach((round) => {
+            const roundNo = parseRoundNoValue(round?.round_no);
+            if (roundNo !== null && !byNo.has(roundNo)) {
+                byNo.set(roundNo, round);
+            }
+            const nameKey = normalizeText(round?.name);
+            if (nameKey && !byName.has(nameKey)) {
+                byName.set(nameKey, round);
+            }
+        });
+        return { byNo, byName };
+    }, [publishedRounds]);
+    const participantResultLookup = useMemo(() => {
+        const byId = new Map();
+        const byNo = new Map();
+        const byName = new Map();
+        const rows = Array.isArray(participantResults?.rounds) ? participantResults.rounds : [];
+        rows.forEach((round) => {
+            const roundId = Number(round?.round_id || 0);
+            if (roundId > 0) byId.set(roundId, round);
+            const roundNo = parseRoundNoValue(round?.round_no);
+            if (roundNo !== null && !byNo.has(roundNo)) byNo.set(roundNo, round);
+            const nameKey = normalizeText(round?.round_name);
+            if (nameKey && !byName.has(nameKey)) byName.set(nameKey, round);
+        });
+        return { byId, byNo, byName };
+    }, [participantResults?.rounds]);
+    const participantResultCards = useMemo(() => (
+        Array.isArray(participantResults?.participant_cards)
+            ? participantResults.participant_cards.filter((card) => card && card.key)
+            : []
+    ), [participantResults?.participant_cards]);
+    const participantChartRows = useMemo(() => {
+        const rows = Array.isArray(participantResults?.rounds) ? participantResults.rounds : [];
+        return rows
+            .map((round) => {
+                const standing = round?.standing && typeof round.standing === 'object' ? round.standing : null;
+                if (!standing) return null;
+                const roundNo = Number(round?.round_no || 0);
+                return {
+                    label: roundNo > 0 ? `R${roundNo}` : String(round?.round_name || 'Round'),
+                    round_name: round?.round_name || '',
+                    score: Number(standing?.round_score || 0),
+                    cumulative_score: Number(standing?.cumulative_score || 0),
+                    rank: standing?.round_rank ? Number(standing.round_rank) : null,
+                };
+            })
+            .filter(Boolean);
+    }, [participantResults?.rounds]);
+    const hasParticipantChartData = participantChartRows.length > 0;
+    const participantMaxRank = useMemo(() => (
+        Math.max(...participantChartRows.map((row) => Number(row.rank || 0)), 1)
+    ), [participantChartRows]);
+    const eventDateLabel = useMemo(
+        () => getEventDateLabel(eventInfo?.start_date, eventInfo?.end_date),
+        [eventInfo?.start_date, eventInfo?.end_date]
+    );
+    const showParticipantDashboardTab = Boolean(participantPath) && !registrationBlockedByApproval;
+    const eventPosterAssets = useMemo(
+        () => sortPosterAssetsByPriority(parsePosterAssets(eventInfo?.poster_url)),
+        [eventInfo?.poster_url]
+    );
+    const eventPosterAspectRatio = useMemo(
+        () => posterAspectRatioToCss(eventPosterAssets[0]?.aspect_ratio),
+        [eventPosterAssets]
+    );
+    const whatsappUrl = useMemo(() => {
+        const value = String(eventInfo?.whatsapp_url || '').trim();
+        return value || '';
+    }, [eventInfo?.whatsapp_url]);
+    const externalUrlLabel = useMemo(() => {
+        const value = String(eventInfo?.external_url_name || '').trim();
+        return value || 'Join whatsapp channel';
+    }, [eventInfo?.external_url_name]);
+    const isEventClosed = useMemo(
+        () => String(eventInfo?.status || '').toLowerCase() === 'closed',
+        [eventInfo?.status]
+    );
+    const disableExternalCtas = isEventClosed;
+    const eventQrWhatsappShareUrl = useMemo(() => {
+        const eventUrl = `${window.location.origin}${infoPath}`;
+        const title = String(eventInfo?.title || 'PDA Event').trim();
+        const descriptionRaw = String(eventInfo?.description || '').replace(/\s+/g, ' ').trim();
+        const description = descriptionRaw.length > 500 ? `${descriptionRaw.slice(0, 497)}...` : descriptionRaw;
+        const messageLines = [
+            `*${title}*`,
+            `Description: ${description || 'Not provided'}`,
+            `Link: ${eventUrl}`,
+        ];
+        return `https://wa.me/?text=${encodeURIComponent(messageLines.join('\n\n'))}`;
+    }, [eventInfo?.description, eventInfo?.title, infoPath]);
+    const selectedRoundPosterAssets = useMemo(
+        () => parsePosterAssets(selectedRound?.round_poster),
+        [selectedRound?.round_poster]
+    );
+    const selectedRoundDateLabel = useMemo(
+        () => formatEventDate(selectedRound?.date),
+        [selectedRound?.date]
+    );
+    const selectedRoundDeadlineLabel = useMemo(
+        () => formatDateTimeIst(selectedRound?.submission_deadline),
+        [selectedRound?.submission_deadline]
+    );
+    const selectedRoundDescription = useMemo(
+        () => String(selectedRound?.description || '').trim(),
+        [selectedRound?.description]
+    );
+    const showRoundDescriptionToggle = selectedRoundDescription.length > 340;
+    const getErrorMessage = useCallback((error, fallback) => {
+        const detail = error?.response?.data?.detail;
+        if (Array.isArray(detail)) {
+            return detail.map((item) => item?.msg || item?.detail || JSON.stringify(item)).join(', ');
+        }
+        if (detail && typeof detail === 'object') {
+            return detail.msg || detail.detail || JSON.stringify(detail);
+        }
+        return detail || fallback;
+    }, []);
+    const seatAvailabilityEnabled = Boolean(eventInfo?.seat_availability_enabled);
+    const seatCapacity = seatAvailabilityEnabled
+        ? parseSeatCapacityValue(eventInfo?.seat_capacity)
+        : 0;
+    const seatsOccupied = seatAvailabilityEnabled
+        ? Math.max(0, Number.parseInt(String(eventInfo?.seats_occupied || 0), 10) || 0)
+        : 0;
+    const seatsLeft = seatAvailabilityEnabled ? Math.max(seatCapacity - seatsOccupied, 0) : 0;
+    const occupiedRatio = seatAvailabilityEnabled && seatCapacity > 0
+        ? Math.min(seatsOccupied / seatCapacity, 1)
+        : 0;
+    const seatProgressPercent = seatAvailabilityEnabled
+        ? Math.min(100, 50 + (occupiedRatio * 50))
+        : 0;
+    const originCommunityProfileId = String(eventInfo?.community_profile_id || '').trim();
+    const originCommunityName = String(eventInfo?.community_name || '').trim();
+    const originClubName = String(eventInfo?.club_name || '').trim();
+    const originByLabel = originClubName || originCommunityName || originCommunityProfileId || '';
+    const showOriginInlineMeta = Boolean(originByLabel || originCommunityProfileId);
+
+    const fetchData = useCallback(async (options = {}) => {
+        const authHeaderOverride = options.authHeaderOverride;
+        const resolvedAuthHeader = authHeaderOverride || getAuthHeader();
+        setParticipantAccessClosed(false);
+        let nextDashboard = null;
+        try {
+            const eventRes = await axios.get(`${API}/persohub/persohub-events/${eventSlug}`);
+            const nextEvent = eventRes.data;
+            setEventInfo(nextEvent);
+            try {
+                const roundsRes = await axios.get(`${API}/persohub/persohub-events/${eventSlug}/rounds`);
+                setPublishedRounds(Array.isArray(roundsRes?.data) ? roundsRes.data : []);
+            } catch {
+                setPublishedRounds([]);
+            }
+
+            if (isLoggedIn || authHeaderOverride) {
+                try {
+                    const dashboardRes = await axios.get(`${API}/persohub/persohub-events/${eventSlug}/dashboard`, { headers: resolvedAuthHeader });
+                    nextDashboard = dashboardRes.data;
+                    setDashboard(nextDashboard);
+                } catch (dashboardError) {
+                    setDashboard(null);
+                    const statusCode = dashboardError?.response?.status;
+                    const detail = String(dashboardError?.response?.data?.detail || '');
+                    if (statusCode === 403 && detail === 'Event is closed') {
+                        setParticipantAccessClosed(true);
+                    }
+                }
+            } else {
+                setDashboard(null);
+            }
+
+            if (!shouldFetchParticipantData) {
+                setEventProfile(null);
+                setRoundStatuses([]);
+                setParticipantResults(null);
+                return { eventInfo: nextEvent, dashboard: nextDashboard, is_registered: Boolean(nextDashboard?.is_registered) };
+            }
+
+            if (!nextDashboard) {
+                setEventProfile(null);
+                setRoundStatuses([]);
+                setParticipantResults(null);
+                return { eventInfo: nextEvent, dashboard: null, is_registered: false };
+            }
+
+            if (nextDashboard?.is_registered) {
+                const [profileRes, roundsRes, resultsRes] = await Promise.allSettled([
+                    nextEvent?.participant_mode === 'individual'
+                        ? axios.get(`${API}/persohub/persohub-events/${eventSlug}/me`, { headers: resolvedAuthHeader })
+                        : Promise.resolve({ data: null }),
+                    axios.get(`${API}/persohub/persohub-events/${eventSlug}/my-rounds`, { headers: resolvedAuthHeader }),
+                    axios.get(`${API}/persohub/persohub-events/${eventSlug}/my-results`, { headers: resolvedAuthHeader })
+                ]);
+
+                if (profileRes.status === 'fulfilled') {
+                    setEventProfile(profileRes.value.data || null);
+                } else {
+                    const statusCode = profileRes.reason?.response?.status;
+                    const detail = String(profileRes.reason?.response?.data?.detail || '');
+                    if (statusCode === 403 && detail === 'Event is closed') {
+                        setParticipantAccessClosed(true);
+                    }
+                    setEventProfile(null);
+                }
+
+                if (roundsRes.status === 'fulfilled') {
+                    setRoundStatuses(roundsRes.value.data || []);
+                } else {
+                    const statusCode = roundsRes.reason?.response?.status;
+                    const detail = String(roundsRes.reason?.response?.data?.detail || '');
+                    if (statusCode === 403 && detail === 'Event is closed') {
+                        setParticipantAccessClosed(true);
+                    }
+                    setRoundStatuses([]);
+                }
+
+                if (resultsRes.status === 'fulfilled') {
+                    setParticipantResults(resultsRes.value.data || null);
+                } else {
+                    const statusCode = resultsRes.reason?.response?.status;
+                    const detail = String(resultsRes.reason?.response?.data?.detail || '');
+                    if (statusCode === 403 && detail === 'Event is closed') {
+                        setParticipantAccessClosed(true);
+                    }
+                    setParticipantResults(null);
+                }
+            } else {
+                setEventProfile(null);
+                setRoundStatuses([]);
+                setParticipantResults(null);
+            }
+            return { eventInfo: nextEvent, dashboard: nextDashboard, is_registered: Boolean(nextDashboard?.is_registered) };
+        } catch (error) {
+            setEventInfo(null);
+            setPublishedRounds([]);
+            setDashboard(null);
+            setEventProfile(null);
+            setRoundStatuses([]);
+            setParticipantResults(null);
+            toast.error(getErrorMessage(error, 'Failed to load event'));
+            return { eventInfo: null, dashboard: null, is_registered: false };
+        } finally {
+            setLoading(false);
+        }
+    }, [eventSlug, getAuthHeader, getErrorMessage, isLoggedIn, shouldFetchParticipantData]);
+
+    useEffect(() => {
+        fetchData();
+    }, [fetchData]);
+
+    useEffect(() => {
+        setLoading(true);
+    }, [eventSlug]);
+
+    const closeRegistrationDialog = (force = false) => {
+        if (!force && (registering || creatingTeam || joiningTeam)) return;
+        setRegistrationDialogOpen(false);
+        setRegisterConfirmed(false);
+        setTeamName('');
+        setTeamCode('');
+    };
+
+    const closePaymentModal = (force = false) => {
+        if (!force && paymentSubmitting) return;
+        setPaymentModalOpen(false);
+        setPaymentScreenshot(null);
+        setPaymentComment('');
+        setPaymentUploadProgress(null);
+    };
+
+    const openAuthDialog = (tab = 'login') => {
+        setAuthTab(tab);
+        setAuthDialogOpen(true);
+    };
+
+    const closeAuthDialog = () => {
+        if (authLoading || signupLoading) return;
+        setAuthDialogOpen(false);
+    };
+
+    const postAuthOpenRegistration = async (authHeaderOverride) => {
+        const result = await fetchData({ authHeaderOverride });
+        if (registrationAvailable && !Boolean(result?.is_registered)) {
+            setRegistrationDialogOpen(true);
+        }
+    };
+
+    const handleLoginSubmit = async (e) => {
+        e.preventDefault();
+        if (!loginForm.regno.trim() || !loginForm.password) return;
+        setAuthLoading(true);
+        try {
+            const data = await login(loginForm.regno.trim(), loginForm.password);
+            if (data?.password_reset_required && data?.reset_token) {
+                toast.info('Please reset your password to continue.');
+                setAuthDialogOpen(false);
+                navigate(`/reset-password?token=${data.reset_token}`);
+                return;
+            }
+            toast.success('Login successful');
+            setAuthDialogOpen(false);
+            const authHeaderOverride = data?.access_token ? { Authorization: `Bearer ${data.access_token}` } : null;
+            await postAuthOpenRegistration(authHeaderOverride);
+        } catch (error) {
+            console.error('PDA login failed:', error);
+            toast.error(getErrorMessage(error, 'Login failed. Please check your credentials.'));
+        } finally {
+            setAuthLoading(false);
+        }
+    };
+
+    const handleSignupSubmit = async (e) => {
+        e.preventDefault();
+        const missingRequiredField = Object.entries(signupForm).some(([key, value]) => {
+            if (key === 'collegeOther') {
+                return signupForm.collegeChoice === 'OTHER' && !String(value).trim();
+            }
+            if (key === 'deptOther') {
+                return signupForm.deptChoice === DEPARTMENT_OTHER && !String(value).trim();
+            }
+            if (key === 'dob' || key === 'gender') {
+                return !value;
+            }
+            if (key === 'deptChoice') {
+                return !value;
+            }
+            if (key === 'collegeChoice') {
+                return !value;
+            }
+            return !String(value).trim();
+        });
+        if (missingRequiredField) {
+            toast.error('Please complete all required fields');
+            return;
+        }
+        if (signupForm.password !== signupForm.confirmPassword) {
+            toast.error('Passwords do not match');
+            return;
+        }
+        const normalizedProfileName = String(signupForm.profile_name || '').trim().toLowerCase();
+        if (normalizedProfileName && !/^[a-z0-9_]{3,40}$/.test(normalizedProfileName)) {
+            toast.error('Profile name must be 3-40 chars: lowercase letters, numbers, underscore');
+            return;
+        }
+        const departmentValue = signupForm.deptChoice === DEPARTMENT_OTHER
+            ? signupForm.deptOther.trim()
+            : signupForm.deptChoice;
+        if (!departmentValue) {
+            toast.error('Please enter your department');
+            return;
+        }
+        const collegeValue = signupForm.collegeChoice === 'OTHER'
+            ? signupForm.collegeOther.trim()
+            : 'MIT';
+        if (!collegeValue) {
+            toast.error('Please enter your college name');
+            return;
+        }
+        setSignupLoading(true);
+        try {
+            const result = await register({
+                name: signupForm.name.trim(),
+                profile_name: normalizedProfileName || undefined,
+                regno: signupForm.regno.trim(),
+                email: signupForm.email.trim(),
+                dob: signupForm.dob,
+                gender: signupForm.gender,
+                phno: signupForm.phno.trim(),
+                dept: departmentValue,
+                college: collegeValue,
+                password: signupForm.password
+            });
+            if (result?.status === 'verification_required') {
+                toast.success('Check your email to verify your account, then log in.');
+                setAuthTab('login');
+                return;
+            }
+            toast.success('Registration successful!');
+            setAuthDialogOpen(false);
+            await postAuthOpenRegistration();
+        } catch (error) {
+            console.error('Signup failed:', error);
+            toast.error(getErrorMessage(error, 'Failed to register'));
+        } finally {
+            setSignupLoading(false);
+        }
+    };
+
+    const registerIndividual = async () => {
+        if (!confirmationMatches || !eventInfo || !registrationAvailable) return;
+        if (paymentRequired && payableAmount > 0) {
+            closeRegistrationDialog(true);
+            setPaymentModalOpen(true);
+            return;
+        }
+        setRegistering(true);
+        try {
+            await axios.post(`${API}/persohub/persohub-events/${eventSlug}/register`, {}, { headers: getAuthHeader() });
+            toast.success('Registered successfully');
+            closeRegistrationDialog(true);
+            if (whatsappUrl) {
+                setRegistrationCtaVariant('registered');
+                setRegistrationCtaModalOpen(true);
+            }
+            await fetchData();
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Registration failed'));
+        } finally {
+            setRegistering(false);
+        }
+    };
+
+    const createTeam = async (e) => {
+        e.preventDefault();
+        if (!confirmationMatches || !registrationAvailable) return;
+        setCreatingTeam(true);
+        try {
+            await axios.post(`${API}/persohub/persohub-events/${eventSlug}/teams/create`, { team_name: teamName }, { headers: getAuthHeader() });
+            closeRegistrationDialog(true);
+            const result = await fetchData();
+            const nextRequiresPayment = Boolean(result?.dashboard?.payment_required) && Number(result?.dashboard?.payable_amount || 0) > 0;
+            if (nextRequiresPayment) {
+                toast.success('Team created. Submit payment proof to continue registration.');
+            } else {
+                toast.success('Team created');
+            }
+            if (!nextRequiresPayment && whatsappUrl) {
+                setRegistrationCtaVariant('registered');
+                setRegistrationCtaModalOpen(true);
+            }
+            if (nextRequiresPayment) {
+                setPaymentModalOpen(true);
+            }
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to create team'));
+        } finally {
+            setCreatingTeam(false);
+        }
+    };
+
+    const joinTeam = async (e) => {
+        e.preventDefault();
+        if (!confirmationMatches || !registrationAvailable) return;
+        setJoiningTeam(true);
+        try {
+            await axios.post(`${API}/persohub/persohub-events/${eventSlug}/teams/join`, { team_code: teamCode }, { headers: getAuthHeader() });
+            closeRegistrationDialog(true);
+            const result = await fetchData();
+            const nextRequiresPayment = Boolean(result?.dashboard?.payment_required) && Number(result?.dashboard?.payable_amount || 0) > 0;
+            if (nextRequiresPayment) {
+                toast.success('Joined team. Team leader must submit payment proof.');
+            } else {
+                toast.success('Joined team');
+            }
+            if (!nextRequiresPayment && whatsappUrl) {
+                setRegistrationCtaVariant('registered');
+                setRegistrationCtaModalOpen(true);
+            }
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to join team'));
+        } finally {
+            setJoiningTeam(false);
+        }
+    };
+
+    const submitPaymentProof = async () => {
+        if (!canSubmitPayment) return;
+        if (!paymentScreenshot) {
+            toast.error('Upload payment screenshot');
+            return;
+        }
+        if (!paymentQrImage || !paymentId) {
+            toast.error('Payment details are not configured for this club');
+            return;
+        }
+        setPaymentSubmitting(true);
+        setPaymentUploadProgress(null);
+        try {
+            const contentType = paymentScreenshot.type || 'application/octet-stream';
+            const presignRes = await axios.post(
+                `${API}/persohub/persohub-events/${eventSlug}/payments/presign`,
+                {
+                    filename: paymentScreenshot.name,
+                    content_type: contentType,
+                    file_size_bytes: paymentScreenshot.size,
+                },
+                { headers: getAuthHeader() }
+            );
+            const { upload_url, public_url, content_type } = presignRes.data || {};
+            setPaymentUploadProgress(0);
+            await axios.put(upload_url, paymentScreenshot, {
+                headers: { 'Content-Type': content_type || contentType },
+                onUploadProgress: (progressEvent) => {
+                    const totalBytes = Number(progressEvent?.total || 0);
+                    const loadedBytes = Number(progressEvent?.loaded || 0);
+                    if (totalBytes > 0) {
+                        const percent = Math.min(100, Math.max(0, Math.round((loadedBytes / totalBytes) * 100)));
+                        setPaymentUploadProgress(percent);
+                    }
+                },
+            });
+            setPaymentUploadProgress(100);
+            await axios.post(
+                `${API}/persohub/persohub-events/${eventSlug}/payments/submit`,
+                {
+                    payment_info_url: public_url,
+                    comment: paymentComment.trim() || null,
+                },
+                { headers: getAuthHeader() }
+            );
+            toast.success('Payment submitted. Pending confirmation.');
+            closePaymentModal(true);
+            if (whatsappUrl) {
+                setRegistrationCtaVariant('payment_submitted');
+                setRegistrationCtaModalOpen(true);
+            }
+            await fetchData();
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to submit payment proof'));
+        } finally {
+            setPaymentSubmitting(false);
+            setPaymentUploadProgress(null);
+        }
+    };
+
+    const inviteMember = async (e) => {
+        e.preventDefault();
+        if (!inviteRegno.trim()) return;
+        setInviting(true);
+        try {
+            await axios.post(`${API}/persohub/persohub-events/${eventSlug}/team/invite`, { regno: inviteRegno.trim() }, { headers: getAuthHeader() });
+            toast.success('Member invited');
+            setInviteRegno('');
+            await fetchData();
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Invite failed'));
+        } finally {
+            setInviting(false);
+        }
+    };
+
+    const leaveTeam = async () => {
+        setLeaveTeamLoading(true);
+        try {
+            await axios.delete(`${API}/persohub/persohub-events/${eventSlug}/team/leave`, { headers: getAuthHeader() });
+            toast.success('You left the team');
+            setLeaveTeamDialogOpen(false);
+            await fetchData();
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to leave team'));
+        } finally {
+            setLeaveTeamLoading(false);
+        }
+    };
+
+    const removeMemberFromTeam = async () => {
+        if (!removeMemberDialog?.userId) return;
+        setRemoveMemberLoading(true);
+        try {
+            await axios.delete(`${API}/persohub/persohub-events/${eventSlug}/team/members/${removeMemberDialog.userId}`, { headers: getAuthHeader() });
+            toast.success('Team member removed');
+            setRemoveMemberDialog({ open: false, userId: null, name: '' });
+            await fetchData();
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to remove team member'));
+        } finally {
+            setRemoveMemberLoading(false);
+        }
+    };
+
+    const deleteTeam = async () => {
+        setDeleteTeamLoading(true);
+        try {
+            await axios.delete(`${API}/persohub/persohub-events/${eventSlug}/team`, { headers: getAuthHeader() });
+            toast.success('Team removed');
+            setDeleteTeamDialogOpen(false);
+            await fetchData();
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to remove team'));
+        } finally {
+            setDeleteTeamLoading(false);
+        }
+    };
+
+    const loadQr = async () => {
+        if (!isLoggedIn || !isRegistered) return;
+        setQrLoading(true);
+        try {
+            const response = await axios.get(`${API}/persohub/persohub-events/${eventSlug}/qr`, { headers: getAuthHeader() });
+            const token = response.data?.qr_token || '';
+            if (!token) {
+                throw new Error('Token unavailable');
+            }
+            const dataUrl = await QRCode.toDataURL(token, {
+                width: 360,
+                margin: 1,
+                color: {
+                    dark: '#000000',
+                    light: '#FFFFFF'
+                }
+            });
+            setQrImageUrl(dataUrl);
+            setQrDialogOpen(true);
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to generate attendance QR'));
+        } finally {
+            setQrLoading(false);
+        }
+    };
+
+    const downloadQrImage = (dataUrl, filename) => {
+        if (!dataUrl) return;
+        const anchor = document.createElement('a');
+        anchor.href = dataUrl;
+        anchor.download = filename;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+    };
+
+    const loadEventQr = async () => {
+        if (!eventSlug) return;
+        setSlugQrLoading(true);
+        try {
+            const eventUrl = `${window.location.origin}${infoPath}`;
+            const dataUrl = await QRCode.toDataURL(eventUrl, {
+                width: 360,
+                margin: 1,
+                color: {
+                    dark: '#000000',
+                    light: '#FFFFFF',
+                },
+            });
+            setSlugQrImageUrl(dataUrl);
+            setSlugQrDialogOpen(true);
+        } catch {
+            toast.error('Failed to generate event QR');
+        } finally {
+            setSlugQrLoading(false);
+        }
+    };
+
+    const copyReferralCode = () => {
+        if (!eventProfile?.referral_code) return;
+        navigator.clipboard.writeText(eventProfile.referral_code);
+        setCopiedReferral(true);
+        toast.success('Referral code copied');
+        setTimeout(() => setCopiedReferral(false), 1800);
+    };
+
+    const loadRoundSubmission = useCallback(async (round) => {
+        if (!round?.id || !round?.requires_submission || !canViewRoundSubmission) {
+            setRoundSubmission(null);
+            setLoadingSubmission(false);
+            return;
+        }
+        setLoadingSubmission(true);
+        try {
+            const response = await axios.get(
+                `${API}/persohub/persohub-events/${eventSlug}/rounds/${round.id}/submission`,
+                { headers: getAuthHeader() }
+            );
+            const data = response.data || null;
+            setRoundSubmission(data);
+            setSubmissionType(normalizeSubmissionType(data?.submission_type));
+            setSubmissionLink(data?.link_url || '');
+            setSubmissionNotes(data?.notes || '');
+            setExistingSubmissionFiles(toSubmissionFiles(data));
+            setNewSubmissionFiles([]);
+            setSubmissionUploadProgress(null);
+        } catch (error) {
+            setRoundSubmission(null);
+            toast.error(getErrorMessage(error, 'Failed to load round submission'));
+        } finally {
+            setLoadingSubmission(false);
+        }
+    }, [canViewRoundSubmission, eventSlug, getAuthHeader, getErrorMessage]);
+
+    useEffect(() => {
+        if (!selectedRound) {
+            setRoundSubmission(null);
+            setExistingSubmissionFiles([]);
+            setNewSubmissionFiles([]);
+            setSubmissionLink('');
+            setSubmissionNotes('');
+            setSubmissionType('file');
+            setRemovingRoundWork(false);
+            setIsRoundDescriptionExpanded(false);
+            return;
+        }
+        setIsRoundDescriptionExpanded(false);
+        loadRoundSubmission(selectedRound);
+    }, [loadRoundSubmission, selectedRound]);
+
+    const submitRoundWork = async () => {
+        if (!selectedRound?.id || !selectedRound?.requires_submission) return;
+        if (!canViewRoundSubmission) {
+            toast.error('Login and register for this event to submit work');
+            return;
+        }
+        if (!canEditRoundSubmission) {
+            toast.error('Only team leader can submit for this round');
+            return;
+        }
+        if (!roundSubmission?.is_editable) {
+            toast.error(normalizeSubmissionLockReason(roundSubmission?.lock_reason) || 'Submission is currently locked');
+            return;
+        }
+        setSubmittingRoundWork(true);
+        setSubmissionUploadProgress(null);
+        try {
+            const normalizedSubmissionType = normalizeSubmissionType(submissionType);
+            let payload = {
+                submission_type: normalizedSubmissionType,
+                notes: String(submissionNotes || '').trim() || null,
+            };
+            if (normalizedSubmissionType === 'file') {
+                const retainedFiles = existingSubmissionFiles.filter((item) => String(item?.file_url || '').trim());
+                const selectedFiles = newSubmissionFiles.filter(Boolean);
+                const totalFileCount = retainedFiles.length + selectedFiles.length;
+                if (totalFileCount < 1) {
+                    toast.error('Choose at least one file');
+                    setSubmittingRoundWork(false);
+                    return;
+                }
+                if (totalFileCount > MAX_SUBMISSION_FILES) {
+                    toast.error(`You can submit up to ${MAX_SUBMISSION_FILES} files`);
+                    setSubmittingRoundWork(false);
+                    return;
+                }
+                const uploadedFiles = [];
+                if (selectedFiles.length > 0) {
+                    setSubmissionUploadProgress(0);
+                }
+                for (let index = 0; index < selectedFiles.length; index += 1) {
+                    const file = selectedFiles[index];
+                    const presignRes = await axios.post(
+                        `${API}/persohub/persohub-events/${eventSlug}/rounds/${selectedRound.id}/submission/presign`,
+                        {
+                            filename: file.name,
+                            content_type: file.type,
+                            file_size_bytes: file.size,
+                        },
+                        { headers: getAuthHeader() }
+                    );
+                    const { upload_url, public_url, content_type } = presignRes.data || {};
+                    await axios.put(upload_url, file, {
+                        headers: { 'Content-Type': content_type || file.type },
+                        onUploadProgress: (progressEvent) => {
+                            const totalBytes = Number(progressEvent?.total || 0);
+                            const loadedBytes = Number(progressEvent?.loaded || 0);
+                            const fileProgress = totalBytes > 0 ? (loadedBytes / totalBytes) : 0;
+                            const percent = Math.min(
+                                100,
+                                Math.max(0, Math.round(((index + fileProgress) / selectedFiles.length) * 100))
+                            );
+                            setSubmissionUploadProgress(percent);
+                        },
+                    });
+                    uploadedFiles.push({
+                        file_url: public_url,
+                        file_name: file.name,
+                        file_size_bytes: file.size,
+                        mime_type: file.type || 'application/octet-stream',
+                    });
+                }
+                const mergedFiles = [...retainedFiles, ...uploadedFiles];
+                const firstFile = mergedFiles[0] || {};
+                setSubmissionUploadProgress(100);
+                payload = {
+                    ...payload,
+                    submission_type: 'file',
+                    files: mergedFiles,
+                    file_url: firstFile.file_url || null,
+                    file_name: firstFile.file_name || null,
+                    file_size_bytes: firstFile.file_size_bytes || null,
+                    mime_type: firstFile.mime_type || null,
+                    link_url: null,
+                };
+            } else {
+                const cleanedLink = String(submissionLink || '').trim();
+                if (!cleanedLink) {
+                    toast.error('Enter a submission link');
+                    setSubmittingRoundWork(false);
+                    return;
+                }
+                payload = {
+                    ...payload,
+                    submission_type: 'link',
+                    link_url: cleanedLink,
+                };
+            }
+            await axios.put(
+                `${API}/persohub/persohub-events/${eventSlug}/rounds/${selectedRound.id}/submission`,
+                payload,
+                { headers: getAuthHeader() }
+            );
+            setSubmissionSuccessText(
+                normalizeSubmissionType(submissionType) === 'file'
+                    ? 'Files submitted successfully.'
+                    : 'Submission link saved successfully.'
+            );
+            setSubmissionSuccessDialogOpen(true);
+            setSelectedRound(null);
+            setExistingSubmissionFiles([]);
+            setNewSubmissionFiles([]);
+            await fetchData();
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to submit round work'));
+        } finally {
+            setSubmittingRoundWork(false);
+            setSubmissionUploadProgress(null);
+        }
+    };
+
+    const removeRoundSubmission = async () => {
+        if (!selectedRound?.id || !selectedRound?.requires_submission) return;
+        if (!canViewRoundSubmission) {
+            toast.error('Login and register for this event to manage submission');
+            return;
+        }
+        if (!canEditRoundSubmission) {
+            toast.error('Only team leader can submit for this round');
+            return;
+        }
+        if (!roundSubmission?.id) {
+            toast.error('No submission found to remove');
+            return;
+        }
+        if (!roundSubmission?.is_editable) {
+            toast.error(normalizeSubmissionLockReason(roundSubmission?.lock_reason) || 'Submission is currently locked');
+            return;
+        }
+        setRemovingRoundWork(true);
+        try {
+            const response = await axios.delete(
+                `${API}/persohub/persohub-events/${eventSlug}/rounds/${selectedRound.id}/submission`,
+                { headers: getAuthHeader() }
+            );
+            const data = response.data || null;
+            setRoundSubmission(data);
+            setSubmissionType('file');
+            setSubmissionLink('');
+            setSubmissionNotes('');
+            setExistingSubmissionFiles([]);
+            setNewSubmissionFiles([]);
+            setSubmissionUploadProgress(null);
+            await fetchData();
+            toast.success('Submitted work removed');
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to remove submission'));
+        } finally {
+            setRemovingRoundWork(false);
+        }
+    };
+
+    if (isParticipantRoute && isLoggedIn && hasUserProfile && !isParticipantOwner) {
+        return <Navigate to={infoPath} replace />;
+    }
+
+    if (loading && !eventInfo) {
+        return (
+            <div className="ph-event-dashboard min-h-screen bg-[#fffdf5] flex flex-col overflow-x-hidden">
+                <PdaHeader />
+                <main className="mx-auto w-full max-w-7xl flex-1 min-h-screen overflow-x-hidden px-4 py-8 sm:px-6 lg:px-8">
+                    <div className="neo-card animate-pulse">
+                        <p className="font-heading text-xl font-bold">Loading event dashboard...</p>
+                    </div>
+                </main>
+                <PdaFooter />
+            </div>
+        );
+    }
+
+    if (!eventInfo) {
+        return (
+            <div className="ph-event-dashboard min-h-screen bg-[#fffdf5] flex flex-col overflow-x-hidden">
+                <PdaHeader />
+                <main className="mx-auto w-full max-w-7xl flex-1 min-h-screen overflow-x-hidden px-4 py-8 sm:px-6 lg:px-8">
+                    <div className="rounded-md border-4 border-black bg-white p-6 shadow-[8px_8px_0px_0px_#000000]">
+                        <h1 className="font-heading text-3xl font-black uppercase tracking-tight">Event not found</h1>
+                        <p className="mt-2 text-sm font-medium text-slate-700">This event does not exist or is unavailable.</p>
+                        <Link to="/" className="mt-4 inline-block">
+                            <Button className="border-2 border-black bg-[#FDE047] text-black shadow-neo">Back to Home</Button>
+                        </Link>
+                    </div>
+                </main>
+                <PdaFooter />
+            </div>
+        );
+    }
+
+    if (isParticipantRoute && isParticipantOwner && registrationBlockedByApproval) {
+        return <Navigate to={infoPath} replace />;
+    }
+
+    return (
+        <div className="ph-event-dashboard min-h-screen bg-[#fffdf5] flex flex-col overflow-x-hidden">
+            <PdaHeader />
+            <main className="mx-auto w-full max-w-7xl flex-1 min-h-screen overflow-x-hidden px-4 py-8 sm:px-6 lg:px-8">
+                <section className="mt-6 rounded-md border-4 border-black bg-white p-2 shadow-[8px_8px_0px_0px_#000000]">
+                    <div className="flex flex-wrap gap-2">
+                        <Link to={infoPath} className="flex-1 min-w-[180px]">
+                            <Button
+                                variant="outline"
+                                className={`w-full border-2 border-black shadow-neo ${!isParticipantRoute ? 'bg-[#FDE047] text-black' : 'bg-white'}`}
+                            >
+                                Event Info
+                            </Button>
+                        </Link>
+                        {showParticipantDashboardTab ? (
+                            <Link to={participantPath} className="flex-1 min-w-[220px]">
+                                <Button
+                                    variant="outline"
+                                    className={`w-full border-2 border-black shadow-neo ${isParticipantRoute ? 'bg-[#8B5CF6] text-white' : 'bg-white'}`}
+                                >
+                                    Participant Dashboard
+                                </Button>
+                            </Link>
+                        ) : null}
+                    </div>
+                </section>
+                {!isParticipantRoute ? (
+                    <section className="mt-6 overflow-hidden rounded-md border-4 border-black bg-white shadow-[8px_8px_0px_0px_#000000]">
+                        <div className="grid gap-0 lg:grid-cols-[1.25fr_0.75fr]">
+                            <div className="p-6 sm:p-8">
+                                <p className="font-mono text-xs font-bold uppercase tracking-[0.2em] text-[#8B5CF6]">{eventInfo.event_code}</p>
+                                <div className="mt-2 flex min-w-0 flex-wrap items-center gap-3">
+                                    <h1 className="break-words font-heading text-4xl font-black uppercase tracking-tight sm:text-5xl">{eventInfo.title}</h1>
+                                    <span className="rounded-md border-2 border-black bg-white px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] shadow-neo">
+                                        {eventInfo.status}
+                                    </span>
+                                    {registrationAvailable && showRegisterNowButton ? (
+                                        <Button
+                                            data-testid="event-overview-register-button"
+                                            onClick={() => {
+                                                if (isRegistered) return;
+                                                if (!isLoggedIn) {
+                                                    openAuthDialog('login');
+                                                    return;
+                                                }
+                                                if (isTeamEvent && hasTeam && paymentRequired && payableAmount > 0 && isLeader) {
+                                                    setPaymentModalOpen(true);
+                                                    return;
+                                                }
+                                                setRegistrationDialogOpen(true);
+                                            }}
+                                            className={`h-auto max-w-full whitespace-normal border-2 border-black py-2 text-left shadow-neo ${
+                                                isPendingRegistration
+                                                    ? 'bg-amber-200 text-amber-900 cursor-not-allowed'
+                                                    : (isRegistered
+                                                        ? 'bg-slate-200 text-slate-600 cursor-not-allowed'
+                                                        : 'bg-[#8B5CF6] text-white hover:bg-[#7C3AED]')
+                                            }`}
+                                            disabled={isRegistered}
+                                        >
+                                            <span className="break-words">{registrationCtaLabel}</span>
+                                        </Button>
+                                    ) : null}
+                                </div>
+                                {showOriginInlineMeta ? (
+                                    <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2 text-[11px] font-black uppercase tracking-[0.1em] text-slate-700">
+                                        {originByLabel ? (
+                                            <span className="min-w-0 truncate">{`By ${originByLabel}`}</span>
+                                        ) : null}
+                                        {originCommunityProfileId ? (
+                                            <Link
+                                                to={`/persohub/${encodeURIComponent(originCommunityProfileId)}`}
+                                                className="inline-flex max-w-full items-center rounded-md border-2 border-black bg-white px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.1em] text-slate-800 shadow-neo hover:bg-[#fef9c3]"
+                                            >
+                                                <span className="truncate">{`@${originCommunityProfileId}`}</span>
+                                            </Link>
+                                        ) : null}
+                                    </div>
+                                ) : null}
+                                {eventInfo?.registration_fee?.enabled ? (
+                                    <div className="mt-3">
+                                        <span className="inline-flex rounded-md border-2 border-black bg-[#ffe4b5] px-3 py-1 text-xs font-black uppercase tracking-[0.14em] text-[#7c2d12] shadow-neo">
+                                            REGISTRATION FEE: MIT Student ₹{Number(eventInfo?.registration_fee?.amounts?.MIT || 0)} / Non MIT Students ₹{Number(eventInfo?.registration_fee?.amounts?.Other || 0)}
+                                        </span>
+                                    </div>
+                                ) : null}
+                                <div className="mt-3 max-w-2xl space-y-2 text-sm font-medium text-slate-700 sm:text-base">
+                                    <ParsedDescription
+                                        description={eventInfo?.description || ''}
+                                        emptyText="No description provided for this event yet."
+                                    />
+                                </div>
+                                <div className="mt-5 flex flex-wrap gap-2">
+                                    <span className="rounded-md border-2 border-black bg-[#FDE047] px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] shadow-neo">
+                                        {eventInfo.event_type}
+                                    </span>
+                                    <span className="rounded-md border-2 border-black bg-[#C4B5FD] px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] shadow-neo">
+                                        {eventInfo.format}
+                                    </span>
+                                    <span className="rounded-md border-2 border-black bg-white px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] shadow-neo">
+                                        {eventInfo.participant_mode}
+                                    </span>
+                                    <span className="rounded-md border-2 border-black bg-white px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] shadow-neo">
+                                        {eventInfo.round_count} rounds
+                                    </span>
+                                </div>
+                                <div className="mt-3 inline-flex items-center gap-2 rounded-md border-2 border-black bg-white px-3 py-2 text-xs font-bold uppercase tracking-[0.1em] text-slate-700 shadow-neo">
+                                    <Calendar className="h-4 w-4 text-[#8B5CF6]" />
+                                    <span>{eventDateLabel}</span>
+                                </div>
+                                {seatAvailabilityEnabled ? (
+                                    <div className="mt-4 max-w-xl rounded-md border-2 border-black bg-white p-3 shadow-neo">
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <p className="text-xs font-black uppercase tracking-[0.12em] text-slate-700">
+                                                Seats Availability
+                                            </p>
+                                            <span
+                                                className={`rounded-md border border-black px-2 py-1 text-[11px] font-black uppercase tracking-[0.08em] ${
+                                                    seatsLeft <= 0 ? 'bg-[#fecaca] text-[#7f1d1d]' : 'bg-[#FDE047] text-black'
+                                                }`}
+                                            >
+                                                {seatsLeft <= 0 ? 'Seats filled' : `${seatsLeft} seats left`}
+                                            </span>
+                                        </div>
+                                        <div className="mt-3 h-3 w-full overflow-hidden rounded-full border border-black bg-[#f8fafc]">
+                                            <div
+                                                className="h-full bg-[#8B5CF6] transition-[width] duration-300"
+                                                style={{ width: `${seatProgressPercent}%` }}
+                                            />
+                                        </div>
+                                    </div>
+                                ) : null}
+                                {whatsappUrl ? (
+                                    <div className="mt-3">
+                                        {disableExternalCtas ? (
+                                            <Button
+                                                data-testid="event-overview-whatsapp-button"
+                                                disabled
+                                                className="h-auto max-w-full whitespace-normal border-2 border-black bg-[#DC2626] py-2 text-left text-white shadow-neo"
+                                            >
+                                                <ExternalLink className="mr-2 h-4 w-4 shrink-0" />
+                                                <span className="break-words">{externalUrlLabel}</span>
+                                            </Button>
+                                        ) : (
+                                            <a href={whatsappUrl} target="_blank" rel="noreferrer" className="inline-block max-w-full">
+                                                <Button
+                                                    data-testid="event-overview-whatsapp-button"
+                                                    className="h-auto max-w-full whitespace-normal border-2 border-black bg-[#DC2626] py-2 text-left text-white shadow-neo hover:bg-[#B91C1C]"
+                                                >
+                                                    <ExternalLink className="mr-2 h-4 w-4 shrink-0" />
+                                                    <span className="break-words">{externalUrlLabel}</span>
+                                                </Button>
+                                            </a>
+                                        )}
+                                    </div>
+                                ) : null}
+                                <div className="mt-3">
+                                    <Button
+                                        data-testid="event-overview-view-event-slug-qr-button"
+                                        className="h-auto max-w-full whitespace-normal border-2 border-black bg-[#11131a] py-2 text-left text-white shadow-neo hover:bg-[#1f2330]"
+                                        onClick={loadEventQr}
+                                        disabled={slugQrLoading}
+                                    >
+                                        <QrCode className="mr-2 h-4 w-4 shrink-0" />
+                                        <span className="break-words">{slugQrLoading ? 'Generating QR...' : 'View Event QR'}</span>
+                                    </Button>
+                                </div>
+                            </div>
+                            <div className="border-t-4 border-black bg-[#11131a] lg:self-start lg:border-l-4 lg:border-t-0">
+                                <div className="relative w-full" style={{ aspectRatio: eventPosterAspectRatio }}>
+                                    {eventPosterAssets.length ? (
+                                        <PosterCarousel
+                                            assets={eventPosterAssets}
+                                            title={eventInfo.title}
+                                            className="h-full w-full"
+                                            imageClassName="h-full w-full object-cover"
+                                        />
+                                    ) : (
+                                        <div className="flex h-full items-center justify-center bg-[#1b1f2a] p-6 text-center">
+                                            <p className="font-heading text-2xl font-black uppercase tracking-tight text-white">{eventInfo.title}</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                ) : null}
+
+                {!isParticipantRoute && resultsPublished ? (
+                    <section className="mt-7 rounded-md border-4 border-black bg-[#11131a] p-6 text-white shadow-[8px_8px_0px_0px_#000000]">
+                        <div className="flex flex-wrap items-center justify-between gap-4">
+                            <div>
+                                <p className="font-mono text-xs font-bold uppercase tracking-[0.16em] text-[#FDE047]">Official Results</p>
+                                <h2 className="mt-1 font-heading text-3xl font-black uppercase tracking-tight">Results are live</h2>
+                                <p className="mt-2 text-sm font-medium text-slate-200">
+                                    View the published results, title winners, nominees, and round snapshots.
+                                </p>
+                            </div>
+                            <Link to={resultsPath} className="inline-block">
+                                <Button
+                                    data-testid="event-dashboard-go-results-button"
+                                    className="border-2 border-black bg-[#FDE047] text-black shadow-neo hover:bg-[#fde68a]"
+                                >
+                                    <Eye className="mr-2 h-4 w-4" />
+                                    Go to Results Page
+                                </Button>
+                            </Link>
+                        </div>
+                    </section>
+                ) : null}
+
+                {!isParticipantRoute ? (
+                    <section className="mt-7 rounded-md border-4 border-black bg-white p-6 shadow-[8px_8px_0px_0px_#000000]">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                                <p className="font-mono text-xs font-bold uppercase tracking-[0.16em] text-[#8B5CF6]">PDA</p>
+                                <h2 className="mt-1 font-heading text-3xl font-black uppercase tracking-tight">EXPLORE EVENT</h2>
+                            </div>
+                        </div>
+                        {publishedRounds.length === 0 ? (
+                            <p className="mt-4 rounded-md border-2 border-black bg-[#fffdf0] px-4 py-3 text-sm font-medium text-slate-700 shadow-neo">
+                                No published rounds yet.
+                            </p>
+                        ) : (
+                            <div className="mt-5 grid gap-5 lg:grid-cols-2">
+                                {publishedRounds.map((round) => {
+                                    const roundPosterAssets = parsePosterAssets(round?.round_poster);
+                                    const roundDateLabel = formatEventDate(round?.date);
+                                    const roundDeadlineLabel = formatDateTimeIst(round?.submission_deadline);
+                                    return (
+                                        <button
+                                            type="button"
+                                            key={round.id}
+                                            className="flex h-[34rem] w-full flex-col overflow-hidden rounded-md border-4 border-black bg-[#fffdf9] p-5 text-left shadow-[6px_6px_0px_0px_#000000] transition-transform duration-150 hover:-translate-y-[2px]"
+                                            onClick={() => setSelectedRound(round)}
+                                        >
+                                            <div className="mb-2">
+                                                <span className="inline-flex rounded-md border-2 border-black bg-[#8B5CF6] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-white">
+                                                    {`Round ${round.round_no || '-'}`}
+                                                </span>
+                                            </div>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <h3 className="inline-flex w-fit rounded-md border-2 border-black bg-[#FDE047] px-3 py-1 font-heading text-lg font-black uppercase tracking-tight text-black">
+                                                    {round.name}
+                                                </h3>
+                                            </div>
+                                            {roundDeadlineLabel ? (
+                                                <div className="mt-2">
+                                                    <span className="inline-flex rounded-md border-2 border-black bg-[#fee2e2] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-red-700">
+                                                        Deadline: {roundDeadlineLabel}
+                                                    </span>
+                                                </div>
+                                            ) : null}
+                                            {roundPosterAssets.length ? (
+                                                <div className="mt-3 overflow-hidden rounded-md border-2 border-black bg-[#11131a]">
+                                                    <PosterCarousel
+                                                        assets={roundPosterAssets}
+                                                        title={round.name || `Round ${round.round_no}`}
+                                                        className="h-52 w-full"
+                                                        imageClassName="h-52 w-full object-cover"
+                                                    />
+                                                </div>
+                                            ) : null}
+                                            <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700">
+                                                <span className="rounded-md border-2 border-black bg-white px-2 py-1 shadow-neo">{round.mode}</span>
+                                                {roundDateLabel ? (
+                                                    <span className="rounded-md border-2 border-black bg-white px-2 py-1 shadow-neo">{roundDateLabel}</span>
+                                                ) : null}
+                                            </div>
+                                            <div className="mt-3 flex-1 overflow-y-auto rounded-md border-2 border-black bg-white p-3 text-sm text-slate-700">
+                                                <ParsedDescription
+                                                    description={round?.description || ''}
+                                                    emptyText="No description provided."
+                                                />
+                                            </div>
+                                            <p className="mt-3 text-center text-xs font-bold uppercase tracking-[0.12em] text-slate-600">
+                                                Click to view full details
+                                            </p>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </section>
+                ) : null}
+
+                {!isParticipantRoute ? (
+                    <>
+                        {!isLoggedIn ? (
+                            <section className="mt-7 rounded-md border-4 border-black bg-white p-6 shadow-[8px_8px_0px_0px_#000000]">
+                                <div className="flex flex-wrap items-center justify-between gap-4">
+                                    <div>
+                                        <p className="font-mono text-xs font-bold uppercase tracking-[0.16em] text-[#8B5CF6]">Public Event Page</p>
+                                        <h2 className="mt-1 font-heading text-3xl font-black uppercase tracking-tight">Login required to register</h2>
+                                        <p className="mt-2 text-sm font-medium text-slate-700">
+                                            Sign in to register and access your participant dashboard.
+                                        </p>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                        <Button
+                                            data-testid="event-public-login-register-button"
+                                            className="border-2 border-black bg-[#8B5CF6] text-white shadow-neo"
+                                            onClick={() => openAuthDialog('login')}
+                                        >
+                                            <LogIn className="mr-2 h-4 w-4" />
+                                            Login to Register
+                                        </Button>
+                                        <Button
+                                            data-testid="event-public-signup-button"
+                                            variant="outline"
+                                            className="border-2 border-black shadow-neo"
+                                            onClick={() => openAuthDialog('signup')}
+                                        >
+                                            Create Account
+                                        </Button>
+                                    </div>
+                                </div>
+                            </section>
+                        ) : null}
+
+                    </>
+                ) : null}
+
+                {isParticipantRoute && !isLoggedIn ? (
+                    <section className="mt-7 rounded-md border-4 border-black bg-white p-6 shadow-[8px_8px_0px_0px_#000000]">
+                        <div className="flex flex-wrap items-center justify-between gap-4">
+                            <div>
+                                <p className="font-mono text-xs font-bold uppercase tracking-[0.16em] text-[#8B5CF6]">Participant Dashboard</p>
+                                <h2 className="mt-1 font-heading text-3xl font-black uppercase tracking-tight">Login required</h2>
+                                <p className="mt-2 text-sm font-medium text-slate-700">Sign in to access your personal participant dashboard for this event.</p>
+                            </div>
+                            <Button className="border-2 border-black bg-[#8B5CF6] text-white shadow-neo" onClick={() => openAuthDialog('login')}>
+                                <LogIn className="mr-2 h-4 w-4" />
+                                Login
+                            </Button>
+                        </div>
+                    </section>
+                ) : null}
+
+                {isParticipantRoute && isLoggedIn && !hasUserProfile ? (
+                    <section className="mt-7 rounded-md border-4 border-black bg-white p-6 shadow-[8px_8px_0px_0px_#000000]">
+                        <h2 className="font-heading text-3xl font-black uppercase tracking-tight">Profile name missing</h2>
+                        <p className="mt-2 text-sm font-medium text-slate-700">Your account does not have a profile name yet. Participant route access is unavailable.</p>
+                        <Link to={infoPath} className="mt-4 inline-block">
+                            <Button className="border-2 border-black bg-[#FDE047] text-black shadow-neo">Back to Event Info</Button>
+                        </Link>
+                    </section>
+                ) : null}
+
+                {isParticipantRoute && isLoggedIn && isParticipantOwner && participantAccessClosed ? (
+                    <section className="mt-7 rounded-md border-4 border-black bg-white p-6 shadow-[8px_8px_0px_0px_#000000]">
+                        <h2 className="font-heading text-3xl font-black uppercase tracking-tight">Participant dashboard unavailable</h2>
+                        <p className="mt-2 text-sm font-medium text-slate-700">Participant dashboard is currently unavailable.</p>
+                        <Link to={infoPath} className="mt-4 inline-block">
+                            <Button className="border-2 border-black bg-[#FDE047] text-black shadow-neo">View Event Info</Button>
+                        </Link>
+                    </section>
+                ) : null}
+
+                {isParticipantRoute && isLoggedIn && isParticipantOwner && !participantAccessClosed ? (
+                    <>
+                        {!isRegistered ? (
+                            <section className="mt-7 rounded-md border-4 border-black bg-white p-6 shadow-[8px_8px_0px_0px_#000000]">
+                                <div className="flex flex-wrap items-center justify-between gap-4">
+                                    <div>
+                                        <p className="font-mono text-xs font-bold uppercase tracking-[0.16em] text-[#8B5CF6]">Registration</p>
+                                        <h2 className="mt-1 font-heading text-3xl font-black uppercase tracking-tight">You are not registered yet</h2>
+                                        <p className="mt-2 text-sm font-medium text-slate-700">
+                                            {isTeamEvent
+                                                ? (hasTeam
+                                                    ? 'Your team is ready. Team leader must complete payment (if applicable) to activate registration.'
+                                                    : 'This is a team event. Register to create or join a team after confirmation.')
+                                                : (paymentRequired && payableAmount > 0
+                                                    ? `This is a paid registration (${formatMoney(payableAmount, feeCurrency)} - ${feeKey || 'Fee Slab'}).`
+                                                    : 'Confirm registration to unlock your participant dashboard and round status.')}
+                                        </p>
+                                        {paymentRequired && payableAmount > 0 ? (
+                                            <p className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+                                                Payment required: {formatMoney(payableAmount, feeCurrency)} ({feeKey || 'Fee'}).
+                                            </p>
+                                        ) : null}
+                                        {isTeamEvent && hasTeam && paymentRequired && payableAmount > 0 && !isLeader ? (
+                                            <p className="mt-2 text-xs font-semibold text-slate-600">
+                                                Waiting for team leader to submit payment proof.
+                                            </p>
+                                        ) : null}
+                                    </div>
+                                    <Button
+                                        data-testid="event-public-open-register-modal-button"
+                                        className="border-2 border-black bg-[#FDE047] text-black shadow-neo"
+                                        onClick={() => {
+                                            if (isTeamEvent && hasTeam && paymentRequired && payableAmount > 0 && isLeader) {
+                                                setPaymentModalOpen(true);
+                                                return;
+                                            }
+                                            setRegistrationDialogOpen(true);
+                                        }}
+                                        disabled={!registrationAvailable || (isTeamEvent && hasTeam && paymentRequired && payableAmount > 0 && !isLeader)}
+                                    >
+                                        <UserPlus className="mr-2 h-4 w-4" />
+                                        {!registrationAvailable
+                                            ? (registrationBlockedByApproval ? 'Approval Pending' : 'Registration Closed')
+                                            : (isTeamEvent && hasTeam && paymentRequired && payableAmount > 0
+                                                ? (isLeader ? 'Submit Payment Proof' : 'Waiting for Leader')
+                                                : 'Register for Event')}
+                                    </Button>
+                                    {registrationBlockedByApproval ? (
+                                        <p className="mt-2 text-xs font-semibold text-slate-600">
+                                            Registration will open after C&C approves this event.
+                                        </p>
+                                    ) : null}
+                                </div>
+                            </section>
+                        ) : null}
+
+                        {isRegistered ? (
+                            <>
+                                <section className={`mt-7 min-w-0 overflow-hidden rounded-md border-4 border-black p-3 shadow-neo sm:p-6 sm:shadow-[8px_8px_0px_0px_#000000] ${
+                                    isPendingRegistration
+                                        ? (paymentStatus === 'declined' ? 'bg-red-50' : 'bg-amber-50')
+                                        : (String(effectiveStatus).toLowerCase() === 'eliminated' ? 'bg-red-50' : 'bg-green-50')
+                                }`}>
+                                    <div className="flex min-w-0 items-center gap-3">
+                                        {statusIcon(effectiveStatus)}
+                                        <div className="min-w-0">
+                                            <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                                <h2 className="min-w-0 break-words font-heading text-2xl font-black uppercase tracking-tight">Status: {effectiveStatus}</h2>
+                                                {isWildcardRegistration ? (
+                                                    <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-800">
+                                                        Wildcard
+                                                    </span>
+                                                ) : null}
+                                            </div>
+                                            <p className="text-sm font-medium text-slate-700">
+                                                {isPendingRegistration
+                                                    ? (paymentStatus === 'declined'
+                                                        ? 'Payment was declined. Resubmit payment proof to continue.'
+                                                        : 'Your registration is pending payment review.')
+                                                    : (String(effectiveStatus).toLowerCase() === 'eliminated'
+                                                        ? 'You are currently eliminated in this event.'
+                                                        : 'You are currently active in this event.')}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    {isPendingRegistration && paymentRequired && payableAmount > 0 ? (
+                                        <div className="mt-4 flex flex-wrap items-center gap-2">
+                                            <span className="rounded-md border-2 border-black bg-white px-3 py-1 text-xs font-bold uppercase tracking-[0.12em] shadow-neo">
+                                                Payment: {paymentStatus}
+                                            </span>
+                                            <span className="rounded-md border-2 border-black bg-white px-3 py-1 text-xs font-bold uppercase tracking-[0.12em] shadow-neo">
+                                                Amount: {formatMoney(payableAmount, feeCurrency)}
+                                            </span>
+                                            {(paymentStatus === 'declined' || paymentStatus === 'none') && canSubmitPayment ? (
+                                                <Button
+                                                    type="button"
+                                                    className="border-2 border-black bg-[#FDE047] text-black shadow-neo"
+                                                    onClick={() => setPaymentModalOpen(true)}
+                                                >
+                                                    {paymentStatus === 'declined' ? 'Resubmit Payment' : 'Submit Payment'}
+                                                </Button>
+                                            ) : null}
+                                        </div>
+                                    ) : null}
+                                    {isPendingRegistration && paymentStatus === 'declined' && paymentReviewReason ? (
+                                        <p className="mt-3 rounded-md border border-red-300 bg-red-100 px-3 py-2 text-xs font-semibold text-red-900">
+                                            Decline Reason: {paymentReviewReason}
+                                        </p>
+                                    ) : null}
+                                </section>
+
+                                <section className="mt-7 grid min-w-0 gap-6 lg:grid-cols-3">
+                                    <div className="min-w-0 space-y-6 overflow-hidden lg:col-span-1">
+                                        <div className="min-w-0 overflow-hidden rounded-md border-4 border-black bg-white p-3 shadow-neo sm:p-5 sm:shadow-[8px_8px_0px_0px_#000000]">
+                                            {!isTeamEvent ? (
+                                                <>
+                                                    <div className="text-center">
+                                                        <Avatar className="mx-auto h-24 w-24 border-4 border-black">
+                                                            <AvatarImage src={resolvePosterUrl(user?.image_url)} alt={user?.name || 'Participant'} />
+                                                            <AvatarFallback className="bg-[#8B5CF6] text-white text-xl font-bold">
+                                                                {String(user?.name || 'U').charAt(0).toUpperCase()}
+                                                            </AvatarFallback>
+                                                        </Avatar>
+                                                        <h3 className="mt-4 font-heading text-2xl font-black uppercase tracking-tight">{user?.name}</h3>
+                                                        <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-600">{eventProfile?.department || user?.dept || '-'}</p>
+                                                    </div>
+
+                                                    <div className="mt-5 rounded-md border-2 border-black bg-[#C4B5FD] p-4 shadow-neo">
+                                                        <Label className="text-xs font-bold uppercase tracking-[0.12em]">Referral Code</Label>
+                                                        <div className="mt-2 flex items-center gap-2">
+                                                            <div className="flex-1 rounded-md border-2 border-black bg-white px-3 py-2 text-center font-mono text-base font-bold tracking-[0.18em]">
+                                                                {eventProfile?.referral_code || '-----'}
+                                                            </div>
+                                                            <Button
+                                                                data-testid="event-dashboard-copy-referral-button"
+                                                                onClick={copyReferralCode}
+                                                                className="border-2 border-black bg-[#FDE047] text-black shadow-neo"
+                                                                disabled={!eventProfile?.referral_code}
+                                                            >
+                                                                {copiedReferral ? <CheckCircle2 className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                                                            </Button>
+                                                        </div>
+                                                        <p className="mt-2 text-xs font-bold uppercase tracking-[0.1em] text-slate-700">
+                                                            Referrals: {eventProfile?.referral_count || 0}
+                                                        </p>
+                                                    </div>
+
+                                                    <div className="mt-5 space-y-2 text-sm font-medium text-slate-700">
+                                                        <div className="flex items-center justify-between rounded-md border-2 border-black bg-white px-3 py-2 shadow-neo">
+                                                            <span>Register No</span>
+                                                            <span className="font-bold text-black">{user?.regno || '-'}</span>
+                                                        </div>
+                                                        <div className="flex items-center justify-between rounded-md border-2 border-black bg-white px-3 py-2 shadow-neo">
+                                                            <span>Gender</span>
+                                                            <span className="font-bold text-black">{eventProfile?.gender || user?.gender || '-'}</span>
+                                                        </div>
+                                                        <div className="flex items-center justify-between rounded-md border-2 border-black bg-white px-3 py-2 shadow-neo">
+                                                            <span>Batch</span>
+                                                            <span className="font-bold text-black">{eventProfile?.batch || '-'}</span>
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <p className="font-mono text-xs font-bold uppercase tracking-[0.14em] text-[#8B5CF6]">Team Dashboard</p>
+                                                    <h3 className="mt-2 font-heading text-2xl font-black uppercase tracking-tight">{dashboard?.team_name || 'Registered Team'}</h3>
+                                                    <div className="mt-4 rounded-md border-2 border-black bg-[#C4B5FD] p-4 shadow-neo">
+                                                        <p className="text-xs font-bold uppercase tracking-[0.1em]">Team Code</p>
+                                                        <p className="mt-2 font-mono text-2xl font-bold tracking-[0.22em]">{dashboard?.team_code || '-----'}</p>
+                                                    </div>
+                                                    <div className="mt-4 space-y-2">
+                                                        {(dashboard?.team_members || []).map((member) => (
+                                                            <div key={`${member.user_id}-${member.role}`} className="flex items-center justify-between gap-2 rounded-md border-2 border-black bg-white px-3 py-2 text-sm font-medium shadow-neo">
+                                                                <div className="min-w-0">
+                                                                    <span className="font-bold text-black">{member.name}</span> ({member.regno}) · {member.role}
+                                                                </div>
+                                                                {isLeader && String(member?.role || '').toLowerCase() !== 'leader' ? (
+                                                                    <Button
+                                                                        type="button"
+                                                                        size="sm"
+                                                                        className="shrink-0 border-2 border-black bg-[#f43f5e] px-2 py-1 text-white shadow-neo hover:bg-[#e11d48]"
+                                                                        onClick={() => setRemoveMemberDialog({ open: true, userId: member.user_id, name: member.name })}
+                                                                    >
+                                                                        <UserX className="mr-1 h-3.5 w-3.5" />
+                                                                        Remove
+                                                                    </Button>
+                                                                ) : null}
+                                                            </div>
+                                                        ))}
+                                                        {(dashboard?.team_members || []).length === 0 ? (
+                                                            <p className="rounded-md border-2 border-black bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-neo">
+                                                                Team members unavailable.
+                                                            </p>
+                                                        ) : null}
+                                                    </div>
+                                                    {isLeader ? (
+                                                        <form className="mt-4 space-y-2" onSubmit={inviteMember}>
+                                                            <Label className="text-xs font-bold uppercase tracking-[0.12em]">Invite Member (Reg No)</Label>
+                                                            <div className="flex gap-2">
+                                                                <Input
+                                                                    value={inviteRegno}
+                                                                    onChange={(e) => setInviteRegno(e.target.value)}
+                                                                    placeholder="Enter reg no"
+                                                                    className="neo-input"
+                                                                    data-testid="event-dashboard-invite-member-input"
+                                                                    required
+                                                                />
+                                                                <Button
+                                                                    type="submit"
+                                                                    data-testid="event-dashboard-invite-member-button"
+                                                                    className="border-2 border-black bg-[#FDE047] text-black shadow-neo"
+                                                                    disabled={inviting}
+                                                                >
+                                                                    {inviting ? 'Inviting...' : 'Invite'}
+                                                                </Button>
+                                                            </div>
+                                                        </form>
+                                                    ) : null}
+                                                    <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                                                        {!isLeader ? (
+                                                            <Button
+                                                                type="button"
+                                                                className="border-2 border-black bg-[#f59e0b] text-black shadow-neo hover:bg-[#d97706]"
+                                                                onClick={() => setLeaveTeamDialogOpen(true)}
+                                                            >
+                                                                <UserMinus className="mr-2 h-4 w-4" />
+                                                                Leave Team
+                                                            </Button>
+                                                        ) : (
+                                                            <Button
+                                                                type="button"
+                                                                className="border-2 border-black bg-[#ef4444] text-white shadow-neo hover:bg-[#dc2626]"
+                                                                onClick={() => setDeleteTeamDialogOpen(true)}
+                                                            >
+                                                                <Trash2 className="mr-2 h-4 w-4" />
+                                                                Remove Team
+                                                            </Button>
+                                                        )}
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+
+                                        <div className="rounded-md border-4 border-black bg-white p-5 shadow-[8px_8px_0px_0px_#000000]">
+                                            <h3 className="font-heading text-xl font-black uppercase tracking-tight">Quick Actions</h3>
+                                            <div className="mt-4 space-y-2">
+                                                <Button
+                                                    data-testid="event-dashboard-view-qr-button"
+                                                    className="w-full border-2 border-black bg-[#8B5CF6] text-white shadow-neo"
+                                                    onClick={loadQr}
+                                                    disabled={qrLoading || !isActiveRegistration}
+                                                >
+                                                    <QrCode className="mr-2 h-4 w-4" />
+                                                    {!isActiveRegistration
+                                                        ? 'QR Available After Confirmation'
+                                                        : (qrLoading ? 'Generating QR...' : 'View Attendance QR')}
+                                                </Button>
+                                                {whatsappUrl ? (
+                                                    disableExternalCtas ? (
+                                                        <Button
+                                                            data-testid="event-dashboard-whatsapp-button"
+                                                            disabled
+                                                            className="w-full border-2 border-black bg-[#DC2626] text-white shadow-neo"
+                                                        >
+                                                            <ExternalLink className="mr-2 h-4 w-4" />
+                                                            {externalUrlLabel}
+                                                        </Button>
+                                                    ) : (
+                                                        <a href={whatsappUrl} target="_blank" rel="noreferrer" className="block">
+                                                            <Button
+                                                                data-testid="event-dashboard-whatsapp-button"
+                                                                className="w-full border-2 border-black bg-[#DC2626] text-white shadow-neo hover:bg-[#B91C1C]"
+                                                            >
+                                                                <ExternalLink className="mr-2 h-4 w-4" />
+                                                                {externalUrlLabel}
+                                                            </Button>
+                                                        </a>
+                                                    )
+                                                ) : null}
+                                                <Link to="/" className="block">
+                                                    <Button data-testid="event-dashboard-back-home-button" variant="outline" className="w-full border-2 border-black shadow-neo">
+                                                        <Calendar className="mr-2 h-4 w-4" />
+                                                        Back to Home
+                                                    </Button>
+                                                </Link>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="min-w-0 overflow-hidden lg:col-span-2">
+                                        <div className="min-w-0 overflow-hidden rounded-md border-4 border-black bg-white p-3 shadow-neo sm:p-5 sm:shadow-[8px_8px_0px_0px_#000000]">
+                                            <h3 className="break-words font-heading text-2xl font-black uppercase tracking-tight">Round Status</h3>
+                                            {participantRoundStatuses.length > 0 ? (
+                                                <div className="mt-4 space-y-3">
+                                                    {participantRoundStatuses.map((round) => {
+                                                        const attendance = attendanceMeta(round.is_present);
+                                                        const panelNoRaw = Number.parseInt(String(round.panel_no ?? ''), 10);
+                                                        const panelNo = Number.isFinite(panelNoRaw) ? panelNoRaw : null;
+                                                        const panelName = String(round.panel_name || '').trim();
+                                                        const panelLink = String(round.panel_link || '').trim();
+                                                        const panelTimeLabel = formatDateTimeValue(round.panel_time);
+                                                        const roundNoKey = parseRoundNoValue(round.round_no);
+                                                        const roundNameKey = normalizeText(round.round_name);
+                                                        const linkedRound = (
+                                                            (roundNoKey !== null ? participantRoundLookup.byNo.get(roundNoKey) : null)
+                                                            || participantRoundLookup.byName.get(roundNameKey)
+                                                            || null
+                                                        );
+                                                        const hasRoundSubmission = Boolean(round?.has_submission);
+                                                        const submissionDeadlineLabel = (
+                                                            linkedRound?.requires_submission
+                                                                ? formatDateTimeIst(linkedRound?.submission_deadline)
+                                                                : ''
+                                                        );
+                                                        const fallbackRound = {
+                                                            id: round?.round_id ?? null,
+                                                            round_no: round?.round_no,
+                                                            name: round?.round_name,
+                                                            description: round?.round_description || '',
+                                                            mode: round?.round_mode || 'round',
+                                                            state: round?.round_state || round?.displayStatus || 'published',
+                                                            date: round?.round_date || null,
+                                                            requires_submission: Boolean(round?.requires_submission),
+                                                            allow_late_submission: Boolean(round?.allow_late_submission),
+                                                            submission_mode: round?.submission_mode || null,
+                                                            submission_deadline: round?.submission_deadline || null,
+                                                            external_url: round?.external_url || '',
+                                                            external_url_name: round?.external_url_name || '',
+                                                            round_poster: round?.round_poster || null,
+                                                        };
+                                                        const roundForDetails = linkedRound || fallbackRound;
+                                                        const resultRound = (
+                                                            (round?.round_id ? participantResultLookup.byId.get(Number(round.round_id)) : null)
+                                                            || (roundNoKey !== null ? participantResultLookup.byNo.get(roundNoKey) : null)
+                                                            || participantResultLookup.byName.get(roundNameKey)
+                                                            || null
+                                                        );
+                                                        const standing = resultRound?.standing && typeof resultRound.standing === 'object'
+                                                            ? resultRound.standing
+                                                            : null;
+                                                        const hasPublishedScore = Boolean(resultRound && standing);
+                                                        return (
+                                                            <article key={`${round.round_no}-${round.round_name}`} className="min-w-0 overflow-hidden rounded-md border-2 border-black bg-[#fffdf0] p-3 shadow-neo sm:p-4">
+                                                                <div className="flex min-w-0 flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                                                                    <div className="flex min-w-0 items-start gap-3">
+                                                                        <div className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border-2 border-black bg-[#8B5CF6] font-heading text-sm font-black text-white shadow-neo">
+                                                                            {String(round.round_no || '').slice(-2)}
+                                                                        </div>
+                                                                        <div className="min-w-0 flex-1">
+                                                                            <div className="flex min-w-0 flex-wrap items-start gap-2">
+                                                                                <p className="min-w-0 break-words font-heading text-lg font-black uppercase tracking-tight">{round.round_name}</p>
+                                                                                <span className="rounded-md border-2 border-black bg-white px-2 py-1 text-[10px] font-black uppercase tracking-[0.1em] text-black shadow-neo">{round.round_no}</span>
+                                                                            </div>
+                                                                            {submissionDeadlineLabel ? (
+                                                                                <div className="mt-2">
+                                                                                    <span className="inline-flex max-w-full break-words rounded-md border-2 border-black bg-[#fee2e2] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] leading-tight text-red-700">
+                                                                                        Deadline: {submissionDeadlineLabel}
+                                                                                    </span>
+                                                                                </div>
+                                                                            ) : null}
+                                                                            <div className="mt-2 flex min-w-0 flex-wrap gap-x-4 gap-y-1 text-xs font-semibold uppercase tracking-[0.08em] text-slate-700">
+                                                                                {panelNo !== null ? <span className="max-w-full break-words">Panel No: {panelNo}</span> : null}
+                                                                                {panelName ? <span className="max-w-full break-words">Panel Name: {panelName}</span> : null}
+                                                                                {panelTimeLabel ? <span className="max-w-full break-words">Panel Time: {panelTimeLabel}</span> : null}
+                                                                            </div>
+                                                                            {panelLink ? (
+                                                                                <a
+                                                                                    href={panelLink}
+                                                                                    target="_blank"
+                                                                                    rel="noreferrer"
+                                                                                    className="mt-3 inline-flex items-center gap-2 rounded-md border-2 border-black bg-[#facc15] px-3 py-2 text-xs font-black uppercase tracking-[0.08em] text-black shadow-[3px_3px_0px_0px_#000000] transition-transform hover:-translate-y-0.5 hover:bg-[#fde047]"
+                                                                                >
+                                                                                    <ExternalLink className="h-3.5 w-3.5" />
+                                                                                    Join Panel
+                                                                                </a>
+                                                                            ) : null}
+                                                                        </div>
+                                                                    </div>
+
+                                                                    <div className="grid w-full min-w-0 gap-2 sm:grid-cols-2 xl:max-w-md xl:grid-cols-3">
+                                                                        <div className="min-w-0 rounded-md border-2 border-black bg-white p-3 shadow-neo">
+                                                                            <p className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-500">Status</p>
+                                                                            <div className="mt-2 flex items-center gap-2 text-sm font-black uppercase tracking-[0.08em] text-black">
+                                                                                {statusIcon(round.displayStatus)}
+                                                                                {round.displayStatus}
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className={`min-w-0 rounded-md border-2 border-black p-3 shadow-neo ${attendance?.badgeClassName || 'bg-white text-slate-700'}`}>
+                                                                            <p className="text-[10px] font-black uppercase tracking-[0.12em] opacity-75">Attendance</p>
+                                                                            <div className="mt-2 flex items-center gap-2 text-sm font-black uppercase tracking-[0.08em]">
+                                                                                {attendance?.icon || <Clock3 className="h-5 w-5" />}
+                                                                                {attendance?.label || 'Pending'}
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className="min-w-0 rounded-md border-2 border-black bg-[#FDE047] p-3 shadow-neo">
+                                                                            <p className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-700">Round Score</p>
+                                                                            <div className="mt-1 font-heading text-2xl font-black text-black">
+                                                                                {hasPublishedScore ? formatScoreValue(standing.round_score) : '--'}
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className="min-w-0 rounded-md border-2 border-black bg-[#DBEAFE] p-3 shadow-neo">
+                                                                            <p className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-700">Round Rank</p>
+                                                                            <div className="mt-1 font-heading text-2xl font-black text-black">
+                                                                                {hasPublishedScore && standing.round_rank ? `#${standing.round_rank}` : '--'}
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className="min-w-0 rounded-md border-2 border-black bg-[#CCFBF1] p-3 shadow-neo">
+                                                                            <p className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-700">Total</p>
+                                                                            <div className="mt-1 font-heading text-2xl font-black text-black">
+                                                                                {hasPublishedScore ? formatScoreValue(standing.cumulative_score) : '--'}
+                                                                            </div>
+                                                                        </div>
+                                                                        {roundForDetails ? (
+                                                                            <Button
+                                                                                type="button"
+                                                                                variant="outline"
+                                                                                className={`h-full min-h-16 border-2 border-black text-black shadow-neo ${
+                                                                                    linkedRound?.requires_submission && hasRoundSubmission
+                                                                                        ? 'bg-[#22C55E] hover:bg-[#16A34A]'
+                                                                                        : 'bg-white hover:bg-[#FDE047]'
+                                                                                }`}
+                                                                                onClick={() => setSelectedRound(roundForDetails)}
+                                                                                data-testid={`event-dashboard-round-action-${round.round_no}`}
+                                                                            >
+                                                                                {roundForDetails?.requires_submission
+                                                                                    ? (
+                                                                                        hasRoundSubmission
+                                                                                            ? 'View Work'
+                                                                                            : (normalizeText(round.displayStatus) === 'eliminated' ? 'View Round' : 'Submit Work')
+                                                                                    )
+                                                                                    : 'View Round'}
+                                                                            </Button>
+                                                                        ) : null}
+                                                                    </div>
+                                                                </div>
+                                                            </article>
+                                                        );
+                                                    })}
+                                                </div>
+                                            ) : (
+                                                <div className="mt-4 rounded-md border-2 border-black bg-[#fffdf0] p-5 text-sm font-medium text-slate-700 shadow-neo">
+                                                    Rounds are not published yet for this event.
+                                                </div>
+                                            )}
+                                        </div>
+                                        {participantResultCards.length > 0 || hasParticipantChartData ? (
+                                            <div className="mt-5 min-w-0 overflow-hidden rounded-md border-4 border-black bg-white p-3 shadow-neo sm:p-5 sm:shadow-[8px_8px_0px_0px_#000000]">
+                                                <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                                                    <div>
+                                                        <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-500">Published Results</p>
+                                                        <h3 className="break-words font-heading text-2xl font-black uppercase tracking-tight">Your Event Highlights</h3>
+                                                        <p className="mt-1 max-w-2xl text-sm font-medium text-slate-600">
+                                                            These cards use the same published result snapshots as the public results page, scoped to your participant or team entry.
+                                                        </p>
+                                                    </div>
+                                                    {participantResults?.wrapped_summary?.performance_trend ? (
+                                                        <div className="w-fit rounded-md border-2 border-black bg-[#DBEAFE] px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-black shadow-neo">
+                                                            {String(participantResults.wrapped_summary.performance_trend).replace(/_/g, ' ')}
+                                                        </div>
+                                                    ) : null}
+                                                </div>
+                                                <div className="mt-3 flex items-center justify-between gap-3 sm:hidden">
+                                                    <span className="text-[11px] font-black uppercase tracking-[0.14em] text-slate-500">Swipe cards</span>
+                                                    <span className="text-[11px] font-bold text-slate-500">{participantResultCards.length} cards</span>
+                                                </div>
+                                                <div
+                                                    className="-mx-3 mt-3 flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain scroll-smooth px-3 pb-4 no-scrollbar sm:mx-0 sm:grid sm:snap-none sm:grid-cols-2 sm:overflow-visible sm:px-0 sm:pb-0 xl:grid-cols-3"
+                                                    aria-label="Participant result highlight carousel"
+                                                >
+                                                    {participantResultCards.map((card) => {
+                                                        const tone = String(card?.tone || '').toLowerCase();
+                                                        const toneClass = tone === 'gold'
+                                                            ? 'bg-[#FEF3C7]'
+                                                            : tone === 'teal'
+                                                                ? 'bg-[#CCFBF1]'
+                                                                : tone === 'lime'
+                                                                    ? 'bg-[#ECFCCB]'
+                                                                    : tone === 'coral' || tone === 'rose'
+                                                                        ? 'bg-[#FFE4E6]'
+                                                                        : tone === 'blue'
+                                                                            ? 'bg-[#DBEAFE]'
+                                                                            : 'bg-[#F8FAFC]';
+                                                        return (
+                                                            <article key={card.key} className={`flex min-h-48 basis-[84%] shrink-0 snap-center flex-col overflow-hidden rounded-md border-2 border-black p-4 shadow-neo sm:min-h-0 sm:basis-auto ${toneClass}`}>
+                                                                <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-600">{card.label}</p>
+                                                                <div className="mt-2 font-heading text-2xl font-black text-black">{card.value ?? '--'}</div>
+                                                                {card.subtext ? (
+                                                                    <p className="mt-1 text-xs font-bold uppercase tracking-[0.08em] text-slate-600">{card.subtext}</p>
+                                                                ) : null}
+                                                                {card.description ? (
+                                                                    <p className="mt-3 text-sm font-medium leading-relaxed text-slate-700">{card.description}</p>
+                                                                ) : null}
+                                                            </article>
+                                                        );
+                                                    })}
+                                                </div>
+                                                {hasParticipantChartData ? (
+                                                    <>
+                                                        <div className="mt-5 flex items-center justify-between gap-3 sm:hidden">
+                                                            <span className="text-[11px] font-black uppercase tracking-[0.14em] text-slate-500">Swipe charts</span>
+                                                            <span className="text-[11px] font-bold text-slate-500">3 charts</span>
+                                                        </div>
+                                                        <div
+                                                            className="-mx-3 mt-3 flex snap-x snap-mandatory gap-4 overflow-x-auto overscroll-x-contain scroll-smooth px-3 pb-4 no-scrollbar md:mx-0 md:grid md:snap-none md:grid-cols-2 md:overflow-visible md:px-0 md:pb-0 xl:grid-cols-3"
+                                                            aria-label="Participant result chart carousel"
+                                                        >
+                                                        <article className="min-w-0 basis-[88%] shrink-0 snap-center overflow-hidden rounded-md border-2 border-black bg-[#F8FAFC] p-4 shadow-neo sm:basis-[78%] md:basis-auto">
+                                                            <div>
+                                                                <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">Score Chart</p>
+                                                                <h4 className="font-heading text-lg font-black uppercase tracking-tight">Score Progression</h4>
+                                                                <p className="mt-1 text-xs font-medium text-slate-600">Round score and cumulative score across published rounds.</p>
+                                                            </div>
+                                                            <div className="mt-4 h-64 min-w-0">
+                                                                <ResponsiveContainer width="100%" height="100%">
+                                                                    <LineChart data={participantChartRows} margin={{ top: 8, right: 12, left: -16, bottom: 0 }}>
+                                                                        <CartesianGrid stroke="rgba(15,23,42,0.12)" vertical={false} />
+                                                                        <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={11} />
+                                                                        <YAxis tickLine={false} axisLine={false} fontSize={11} />
+                                                                        <Tooltip content={<ParticipantResultTooltip />} />
+                                                                        <Line type="monotone" name="Round Score" dataKey="score" stroke="#8B5CF6" strokeWidth={3} dot={{ r: 3 }} />
+                                                                        <Line type="monotone" name="Total" dataKey="cumulative_score" stroke="#0EA5E9" strokeWidth={3} dot={{ r: 3 }} />
+                                                                    </LineChart>
+                                                                </ResponsiveContainer>
+                                                            </div>
+                                                        </article>
+                                                        <article className="min-w-0 basis-[88%] shrink-0 snap-center overflow-hidden rounded-md border-2 border-black bg-[#FFF7ED] p-4 shadow-neo sm:basis-[78%] md:basis-auto">
+                                                            <div>
+                                                                <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">Rank Chart</p>
+                                                                <h4 className="font-heading text-lg font-black uppercase tracking-tight">Rank Movement</h4>
+                                                                <p className="mt-1 text-xs font-medium text-slate-600">Lower is better. The axis is reversed to make upward movement visible.</p>
+                                                            </div>
+                                                            <div className="mt-4 h-64 min-w-0">
+                                                                <ResponsiveContainer width="100%" height="100%">
+                                                                    <LineChart data={participantChartRows} margin={{ top: 8, right: 12, left: -16, bottom: 0 }}>
+                                                                        <CartesianGrid stroke="rgba(15,23,42,0.12)" vertical={false} />
+                                                                        <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={11} />
+                                                                        <YAxis reversed domain={[1, participantMaxRank]} tickLine={false} axisLine={false} fontSize={11} allowDataOverflow />
+                                                                        <Tooltip content={<ParticipantResultTooltip />} />
+                                                                        <Line type="monotone" name="Rank" dataKey="rank" stroke="#F97316" strokeWidth={3} dot={{ r: 3 }} connectNulls />
+                                                                    </LineChart>
+                                                                </ResponsiveContainer>
+                                                            </div>
+                                                        </article>
+                                                        <article className="min-w-0 basis-[88%] shrink-0 snap-center overflow-hidden rounded-md border-2 border-black bg-[#F0FDFA] p-4 shadow-neo sm:basis-[78%] md:basis-auto">
+                                                            <div>
+                                                                <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">Radar</p>
+                                                                <h4 className="font-heading text-lg font-black uppercase tracking-tight">Round Rank Radar</h4>
+                                                                <p className="mt-1 text-xs font-medium text-slate-600">A compact view of your rank footprint over the result timeline.</p>
+                                                            </div>
+                                                            <div className="mt-4 h-64 min-w-0">
+                                                                <ResponsiveContainer width="100%" height="100%">
+                                                                    <RadarChart data={participantChartRows} outerRadius="72%">
+                                                                        <PolarGrid stroke="rgba(15,23,42,0.16)" />
+                                                                        <PolarAngleAxis dataKey="label" tick={{ fill: '#334155', fontSize: 11 }} />
+                                                                        <PolarRadiusAxis angle={90} domain={[1, participantMaxRank]} reversed tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} />
+                                                                        <Tooltip content={<ParticipantResultTooltip />} />
+                                                                        <Radar name="Rank" dataKey="rank" stroke="#14B8A6" fill="#14B8A6" fillOpacity={0.2} strokeWidth={3} />
+                                                                    </RadarChart>
+                                                                </ResponsiveContainer>
+                                                            </div>
+                                                        </article>
+                                                        </div>
+                                                    </>
+                                                ) : null}
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                </section>
+                            </>
+                        ) : null}
+                    </>
+                ) : null}
+            </main>
+
+            <Dialog open={authDialogOpen} onOpenChange={(open) => (open ? setAuthDialogOpen(true) : closeAuthDialog())}>
+                <DialogContent className="max-h-[calc(100vh-2rem)] overflow-x-hidden overflow-y-auto border-4 border-black bg-white p-0">
+                    <div className="flex border-b-2 border-black">
+                        <button
+                            type="button"
+                            className={`flex-1 px-4 py-3 text-sm font-bold uppercase tracking-[0.14em] ${authTab === 'login' ? 'bg-[#8B5CF6] text-white' : 'bg-white text-black'}`}
+                            onClick={() => setAuthTab('login')}
+                        >
+                            Login
+                        </button>
+                        <button
+                            type="button"
+                            className={`flex-1 px-4 py-3 text-sm font-bold uppercase tracking-[0.14em] ${authTab === 'signup' ? 'bg-[#FDE047] text-black' : 'bg-white text-black'}`}
+                            onClick={() => setAuthTab('signup')}
+                        >
+                            Sign Up
+                        </button>
+                    </div>
+                    <div className="p-5 sm:p-7">
+                        {authTab === 'login' ? (
+                            <>
+                                <DialogHeader>
+                                    <DialogTitle className="font-heading text-2xl font-black uppercase tracking-tight">
+                                        PDA Login
+                                    </DialogTitle>
+                                </DialogHeader>
+                                <p className="mt-2 text-sm font-medium text-slate-700">Use your register number or profile name and password to continue.</p>
+                                <form onSubmit={handleLoginSubmit} className="mt-6 space-y-4">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="auth-regno" className="text-xs font-bold uppercase tracking-[0.12em]">Register Number or Profile Name</Label>
+                                        <Input
+                                            id="auth-regno"
+                                            name="regno"
+                                            value={loginForm.regno}
+                                            onChange={(e) => setLoginForm((prev) => ({ ...prev, regno: e.target.value }))}
+                                            required
+                                            className={authInputClass}
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="auth-password" className="text-xs font-bold uppercase tracking-[0.12em]">Password</Label>
+                                        <div className="relative">
+                                            <Input
+                                                id="auth-password"
+                                                name="password"
+                                                type={showAuthPassword ? 'text' : 'password'}
+                                                value={loginForm.password}
+                                                onChange={(e) => setLoginForm((prev) => ({ ...prev, password: e.target.value }))}
+                                                required
+                                                className={`${authInputClass} pr-12`}
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowAuthPassword((prev) => !prev)}
+                                                className="absolute right-3 top-1/2 inline-flex -translate-y-1/2 items-center justify-center rounded-md border-2 border-black bg-white p-1 text-black shadow-[2px_2px_0px_0px_#000000]"
+                                                aria-label={showAuthPassword ? 'Hide password' : 'Show password'}
+                                            >
+                                                {showAuthPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                            </button>
+                                        </div>
+                                        <div className="text-right">
+                                            <Link
+                                                to="/forgot-password"
+                                                className="text-xs font-bold uppercase tracking-[0.1em] text-[#8B5CF6] transition-[color] duration-150 hover:text-black"
+                                            >
+                                                Forgot Password?
+                                            </Link>
+                                        </div>
+                                    </div>
+                                    <div className="flex justify-end gap-2">
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            className="border-2 border-black shadow-neo"
+                                            onClick={closeAuthDialog}
+                                            disabled={authLoading}
+                                        >
+                                            Cancel
+                                        </Button>
+                                        <Button
+                                            type="submit"
+                                            className="border-2 border-black bg-[#8B5CF6] text-white shadow-neo hover:bg-[#7C3AED]"
+                                            disabled={authLoading}
+                                        >
+                                            {authLoading ? 'Logging In...' : 'Login'}
+                                        </Button>
+                                    </div>
+                                </form>
+                            </>
+                        ) : (
+                            <>
+                                <DialogHeader>
+                                    <DialogTitle className="font-heading text-2xl font-black uppercase tracking-tight">
+                                        PDA Signup
+                                    </DialogTitle>
+                                </DialogHeader>
+                                <p className="mt-2 text-sm font-medium text-slate-700">Create your account to register for this event.</p>
+                                <form onSubmit={handleSignupSubmit} className="mt-6 grid gap-4 md:grid-cols-2">
+                                    <div>
+                                        <Label htmlFor="auth-name" className="text-xs font-bold uppercase tracking-[0.12em]">Name *</Label>
+                                        <Input
+                                            id="auth-name"
+                                            name="name"
+                                            value={signupForm.name}
+                                            onChange={(e) => setSignupForm((prev) => ({ ...prev, name: e.target.value }))}
+                                            required
+                                            className={authInputClass}
+                                        />
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="auth-regno-signup" className="text-xs font-bold uppercase tracking-[0.12em]">Register Number *</Label>
+                                        <Input
+                                            id="auth-regno-signup"
+                                            name="regno"
+                                            value={signupForm.regno}
+                                            onChange={(e) => setSignupForm((prev) => ({ ...prev, regno: e.target.value }))}
+                                            required
+                                            className={authInputClass}
+                                        />
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="auth-profile-name" className="text-xs font-bold uppercase tracking-[0.12em]">Profile Name *</Label>
+                                        <Input
+                                            id="auth-profile-name"
+                                            name="profile_name"
+                                            value={signupForm.profile_name}
+                                            onChange={(e) => setSignupForm((prev) => ({ ...prev, profile_name: e.target.value }))}
+                                            placeholder="eg: john_doe"
+                                            required
+                                            className={authInputClass}
+                                        />
+                                        <p className="mt-1 text-[11px] font-medium text-slate-600">3-40 chars: lowercase letters, numbers, underscore.</p>
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="auth-email" className="text-xs font-bold uppercase tracking-[0.12em]">Email *</Label>
+                                        <Input
+                                            id="auth-email"
+                                            name="email"
+                                            type="email"
+                                            value={signupForm.email}
+                                            onChange={(e) => setSignupForm((prev) => ({ ...prev, email: e.target.value }))}
+                                            required
+                                            className={authInputClass}
+                                        />
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="auth-dob" className="text-xs font-bold uppercase tracking-[0.12em]">Date Of Birth *</Label>
+                                        <Input
+                                            id="auth-dob"
+                                            name="dob"
+                                            type="date"
+                                            value={signupForm.dob}
+                                            onChange={(e) => setSignupForm((prev) => ({ ...prev, dob: e.target.value }))}
+                                            max={maxDobDate}
+                                            required
+                                            className={`${authInputClass} [color-scheme:light]`}
+                                        />
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="auth-gender" className="text-xs font-bold uppercase tracking-[0.12em]">Gender *</Label>
+                                        <Select value={signupForm.gender} onValueChange={(value) => setSignupForm((prev) => ({ ...prev, gender: value }))}>
+                                            <SelectTrigger id="auth-gender" className={authSelectTriggerClass}>
+                                                <SelectValue placeholder="Select gender" />
+                                            </SelectTrigger>
+                                            <SelectContent className={authSelectContentClass}>
+                                                {GENDERS.map((gender) => (
+                                                    <SelectItem key={gender.value} value={gender.value}>{gender.label}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="auth-phone" className="text-xs font-bold uppercase tracking-[0.12em]">Phone *</Label>
+                                        <Input
+                                            id="auth-phone"
+                                            name="phno"
+                                            value={signupForm.phno}
+                                            onChange={(e) => setSignupForm((prev) => ({ ...prev, phno: e.target.value }))}
+                                            required
+                                            className={authInputClass}
+                                        />
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="auth-dept" className="text-xs font-bold uppercase tracking-[0.12em]">Department *</Label>
+                                        <Select value={signupForm.deptChoice} onValueChange={(value) => setSignupForm((prev) => ({ ...prev, deptChoice: value, deptOther: value === DEPARTMENT_OTHER ? prev.deptOther : '' }))}>
+                                            <SelectTrigger id="auth-dept" className={authSelectTriggerClass}>
+                                                <SelectValue placeholder="Select department" />
+                                            </SelectTrigger>
+                                            <SelectContent className={authSelectContentClass}>
+                                                {DEPARTMENTS.map((dept) => (
+                                                    <SelectItem key={dept.value} value={dept.value}>{dept.label}</SelectItem>
+                                                ))}
+                                                <SelectItem value={DEPARTMENT_OTHER}>Other</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    {signupForm.deptChoice === DEPARTMENT_OTHER ? (
+                                        <div>
+                                            <Label htmlFor="auth-dept-other" className="text-xs font-bold uppercase tracking-[0.12em]">Department Name *</Label>
+                                            <Input
+                                                id="auth-dept-other"
+                                                name="deptOther"
+                                                value={signupForm.deptOther}
+                                                onChange={(e) => setSignupForm((prev) => ({ ...prev, deptOther: e.target.value }))}
+                                                required
+                                                className={authInputClass}
+                                            />
+                                        </div>
+                                    ) : null}
+                                    <div>
+                                        <Label htmlFor="auth-college-choice" className="text-xs font-bold uppercase tracking-[0.12em]">College *</Label>
+                                        <Select
+                                            value={signupForm.collegeChoice}
+                                            onValueChange={(value) => setSignupForm((prev) => ({ ...prev, collegeChoice: value, collegeOther: value === 'OTHER' ? prev.collegeOther : '' }))}
+                                        >
+                                            <SelectTrigger id="auth-college-choice" className={authSelectTriggerClass}>
+                                                <SelectValue placeholder="Select college" />
+                                            </SelectTrigger>
+                                            <SelectContent className={authSelectContentClass}>
+                                                {COLLEGES.map((college) => (
+                                                    <SelectItem key={college.value} value={college.value}>{college.label}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    {signupForm.collegeChoice === 'OTHER' ? (
+                                        <div>
+                                            <Label htmlFor="auth-college-other" className="text-xs font-bold uppercase tracking-[0.12em]">College Name *</Label>
+                                            <Input
+                                                id="auth-college-other"
+                                                name="collegeOther"
+                                                value={signupForm.collegeOther}
+                                                onChange={(e) => setSignupForm((prev) => ({ ...prev, collegeOther: e.target.value }))}
+                                                required
+                                                className={authInputClass}
+                                            />
+                                        </div>
+                                    ) : null}
+                                    <div>
+                                        <Label htmlFor="auth-password-signup" className="text-xs font-bold uppercase tracking-[0.12em]">Password *</Label>
+                                        <div className="relative">
+                                            <Input
+                                                id="auth-password-signup"
+                                                name="password"
+                                                type={showAuthPassword ? 'text' : 'password'}
+                                                value={signupForm.password}
+                                                onChange={(e) => setSignupForm((prev) => ({ ...prev, password: e.target.value }))}
+                                                required
+                                                className={`${authInputClass} pr-12`}
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowAuthPassword((prev) => !prev)}
+                                                className="absolute right-3 top-1/2 inline-flex -translate-y-1/2 items-center justify-center rounded-md border-2 border-black bg-white p-1 text-black shadow-[2px_2px_0px_0px_#000000]"
+                                                aria-label={showAuthPassword ? 'Hide password' : 'Show password'}
+                                            >
+                                                {showAuthPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="auth-confirm-password" className="text-xs font-bold uppercase tracking-[0.12em]">Confirm Password *</Label>
+                                        <div className="relative">
+                                            <Input
+                                                id="auth-confirm-password"
+                                                name="confirmPassword"
+                                                type={showAuthConfirmPassword ? 'text' : 'password'}
+                                                value={signupForm.confirmPassword}
+                                                onChange={(e) => setSignupForm((prev) => ({ ...prev, confirmPassword: e.target.value }))}
+                                                required
+                                                className={`${authInputClass} pr-12`}
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowAuthConfirmPassword((prev) => !prev)}
+                                                className="absolute right-3 top-1/2 inline-flex -translate-y-1/2 items-center justify-center rounded-md border-2 border-black bg-white p-1 text-black shadow-[2px_2px_0px_0px_#000000]"
+                                                aria-label={showAuthConfirmPassword ? 'Hide password' : 'Show password'}
+                                            >
+                                                {showAuthConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="md:col-span-2 flex justify-end gap-2">
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            className="border-2 border-black shadow-neo"
+                                            onClick={closeAuthDialog}
+                                            disabled={signupLoading}
+                                        >
+                                            Cancel
+                                        </Button>
+                                        <Button
+                                            type="submit"
+                                            className="border-2 border-black bg-[#FDE047] text-black shadow-neo"
+                                            disabled={signupLoading}
+                                        >
+                                            {signupLoading ? 'Creating...' : 'Create Account'}
+                                        </Button>
+                                    </div>
+                                </form>
+                            </>
+                        )}
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={registrationDialogOpen} onOpenChange={(open) => (open ? setRegistrationDialogOpen(true) : closeRegistrationDialog())}>
+                <DialogContent className="max-h-[calc(100vh-2rem)] overflow-x-hidden overflow-y-auto border-4 border-black bg-white">
+                    <DialogHeader>
+                        <DialogTitle className="pr-8 break-words font-heading text-2xl font-black uppercase tracking-tight">
+                            Register: {eventInfo.title}
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <p className="text-sm font-medium text-slate-700">
+                            {paymentRequired && payableAmount > 0
+                                ? `This event requires payment (${formatMoney(payableAmount, feeCurrency)} - ${feeKey || 'Fee'}). Confirm to proceed.`
+                                : 'Confirm you want to register for this event to proceed.'}
+                        </p>
+                        <label className="flex items-start gap-3 rounded-md border-2 border-black bg-[#fffdf0] p-3 text-sm font-medium text-slate-700 shadow-neo">
+                            <input
+                                type="checkbox"
+                                checked={registerConfirmed}
+                                onChange={(e) => setRegisterConfirmed(e.target.checked)}
+                                className="mt-1 h-4 w-4"
+                                data-testid="event-register-confirm-checkbox"
+                            />
+                            <span>
+                                Claim my spot! I’m ready to level up @<span className="font-bold">{eventInfo.title}</span>.
+                            </span>
+                        </label>
+
+                        {!isTeamEvent ? (
+                            <div className="flex justify-center">
+                                <Button
+                                    data-testid="event-register-confirm-button"
+                                    className="border-2 border-black bg-[#FDE047] text-black shadow-neo"
+                                    onClick={registerIndividual}
+                                    disabled={!confirmationMatches || registering || !registrationAvailable}
+                                >
+                                    {paymentRequired && payableAmount > 0
+                                        ? 'Proceed to Payment'
+                                        : (registering ? 'Registering...' : 'Confirm Registration')}
+                                </Button>
+                            </div>
+                        ) : (
+                            <>
+                                {confirmationMatches ? (
+                                    <div className="grid gap-4 md:grid-cols-2">
+                                        <form className="rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo" onSubmit={createTeam}>
+                                            <h4 className="font-heading text-lg font-black uppercase tracking-tight">Create Team</h4>
+                                            <Label htmlFor="event-team-name" className="mt-3 block text-xs font-bold uppercase tracking-[0.1em]">Team Name</Label>
+                                            <Input
+                                                id="event-team-name"
+                                                value={teamName}
+                                                onChange={(e) => setTeamName(e.target.value)}
+                                                className="neo-input mt-2"
+                                                data-testid="event-register-create-team-input"
+                                                required
+                                            />
+                                            <Button
+                                                type="submit"
+                                                data-testid="event-register-create-team-button"
+                                                className="mt-3 w-full border-2 border-black bg-[#8B5CF6] text-white shadow-neo"
+                                                disabled={creatingTeam || !registrationAvailable}
+                                            >
+                                                <Users className="mr-2 h-4 w-4" />
+                                                {creatingTeam ? 'Creating...' : 'Create Team'}
+                                            </Button>
+                                        </form>
+
+                                        <form className="rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo" onSubmit={joinTeam}>
+                                            <h4 className="font-heading text-lg font-black uppercase tracking-tight">Join Team</h4>
+                                            <Label htmlFor="event-team-code" className="mt-3 block text-xs font-bold uppercase tracking-[0.1em]">Team Code</Label>
+                                            <Input
+                                                id="event-team-code"
+                                                value={teamCode}
+                                                onChange={(e) => setTeamCode(e.target.value.toUpperCase())}
+                                                maxLength={5}
+                                                className="neo-input mt-2"
+                                                data-testid="event-register-join-team-input"
+                                                required
+                                            />
+                                            <Button
+                                                type="submit"
+                                                data-testid="event-register-join-team-button"
+                                                className="mt-3 w-full border-2 border-black bg-[#FDE047] text-black shadow-neo"
+                                                disabled={joiningTeam || !registrationAvailable}
+                                            >
+                                                {joiningTeam ? 'Joining...' : 'Join Team'}
+                                            </Button>
+                                        </form>
+                                    </div>
+                                ) : (
+                                    <p className="rounded-md border-2 border-black bg-[#fffdf0] p-3 text-sm font-medium text-slate-700 shadow-neo">
+                                        Confirm registration to unlock team registration.
+                                    </p>
+                                )}
+                                <div className="flex justify-end">
+                                    <Button data-testid="event-register-team-close-button" variant="outline" className="border-2 border-black shadow-neo" onClick={closeRegistrationDialog} disabled={creatingTeam || joiningTeam}>
+                                        Close
+                                    </Button>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={paymentModalOpen} onOpenChange={(open) => (open ? setPaymentModalOpen(true) : closePaymentModal())}>
+                <DialogContent className="max-h-[calc(100vh-2rem)] overflow-x-hidden overflow-y-auto border-4 border-black bg-white">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading text-2xl font-black uppercase tracking-tight">
+                            Submit Payment Proof
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <div className="rounded-md border-2 border-black bg-[#fef3c7] px-4 py-3 shadow-neo">
+                            <p className="text-[11px] font-black uppercase tracking-[0.14em] text-amber-800">Amount to Pay</p>
+                            <p className="mt-1 text-lg font-black uppercase tracking-[0.06em] text-black">
+                                {formatMoney(payableAmount, feeCurrency)}
+                            </p>
+                            {feeKey ? (
+                                <p className="mt-1 text-xs font-semibold uppercase tracking-[0.08em] text-slate-700">
+                                    Fee Slab: {feeKey}
+                                </p>
+                            ) : null}
+                        </div>
+                        {!paymentQrImage || !paymentId ? (
+                            <p className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+                                Payment details are not configured for this club yet.
+                            </p>
+                        ) : (
+                            <div className="space-y-4">
+                                <div className="rounded-md border-2 border-black bg-[#fffdf0] p-3">
+                                    <p className="text-xs font-bold uppercase tracking-[0.1em] text-slate-600">Payment QR</p>
+                                    <div className="mt-2 overflow-hidden rounded-md border-2 border-black bg-white p-2">
+                                        <div className="aspect-[5/4] w-full">
+                                            <img src={paymentQrImage} alt="Club payment QR" className="h-full w-full object-contain" />
+                                        </div>
+                                    </div>
+                                    <div className="mt-3">
+                                        <p className="text-xs font-bold uppercase tracking-[0.1em] text-slate-600">UPI ID / Payment ID</p>
+                                        <p className="mt-2 rounded-md border-2 border-black bg-white px-3 py-2 text-sm font-semibold text-slate-800">
+                                            {paymentId}
+                                        </p>
+                                    </div>
+                                    {clubOwnerMobile ? (
+                                        <div className="mt-3">
+                                            <p className="text-xs font-bold uppercase tracking-[0.1em] text-slate-600">Club Owner Mobile</p>
+                                            <p className="mt-2 rounded-md border-2 border-black bg-white px-3 py-2 text-sm font-semibold text-slate-800">
+                                                {clubOwnerMobile}
+                                            </p>
+                                        </div>
+                                    ) : null}
+                                </div>
+                            </div>
+                        )}
+                        <div className="space-y-2">
+                            <Label htmlFor="payment-screenshot" className="text-xs font-bold uppercase tracking-[0.1em]">Payment Screenshot</Label>
+                            <Input
+                                id="payment-screenshot"
+                                type="file"
+                                accept="image/png,image/jpeg,image/jpg,image/webp"
+                                className="neo-input"
+                                disabled={!canSubmitPayment || paymentSubmitting}
+                                onChange={(event) => setPaymentScreenshot(event.target.files?.[0] || null)}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="payment-comment" className="text-xs font-bold uppercase tracking-[0.1em]">Comment (optional)</Label>
+                            <Textarea
+                                id="payment-comment"
+                                rows={3}
+                                value={paymentComment}
+                                onChange={(event) => setPaymentComment(event.target.value)}
+                                disabled={!canSubmitPayment || paymentSubmitting}
+                            />
+                        </div>
+                        {paymentSubmitting && paymentUploadProgress !== null ? (
+                            <div className="space-y-1">
+                                <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
+                                    <span>Uploading screenshot...</span>
+                                    <span>{paymentUploadProgress}%</span>
+                                </div>
+                                <div className="h-2 w-full overflow-hidden rounded border border-black bg-white">
+                                    <div
+                                        className="h-full bg-[#8B5CF6] transition-all duration-200"
+                                        style={{ width: `${paymentUploadProgress}%` }}
+                                    />
+                                </div>
+                            </div>
+                        ) : null}
+                        <div className="flex justify-end gap-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="border-2 border-black shadow-neo"
+                                onClick={closePaymentModal}
+                                disabled={paymentSubmitting}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                type="button"
+                                className="border-2 border-black bg-[#FDE047] text-black shadow-neo"
+                                onClick={submitPaymentProof}
+                                disabled={!canSubmitPayment || !paymentQrImage || !paymentId || paymentSubmitting}
+                            >
+                                {paymentSubmitting ? 'Submitting...' : 'Submit Payment'}
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={Boolean(selectedRound)} onOpenChange={(open) => (!open ? setSelectedRound(null) : null)}>
+                <DialogContent className="max-h-[calc(100vh-2rem)] max-w-5xl overflow-x-hidden overflow-y-auto border-4 border-black bg-white p-6 sm:p-7">
+                    {selectedRound ? (
+                        <>
+                            <DialogHeader>
+                                <DialogTitle className="font-heading text-2xl font-black uppercase tracking-tight">
+                                    Round {selectedRound.round_no}
+                                </DialogTitle>
+                            </DialogHeader>
+                            <div className="space-y-5">
+                                <div className="space-y-2">
+                                    <h3 className="inline-flex w-fit rounded-md border-2 border-black bg-[#FDE047] px-3 py-1 font-heading text-xl font-black uppercase tracking-tight text-black">
+                                        {selectedRound.name}
+                                    </h3>
+                                    {selectedRoundDeadlineLabel ? (
+                                        <div>
+                                            <span className="inline-flex items-center rounded-md border-2 border-black bg-[#fee2e2] px-3 py-1 text-xs font-bold uppercase tracking-[0.08em] text-red-700">
+                                                Deadline: {selectedRoundDeadlineLabel}
+                                            </span>
+                                        </div>
+                                    ) : null}
+                                </div>
+                                <div className={`${selectedRoundPosterAssets.length ? 'grid gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:items-start' : 'space-y-4'}`}>
+                                    {selectedRoundPosterAssets.length ? (
+                                        <div className="space-y-3">
+                                            <div className="overflow-hidden rounded-md border-2 border-black bg-[#11131a]">
+                                                <div className="aspect-[1/1.41421356] w-full">
+                                                    <PosterCarousel
+                                                        assets={selectedRoundPosterAssets}
+                                                        title={selectedRound.name || `Round ${selectedRound.round_no}`}
+                                                        className="h-full w-full"
+                                                        imageClassName="h-full w-full object-contain"
+                                                        autoPlay={false}
+                                                        showArrows
+                                                        showPageMeta
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div className="flex flex-wrap gap-2 text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700">
+                                                <span className="rounded-md border-2 border-black bg-white px-2 py-1 shadow-neo">{selectedRound.state}</span>
+                                                <span className="rounded-md border-2 border-black bg-white px-2 py-1 shadow-neo">{selectedRound.mode}</span>
+                                                {selectedRoundDateLabel ? (
+                                                    <span className="rounded-md border-2 border-black bg-white px-2 py-1 shadow-neo">
+                                                        {selectedRoundDateLabel}
+                                                    </span>
+                                                ) : null}
+                                            </div>
+                                        </div>
+                                    ) : null}
+                                    <div className="space-y-4">
+                                        {!selectedRoundPosterAssets.length ? (
+                                            <div className="flex flex-wrap gap-2 text-[11px] font-bold uppercase tracking-[0.08em] text-slate-700">
+                                                <span className="rounded-md border-2 border-black bg-white px-2 py-1 shadow-neo">{selectedRound.state}</span>
+                                                <span className="rounded-md border-2 border-black bg-white px-2 py-1 shadow-neo">{selectedRound.mode}</span>
+                                                {selectedRoundDateLabel ? (
+                                                    <span className="rounded-md border-2 border-black bg-white px-2 py-1 shadow-neo">
+                                                        {selectedRoundDateLabel}
+                                                    </span>
+                                                ) : null}
+                                            </div>
+                                        ) : null}
+                                        <div className="rounded-md border-2 border-black bg-white p-4 text-base text-slate-700">
+                                            <div className={`relative ${showRoundDescriptionToggle && !isRoundDescriptionExpanded ? 'max-h-44 overflow-hidden' : ''}`}>
+                                                <ParsedDescription
+                                                    description={selectedRound?.description || ''}
+                                                    emptyText="No description provided."
+                                                />
+                                                {showRoundDescriptionToggle && !isRoundDescriptionExpanded ? (
+                                                    <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-white to-transparent" />
+                                                ) : null}
+                                            </div>
+                                            {showRoundDescriptionToggle ? (
+                                                <span
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    className="mt-3 inline-block text-sm font-bold text-blue-700 underline underline-offset-2"
+                                                    onClick={() => setIsRoundDescriptionExpanded((prev) => !prev)}
+                                                    onKeyDown={(event) => {
+                                                        if (event.key === 'Enter' || event.key === ' ') {
+                                                            event.preventDefault();
+                                                            setIsRoundDescriptionExpanded((prev) => !prev);
+                                                        }
+                                                    }}
+                                                >
+                                                    {isRoundDescriptionExpanded ? 'Read less' : 'Read more'}
+                                                </span>
+                                            ) : null}
+                                        </div>
+                                        {String(selectedRound?.external_url || '').trim() ? (
+                                            disableExternalCtas ? (
+                                                <Button disabled className="w-full border-2 border-black bg-[#DC2626] text-white shadow-neo">
+                                                    <ExternalLink className="mr-2 h-4 w-4" />
+                                                    {String(selectedRound?.external_url_name || '').trim() || 'Explore Round'}
+                                                </Button>
+                                            ) : (
+                                                <a href={String(selectedRound?.external_url || '').trim()} target="_blank" rel="noreferrer">
+                                                    <Button className="w-full border-2 border-black bg-[#DC2626] text-white shadow-neo hover:bg-[#B91C1C]">
+                                                        <ExternalLink className="mr-2 h-4 w-4" />
+                                                        {String(selectedRound?.external_url_name || '').trim() || 'Explore Round'}
+                                                    </Button>
+                                                </a>
+                                            )
+                                        ) : null}
+                                        {selectedRound?.requires_submission ? (
+                                            <div className="rounded-md border-2 border-black bg-[#fffdf0] p-4">
+                                                <h4 className="font-heading text-base font-black uppercase tracking-tight">Submission</h4>
+                                                {!isParticipantRoute ? (
+                                                    <p className="mt-3 text-sm font-medium text-slate-700">
+                                                        Head to Participant Dashboard to submit work.
+                                                    </p>
+                                                ) : !isLoggedIn ? (
+                                                    <>
+                                                        <p className="mt-1 text-xs font-medium text-slate-700">
+                                                            Mode: {selectedRound?.submission_mode || 'file_or_link'}
+                                                        </p>
+                                                        <p className="mt-1 text-xs font-medium text-slate-700">
+                                                            Deadline (IST): {selectedRoundDeadlineLabel || 'Not Set'}
+                                                        </p>
+                                                        {normalizeSubmissionLockReason(roundSubmission?.lock_reason) === 'Round is closed for submission' ? (
+                                                            <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                                Round is closed for submission
+                                                            </p>
+                                                        ) : selectedRound?.allow_late_submission ? (
+                                                            <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                                Late submissions are allowed. Submissions after deadline will be marked as late.
+                                                            </p>
+                                                        ) : null}
+                                                        <p className="mt-3 text-sm font-medium text-slate-700">
+                                                        Login to submit work for this round.
+                                                        </p>
+                                                    </>
+                                                ) : !isRegistered ? (
+                                                    <>
+                                                        <p className="mt-1 text-xs font-medium text-slate-700">
+                                                            Mode: {selectedRound?.submission_mode || 'file_or_link'}
+                                                        </p>
+                                                        <p className="mt-1 text-xs font-medium text-slate-700">
+                                                            Deadline (IST): {selectedRoundDeadlineLabel || 'Not Set'}
+                                                        </p>
+                                                        {normalizeSubmissionLockReason(roundSubmission?.lock_reason) === 'Round is closed for submission' ? (
+                                                            <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                                Round is closed for submission
+                                                            </p>
+                                                        ) : selectedRound?.allow_late_submission ? (
+                                                            <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                                Late submissions are allowed. Submissions after deadline will be marked as late.
+                                                            </p>
+                                                        ) : null}
+                                                        <p className="mt-3 text-sm font-medium text-slate-700">
+                                                        Register for this event to submit work.
+                                                        </p>
+                                                    </>
+                                                ) : isPendingRegistration ? (
+                                                    <>
+                                                        <p className="mt-1 text-xs font-medium text-slate-700">
+                                                            Mode: {selectedRound?.submission_mode || 'file_or_link'}
+                                                        </p>
+                                                        <p className="mt-1 text-xs font-medium text-slate-700">
+                                                            Deadline (IST): {selectedRoundDeadlineLabel || 'Not Set'}
+                                                        </p>
+                                                        {normalizeSubmissionLockReason(roundSubmission?.lock_reason) === 'Round is closed for submission' ? (
+                                                            <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                                Round is closed for submission
+                                                            </p>
+                                                        ) : selectedRound?.allow_late_submission ? (
+                                                            <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                                Late submissions are allowed. Submissions after deadline will be marked as late.
+                                                            </p>
+                                                        ) : null}
+                                                        <p className="mt-3 text-sm font-medium text-slate-700">
+                                                        Registration is pending confirmation. Submissions unlock after approval.
+                                                        </p>
+                                                    </>
+                                                ) : !canEditRoundSubmission ? (
+                                                    <>
+                                                        <p className="mt-1 text-xs font-medium text-slate-700">
+                                                            Mode: {selectedRound?.submission_mode || 'file_or_link'}
+                                                        </p>
+                                                        <p className="mt-1 text-xs font-medium text-slate-700">
+                                                            Deadline (IST): {selectedRoundDeadlineLabel || 'Not Set'}
+                                                        </p>
+                                                        {normalizeSubmissionLockReason(roundSubmission?.lock_reason) === 'Round is closed for submission' ? (
+                                                            <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                                Round is closed for submission
+                                                            </p>
+                                                        ) : selectedRound?.allow_late_submission ? (
+                                                            <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                                Late submissions are allowed. Submissions after deadline will be marked as late.
+                                                            </p>
+                                                        ) : null}
+                                                        <p className="mt-3 text-sm font-medium text-slate-700">
+                                                        Only team leaders can submit work for this round.
+                                                        </p>
+                                                    </>
+                                                ) : loadingSubmission ? (
+                                                    <>
+                                                        <p className="mt-1 text-xs font-medium text-slate-700">
+                                                            Mode: {selectedRound?.submission_mode || 'file_or_link'}
+                                                        </p>
+                                                        <p className="mt-1 text-xs font-medium text-slate-700">
+                                                            Deadline (IST): {selectedRoundDeadlineLabel || 'Not Set'}
+                                                        </p>
+                                                        {normalizeSubmissionLockReason(roundSubmission?.lock_reason) === 'Round is closed for submission' ? (
+                                                            <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                                Round is closed for submission
+                                                            </p>
+                                                        ) : selectedRound?.allow_late_submission ? (
+                                                            <p className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                                Late submissions are allowed. Submissions after deadline will be marked as late.
+                                                            </p>
+                                                        ) : null}
+                                                        <p className="mt-3 text-sm font-medium text-slate-700">Loading submission...</p>
+                                                    </>
+                                                ) : (
+                                                    <div className="mt-3 space-y-3">
+                                                        <p className="text-xs font-medium text-slate-700">
+                                                            Mode: {selectedRound?.submission_mode || 'file_or_link'}
+                                                        </p>
+                                                        <p className="text-xs font-medium text-slate-700">
+                                                            Deadline (IST): {selectedRoundDeadlineLabel || 'Not Set'}
+                                                        </p>
+                                                        {normalizeSubmissionLockReason(roundSubmission?.lock_reason) === 'Round is closed for submission' ? (
+                                                            <p className="rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                                Round is closed for submission
+                                                            </p>
+                                                        ) : selectedRound?.allow_late_submission ? (
+                                                            <p className="rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700">
+                                                                Late submissions are allowed. Submissions after deadline will be marked as late.
+                                                            </p>
+                                                        ) : null}
+                                                        {roundSubmission?.id ? (
+                                                            <div className="rounded-md border-2 border-black bg-white p-3 text-xs font-medium text-slate-700">
+                                                                <p>Version: {roundSubmission?.version || 1}</p>
+                                                                <p>Type: {roundSubmission?.submission_type || '-'}</p>
+                                                                {toSubmissionFiles(roundSubmission).length ? (
+                                                                    <div className="space-y-1">
+                                                                        <p>Files:</p>
+                                                                        {toSubmissionFiles(roundSubmission).map((item, idx) => (
+                                                                            <p key={`${item.file_url}-${idx}`}>
+                                                                                <a className="underline" href={item.file_url} target="_blank" rel="noreferrer">
+                                                                                    {item.file_name || `File ${idx + 1}`}
+                                                                                </a>
+                                                                                <span className="ml-1 text-slate-500">({formatFileSize(item.file_size_bytes)})</span>
+                                                                            </p>
+                                                                        ))}
+                                                                    </div>
+                                                                ) : null}
+                                                                {roundSubmission?.link_url ? (
+                                                                    <p>
+                                                                        Link:
+                                                                        <a className="ml-1 underline" href={roundSubmission.link_url} target="_blank" rel="noreferrer">Open link</a>
+                                                                    </p>
+                                                                ) : null}
+                                                            </div>
+                                                        ) : (
+                                                            <p className="text-sm font-medium text-slate-700">No submission yet.</p>
+                                                        )}
+                                                        {(() => {
+                                                            const lockReasonText = normalizeSubmissionLockReason(roundSubmission?.lock_reason);
+                                                            if (!lockReasonText || lockReasonText === 'Round is closed for submission') return null;
+                                                            return <p className="text-xs font-bold text-red-600">{lockReasonText}</p>;
+                                                        })()}
+                                                        {normalizeSubmissionLockReason(roundSubmission?.lock_reason) === 'Participant is eliminated for this round' ? null : (
+                                                            <>
+                                                                <div>
+                                                                    <Label className="text-xs font-bold uppercase tracking-[0.1em]">Submission Type</Label>
+                                                                    <Select
+                                                                        value={normalizeSubmissionType(submissionType)}
+                                                                        onValueChange={(value) => setSubmissionType(normalizeSubmissionType(value))}
+                                                                        disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}
+                                                                    >
+                                                                        <SelectTrigger className="neo-input mt-2"><SelectValue /></SelectTrigger>
+                                                                        <SelectContent>
+                                                                            <SelectItem value="file">File Upload</SelectItem>
+                                                                            <SelectItem value="link">External Link</SelectItem>
+                                                                        </SelectContent>
+                                                                    </Select>
+                                                                </div>
+                                                                {normalizeSubmissionType(submissionType) === 'file' ? (
+                                                                    <div>
+                                                                        <Label className="text-xs font-bold uppercase tracking-[0.1em]">Files (max 5)</Label>
+                                                                        <Input
+                                                                            type="file"
+                                                                            accept=".pdf,.ppt,.pptx,.mp3,.mp4,.mov,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,image/png,image/jpeg,image/webp,video/mp4,video/quicktime,audio/mpeg,application/zip"
+                                                                            multiple
+                                                                            className="neo-input mt-2"
+                                                                            disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}
+                                                                            onChange={(e) => {
+                                                                                const files = Array.from(e.target.files || []);
+                                                                                const allowedNewCount = Math.max(0, MAX_SUBMISSION_FILES - existingSubmissionFiles.length - newSubmissionFiles.length);
+                                                                                if (files.length > allowedNewCount) {
+                                                                                    toast.error(`You can add ${allowedNewCount} more file(s)`);
+                                                                                }
+                                                                                const accepted = files.slice(0, allowedNewCount);
+                                                                                setNewSubmissionFiles((prev) => [...prev, ...accepted].slice(0, MAX_SUBMISSION_FILES));
+                                                                                e.target.value = '';
+                                                                            }}
+                                                                        />
+                                                                        {existingSubmissionFiles.length > 0 ? (
+                                                                            <div className="mt-2 space-y-1">
+                                                                                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-600">Retained Files</p>
+                                                                                {existingSubmissionFiles.map((item, idx) => (
+                                                                                    <div key={`${item.file_url}-${idx}`} className="flex items-center justify-between rounded-md border border-slate-200 px-2 py-1 text-xs">
+                                                                                        <a className="truncate pr-2 underline" href={item.file_url} target="_blank" rel="noreferrer">{item.file_name || `File ${idx + 1}`}</a>
+                                                                                        <Button type="button" variant="outline" className="h-6 px-2 text-xs" onClick={() => setExistingSubmissionFiles((prev) => prev.filter((_, i) => i !== idx))}>Remove</Button>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        ) : null}
+                                                                        {newSubmissionFiles.length > 0 ? (
+                                                                            <div className="mt-2 space-y-1">
+                                                                                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-600">New Files</p>
+                                                                                {newSubmissionFiles.map((file, idx) => (
+                                                                                    <div key={`${file.name}-${file.size}-${idx}`} className="flex items-center justify-between rounded-md border border-slate-200 px-2 py-1 text-xs">
+                                                                                        <span className="truncate pr-2">{file.name} ({formatFileSize(file.size)})</span>
+                                                                                        <Button type="button" variant="outline" className="h-6 px-2 text-xs" onClick={() => setNewSubmissionFiles((prev) => prev.filter((_, i) => i !== idx))}>Remove</Button>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        ) : null}
+                                                                    </div>
+                                                                ) : (
+                                                                    <div>
+                                                                        <Label className="text-xs font-bold uppercase tracking-[0.1em]">Submission Link</Label>
+                                                                        <Input
+                                                                            value={submissionLink}
+                                                                            onChange={(e) => setSubmissionLink(e.target.value)}
+                                                                            placeholder="https://..."
+                                                                            className="neo-input mt-2"
+                                                                            disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}
+                                                                        />
+                                                                    </div>
+                                                                )}
+                                                                <div>
+                                                                    <Label className="text-xs font-bold uppercase tracking-[0.1em]">Notes</Label>
+                                                                    <Input
+                                                                        value={submissionNotes}
+                                                                        onChange={(e) => setSubmissionNotes(e.target.value)}
+                                                                        className="neo-input mt-2"
+                                                                        disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}
+                                                                    />
+                                                                </div>
+                                                                {submittingRoundWork && normalizeSubmissionType(submissionType) === 'file' && submissionUploadProgress !== null ? (
+                                                                    <div className="space-y-1">
+                                                                        <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
+                                                                            <span>Uploading files...</span>
+                                                                            <span>{submissionUploadProgress}%</span>
+                                                                        </div>
+                                                                        <div className="h-2 w-full overflow-hidden rounded border border-black bg-white">
+                                                                            <div
+                                                                                className="h-full bg-[#8B5CF6] transition-all duration-200"
+                                                                                style={{ width: `${submissionUploadProgress}%` }}
+                                                                            />
+                                                                        </div>
+                                                                    </div>
+                                                                ) : null}
+                                                                <Button
+                                                                    className="w-full border-2 border-black bg-[#8B5CF6] text-white shadow-neo"
+                                                                    disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}
+                                                                    onClick={submitRoundWork}
+                                                                >
+                                                                    <Upload className="mr-2 h-4 w-4" />
+                                                                    {submittingRoundWork
+                                                                        ? 'Submitting...'
+                                                                        : (roundSubmission?.id ? 'Submitted (can be replaced)' : 'Submit Work')}
+                                                                </Button>
+                                                                {roundSubmission?.id ? (
+                                                                    <Button
+                                                                        variant="outline"
+                                                                        className="w-full border-2 border-black bg-white text-red-700 shadow-neo"
+                                                                        disabled={!canEditRoundSubmission || !roundSubmission?.is_editable || submittingRoundWork || removingRoundWork}
+                                                                        onClick={removeRoundSubmission}
+                                                                    >
+                                                                        {removingRoundWork ? 'Removing...' : 'Remove Submitted Work'}
+                                                                    </Button>
+                                                                ) : null}
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                </div>
+                            </div>
+                        </>
+                    ) : null}
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={leaveTeamDialogOpen} onOpenChange={setLeaveTeamDialogOpen}>
+                <DialogContent className="max-w-md border-4 border-black bg-white">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading text-xl font-black uppercase tracking-tight">Leave Team</DialogTitle>
+                    </DialogHeader>
+                    <p className="text-sm font-medium text-slate-700">
+                        You will be removed from this team. This action cannot be undone automatically.
+                    </p>
+                    <div className="flex justify-end gap-2">
+                        <Button type="button" variant="outline" className="border-2 border-black shadow-neo" onClick={() => setLeaveTeamDialogOpen(false)} disabled={leaveTeamLoading}>
+                            Cancel
+                        </Button>
+                        <Button type="button" className="border-2 border-black bg-[#f59e0b] text-black shadow-neo hover:bg-[#d97706]" onClick={leaveTeam} disabled={leaveTeamLoading}>
+                            {leaveTeamLoading ? 'Leaving...' : 'Confirm Leave'}
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={removeMemberDialog.open} onOpenChange={(open) => setRemoveMemberDialog(open ? removeMemberDialog : { open: false, userId: null, name: '' })}>
+                <DialogContent className="max-w-md border-4 border-black bg-white">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading text-xl font-black uppercase tracking-tight">Remove Member</DialogTitle>
+                    </DialogHeader>
+                    <p className="text-sm font-medium text-slate-700">
+                        Remove <span className="font-bold text-black">{removeMemberDialog.name || 'this member'}</span> from your team?
+                    </p>
+                    <div className="flex justify-end gap-2">
+                        <Button type="button" variant="outline" className="border-2 border-black shadow-neo" onClick={() => setRemoveMemberDialog({ open: false, userId: null, name: '' })} disabled={removeMemberLoading}>
+                            Cancel
+                        </Button>
+                        <Button type="button" className="border-2 border-black bg-[#f43f5e] text-white shadow-neo hover:bg-[#e11d48]" onClick={removeMemberFromTeam} disabled={removeMemberLoading}>
+                            {removeMemberLoading ? 'Removing...' : 'Confirm Remove'}
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={deleteTeamDialogOpen} onOpenChange={setDeleteTeamDialogOpen}>
+                <DialogContent className="max-w-md border-4 border-black bg-white">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading text-xl font-black uppercase tracking-tight">Remove Team</DialogTitle>
+                    </DialogHeader>
+                    <p className="text-sm font-medium text-slate-700">
+                        This will remove your team. It is allowed only before any score rows exist.
+                    </p>
+                    <div className="flex justify-end gap-2">
+                        <Button type="button" variant="outline" className="border-2 border-black shadow-neo" onClick={() => setDeleteTeamDialogOpen(false)} disabled={deleteTeamLoading}>
+                            Cancel
+                        </Button>
+                        <Button type="button" className="border-2 border-black bg-[#dc2626] text-white shadow-neo hover:bg-[#b91c1c]" onClick={deleteTeam} disabled={deleteTeamLoading}>
+                            {deleteTeamLoading ? 'Removing...' : 'Confirm Remove Team'}
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={qrDialogOpen} onOpenChange={setQrDialogOpen}>
+                <DialogContent className="max-h-[calc(100vh-2rem)] overflow-x-hidden overflow-y-auto border-4 border-black bg-white">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading text-2xl font-black uppercase tracking-tight">Attendance QR</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                        <p className="text-sm font-medium text-slate-700">Show this QR at attendance checkpoints for this event.</p>
+                        <div className="flex justify-center rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
+                            {qrImageUrl ? (
+                                <img src={qrImageUrl} alt="Attendance QR" className="h-72 w-72 max-w-full" />
+                            ) : (
+                                <p className="text-sm font-medium text-slate-600">Unable to render QR.</p>
+                            )}
+                        </div>
+                        <p className="text-[11px] font-medium text-slate-500">Token is embedded in the QR image and hidden from plain view.</p>
+                        <div className="flex justify-end">
+                            <Button
+                                data-testid="event-dashboard-close-qr-button"
+                                variant="outline"
+                                className="border-2 border-black shadow-neo"
+                                onClick={() => {
+                                    setQrDialogOpen(false);
+                                }}
+                            >
+                                Close
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={!isParticipantRoute && slugQrDialogOpen} onOpenChange={setSlugQrDialogOpen}>
+                <DialogContent className="max-h-[calc(100vh-2rem)] overflow-x-hidden overflow-y-auto border-4 border-black bg-white">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading text-2xl font-black uppercase tracking-tight">Event QR</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                        <p className="text-sm font-medium text-slate-700">Share this QR to open this event page directly.</p>
+                        <div className="flex justify-center rounded-md border-2 border-black bg-[#fffdf0] p-4 shadow-neo">
+                            {slugQrImageUrl ? (
+                                <img src={slugQrImageUrl} alt="Event QR" className="h-72 w-72 max-w-full" />
+                            ) : (
+                                <p className="text-sm font-medium text-slate-600">Unable to render QR.</p>
+                            )}
+                        </div>
+                        <p className="text-[11px] font-medium text-slate-500 break-all">{`${window.location.origin}${infoPath}`}</p>
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                            <a href={eventQrWhatsappShareUrl} target="_blank" rel="noreferrer">
+                                <Button
+                                    type="button"
+                                    className="border-2 border-black bg-[#22c55e] text-black shadow-neo hover:bg-[#16a34a]"
+                                >
+                                    <ExternalLink className="mr-2 h-4 w-4" />
+                                    Share to WhatsApp
+                                </Button>
+                            </a>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="border-2 border-black shadow-neo"
+                                onClick={async () => {
+                                    try {
+                                        await navigator.clipboard.writeText(`${window.location.origin}${infoPath}`);
+                                        toast.success('Event link copied');
+                                    } catch {
+                                        toast.error('Failed to copy event link');
+                                    }
+                                }}
+                            >
+                                <Copy className="mr-2 h-4 w-4" />
+                                Copy Link
+                            </Button>
+                            <Button
+                                type="button"
+                                className="border-2 border-black bg-[#8B5CF6] text-white shadow-neo"
+                                onClick={() => downloadQrImage(slugQrImageUrl, `${eventSlug || 'event'}_qr.png`)}
+                                disabled={!slugQrImageUrl}
+                            >
+                                <Download className="mr-2 h-4 w-4" />
+                                Download QR
+                            </Button>
+                            <Button
+                                data-testid="event-dashboard-close-event-slug-qr-button"
+                                variant="outline"
+                                className="border-2 border-black shadow-neo"
+                                onClick={() => {
+                                    setSlugQrDialogOpen(false);
+                                }}
+                            >
+                                Close
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={submissionSuccessDialogOpen} onOpenChange={setSubmissionSuccessDialogOpen}>
+                <DialogContent className="max-w-md border-4 border-black bg-white">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading text-xl font-black uppercase tracking-tight">
+                            Submission Confirmed
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <p className="text-sm font-medium text-slate-700">
+                            {submissionSuccessText || 'Submission saved successfully.'}
+                        </p>
+                        <div className="flex justify-end">
+                            <Button
+                                type="button"
+                                className="border-2 border-black bg-[#8B5CF6] text-white shadow-neo"
+                                onClick={() => setSubmissionSuccessDialogOpen(false)}
+                            >
+                                OK
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={registrationCtaModalOpen} onOpenChange={setRegistrationCtaModalOpen}>
+                <DialogContent className="max-w-md border-4 border-black bg-white">
+                    <DialogHeader>
+                        <DialogTitle className="font-heading text-xl font-black uppercase tracking-tight">
+                            {registrationCtaVariant === 'payment_submitted' ? 'Payment Submitted' : 'Registration Confirmed'}
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <p className="text-sm font-medium text-slate-700">
+                            {registrationCtaVariant === 'payment_submitted'
+                                ? 'Payment proof submitted successfully. Join the external channel for updates while confirmation is pending.'
+                                : 'You are registered. Join the external channel for updates.'}
+                        </p>
+                        {whatsappUrl ? (
+                            disableExternalCtas ? (
+                                <Button type="button" disabled className="w-full border-2 border-black bg-[#16A34A] text-white shadow-neo">
+                                    <ExternalLink className="mr-2 h-4 w-4" />
+                                    {externalUrlLabel}
+                                </Button>
+                            ) : (
+                                <a href={whatsappUrl} target="_blank" rel="noreferrer">
+                                    <Button type="button" className="w-full border-2 border-black bg-[#16A34A] text-white shadow-neo hover:bg-[#15803D]">
+                                        <ExternalLink className="mr-2 h-4 w-4" />
+                                        {externalUrlLabel}
+                                    </Button>
+                                </a>
+                            )
+                        ) : null}
+                        <div className="flex justify-end">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="border-2 border-black shadow-neo"
+                                onClick={() => setRegistrationCtaModalOpen(false)}
+                            >
+                                Close
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <PdaFooter />
+        </div>
+    );
+}
