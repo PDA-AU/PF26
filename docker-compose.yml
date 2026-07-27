@@ -1,7 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
-    platform: linux/arm64
+    platform: linux/amd64
     container_name: pf26-postgres
     restart: unless-stopped
     environment:
