@@ -429,7 +429,7 @@ export default function PdaHome() {
                 <h3 className="mt-4 shrink-0 text-xl font-heading font-bold leading-tight line-clamp-2">{item.title}</h3>
                 <div className="relative mt-2 h-52 shrink-0 overflow-y-auto pr-2 text-sm leading-5 text-slate-700">
                     {description ? (
-                        <div className="break-words [overflow-wrap:anywhere] [&>p]:m-0 [&>p+p]:mt-1.5 [&>ul]:m-0 [&>ul]:space-y-1 [&>ul]:pl-5">
+                        <div className="break-words [&>p]:m-0 [&>p+p]:mt-1.5 [&>ul]:m-0 [&>ul]:space-y-1 [&>ul]:pl-5">
                             <ParsedDescription description={description} />
                         </div>
                     ) : (
@@ -855,8 +855,8 @@ export default function PdaHome() {
                                     ref={eventScrollRef}
                                     className="flex gap-4 overflow-x-auto pb-4 no-scrollbar snap-x snap-mandatory"
                                 >
-                                    {events.map((event) => (
-                                        <div key={`event-mobile-${event.id || event.title}`} className="min-w-[260px] snap-start">
+                                    {events.map((event, i) => (
+                                        <div key={`event-mobile-${event.id ?? event.title ?? i}`} className="min-w-[260px] snap-start">
                                             {renderCard(event, 'event')}
                                         </div>
                                     ))}

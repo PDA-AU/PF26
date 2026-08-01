@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -19,8 +19,6 @@ from models import (
     PersohubPayment,
     PersohubSympo,
     PersohubSympoEvent,
-    PdaEvent,
-    PdaEventTeam,
     PdaTeam,
     PdaUser,
     PersohubAdmin,
@@ -587,11 +585,11 @@ def _validate_cc_badge_assignment_refs(
 ) -> None:
     if user_id is not None and not db.query(PdaUser.id).filter(PdaUser.id == int(user_id)).first():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User {user_id} not found")
-    if pda_team_id is not None and not db.query(PdaEventTeam.id).filter(PdaEventTeam.id == int(pda_team_id)).first():
+    if pda_team_id is not None and not db.execute(text("SELECT 1 FROM pda_event_teams WHERE id=:id LIMIT 1"), {"id": int(pda_team_id)}).first():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"PDA team {pda_team_id} not found")
     if persohub_team_id is not None and not db.query(PersohubEventTeam.id).filter(PersohubEventTeam.id == int(persohub_team_id)).first():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Persohub team {persohub_team_id} not found")
-    if pda_event_id is not None and not db.query(PdaEvent.id).filter(PdaEvent.id == int(pda_event_id)).first():
+    if pda_event_id is not None and not db.execute(text("SELECT 1 FROM pda_events WHERE id=:id LIMIT 1"), {"id": int(pda_event_id)}).first():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"PDA event {pda_event_id} not found")
     if persohub_event_id is not None and not db.query(PersohubEvent.id).filter(PersohubEvent.id == int(persohub_event_id)).first():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Persohub event {persohub_event_id} not found")

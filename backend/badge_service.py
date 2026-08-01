@@ -5,7 +5,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
-from models import Badge, BadgeAssignment, PdaEvent, PersohubEvent
+from models import Badge, BadgeAssignment, PersohubEvent
 
 
 def _clean_text(value: Optional[str]) -> str:
@@ -168,23 +168,16 @@ def delete_badges_for_persohub_teams(db: Session, team_ids: Iterable[int]) -> No
 
 def get_user_achievements(db: Session, *, platform: str, user_id: int, team_ids: Iterable[int]) -> List[Tuple[BadgeAssignment, Badge, Optional[Any]]]:
     ids = [int(item) for item in team_ids if item is not None]
-    q = db.query(BadgeAssignment, Badge).join(Badge, Badge.id == BadgeAssignment.badge_id)
-    if platform == "pda":
-        event_join = PdaEvent
-        q = q.outerjoin(PdaEvent, PdaEvent.id == BadgeAssignment.pda_event_id)
-        q = q.add_columns(PdaEvent)
-        if ids:
-            q = q.filter(or_(BadgeAssignment.user_id == user_id, BadgeAssignment.pda_team_id.in_(ids)))
-        else:
-            q = q.filter(BadgeAssignment.user_id == user_id)
+    q = (
+        db.query(BadgeAssignment, Badge)
+        .join(Badge, Badge.id == BadgeAssignment.badge_id)
+        .outerjoin(PersohubEvent, PersohubEvent.id == BadgeAssignment.persohub_event_id)
+        .add_columns(PersohubEvent)
+    )
+    if ids:
+        q = q.filter(or_(BadgeAssignment.user_id == user_id, BadgeAssignment.persohub_team_id.in_(ids)))
     else:
-        event_join = PersohubEvent
-        q = q.outerjoin(PersohubEvent, PersohubEvent.id == BadgeAssignment.persohub_event_id)
-        q = q.add_columns(PersohubEvent)
-        if ids:
-            q = q.filter(or_(BadgeAssignment.user_id == user_id, BadgeAssignment.persohub_team_id.in_(ids)))
-        else:
-            q = q.filter(BadgeAssignment.user_id == user_id)
+        q = q.filter(BadgeAssignment.user_id == user_id)
     return q.order_by(BadgeAssignment.created_at.desc(), BadgeAssignment.id.desc()).all()
 
 

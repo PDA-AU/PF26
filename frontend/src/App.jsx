@@ -53,7 +53,7 @@ const PersohubEventAdminBadgesPage = lazy(() => import("@/pages/persohub/events/
 const PersohubEventAdminEmailPage = lazy(() => import("@/pages/persohub/events/admin/EventAdminEmailPage"));
 
 // Protected Route Components
-const ProtectedPdaRoute = ({ children, requirePf = false, requireHome = false, requireSuperAdmin = false, requireEvents = false }) => {
+const ProtectedPdaRoute = ({ children, requirePf = false, requireHome = false, requireSuperAdmin = false }) => {
     const { user, loading } = useAuth();
 
     if (loading) {
@@ -70,13 +70,6 @@ const ProtectedPdaRoute = ({ children, requirePf = false, requireHome = false, r
     if (requireHome && !user.is_superadmin && !user.policy?.home) {
         return <Navigate to="/login" replace />;
     }
-    if (requireEvents && !user.is_superadmin) {
-        const eventsPolicy = (user.policy && typeof user.policy.events === 'object') ? user.policy.events : null;
-        const hasAnyEventAccess = !!eventsPolicy && Object.values(eventsPolicy).some((value) => Boolean(value));
-        if (!hasAnyEventAccess) {
-            return <Navigate to="/login" replace />;
-        }
-    }
 
     return children;
 };
@@ -85,15 +78,6 @@ const PersohubEventAdminBaseRedirect = () => {
     const { eventSlug } = useParams();
     if (!eventSlug) return <Navigate to="/persohub/admin/events" replace />;
     return <Navigate to={`/persohub/admin/events/${eventSlug}/dashboard`} replace />;
-};
-
-const LegacyEventsRouteRedirect = () => {
-    const { "*": rest = "" } = useParams();
-    const location = useLocation();
-    const targetPath = String(rest || "").trim()
-        ? `/persohub/events/${rest}`
-        : "/persohub/events";
-    return <Navigate to={`${targetPath}${location.search || ""}${location.hash || ""}`} replace />;
 };
 
 const LegacyPersohubAdminEventsRouteRedirect = () => {
@@ -210,8 +194,6 @@ function AppRoutes() {
                     <PersohubPaymentsAdminPage />
                 </ProtectedPdaRoute>
             } />
-            <Route path="/admin/event/:eventSlug" element={<Navigate to="/persohub/admin" replace />} />
-            <Route path="/admin/events/*" element={<Navigate to="/persohub/admin" replace />} />
             <Route path="/admin/recruitments" element={
                 <ProtectedPdaRoute requireSuperAdmin>
                     <RecruitmentsAdmin />
@@ -219,8 +201,6 @@ function AppRoutes() {
             } />
             <Route path="/admin/logs" element={<LogsAdmin />} />
             <Route path="/admin/superadmin" element={<SuperAdmin />} />
-            <Route path="/event/*" element={<LegacyEventsRouteRedirect />} />
-            <Route path="/events/*" element={<LegacyEventsRouteRedirect />} />
             <Route path="/persohub" element={<PersohubFeedPage />} />
             <Route path="/persohub/p/:slugToken" element={<PersohubPostPage />} />
             <Route path="/persohub/tmp/chakravyuha" element={

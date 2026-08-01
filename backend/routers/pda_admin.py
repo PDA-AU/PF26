@@ -12,20 +12,14 @@ from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 
 from database import get_db, SessionLocal
-from badge_service import delete_badges_for_pda_teams, delete_badges_for_user
+from badge_service import delete_badges_for_user
 from models import (
     PdaItem,
     PdaTeam,
     PdaGallery,
     PdaUser,
     PdaAdmin,
-    PdaEventRegistration,
-    PdaEventTeam,
-    PdaEventTeamMember,
-    PdaEventAttendance,
-    PdaEventScore,
     BadgeAssignment,
-    PdaEventInvite,
     PersohubCommunity,
     PersohubCommunityFollow,
     PersohubPost,
@@ -282,17 +276,7 @@ def _sync_member_status_from_team(user: Optional[PdaUser], member: Optional[PdaT
 
 def _user_dependency_checks(db: Session, user_id: int) -> List[str]:
     checks = [
-        ("pda_event_registrations", db.query(PdaEventRegistration).filter(PdaEventRegistration.user_id == user_id).first()),
-        ("pda_event_teams", db.query(PdaEventTeam).filter(PdaEventTeam.team_lead_user_id == user_id).first()),
-        ("pda_event_team_members", db.query(PdaEventTeamMember).filter(PdaEventTeamMember.user_id == user_id).first()),
-        ("pda_event_attendance", db.query(PdaEventAttendance).filter(
-            (PdaEventAttendance.user_id == user_id) | (PdaEventAttendance.marked_by_user_id == user_id)
-        ).first()),
-        ("pda_event_scores", db.query(PdaEventScore).filter(PdaEventScore.user_id == user_id).first()),
         ("badge_assignments", db.query(BadgeAssignment).filter(BadgeAssignment.user_id == user_id).first()),
-        ("pda_event_invites", db.query(PdaEventInvite).filter(
-            (PdaEventInvite.invited_user_id == user_id) | (PdaEventInvite.invited_by_user_id == user_id)
-        ).first()),
         ("persohub_communities", db.query(PersohubCommunity).filter(PersohubCommunity.admin_id == user_id).first()),
         ("persohub_community_follows", db.query(PersohubCommunityFollow).filter(PersohubCommunityFollow.user_id == user_id).first()),
         ("persohub_posts", db.query(PersohubPost).filter(PersohubPost.admin_id == user_id).first()),
@@ -980,29 +964,7 @@ def delete_pda_user(
         )
 
     if force:
-        team_ids_led = [t.id for t in db.query(PdaEventTeam).filter(PdaEventTeam.team_lead_user_id == user_id).all()]
-        team_ids_member = [t.id for t in db.query(PdaEventTeamMember).filter(PdaEventTeamMember.user_id == user_id).all()]
-        team_ids = list({*team_ids_led, *team_ids_member})
-
-        if team_ids:
-            db.query(PdaEventRegistration).filter(PdaEventRegistration.team_id.in_(team_ids)).delete(synchronize_session=False)
-            db.query(PdaEventAttendance).filter(PdaEventAttendance.team_id.in_(team_ids)).delete(synchronize_session=False)
-            db.query(PdaEventScore).filter(PdaEventScore.team_id.in_(team_ids)).delete(synchronize_session=False)
-            delete_badges_for_pda_teams(db, team_ids)
-            db.query(PdaEventInvite).filter(PdaEventInvite.team_id.in_(team_ids)).delete(synchronize_session=False)
-            db.query(PdaEventTeamMember).filter(PdaEventTeamMember.team_id.in_(team_ids)).delete(synchronize_session=False)
-            db.query(PdaEventTeam).filter(PdaEventTeam.id.in_(team_ids_led)).delete(synchronize_session=False)
-
-        db.query(PdaEventRegistration).filter(PdaEventRegistration.user_id == user_id).delete(synchronize_session=False)
-        db.query(PdaEventTeamMember).filter(PdaEventTeamMember.user_id == user_id).delete(synchronize_session=False)
-        db.query(PdaEventAttendance).filter(
-            (PdaEventAttendance.user_id == user_id) | (PdaEventAttendance.marked_by_user_id == user_id)
-        ).delete(synchronize_session=False)
-        db.query(PdaEventScore).filter(PdaEventScore.user_id == user_id).delete(synchronize_session=False)
         delete_badges_for_user(db, user_id)
-        db.query(PdaEventInvite).filter(
-            (PdaEventInvite.invited_user_id == user_id) | (PdaEventInvite.invited_by_user_id == user_id)
-        ).delete(synchronize_session=False)
 
         post_ids = [p.id for p in db.query(PersohubPost).filter(PersohubPost.admin_id == user_id).all()]
         if post_ids:
