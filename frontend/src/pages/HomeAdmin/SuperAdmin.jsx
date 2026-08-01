@@ -1,9 +1,17 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
+import { FileText, Upload, X } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import AdminLayout from '@/pages/HomeAdmin/AdminLayout';
 import { API } from '@/pages/HomeAdmin/adminApi';
@@ -318,6 +326,65 @@ export default function SuperAdmin() {
     };
 
 
+    // ─── Batch placement upload ───────────────────────────────────────────────
+    const batchFileInputRef = useRef(null);
+    const [batchFiles, setBatchFiles] = useState([]); // [{file, experience_type, company_name}]
+    const [batchUploading, setBatchUploading] = useState(false);
+
+    const handleBatchFilesSelect = (e) => {
+        const selected = Array.from(e.target.files || []);
+        setBatchFiles(prev => [
+            ...prev,
+            ...selected.map(f => ({ file: f, experience_type: 'intern', company_name: '' })),
+        ]);
+        e.target.value = '';
+    };
+
+    const updateBatchItem = (idx, key, val) => {
+        setBatchFiles(prev => prev.map((item, i) => i === idx ? { ...item, [key]: val } : item));
+    };
+
+    const removeBatchItem = (idx) => {
+        setBatchFiles(prev => prev.filter((_, i) => i !== idx));
+    };
+
+    const handleBatchUpload = async () => {
+        if (!batchFiles.length) return toast.error('Select at least one file');
+        setBatchUploading(true);
+        try {
+            const presignRes = await axios.post(
+                `${API}/pda-admin/placements/batch-presign`,
+                batchFiles.map(b => ({ filename: b.file.name, content_type: b.file.type })),
+                { headers: getAuthHeader() },
+            );
+            const presigns = presignRes.data;
+            // PUT all files to S3 in parallel
+            await Promise.all(
+                presigns.map((p, i) =>
+                    axios.put(p.upload_url, batchFiles[i].file, {
+                        headers: { 'Content-Type': p.content_type || batchFiles[i].file.type },
+                    })
+                )
+            );
+            // Create all placement records
+            const body = presigns.map((p, i) => ({
+                s3_url: p.public_url,
+                content_type: batchFiles[i].file.type,
+                experience_type: batchFiles[i].experience_type,
+                company_name: batchFiles[i].company_name || null,
+            }));
+            await axios.post(`${API}/pda-admin/placements/batch`, body, { headers: getAuthHeader() });
+            toast.success(`${batchFiles.length} placement${batchFiles.length !== 1 ? 's' : ''} uploaded`);
+            setBatchFiles([]);
+        } catch (err) {
+            const detail = err?.response?.data?.detail;
+            toast.error(typeof detail === 'string' ? detail : 'Batch upload failed');
+        } finally {
+            setBatchUploading(false);
+        }
+    };
+    // ─────────────────────────────────────────────────────────────────────────
+
     if (!user?.is_superadmin) {
         return (
             <AdminLayout title="Superadmin" subtitle="Access restricted to the superadmin account.">
@@ -576,6 +643,93 @@ export default function SuperAdmin() {
                         </div>
                     )}
                 </div>
+            </section>
+
+            {/* Batch Placement Upload */}
+            <section className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                        <p className="text-xs uppercase tracking-[0.4em] text-slate-400">Placements</p>
+                        <h2 className="text-2xl font-heading font-black">Batch Upload</h2>
+                        <p className="mt-1 text-xs text-slate-400">
+                            Upload multiple PDF / DOCX placement files at once. All files use default user (0000000000).
+                        </p>
+                    </div>
+                    <Button
+                        type="button"
+                        onClick={() => batchFileInputRef.current?.click()}
+                        className="bg-[#f6c347] text-black hover:bg-[#ffd16b] transition-colors duration-200 font-semibold flex items-center gap-2 shrink-0"
+                        disabled={batchUploading}
+                    >
+                        <Upload className="w-4 h-4" />
+                        Add Files
+                    </Button>
+                    <input
+                        ref={batchFileInputRef}
+                        type="file"
+                        multiple
+                        accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        className="hidden"
+                        onChange={handleBatchFilesSelect}
+                    />
+                </div>
+
+                {batchFiles.length > 0 && (
+                    <div className="mt-6 space-y-3">
+                        {batchFiles.map((item, idx) => (
+                            <div key={idx} className="flex flex-col gap-2 sm:flex-row sm:items-center rounded-xl border border-black/10 bg-[#fffdf7] p-3">
+                                <div className="flex items-center gap-2 flex-1 min-w-0">
+                                    <FileText className="w-4 h-4 text-[#b48900] shrink-0" />
+                                    <span className="text-sm font-medium truncate">{item.file.name}</span>
+                                </div>
+                                <div className="flex flex-col gap-2 sm:flex-row sm:items-center shrink-0">
+                                    <Select
+                                        value={item.experience_type}
+                                        onValueChange={v => updateBatchItem(idx, 'experience_type', v)}
+                                    >
+                                        <SelectTrigger className="w-full sm:w-36 border-black/10 text-xs h-8">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="intern">Internship</SelectItem>
+                                            <SelectItem value="placement">Placement</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                    <Input
+                                        value={item.company_name}
+                                        onChange={e => updateBatchItem(idx, 'company_name', e.target.value)}
+                                        placeholder="Company name"
+                                        className="w-full sm:w-44 border-black/10 text-xs h-8"
+                                    />
+                                    <button
+                                        onClick={() => removeBatchItem(idx)}
+                                        className="text-slate-400 hover:text-red-500 transition-colors duration-150 self-end sm:self-auto"
+                                    >
+                                        <X className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+
+                        <div className="flex justify-end gap-2 pt-2">
+                            <Button
+                                variant="outline"
+                                className="border-black/10 text-sm"
+                                onClick={() => setBatchFiles([])}
+                                disabled={batchUploading}
+                            >
+                                Clear All
+                            </Button>
+                            <Button
+                                onClick={handleBatchUpload}
+                                disabled={batchUploading}
+                                className="bg-[#11131a] text-white hover:bg-[#1f2330] transition-colors duration-200 font-semibold"
+                            >
+                                {batchUploading ? `Uploading ${batchFiles.length} files…` : `Upload ${batchFiles.length} file${batchFiles.length !== 1 ? 's' : ''}`}
+                            </Button>
+                        </div>
+                    </div>
+                )}
             </section>
 
             <Dialog open={restoreOpen} onOpenChange={setRestoreOpen}>

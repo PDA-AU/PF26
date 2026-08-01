@@ -868,3 +868,23 @@ class PersohubPostMention(Base):
     post_id = Column(Integer, ForeignKey("persohub_posts.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class ExperienceType(enum.Enum):
+    INTERN = "intern"
+    PLACEMENT = "placement"
+
+
+class Placement(Base):
+    __tablename__ = "placements"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    s3_url = Column(String(800), nullable=False)
+    experience_type = Column(SQLEnum(ExperienceType, values_callable=lambda x: [e.value for e in x]), nullable=False)
+    extracted_text = Column(Text, nullable=True)
+    content = Column(JSON, nullable=True)
+    company_name = Column(String(255), nullable=True, index=True)
+    experience_months = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())

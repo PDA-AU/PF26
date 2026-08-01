@@ -40,6 +40,12 @@ export default function HomeHeader() {
                     >
                         Persohub
                     </Link>
+                    <Link
+                        to="/placements"
+                        className="hidden text-sm font-semibold text-slate-700 transition hover:text-[#0f1115] md:block"
+                    >
+                        Placements
+                    </Link>
 
                     {user ? (
                         <div className="hidden items-center gap-3 md:flex">
@@ -91,6 +97,9 @@ export default function HomeHeader() {
                         </Link>
                         <Link to="/persohub" className="text-sm font-semibold text-slate-700 hover:text-[#0f1115]" onClick={() => setMenuOpen(false)}>
                             Persohub
+                        </Link>
+                        <Link to="/placements" className="text-sm font-semibold text-slate-700 hover:text-[#0f1115]" onClick={() => setMenuOpen(false)}>
+                            Placements
                         </Link>
                         <Link to="/recruit" className="text-sm font-semibold text-slate-700 hover:text-[#0f1115]" onClick={() => setMenuOpen(false)}>
                             Become a Member

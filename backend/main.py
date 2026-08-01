@@ -13,6 +13,7 @@ from auth import decode_token
 from utils import log_admin_action
 
 from routers import public, auth_pda, pda_public, pda_admin, superadmin, pda_cc_admin
+from routers import placements as placements_router
 from routers import (
     persohub_public,
     persohub_community_auth,
@@ -106,3 +107,5 @@ app.include_router(persohub_admin_events.router, prefix="/api")
 app.include_router(persohub_admin_governance.router, prefix="/api")
 app.include_router(persohub_events_admin.router, prefix="/api")
 app.include_router(persohub_events.router, prefix="/api")
+app.include_router(placements_router.router, prefix="/api")
+app.include_router(placements_router.admin_router, prefix="/api")

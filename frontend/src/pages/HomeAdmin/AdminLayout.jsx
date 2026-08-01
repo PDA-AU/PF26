@@ -60,7 +60,8 @@ export default function AdminLayout({ title, subtitle, children, allowEventAdmin
             { label: 'Users', path: '/admin/users' },
             { label: 'Team', path: '/admin/team' },
             { label: 'Email', path: '/admin/email' },
-            { label: 'Gallery', path: '/admin/gallery' }
+            { label: 'Gallery', path: '/admin/gallery' },
+            { label: 'Placements', path: '/admin/placements' },
         ]
         : [];
     const navItems = isSuperAdmin

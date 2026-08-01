@@ -51,6 +51,8 @@ const PersohubEventAdminResultsPage = lazy(() => import("@/pages/persohub/events
 const PersohubEventAdminLogsPage = lazy(() => import("@/pages/persohub/events/admin/EventAdminLogsPage"));
 const PersohubEventAdminBadgesPage = lazy(() => import("@/pages/persohub/events/admin/EventAdminBadgesPage"));
 const PersohubEventAdminEmailPage = lazy(() => import("@/pages/persohub/events/admin/EventAdminEmailPage"));
+const PlacementsPage = lazy(() => import("@/pages/placements/PlacementsPage"));
+const PlacementsAdmin = lazy(() => import("@/pages/HomeAdmin/PlacementsAdmin"));
 
 // Protected Route Components
 const ProtectedPdaRoute = ({ children, requirePf = false, requireHome = false, requireSuperAdmin = false }) => {
@@ -201,6 +203,8 @@ function AppRoutes() {
             } />
             <Route path="/admin/logs" element={<LogsAdmin />} />
             <Route path="/admin/superadmin" element={<SuperAdmin />} />
+            <Route path="/admin/placements" element={<PlacementsAdmin />} />
+            <Route path="/placements" element={<PlacementsPage />} />
             <Route path="/persohub" element={<PersohubFeedPage />} />
             <Route path="/persohub/p/:slugToken" element={<PersohubPostPage />} />
             <Route path="/persohub/tmp/chakravyuha" element={
