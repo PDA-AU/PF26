@@ -232,7 +232,7 @@ class PdaRecruitmentApplyRequest(BaseModel):
             raise ValueError("preferred_team_1 is required")
         prefs = [self.preferred_team_1, self.preferred_team_2, self.preferred_team_3]
         filtered = [pref for pref in prefs if pref]
-        if any(pref == "Executive" for pref in filtered):
+        if any(pref.lower() in {"executive", "Executive".lower()} for pref in filtered):
             raise ValueError("Executive team cannot be selected")
         if len(filtered) != len(set(filtered)):
             raise ValueError("Team preferences must be unique")
@@ -334,6 +334,7 @@ class PdaUserResponse(BaseModel):
     preferred_team_2: Optional[str] = None
     preferred_team_3: Optional[str] = None
     resume_url: Optional[str] = None
+    applied_at: Optional[datetime] = None
     team: Optional[str] = None
     designation: Optional[str] = None
     instagram_url: Optional[str] = None
@@ -346,6 +347,85 @@ class PdaUserResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class PdaRecruitmentTeamResponse(BaseModel):
+    id: int
+    team_code: str
+    title: str
+    description: Optional[str] = None
+    active: bool
+
+    class Config:
+        from_attributes = True
+
+
+class PdaRecruitmentTeamPublicResponse(BaseModel):
+    team_code: str
+    title: str
+    description: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class PdaRecruitmentTeamUpsertRequest(BaseModel):
+    team_code: str = Field(..., min_length=2, max_length=32)
+    title: str = Field(..., min_length=2, max_length=120)
+    description: Optional[str] = Field(default=None, max_length=2000)
+    active: bool = True
+
+    @field_validator("team_code")
+    @classmethod
+    def normalize_team_code(cls, v):
+        value = str(v or "").strip().lower()
+        if not value:
+            raise ValueError("team_code is required")
+        return value
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, v):
+        value = str(v or "").strip()
+        if not value:
+            raise ValueError("title is required")
+        return value
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, v):
+        if v is None:
+            return None
+        value = str(v or "").strip()
+        return value or None
+
+
+class PdaRecruitmentTeamUpdateRequest(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=2, max_length=120)
+    description: Optional[str] = Field(default=None, max_length=2000)
+    active: Optional[bool] = None
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, v):
+        if v is None:
+            return None
+        value = str(v or "").strip()
+        return value or None
+
+
+class PdaRecruitmentTeamMergeRequest(BaseModel):
+    source_id: int
+    target_id: int
+    new_title: Optional[str] = Field(default=None, min_length=2, max_length=120)
+
+    @field_validator("new_title")
+    @classmethod
+    def normalize_new_title(cls, v):
+        if v is None:
+            return None
+        value = str(v or "").strip()
+        return value or None
 
 
 class PdaPasswordChangeRequest(BaseModel):
@@ -1562,8 +1642,16 @@ class PdaBirthdayWishResponse(BaseModel):
 
 class RecruitmentApprovalItem(BaseModel):
     id: int
-    team: Optional["PdaTeamName"] = None
+    team: Optional[str] = Field(default=None, max_length=120)
     designation: Optional["PdaTeamDesignation"] = None
+
+    @field_validator("team")
+    @classmethod
+    def normalize_team(cls, v):
+        if v is None:
+            return None
+        value = str(v or "").strip()
+        return value or None
 
 
 # Top Referrers

@@ -159,6 +159,28 @@ class PdaResume(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
+class PdaRecruitmentTeam(Base):
+    __tablename__ = "pda_recruitment_team"
+
+    id = Column(Integer, primary_key=True, index=True)
+    team_code = Column(String(32), unique=True, index=True, nullable=False)
+    title = Column(String(120), nullable=False)
+    description = Column(Text, nullable=True)
+    active = Column(Boolean, nullable=False, default=True, server_default="true")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PdaRecruitment(Base):
+    __tablename__ = "pda_recruitment"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    team_preferences = Column(JSON, nullable=False)
+    resume_url = Column(String(800), nullable=True)
+    applied_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class PdaGallery(Base):
     __tablename__ = "pda_gallery"
 

@@ -10,17 +10,6 @@ import { useAuth } from '@/context/AuthContext';
 import AdminLayout from '@/pages/HomeAdmin/AdminLayout';
 import { API } from '@/pages/HomeAdmin/adminApi';
 
-const TEAMS = [
-    'Executive',
-    'Content Creation',
-    'Event Management',
-    'Design',
-    'Website Design',
-    'Public Relations',
-    'Podcast',
-    'Library'
-];
-
 const DESIGNATIONS = [
     'Member',
     'Volunteer',
@@ -41,24 +30,20 @@ const EXECUTIVE_DESIGNATIONS = [
     'Treasurer'
 ];
 
-const TEAM_FILTERS = [
-    'All',
-    'Executive',
-    'Content Creation',
-    'Event Management',
-    'Design',
-    'Website Design',
-    'Public Relations',
-    'Podcast',
-    'Library',
-    'Unassigned'
-];
-
 const RESUME_FILTERS = [
     'All',
     'Uploaded',
     'Missing'
 ];
+
+const formatAppliedAt = (value) => {
+    if (!value) return 'N/A';
+    try {
+        return new Date(value).toLocaleString();
+    } catch (e) {
+        return String(value);
+    }
+};
 
 export default function RecruitmentsAdmin() {
     const { user, getAuthHeader } = useAuth();
@@ -75,15 +60,33 @@ export default function RecruitmentsAdmin() {
     const [approveConfirmText, setApproveConfirmText] = useState('');
     const [rejectConfirmText, setRejectConfirmText] = useState('');
     const [bulkActionLoading, setBulkActionLoading] = useState(false);
+    const [adminTeams, setAdminTeams] = useState([]);
+    const [resetDialogOpen, setResetDialogOpen] = useState(false);
+    const [resetConfirmText, setResetConfirmText] = useState('');
+    const [resetting, setResetting] = useState(false);
+
+    const findTeamByAny = (value) => {
+        if (!value) return null;
+        return adminTeams.find((t) => t.team_code === value || t.title === value) || null;
+    };
 
     const fetchRecruitments = useCallback(async () => {
         try {
-            const res = await axios.get(`${API}/pda-admin/recruitments`, { headers: getAuthHeader() });
-            setRecruitments(res.data || []);
+            const [recruitsRes, teamsRes] = await Promise.all([
+                axios.get(`${API}/pda-admin/recruitments`, { headers: getAuthHeader() }),
+                axios.get(`${API}/pda-admin/recruitment-teams`, { headers: getAuthHeader() }),
+            ]);
+            const teamList = Array.isArray(teamsRes.data) ? teamsRes.data : [];
+            setAdminTeams(teamList);
+            const teamsByTitle = new Map(teamList.map((t) => [t.title, t]));
+            const teamsByCode = new Map(teamList.map((t) => [t.team_code, t]));
+            setRecruitments(recruitsRes.data || []);
             const initial = {};
-            (res.data || []).forEach((recruit) => {
+            (recruitsRes.data || []).forEach((recruit) => {
+                const rawPref = recruit.preferred_team_1 || recruit.preferred_team || '';
+                const matched = teamsByCode.get(rawPref) || teamsByTitle.get(rawPref) || null;
                 initial[recruit.id] = {
-                    team: recruit.preferred_team_1 || recruit.preferred_team || '',
+                    team: matched?.team_code || '',
                     designation: 'Member'
                 };
             });
@@ -99,6 +102,21 @@ export default function RecruitmentsAdmin() {
         }
     }, [user, fetchRecruitments]);
 
+    const resetRecruitments = async () => {
+        setResetting(true);
+        try {
+            await axios.post(`${API}/pda-admin/recruitments/reset`, {}, { headers: getAuthHeader() });
+            setSelectedRecruitments([]);
+            setResetDialogOpen(false);
+            setResetConfirmText('');
+            fetchRecruitments();
+        } catch (error) {
+            console.error('Failed to reset recruitments:', error);
+        } finally {
+            setResetting(false);
+        }
+    };
+
     const toggleRecruitment = (id) => {
         setSelectedRecruitments(prev => prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]);
     };
@@ -113,8 +131,8 @@ export default function RecruitmentsAdmin() {
         }));
     };
 
-    const getDesignationOptions = (team) => (
-        team === 'Executive' ? EXECUTIVE_DESIGNATIONS : DESIGNATIONS
+    const getDesignationOptions = (teamCode) => (
+        teamCode === 'executive' ? EXECUTIVE_DESIGNATIONS : DESIGNATIONS
     );
 
     const approveRecruitments = async () => {
@@ -194,10 +212,11 @@ export default function RecruitmentsAdmin() {
     }, [recruitSearch, recruitTeamFilter, resumeFilter]);
 
     const filteredRecruitments = recruitments.filter((recruit) => {
-        const preferredTeam = recruit?.preferred_team_1 || recruit?.preferred_team;
+        const preferredRaw = recruit?.preferred_team_1 || recruit?.preferred_team;
+        const preferredTeamCode = findTeamByAny(preferredRaw)?.team_code || preferredRaw;
         const teamMatch = recruitTeamFilter === 'All'
-            || (recruitTeamFilter === 'Unassigned' && !preferredTeam)
-            || preferredTeam === recruitTeamFilter;
+            || (recruitTeamFilter === 'Unassigned' && !preferredRaw)
+            || preferredTeamCode === recruitTeamFilter;
         const resumeMatch = resumeFilter === 'All'
             || (resumeFilter === 'Uploaded' && Boolean(recruit?.resume_url))
             || (resumeFilter === 'Missing' && !recruit?.resume_url);
@@ -264,6 +283,14 @@ export default function RecruitmentsAdmin() {
                         <Button onClick={openRejectDialog} variant="outline" className="border-black/20 text-sm" disabled={selectedRecruitments.length === 0}>
                             Reject Selected
                         </Button>
+                        <Button
+                            onClick={() => { setResetConfirmText(''); setResetDialogOpen(true); }}
+                            variant="destructive"
+                            className="text-sm"
+                            disabled={recruitments.length === 0}
+                        >
+                            Reset Applicants
+                        </Button>
                     </div>
                 </div>
                 <div className="mt-6 grid gap-4 md:grid-cols-4">
@@ -284,9 +311,11 @@ export default function RecruitmentsAdmin() {
                             onChange={(e) => setRecruitTeamFilter(e.target.value)}
                             className="w-full rounded-md border border-black/10 bg-white px-3 py-2 text-sm"
                         >
-                            {TEAM_FILTERS.map((team) => (
-                                <option key={team} value={team}>{team}</option>
+                            <option value="All">All</option>
+                            {adminTeams.map((team) => (
+                                <option key={team.team_code} value={team.team_code}>{team.title}</option>
                             ))}
+                            <option value="Unassigned">Unassigned</option>
                         </select>
                     </div>
                     <div>
@@ -348,6 +377,9 @@ export default function RecruitmentsAdmin() {
                                     <p className="text-xs text-slate-500">
                                         Dept: {recruit.dept || 'N/A'}
                                     </p>
+                                    <p className="text-xs text-slate-500">
+                                        Applied: {formatAppliedAt(recruit.applied_at)}
+                                    </p>
                                     <div className="mt-2">
                                         {recruit.resume_url ? (
                                             <a
@@ -381,8 +413,8 @@ export default function RecruitmentsAdmin() {
                                             <SelectValue placeholder="Select team" />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            {TEAMS.map((team) => (
-                                                <SelectItem key={team} value={team}>{team}</SelectItem>
+                                            {adminTeams.map((team) => (
+                                                <SelectItem key={team.team_code} value={team.team_code}>{team.title}</SelectItem>
                                             ))}
                                         </SelectContent>
                                     </Select>
@@ -449,6 +481,48 @@ export default function RecruitmentsAdmin() {
                             className="bg-[#f6c347] text-black hover:bg-[#ffd16b]"
                         >
                             {bulkActionLoading ? 'Approving...' : 'Confirm Approve'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Reset All Applicants</DialogTitle>
+                        <DialogDescription>
+                            This will permanently delete <span className="font-semibold">all {recruitments.length} pending recruitment application(s)</span>. Approved members are not affected. Type <span className="font-semibold">RESET</span> to continue.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-2">
+                        <Label htmlFor="reset-confirm-input">Type RESET</Label>
+                        <Input
+                            id="reset-confirm-input"
+                            value={resetConfirmText}
+                            onChange={(e) => setResetConfirmText(e.target.value)}
+                            placeholder="RESET"
+                            autoComplete="off"
+                        />
+                    </div>
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => {
+                                setResetDialogOpen(false);
+                                setResetConfirmText('');
+                            }}
+                            disabled={resetting}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            type="button"
+                            onClick={resetRecruitments}
+                            disabled={resetting || resetConfirmText.trim().toUpperCase() !== 'RESET'}
+                            variant="destructive"
+                        >
+                            {resetting ? 'Resetting...' : 'Confirm Reset'}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

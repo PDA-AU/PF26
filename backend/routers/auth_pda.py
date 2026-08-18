@@ -99,6 +99,7 @@ def _build_pda_user_response(db: Session, user: PdaUser) -> PdaUserResponse:
         preferred_team_2=recruit["preferred_team_2"],
         preferred_team_3=recruit["preferred_team_3"],
         resume_url=recruit["resume_url"],
+        applied_at=recruit.get("applied_at"),
         team=team.team if team else None,
         designation=team.designation if team else None,
         instagram_url=user.instagram_url,
@@ -198,14 +199,17 @@ def apply_for_pda_recruitment(
     if recruit_state["is_applied"]:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Recruitment application already submitted")
 
-    create_recruitment_application(
-        db=db,
-        user=user,
-        preferred_team_1=payload.preferred_team_1,
-        preferred_team_2=payload.preferred_team_2,
-        preferred_team_3=payload.preferred_team_3,
-        resume_url=payload.resume_url,
-    )
+    try:
+        create_recruitment_application(
+            db=db,
+            user=user,
+            preferred_team_1=payload.preferred_team_1,
+            preferred_team_2=payload.preferred_team_2,
+            preferred_team_3=payload.preferred_team_3,
+            resume_url=payload.resume_url,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     db.commit()
     db.refresh(user)
     try:

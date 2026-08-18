@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
+from typing import List
 
 from database import get_db
-from models import SystemConfig
+from models import SystemConfig, PdaRecruitmentTeam
+from schemas import PdaRecruitmentTeamPublicResponse
 from datetime import datetime
 
 router = APIRouter()
@@ -27,6 +29,30 @@ def get_pda_recruitment_status(db: Session = Depends(get_db)):
     return {"recruitment_open": recruitment_open, "recruit_url": recruit_url}
 
 
+@router.get("/pda/recruitment-teams", response_model=List[PdaRecruitmentTeamPublicResponse])
+def get_pda_recruitment_teams(db: Session = Depends(get_db)):
+    rows = (
+        db.query(PdaRecruitmentTeam)
+        .filter(PdaRecruitmentTeam.active == True)  # noqa: E712
+        .filter(PdaRecruitmentTeam.team_code != "executive")
+        .order_by(PdaRecruitmentTeam.id)
+        .all()
+    )
+    return rows
+
+
+@router.get("/pda/teams-catalog", response_model=List[PdaRecruitmentTeamPublicResponse])
+def get_pda_teams_catalog(db: Session = Depends(get_db)):
+    """All active teams (including Executive) — used by the home page to derive filter tabs."""
+    rows = (
+        db.query(PdaRecruitmentTeam)
+        .filter(PdaRecruitmentTeam.active == True)  # noqa: E712
+        .order_by(PdaRecruitmentTeam.id)
+        .all()
+    )
+    return rows
+
+
 @router.get("/routes")
 def list_routes():
     return {
@@ -35,6 +61,8 @@ def list_routes():
             {"method": "GET", "path": "/"},
             {"method": "GET", "path": "/health"},
             {"method": "GET", "path": "/pda/recruitment-status"},
+            {"method": "GET", "path": "/pda/recruitment-teams"},
+            {"method": "GET", "path": "/pda/teams-catalog"},
             {"method": "GET", "path": "/routes"},
             {"method": "POST", "path": "/auth/register"},
             {"method": "POST", "path": "/auth/login"},

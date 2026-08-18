@@ -1,0 +1,14 @@
+Create a new table placements with schema 
+id (fk users), s3 url , extracted text , Content JSONB , enum (intern, experience) ,(Company name, experience in months)  
+we have to create a new page in route /placements where users can add their intern/placement experiences in pdf/doc format , the page is accessible for loggin in users only , The filter options should be dept and  batch , It will display all the uploaded experiences ,
+in the top add left add a batch for upload , show the experience files in grid format with sortiung and filtering options , add pagination (10) 
+
+
+in admin panel /admin/placements
+where admin can also add the experience , default user be 0000000000, 
+
+Add a modular extraction pipeline where text can be extracted from  pdf /doc and store it in db ,
+
+Use a Keyword search BM25 realtime suggested files , add a hardcoded keowords for CT IT departments like DSA C, C++, and show the labels patches that can be slected
+follow the pda home theme , users can upload max 2 files tagged by intern/placement , admin can batch upload files , Add CRUD option in admin/placement.
+make it mobile first responsive layout with hover transitions smooth

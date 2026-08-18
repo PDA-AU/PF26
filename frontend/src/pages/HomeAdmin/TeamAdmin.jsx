@@ -4,7 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
 import LoadingState from '@/components/common/LoadingState';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
@@ -138,6 +139,34 @@ export default function TeamAdmin() {
     const [adding, setAdding] = useState(false);
     const maxDobDate = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
+    // Recruit teams catalog (embedded below PDA Team Stats).
+    const [recruitTeams, setRecruitTeams] = useState([]);
+    const [recruitTeamsLoading, setRecruitTeamsLoading] = useState(false);
+    const [rtDialogOpen, setRtDialogOpen] = useState(false);
+    const [rtEditTarget, setRtEditTarget] = useState(null);
+    const [rtForm, setRtForm] = useState({ team_code: '', title: '', description: '', active: true });
+    const [rtSaving, setRtSaving] = useState(false);
+    const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
+    const [mergeSourceId, setMergeSourceId] = useState('');
+    const [mergeTargetId, setMergeTargetId] = useState('');
+    const [mergeNewTitle, setMergeNewTitle] = useState('');
+    const [mergeConfirmText, setMergeConfirmText] = useState('');
+    const [merging, setMerging] = useState(false);
+
+    const fetchRecruitTeams = useCallback(async () => {
+        if (!isSuperAdmin) return;
+        setRecruitTeamsLoading(true);
+        try {
+            const res = await axios.get(`${API}/pda-admin/recruitment-teams`, { headers: getAuthHeader() });
+            setRecruitTeams(Array.isArray(res.data) ? res.data : []);
+        } catch (error) {
+            console.error('Failed to load recruit teams:', error);
+            toast.error('Failed to load recruit teams');
+        } finally {
+            setRecruitTeamsLoading(false);
+        }
+    }, [getAuthHeader, isSuperAdmin]);
+
     const fetchData = useCallback(async () => {
         try {
             const res = await axios.get(`${API}/pda-admin/team?college_scope=mit`, { headers: getAuthHeader() });
@@ -160,6 +189,95 @@ export default function TeamAdmin() {
             fetchData();
         }
     }, [canAccessHome, fetchData]);
+
+    useEffect(() => {
+        if (isSuperAdmin) {
+            fetchRecruitTeams();
+        }
+    }, [isSuperAdmin, fetchRecruitTeams]);
+
+    const openRtCreate = () => {
+        setRtEditTarget(null);
+        setRtForm({ team_code: '', title: '', description: '', active: true });
+        setRtDialogOpen(true);
+    };
+    const openRtEdit = (team) => {
+        setRtEditTarget(team);
+        setRtForm({
+            team_code: team.team_code,
+            title: team.title || '',
+            description: team.description || '',
+            active: Boolean(team.active),
+        });
+        setRtDialogOpen(true);
+    };
+    const submitRtForm = async () => {
+        setRtSaving(true);
+        try {
+            if (rtEditTarget) {
+                await axios.put(
+                    `${API}/pda-admin/recruitment-teams/${rtEditTarget.id}`,
+                    { title: rtForm.title, description: rtForm.description || null, active: rtForm.active },
+                    { headers: getAuthHeader() },
+                );
+                toast.success('Team updated');
+            } else {
+                await axios.post(
+                    `${API}/pda-admin/recruitment-teams`,
+                    { team_code: rtForm.team_code, title: rtForm.title, description: rtForm.description || null, active: rtForm.active },
+                    { headers: getAuthHeader() },
+                );
+                toast.success('Team created');
+            }
+            setRtDialogOpen(false);
+            fetchRecruitTeams();
+        } catch (error) {
+            console.error('Failed to save team:', error);
+            const detail = error?.response?.data?.detail;
+            toast.error(typeof detail === 'string' ? detail : 'Failed to save team');
+        } finally {
+            setRtSaving(false);
+        }
+    };
+
+    const openMergeDialog = () => {
+        setMergeSourceId('');
+        setMergeTargetId('');
+        setMergeNewTitle('');
+        setMergeConfirmText('');
+        setMergeDialogOpen(true);
+    };
+    const submitMerge = async () => {
+        if (!mergeSourceId || !mergeTargetId || mergeSourceId === mergeTargetId) {
+            toast.error('Pick two different teams');
+            return;
+        }
+        setMerging(true);
+        try {
+            const res = await axios.post(
+                `${API}/pda-admin/recruitment-teams/merge`,
+                {
+                    source_id: Number(mergeSourceId),
+                    target_id: Number(mergeTargetId),
+                    new_title: mergeNewTitle.trim() || null,
+                },
+                { headers: getAuthHeader() },
+            );
+            const data = res.data || {};
+            toast.success(
+                `Merged: ${data.applications_updated || 0} apps, ${data.team_members_updated || 0} members${data.renamed_to ? ` (renamed to ${data.renamed_to})` : ''}`
+            );
+            setMergeDialogOpen(false);
+            fetchRecruitTeams();
+            fetchData();
+        } catch (error) {
+            console.error('Failed to merge teams:', error);
+            const detail = error?.response?.data?.detail;
+            toast.error(typeof detail === 'string' ? detail : 'Failed to merge teams');
+        } finally {
+            setMerging(false);
+        }
+    };
 
     const filtered = useMemo(() => {
         const filteredByTeam = teamMembers.filter((member) => {
@@ -588,6 +706,62 @@ export default function TeamAdmin() {
                     </div>
                 </div>
             </section>
+
+            {isSuperAdmin ? (
+                <section className="mb-6 rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                            <p className="text-xs uppercase tracking-[0.4em] text-slate-400">Recruitment Catalog</p>
+                            <h2 className="text-2xl font-heading font-black">Recruit Teams</h2>
+                            <p className="mt-1 text-sm text-slate-600">Teams shown on the /recruit page. Executive stays active but is not shown to applicants.</p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <Button onClick={openRtCreate} className="bg-[#f6c347] text-black hover:bg-[#ffd16b]">
+                                Add Team
+                            </Button>
+                            <Button
+                                onClick={openMergeDialog}
+                                variant="outline"
+                                className="border-black/20 text-sm"
+                                disabled={recruitTeams.length < 2}
+                            >
+                                Merge Teams
+                            </Button>
+                        </div>
+                    </div>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                        {recruitTeamsLoading ? (
+                            <p className="text-sm text-slate-500">Loading teams...</p>
+                        ) : recruitTeams.length === 0 ? (
+                            <p className="text-sm text-slate-500">No teams yet.</p>
+                        ) : (
+                            recruitTeams.map((team) => (
+                                <article key={team.id} className="flex flex-col gap-2 rounded-2xl border border-black/10 bg-[#fffdf7] p-4">
+                                    <div className="flex items-start justify-between gap-2">
+                                        <div>
+                                            <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-slate-400">{team.team_code}</p>
+                                            <h3 className="mt-1 font-semibold">{team.title}</h3>
+                                        </div>
+                                        <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${team.active ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-slate-50 text-slate-500'}`}>
+                                            {team.active ? 'Active' : 'Inactive'}
+                                        </span>
+                                    </div>
+                                    {team.description ? (
+                                        <p className="line-clamp-4 text-xs text-slate-600">{team.description}</p>
+                                    ) : (
+                                        <p className="text-xs italic text-slate-400">No description</p>
+                                    )}
+                                    <div className="mt-auto flex justify-end">
+                                        <Button size="sm" variant="outline" className="border-black/20" onClick={() => openRtEdit(team)}>
+                                            Edit
+                                        </Button>
+                                    </div>
+                                </article>
+                            ))
+                        )}
+                    </div>
+                </section>
+            ) : null}
 
             <section className="rounded-3xl border border-black/10 bg-white p-6 shadow-sm">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1131,6 +1305,159 @@ export default function TeamAdmin() {
                             </Button>
                         </div>
                     </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={rtDialogOpen} onOpenChange={setRtDialogOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>{rtEditTarget ? 'Edit Team' : 'Add Team'}</DialogTitle>
+                        <DialogDescription>
+                            {rtEditTarget ? 'Update the team title, description, or active state.' : 'Create a new recruitment team.'}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                        <div>
+                            <Label htmlFor="rt-code">Team Code</Label>
+                            <Input
+                                id="rt-code"
+                                value={rtForm.team_code}
+                                onChange={(e) => setRtForm((p) => ({ ...p, team_code: e.target.value }))}
+                                placeholder="e.g. web"
+                                disabled={Boolean(rtEditTarget)}
+                                autoComplete="off"
+                            />
+                            <p className="mt-1 text-[11px] text-slate-500">
+                                {rtEditTarget ? 'Team code cannot be changed after creation.' : 'Short lowercase slug used internally.'}
+                            </p>
+                        </div>
+                        <div>
+                            <Label htmlFor="rt-title">Title</Label>
+                            <Input
+                                id="rt-title"
+                                value={rtForm.title}
+                                onChange={(e) => setRtForm((p) => ({ ...p, title: e.target.value }))}
+                                placeholder="e.g. Website Design"
+                                autoComplete="off"
+                            />
+                        </div>
+                        <div>
+                            <Label htmlFor="rt-desc">Description</Label>
+                            <Textarea
+                                id="rt-desc"
+                                value={rtForm.description}
+                                onChange={(e) => setRtForm((p) => ({ ...p, description: e.target.value }))}
+                                rows={4}
+                                placeholder="Marketing blurb shown on the /recruit page"
+                            />
+                        </div>
+                        <label className="flex items-center gap-2 text-sm">
+                            <input
+                                type="checkbox"
+                                checked={rtForm.active}
+                                onChange={(e) => setRtForm((p) => ({ ...p, active: e.target.checked }))}
+                            />
+                            Active
+                        </label>
+                    </div>
+                    <DialogFooter>
+                        <Button type="button" variant="outline" onClick={() => setRtDialogOpen(false)} disabled={rtSaving}>
+                            Cancel
+                        </Button>
+                        <Button
+                            type="button"
+                            onClick={submitRtForm}
+                            disabled={rtSaving || !rtForm.team_code || !rtForm.title}
+                            className="bg-[#f6c347] text-black hover:bg-[#ffd16b]"
+                        >
+                            {rtSaving ? 'Saving...' : (rtEditTarget ? 'Save Changes' : 'Create Team')}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={mergeDialogOpen} onOpenChange={setMergeDialogOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Merge Teams</DialogTitle>
+                        <DialogDescription>
+                            The source team will be deleted. All application preferences and team member rows for the source will be reassigned to the target. Optionally rename the target in the same operation. Type <span className="font-semibold">MERGE</span> to confirm.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                        <div>
+                            <Label htmlFor="merge-source">Source Team (will be removed)</Label>
+                            <Select value={mergeSourceId} onValueChange={setMergeSourceId}>
+                                <SelectTrigger id="merge-source" className="w-full">
+                                    <SelectValue placeholder="Select source team" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {recruitTeams.map((team) => (
+                                        <SelectItem key={team.id} value={String(team.id)}>
+                                            {team.title} ({team.team_code})
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div>
+                            <Label htmlFor="merge-target">Target Team (will absorb source)</Label>
+                            <Select value={mergeTargetId} onValueChange={setMergeTargetId}>
+                                <SelectTrigger id="merge-target" className="w-full">
+                                    <SelectValue placeholder="Select target team" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {recruitTeams
+                                        .filter((team) => String(team.id) !== mergeSourceId)
+                                        .map((team) => (
+                                            <SelectItem key={team.id} value={String(team.id)}>
+                                                {team.title} ({team.team_code})
+                                            </SelectItem>
+                                        ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div>
+                            <Label htmlFor="merge-rename">Rename target to (optional)</Label>
+                            <Input
+                                id="merge-rename"
+                                value={mergeNewTitle}
+                                onChange={(e) => setMergeNewTitle(e.target.value)}
+                                placeholder="Leave blank to keep the target's current title"
+                                autoComplete="off"
+                            />
+                            <p className="mt-1 text-[11px] text-slate-500">Existing team members under either the source or target title will be updated to this new title.</p>
+                        </div>
+                        <div>
+                            <Label htmlFor="merge-confirm">Type MERGE</Label>
+                            <Input
+                                id="merge-confirm"
+                                value={mergeConfirmText}
+                                onChange={(e) => setMergeConfirmText(e.target.value)}
+                                placeholder="MERGE"
+                                autoComplete="off"
+                            />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button type="button" variant="outline" onClick={() => setMergeDialogOpen(false)} disabled={merging}>
+                            Cancel
+                        </Button>
+                        <Button
+                            type="button"
+                            onClick={submitMerge}
+                            disabled={
+                                merging
+                                || !mergeSourceId
+                                || !mergeTargetId
+                                || mergeSourceId === mergeTargetId
+                                || mergeConfirmText.trim().toUpperCase() !== 'MERGE'
+                            }
+                            variant="destructive"
+                        >
+                            {merging ? 'Merging...' : 'Confirm Merge'}
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
         </AdminLayout>

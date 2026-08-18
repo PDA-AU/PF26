@@ -15,7 +15,7 @@ from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 
 from database import get_db
-from models import PdaAdmin, PdaUser, PdaTeam, AdminLog, SystemConfig
+from models import PdaAdmin, PdaUser, PdaTeam, AdminLog, SystemConfig, PdaRecruitment, PdaRecruitmentTeam
 from schemas import (
     PdaAdminCreate,
     PdaAdminPolicyUpdate,
@@ -23,11 +23,19 @@ from schemas import (
     AdminLogResponse,
     RecruitmentApprovalItem,
     PdaRecruitmentConfigUpdateRequest,
+    PdaRecruitmentTeamResponse,
+    PdaRecruitmentTeamUpsertRequest,
+    PdaRecruitmentTeamUpdateRequest,
+    PdaRecruitmentTeamMergeRequest,
     SuperadminMigrationStatusResponse,
 )
 from security import require_superadmin
 from utils import log_admin_action, _upload_bytes_to_s3, S3_CLIENT, S3_BUCKET_NAME
-from recruitment_state import clear_legacy_recruitment_json, get_recruitment_state, get_recruitment_state_map
+from recruitment_state import (
+    delete_recruitment_application,
+    get_recruitment_state,
+    get_recruitment_state_map,
+)
 from email_workflows import send_recruitment_review_email
 
 router = APIRouter()
@@ -182,6 +190,7 @@ def _build_admin_response(
         preferred_team_2=recruit_state.get("preferred_team_2"),
         preferred_team_3=recruit_state.get("preferred_team_3"),
         resume_url=recruit_state.get("resume_url"),
+        applied_at=recruit_state.get("applied_at"),
         team=team.team if team else None,
         designation=team.designation if team else None,
         instagram_url=user.instagram_url,
@@ -856,14 +865,13 @@ def notify_existing_recruitment_applicants(
     reg_config = _get_or_create_recruitment_config(db)
     recruit_url = str(reg_config.recruit_url or "").strip() or DEFAULT_PDA_RECRUIT_URL
 
-    pending_candidates = (
+    pending = (
         db.query(PdaUser)
-        .filter(PdaUser.is_member == False)
-        .order_by(PdaUser.created_at.desc())
+        .join(PdaRecruitment, PdaRecruitment.user_id == PdaUser.id)
+        .filter(PdaUser.is_member == False)  # noqa: E712
+        .order_by(PdaRecruitment.applied_at.desc())
         .all()
     )
-    recruit_map = get_recruitment_state_map(db, pending_candidates)
-    pending = [user for user in pending_candidates if recruit_map.get(user.id, {}).get("is_applied")]
 
     sent = 0
     for candidate in pending:
@@ -898,16 +906,16 @@ def list_recruitments(
     _: PdaUser = Depends(require_superadmin),
     db: Session = Depends(get_db),
 ):
-    pending_candidates = (
+    pending = (
         db.query(PdaUser)
-        .filter(PdaUser.is_member == False)
-        .order_by(PdaUser.created_at.desc())
+        .join(PdaRecruitment, PdaRecruitment.user_id == PdaUser.id)
+        .filter(PdaUser.is_member == False)  # noqa: E712
+        .order_by(PdaRecruitment.applied_at.desc())
         .all()
     )
-    recruit_map = get_recruitment_state_map(db, pending_candidates)
-    pending = [user for user in pending_candidates if recruit_map.get(user.id, {}).get("is_applied")]
     if not pending:
         return []
+    recruit_map = get_recruitment_state_map(db, pending)
     pending_ids = [u.id for u in pending]
     team_map = {row.user_id: row for row in db.query(PdaTeam).filter(PdaTeam.user_id.in_(pending_ids)).all()}
     admin_map = {row.user_id: row for row in db.query(PdaAdmin).filter(PdaAdmin.user_id.in_(pending_ids)).all()}
@@ -920,23 +928,25 @@ def export_recruitments(
     db: Session = Depends(get_db),
     request: Request = None,
 ):
-    pending_candidates = (
+    pending = (
         db.query(PdaUser)
-        .filter(PdaUser.is_member == False)
-        .order_by(PdaUser.created_at.desc())
+        .join(PdaRecruitment, PdaRecruitment.user_id == PdaUser.id)
+        .filter(PdaUser.is_member == False)  # noqa: E712
+        .order_by(PdaRecruitment.applied_at.desc())
         .all()
     )
-    recruit_map = get_recruitment_state_map(db, pending_candidates)
-    pending = [user for user in pending_candidates if recruit_map.get(user.id, {}).get("is_applied")]
+    recruit_map = get_recruitment_state_map(db, pending)
     wb = Workbook()
     ws = wb.active
     ws.title = "Recruitments"
     ws.append([
         "Name", "Register Number", "Email", "Phone", "DOB", "Gender",
-        "Department", "Preferred Team 1", "Preferred Team 2", "Preferred Team 3", "Resume URL", "Created At"
+        "Department", "Preferred Team 1", "Preferred Team 2", "Preferred Team 3",
+        "Resume URL", "Applied At", "Created At"
     ])
     for user in pending:
         recruit = recruit_map.get(user.id, {})
+        applied_at = recruit.get("applied_at")
         ws.append([
             user.name,
             user.regno,
@@ -949,6 +959,7 @@ def export_recruitments(
             recruit.get("preferred_team_2") or "",
             recruit.get("preferred_team_3") or "",
             recruit.get("resume_url") or "",
+            applied_at.isoformat() if applied_at else "",
             user.created_at.isoformat() if user.created_at else ""
         ])
     output = io.BytesIO()
@@ -990,6 +1001,9 @@ def approve_recruitments(
     user_ids = list({user_id for user_id, _, _ in parsed_items})
     user_map = {u.id: u for u in db.query(PdaUser).filter(PdaUser.id.in_(user_ids)).all()} if user_ids else {}
     recruit_map = get_recruitment_state_map(db, user_map.values())
+    team_rows = db.query(PdaRecruitmentTeam).all()
+    team_by_code = {t.team_code: t for t in team_rows}
+    team_by_title = {t.title: t for t in team_rows}
 
     for user_id, assigned_team, assigned_designation in parsed_items:
         user = user_map.get(user_id)
@@ -998,24 +1012,31 @@ def approve_recruitments(
         recruit_state = recruit_map.get(user.id, {})
         if not recruit_state.get("is_applied"):
             continue
-        team_to_assign = assigned_team or recruit_state.get("preferred_team_1") or recruit_state.get("preferred_team_2") or recruit_state.get("preferred_team_3")
-        if not team_to_assign:
+        raw_choice = assigned_team
+        if not raw_choice:
+            prefs = recruit_state.get("team_preferences") or []
+            raw_choice = prefs[0] if prefs else None
+        if not raw_choice:
             continue
-        if team_to_assign == "Executive" and assigned_designation not in {"Staff Advisor", "Chairperson", "Vice Chairperson", "General Secretary", "Treasurer"}:
+        team_entry = team_by_code.get(raw_choice) or team_by_title.get(raw_choice)
+        if not team_entry:
+            continue
+        team_title = team_entry.title
+        if team_entry.team_code == "executive" and assigned_designation not in {"Staff Advisor", "Chairperson", "Vice Chairperson", "General Secretary", "Treasurer"}:
             continue
         team_row = db.query(PdaTeam).filter(PdaTeam.user_id == user.id).first()
         if not team_row:
             team_row = PdaTeam(
                 user_id=user.id,
-                team=team_to_assign,
+                team=team_title,
                 designation=assigned_designation or "Member"
             )
             db.add(team_row)
         else:
-            team_row.team = team_to_assign
+            team_row.team = team_title
             team_row.designation = assigned_designation or team_row.designation or "Member"
         user.is_member = True
-        clear_legacy_recruitment_json(user)
+        delete_recruitment_application(db, user.id)
         approved.append(user.id)
 
     db.commit()
@@ -1053,9 +1074,172 @@ def reject_recruitments(
         recruit_state = recruit_map.get(user.id, {})
         if not recruit_state.get("is_applied"):
             continue
-        clear_legacy_recruitment_json(user)
+        delete_recruitment_application(db, user.id)
         rejected.append(user.id)
 
     db.commit()
     log_admin_action(db, superadmin, "Reject recruitments", request.method if request else None, request.url.path if request else None, {"rejected": rejected})
     return {"rejected": rejected}
+
+
+@router.post("/pda-admin/recruitments/reset")
+def reset_recruitments(
+    superadmin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    count = db.query(PdaRecruitment).count()
+    db.query(PdaRecruitment).delete()
+    db.commit()
+    log_admin_action(
+        db,
+        superadmin,
+        "Reset recruitments",
+        request.method if request else None,
+        request.url.path if request else None,
+        {"cleared": count},
+    )
+    return {"reset": True, "cleared": count}
+
+
+@router.get("/pda-admin/recruitment-teams", response_model=List[PdaRecruitmentTeamResponse])
+def list_recruitment_teams(
+    _: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+):
+    return db.query(PdaRecruitmentTeam).order_by(PdaRecruitmentTeam.id).all()
+
+
+@router.post("/pda-admin/recruitment-teams", response_model=PdaRecruitmentTeamResponse)
+def create_recruitment_team(
+    payload: PdaRecruitmentTeamUpsertRequest,
+    superadmin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    existing = db.query(PdaRecruitmentTeam).filter(PdaRecruitmentTeam.team_code == payload.team_code).first()
+    if existing:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="team_code already exists")
+    row = PdaRecruitmentTeam(
+        team_code=payload.team_code,
+        title=payload.title,
+        description=payload.description,
+        active=payload.active,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    log_admin_action(
+        db, superadmin, "Create recruitment team",
+        request.method if request else None,
+        request.url.path if request else None,
+        {"team_code": row.team_code, "title": row.title},
+    )
+    return row
+
+
+@router.put("/pda-admin/recruitment-teams/{team_id}", response_model=PdaRecruitmentTeamResponse)
+def update_recruitment_team(
+    team_id: int,
+    payload: PdaRecruitmentTeamUpdateRequest,
+    superadmin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    row = db.query(PdaRecruitmentTeam).filter(PdaRecruitmentTeam.id == team_id).first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+    changed = {}
+    if payload.title is not None:
+        row.title = payload.title
+        changed["title"] = payload.title
+    if payload.description is not None:
+        row.description = payload.description
+        changed["description"] = payload.description
+    if payload.active is not None:
+        row.active = payload.active
+        changed["active"] = payload.active
+    db.commit()
+    db.refresh(row)
+    log_admin_action(
+        db, superadmin, "Update recruitment team",
+        request.method if request else None,
+        request.url.path if request else None,
+        {"team_code": row.team_code, "changed": changed},
+    )
+    return row
+
+
+@router.post("/pda-admin/recruitment-teams/merge")
+def merge_recruitment_teams(
+    payload: PdaRecruitmentTeamMergeRequest,
+    superadmin: PdaUser = Depends(require_superadmin),
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    if payload.source_id == payload.target_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Source and target must differ")
+    source = db.query(PdaRecruitmentTeam).filter(PdaRecruitmentTeam.id == payload.source_id).first()
+    target = db.query(PdaRecruitmentTeam).filter(PdaRecruitmentTeam.id == payload.target_id).first()
+    if not source or not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+
+    applications = db.query(PdaRecruitment).all()
+    apps_updated = 0
+    for app in applications:
+        prefs = list(app.team_preferences or [])
+        if source.team_code not in prefs:
+            continue
+        new_prefs = []
+        for code in prefs:
+            replacement = target.team_code if code == source.team_code else code
+            if replacement not in new_prefs:
+                new_prefs.append(replacement)
+        app.team_preferences = new_prefs
+        apps_updated += 1
+
+    old_target_title = target.title
+    new_title = payload.new_title
+    renamed = bool(new_title and new_title != old_target_title)
+    if renamed:
+        target.title = new_title
+
+    # First reassign all rows that referenced the source title to the (possibly new) target title.
+    members_reassigned = (
+        db.query(PdaTeam)
+        .filter(PdaTeam.team == source.title)
+        .update({PdaTeam.team: target.title}, synchronize_session=False)
+    )
+    # Then rename existing target rows if the target was renamed.
+    members_renamed = 0
+    if renamed:
+        members_renamed = (
+            db.query(PdaTeam)
+            .filter(PdaTeam.team == old_target_title)
+            .update({PdaTeam.team: target.title}, synchronize_session=False)
+        )
+    members_updated = members_reassigned + members_renamed
+
+    db.delete(source)
+    db.commit()
+
+    log_admin_action(
+        db, superadmin, "Merge recruitment teams",
+        request.method if request else None,
+        request.url.path if request else None,
+        {
+            "source": source.team_code,
+            "target": target.team_code,
+            "renamed_to": new_title if renamed else None,
+            "applications_updated": apps_updated,
+            "team_members_updated": members_updated,
+        },
+    )
+    return {
+        "merged": True,
+        "source": source.team_code,
+        "target": target.team_code,
+        "renamed_to": new_title if renamed else None,
+        "applications_updated": apps_updated,
+        "team_members_updated": members_updated,
+    }

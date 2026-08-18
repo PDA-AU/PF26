@@ -147,6 +147,7 @@ export default function PdaHome() {
     const [teamMembers, setTeamMembers] = useState([]);
     const [birthdayUsers, setBirthdayUsers] = useState([]);
     const [galleryItems, setGalleryItems] = useState([]);
+    const [teamCatalog, setTeamCatalog] = useState([]);
     const [teamFilter, setTeamFilter] = useState('Executive');
 
     useEffect(() => {
@@ -184,12 +185,13 @@ export default function PdaHome() {
     useEffect(() => {
         const fetchPdaContent = async () => {
             try {
-                const [programsRes, eventsRes, teamRes, galleryRes, birthdaysRes] = await Promise.all([
+                const [programsRes, eventsRes, teamRes, galleryRes, birthdaysRes, catalogRes] = await Promise.all([
                     axios.get(`${API}/pda/programs`, { params: { limit: PROGRAMS_FETCH_LIMIT } }),
                     axios.get(`${API}/pda/events`, { params: { limit: EVENTS_FETCH_LIMIT } }),
                     axios.get(`${API}/pda/team`),
                     axios.get(`${API}/pda/gallery`, { params: { limit: GALLERY_FETCH_LIMIT } }),
-                    axios.get(`${API}/pda/birthdays/today`)
+                    axios.get(`${API}/pda/birthdays/today`),
+                    axios.get(`${API}/pda/teams-catalog`).catch(() => ({ data: [] }))
                 ]);
                 const programData = programsRes.data || [];
                 const eventData = eventsRes.data || [];
@@ -206,6 +208,7 @@ export default function PdaHome() {
                 setTeamMembers(teamRes.data || []);
                 setBirthdayUsers(birthdaysRes.data || []);
                 setGalleryItems(galleryRes.data || []);
+                setTeamCatalog(Array.isArray(catalogRes.data) ? catalogRes.data : []);
             } catch (error) {
                 console.error('Failed to load PDA content:', error);
             }
@@ -277,27 +280,25 @@ export default function PdaHome() {
 
     const heroImageSrc = pdaGroupPhoto || pdaLogo;
 
-    const teamLabels = [
-        'Executive',
-        'Content Creation',
-        'Event Management',
-        'Design',
-        'Website Design',
-        'Public Relations',
-        'Podcast',
-        'Library'
-    ];
+    const teamLabels = useMemo(() => {
+        if (!teamCatalog.length) {
+            return ['Executive', 'Content Creation', 'Event Management', 'Design', 'Website Design', 'Public Relations', 'Podcast', 'Library'];
+        }
+        const executive = teamCatalog.find((t) => t.team_code === 'executive');
+        const others = teamCatalog.filter((t) => t.team_code !== 'executive');
+        return [
+            ...(executive ? [executive.title] : []),
+            ...others.map((t) => t.title),
+        ];
+    }, [teamCatalog]);
 
-    const TEAM_SORT_ORDER = [
-        'Executive',
-        'Content Creation',
-        'Event Management',
-        'Design',
-        'Website Design',
-        'Public Relations',
-        'Podcast',
-        'Library'
-    ];
+    const TEAM_SORT_ORDER = teamLabels;
+
+    useEffect(() => {
+        if (teamLabels.length && !teamLabels.includes(teamFilter)) {
+            setTeamFilter(teamLabels[0]);
+        }
+    }, [teamLabels, teamFilter]);
 
     const getDesignationPriority = (designation, team) => {
         const value = (designation || '').toLowerCase().trim();

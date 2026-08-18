@@ -1,9 +1,9 @@
 from datetime import datetime, timezone
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable, List, Optional
 
 from sqlalchemy.orm import Session
 
-from models import PdaResume, PdaUser
+from models import PdaRecruitment, PdaRecruitmentTeam, PdaUser
 
 
 def _normalize_text(value: Optional[str]) -> Optional[str]:
@@ -13,51 +13,54 @@ def _normalize_text(value: Optional[str]) -> Optional[str]:
     return normalized or None
 
 
+def _passthrough_dt(value):
+    return value or None
+
+
 def clear_legacy_recruitment_json(user: PdaUser) -> None:
-    if not isinstance(user.json_content, dict):
-        return
-    payload = dict(user.json_content)
-    changed = False
-    for key in (
-        "is_applied",
-        "preferred_team",
-        "preferred_team_1",
-        "preferred_team_2",
-        "preferred_team_3",
-        "applied_at",
-        "resume_url",
-    ):
-        if key in payload:
-            payload.pop(key, None)
-            changed = True
-    if changed:
-        user.json_content = payload
+    """Kept as a no-op for backward compatibility with older callers.
+
+    Recruitment data no longer lives in users.json_content; approve/reject
+    delete the pda_recruitment row directly via delete_recruitment_application.
+    """
+    return None
 
 
-def get_recruitment_resume(db: Session, user_id: int) -> Optional[PdaResume]:
-    return db.query(PdaResume).filter(PdaResume.user_id == user_id).first()
+def _title_map(db: Session) -> Dict[str, str]:
+    rows = db.query(PdaRecruitmentTeam).all()
+    return {row.team_code: row.title for row in rows}
 
 
-def _build_recruitment_state(user: Optional[PdaUser], resume: Optional[PdaResume]) -> Dict[str, Optional[str]]:
-    payload = user.json_content if user and isinstance(user.json_content, dict) else {}
-    preferred_team_1 = _normalize_text(payload.get("preferred_team_1")) or _normalize_text(payload.get("preferred_team"))
-    preferred_team_2 = _normalize_text(payload.get("preferred_team_2"))
-    preferred_team_3 = _normalize_text(payload.get("preferred_team_3"))
-    is_applied = payload.get("is_applied") is True
-    if preferred_team_1 and not is_applied:
-        is_applied = True
-    resume_url = _normalize_text(payload.get("resume_url"))
-    if not resume_url:
-        resume_url = _normalize_text(resume.s3_url) if resume else None
-
+def _build_state(record: Optional[PdaRecruitment], title_map: Dict[str, str]) -> Dict[str, Optional[object]]:
+    if not record:
+        return {
+            "is_applied": False,
+            "preferred_team": None,
+            "preferred_team_1": None,
+            "preferred_team_2": None,
+            "preferred_team_3": None,
+            "team_preferences": [],
+            "resume_url": None,
+            "applied_at": None,
+        }
+    prefs_raw = record.team_preferences or []
+    prefs = [_normalize_text(p) for p in prefs_raw if _normalize_text(p)]
+    titles = [title_map.get(code, code) for code in prefs]
+    padded = titles + [None, None, None]
     return {
-        "is_applied": bool(is_applied),
-        "preferred_team": preferred_team_1,
-        "preferred_team_1": preferred_team_1,
-        "preferred_team_2": preferred_team_2,
-        "preferred_team_3": preferred_team_3,
-        "resume_url": resume_url,
+        "is_applied": True,
+        "preferred_team": padded[0],
+        "preferred_team_1": padded[0],
+        "preferred_team_2": padded[1],
+        "preferred_team_3": padded[2],
+        "team_preferences": prefs,
+        "resume_url": _normalize_text(record.resume_url),
+        "applied_at": _passthrough_dt(record.applied_at),
     }
+
+
+def get_recruitment_record(db: Session, user_id: int) -> Optional[PdaRecruitment]:
+    return db.query(PdaRecruitment).filter(PdaRecruitment.user_id == user_id).first()
 
 
 def get_recruitment_state(
@@ -65,26 +68,46 @@ def get_recruitment_state(
     user_id: int,
     *,
     user: Optional[PdaUser] = None,
-    resume: Optional[PdaResume] = None,
-) -> Dict[str, Optional[str]]:
-    loaded_user = user or db.query(PdaUser).filter(PdaUser.id == user_id).first()
-    loaded_resume = resume if resume is not None else get_recruitment_resume(db, user_id)
-    return _build_recruitment_state(loaded_user, loaded_resume)
+    resume: Optional[PdaRecruitment] = None,
+) -> Dict[str, Optional[object]]:
+    record = resume if isinstance(resume, PdaRecruitment) else get_recruitment_record(db, user_id)
+    return _build_state(record, _title_map(db))
 
 
-def get_recruitment_state_map(db: Session, users: Iterable[PdaUser]) -> Dict[int, Dict[str, Optional[str]]]:
+def get_recruitment_state_map(db: Session, users: Iterable[PdaUser]) -> Dict[int, Dict[str, Optional[object]]]:
     user_list = [user for user in users if user and user.id is not None]
     if not user_list:
         return {}
 
     user_ids = [user.id for user in user_list]
-    resumes = (
-        db.query(PdaResume)
-        .filter(PdaResume.user_id.in_(user_ids))
+    records = (
+        db.query(PdaRecruitment)
+        .filter(PdaRecruitment.user_id.in_(user_ids))
         .all()
     )
-    resume_map = {row.user_id: row for row in resumes}
-    return {user.id: _build_recruitment_state(user, resume_map.get(user.id)) for user in user_list}
+    record_map = {row.user_id: row for row in records}
+    titles = _title_map(db)
+    return {user.id: _build_state(record_map.get(user.id), titles) for user in user_list}
+
+
+def _resolve_team_code(db: Session, value: Optional[str]) -> Optional[str]:
+    """Accept either a team_code or a legacy title; return team_code or None."""
+    normalized = _normalize_text(value)
+    if not normalized:
+        return None
+    match = (
+        db.query(PdaRecruitmentTeam)
+        .filter(PdaRecruitmentTeam.team_code == normalized)
+        .first()
+    )
+    if match:
+        return match.team_code
+    match = (
+        db.query(PdaRecruitmentTeam)
+        .filter(PdaRecruitmentTeam.title == normalized)
+        .first()
+    )
+    return match.team_code if match else None
 
 
 def create_recruitment_application(
@@ -94,39 +117,33 @@ def create_recruitment_application(
     preferred_team_2: Optional[str] = None,
     preferred_team_3: Optional[str] = None,
     resume_url: Optional[str] = None,
-) -> PdaUser:
-    resume_row = get_recruitment_resume(db, user.id)
+) -> PdaRecruitment:
+    codes: List[str] = []
+    for raw in (preferred_team_1, preferred_team_2, preferred_team_3):
+        code = _resolve_team_code(db, raw)
+        if code and code not in codes:
+            codes.append(code)
+    if not codes:
+        raise ValueError("At least one valid preferred team is required")
+
     normalized_resume_url = _normalize_text(resume_url)
-    effective_resume_url = normalized_resume_url or (_normalize_text(resume_row.s3_url) if resume_row else None)
 
-    if normalized_resume_url:
-        if resume_row:
-            resume_row.s3_url = normalized_resume_url
-        else:
-            db.add(PdaResume(user_id=user.id, s3_url=normalized_resume_url))
+    existing = get_recruitment_record(db, user.id)
+    if existing:
+        existing.team_preferences = codes
+        if normalized_resume_url:
+            existing.resume_url = normalized_resume_url
+        existing.applied_at = datetime.now(timezone.utc)
+        return existing
 
-    payload = dict(user.json_content) if isinstance(user.json_content, dict) else {}
-    payload["is_applied"] = True
-    payload["preferred_team"] = str(preferred_team_1).strip()
-    payload["preferred_team_1"] = str(preferred_team_1).strip()
-    preferred_team_2_value = _normalize_text(preferred_team_2)
-    preferred_team_3_value = _normalize_text(preferred_team_3)
-    if preferred_team_2_value:
-        payload["preferred_team_2"] = preferred_team_2_value
-    else:
-        payload.pop("preferred_team_2", None)
-    if preferred_team_3_value:
-        payload["preferred_team_3"] = preferred_team_3_value
-    else:
-        payload.pop("preferred_team_3", None)
-    payload["applied_at"] = datetime.now(timezone.utc).isoformat()
-    if effective_resume_url:
-        payload["resume_url"] = effective_resume_url
-    else:
-        payload.pop("resume_url", None)
-
-    user.json_content = payload
-    return user
+    record = PdaRecruitment(
+        user_id=user.id,
+        team_preferences=codes,
+        resume_url=normalized_resume_url,
+        applied_at=datetime.now(timezone.utc),
+    )
+    db.add(record)
+    return record
 
 
 def update_recruitment_resume(
@@ -135,27 +152,22 @@ def update_recruitment_resume(
     *,
     resume_url: Optional[str] = None,
     remove: bool = False,
-) -> PdaUser:
-    normalized_resume_url = _normalize_text(resume_url)
-    resume_row = get_recruitment_resume(db, user.id)
-
+) -> Optional[PdaRecruitment]:
+    record = get_recruitment_record(db, user.id)
+    if not record:
+        return None
     if remove:
-        if resume_row:
-            db.delete(resume_row)
-        payload = dict(user.json_content) if isinstance(user.json_content, dict) else {}
-        payload.pop("resume_url", None)
-        user.json_content = payload
-        return user
+        record.resume_url = None
+        return record
+    normalized = _normalize_text(resume_url)
+    if normalized:
+        record.resume_url = normalized
+    return record
 
-    if not normalized_resume_url:
-        return user
 
-    if resume_row:
-        resume_row.s3_url = normalized_resume_url
-    else:
-        db.add(PdaResume(user_id=user.id, s3_url=normalized_resume_url))
-
-    payload = dict(user.json_content) if isinstance(user.json_content, dict) else {}
-    payload["resume_url"] = normalized_resume_url
-    user.json_content = payload
-    return user
+def delete_recruitment_application(db: Session, user_id: int) -> bool:
+    record = get_recruitment_record(db, user_id)
+    if not record:
+        return False
+    db.delete(record)
+    return True

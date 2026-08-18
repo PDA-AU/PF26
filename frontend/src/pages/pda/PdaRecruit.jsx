@@ -13,51 +13,13 @@ import PdaHeader from '@/components/layout/PdaHeader';
 
 const API = `${import.meta.env.VITE_BACKEND_URL}/api`;
 
-const PDA_RECRUITMENT_TEAMS = [
-    {
-        value: 'Website Design',
-        label: 'PDA Web Team',
-        description: 'Embrace your creativity and expertise! Join our team of web designers, skilled coders, and content curators to deliver seamless and captivating online experiences that leave a lasting impact.'
-    },
-    {
-        value: 'Public Relations',
-        label: 'Public Relations',
-        description: "Want to be a marketing genius? Join our team as the ultimate bridge, linking diverse departments seamlessly for a successful outreach. You'll help us reach out to our audience and play a vital role in taking PDA to new heights!"
-    },
-    {
-        value: 'Content Creation',
-        label: 'Content',
-        description: 'Unleash your creativity as a Content Wizard! Join our team to conjure captivating and share-worthy content for magazines and social media, leaving a trail of mesmerized followers behind!'
-    },
-    {
-        value: 'Design',
-        label: 'Design',
-        description: 'Love making eye-catching designs? Ready to be the creative genius behind captivating PDA videos and posters? Join us now to flaunt your talent and dazzle audiences with your incredible creations!'
-    },
-    {
-        value: 'Event Management',
-        label: 'Event Management',
-        description: 'Are you a better manager? Want to be a better one? Join us and help us organize successful events! Coordinate with various teams and handle all tasks with ease and make every occasion a grand success!'
-    },
-    {
-        value: 'Podcast',
-        label: 'Podcast',
-        description: 'Are you a skilled storyteller? Can you make boring lectures into exciting presentations and engaging content for coding, aptitude and other sessions? Want to learn how to deliver effective seminars and learning experiences? Then be a part of our knowledge-sharing journey!'
-    },
-    {
-        value: 'Library',
-        label: 'PDA Library Management',
-        description: 'Can you turn every setback into success? Are you a skilled organizer and manager? Take charge of the library management, ensure smooth and efficient operations. Join our team and be the librarian extraordinaire!'
-    }
-];
-
-const getRecruitmentTeamMeta = (teamValue) => {
-    if (!teamValue) return null;
-    return PDA_RECRUITMENT_TEAMS.find((team) => team.value === teamValue) || null;
+const findTeamMeta = (teams, code) => {
+    if (!code) return null;
+    return teams.find((team) => team.team_code === code) || null;
 };
 
-const getFilteredTeams = (blockedValues = []) =>
-    PDA_RECRUITMENT_TEAMS.filter((team) => !blockedValues.includes(team.value));
+const filterTeams = (teams, blockedCodes = []) =>
+    teams.filter((team) => !blockedCodes.includes(team.team_code));
 
 const inferRecruitmentDocContentType = (file) => {
     const filename = String(file?.name || '').toLowerCase();
@@ -81,6 +43,8 @@ export default function PdaRecruit() {
     const [recruitmentOpen, setRecruitmentOpen] = useState(true);
     const [recruitUrl, setRecruitUrl] = useState('');
     const [statusLoading, setStatusLoading] = useState(true);
+    const [teams, setTeams] = useState([]);
+    const [teamsLoading, setTeamsLoading] = useState(true);
     const [preferredTeam1, setPreferredTeam1] = useState('');
     const [preferredTeam2, setPreferredTeam2] = useState('');
     const [preferredTeam3, setPreferredTeam3] = useState('');
@@ -94,23 +58,30 @@ export default function PdaRecruit() {
     const [submitting, setSubmitting] = useState(false);
 
     useEffect(() => {
-        const fetchRecruitmentStatus = async () => {
+        const fetchAll = async () => {
             setStatusLoading(true);
+            setTeamsLoading(true);
             try {
-                const res = await axios.get(`${API}/pda/recruitment-status`);
-                if (typeof res.data?.recruitment_open === 'boolean') {
-                    setRecruitmentOpen(res.data.recruitment_open);
+                const [statusRes, teamsRes] = await Promise.all([
+                    axios.get(`${API}/pda/recruitment-status`),
+                    axios.get(`${API}/pda/recruitment-teams`),
+                ]);
+                if (typeof statusRes.data?.recruitment_open === 'boolean') {
+                    setRecruitmentOpen(statusRes.data.recruitment_open);
                 }
-                setRecruitUrl(String(res.data?.recruit_url || ''));
+                setRecruitUrl(String(statusRes.data?.recruit_url || ''));
+                setTeams(Array.isArray(teamsRes.data) ? teamsRes.data : []);
             } catch (error) {
-                console.error('Failed to load recruitment status:', error);
+                console.error('Failed to load recruitment data:', error);
                 setRecruitmentOpen(false);
                 setRecruitUrl('');
+                setTeams([]);
             } finally {
                 setStatusLoading(false);
+                setTeamsLoading(false);
             }
         };
-        fetchRecruitmentStatus();
+        fetchAll();
     }, []);
 
     useEffect(() => {
@@ -265,8 +236,11 @@ export default function PdaRecruit() {
         }
     };
 
-    const selectedTeamMeta = getRecruitmentTeamMeta(preferredTeam1);
-    const appliedTeamMeta = getRecruitmentTeamMeta(user?.preferred_team_1 || user?.preferred_team);
+    const selectedTeamMeta = findTeamMeta(teams, preferredTeam1);
+    const appliedPreferredTitle = user?.preferred_team_1 || user?.preferred_team || '';
+    const appliedTeamMeta = teams.find(
+        (t) => t.team_code === appliedPreferredTitle || t.title === appliedPreferredTitle
+    ) || null;
 
     return (
         <div className="min-h-screen bg-[#fffdf5] text-black flex flex-col">
@@ -346,7 +320,7 @@ export default function PdaRecruit() {
                                 ) : user.is_applied ? (
                                     <div className="rounded-md border-2 border-black bg-[#FFF5CC] p-4 shadow-neo">
                                         <p className="text-sm font-bold text-black">Application already submitted.</p>
-                                        <p className="mt-1 text-sm text-slate-700">Preferred Team 1: {appliedTeamMeta?.label || user.preferred_team_1 || user.preferred_team || 'Not specified'}</p>
+                                        <p className="mt-1 text-sm text-slate-700">Preferred Team 1: {appliedTeamMeta?.title || user.preferred_team_1 || user.preferred_team || 'Not specified'}</p>
                                         <p className="mt-1 text-sm text-slate-700">Preferred Team 2: {user.preferred_team_2 || 'Not specified'}</p>
                                         <p className="mt-1 text-sm text-slate-700">Preferred Team 3: {user.preferred_team_3 || 'Not specified'}</p>
                                         <p className="mt-1 text-sm text-slate-700">Resume: {user.resume_url ? 'Uploaded' : 'Not provided'}</p>
@@ -375,8 +349,8 @@ export default function PdaRecruit() {
                                                     <SelectValue placeholder="Select first preferred team" />
                                                 </SelectTrigger>
                                                 <SelectContent className="border-2 border-black bg-white shadow-neo">
-                                                    {PDA_RECRUITMENT_TEAMS.map((team) => (
-                                                        <SelectItem key={team.value} value={team.value}>{team.label}</SelectItem>
+                                                    {teams.map((team) => (
+                                                        <SelectItem key={team.team_code} value={team.team_code}>{team.title}</SelectItem>
                                                     ))}
                                                 </SelectContent>
                                             </Select>
@@ -394,8 +368,8 @@ export default function PdaRecruit() {
                                                     <SelectValue placeholder="Select second preferred team" />
                                                 </SelectTrigger>
                                                 <SelectContent className="border-2 border-black bg-white shadow-neo">
-                                                    {getFilteredTeams([preferredTeam1]).map((team) => (
-                                                        <SelectItem key={team.value} value={team.value}>{team.label}</SelectItem>
+                                                    {filterTeams(teams, [preferredTeam1]).map((team) => (
+                                                        <SelectItem key={team.team_code} value={team.team_code}>{team.title}</SelectItem>
                                                     ))}
                                                 </SelectContent>
                                             </Select>
@@ -407,8 +381,8 @@ export default function PdaRecruit() {
                                                     <SelectValue placeholder="Select third preferred team" />
                                                 </SelectTrigger>
                                                 <SelectContent className="border-2 border-black bg-white shadow-neo">
-                                                    {getFilteredTeams([preferredTeam1, preferredTeam2]).map((team) => (
-                                                        <SelectItem key={team.value} value={team.value}>{team.label}</SelectItem>
+                                                    {filterTeams(teams, [preferredTeam1, preferredTeam2]).map((team) => (
+                                                        <SelectItem key={team.team_code} value={team.team_code}>{team.title}</SelectItem>
                                                     ))}
                                                 </SelectContent>
                                             </Select>
@@ -449,7 +423,7 @@ export default function PdaRecruit() {
                                             {selectedTeamMeta?.description ? (
                                                 <div className="mt-3 rounded-md border-2 border-black bg-[#F7F0FF] p-3">
                                                     <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#6D28D9]">
-                                                        {selectedTeamMeta.label}
+                                                        {selectedTeamMeta.title}
                                                     </p>
                                                     <p className="mt-1 text-xs text-slate-700">{selectedTeamMeta.description}</p>
                                                 </div>
@@ -484,12 +458,18 @@ export default function PdaRecruit() {
                                 Explore each team and choose where you can contribute best.
                             </p>
                             <div className="mt-5 grid gap-3">
-                                {PDA_RECRUITMENT_TEAMS.map((team) => (
-                                    <article key={team.value} className="rounded-md border-2 border-black bg-white p-3 text-black shadow-neo">
-                                        <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#6D28D9]">{team.label}</p>
-                                        <p className="mt-1 text-xs text-slate-700">{team.description}</p>
-                                    </article>
-                                ))}
+                                {teamsLoading ? (
+                                    <p className="text-sm text-white/70">Loading teams...</p>
+                                ) : teams.length === 0 ? (
+                                    <p className="text-sm text-white/70">No teams available.</p>
+                                ) : (
+                                    teams.map((team) => (
+                                        <article key={team.team_code} className="rounded-md border-2 border-black bg-white p-3 text-black shadow-neo">
+                                            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#6D28D9]">{team.title}</p>
+                                            <p className="mt-1 text-xs text-slate-700">{team.description}</p>
+                                        </article>
+                                    ))
+                                )}
                             </div>
                         </section>
                     </div>
@@ -503,13 +483,13 @@ export default function PdaRecruit() {
                     </DialogHeader>
                     <div className="space-y-3">
                         <p className="text-sm text-slate-700">
-                            Preferred Team 1: <span className="font-semibold">{selectedTeamMeta?.label || preferredTeam1 || '-'}</span>
+                            Preferred Team 1: <span className="font-semibold">{selectedTeamMeta?.title || preferredTeam1 || '-'}</span>
                         </p>
                         <p className="text-sm text-slate-700">
-                            Preferred Team 2: <span className="font-semibold">{preferredTeam2 || '-'}</span>
+                            Preferred Team 2: <span className="font-semibold">{findTeamMeta(teams, preferredTeam2)?.title || preferredTeam2 || '-'}</span>
                         </p>
                         <p className="text-sm text-slate-700">
-                            Preferred Team 3: <span className="font-semibold">{preferredTeam3 || '-'}</span>
+                            Preferred Team 3: <span className="font-semibold">{findTeamMeta(teams, preferredTeam3)?.title || preferredTeam3 || '-'}</span>
                         </p>
                         <p className="text-sm text-slate-700">
                             Resume File: <span className="font-semibold">{recruitmentDocFile ? recruitmentDocFile.name : (resumeUrl ? 'Uploaded' : 'Not provided')}</span>
