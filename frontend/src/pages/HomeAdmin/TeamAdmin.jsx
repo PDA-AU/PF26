@@ -528,7 +528,10 @@ export default function TeamAdmin() {
 
     const statsMembers = teamMembers;
     const totalMembers = statsMembers.length;
-    const teamCounts = TEAMS.reduce((acc, team) => {
+    const teamTitles = recruitTeams.length
+        ? recruitTeams.map((t) => t.title)
+        : TEAMS;
+    const teamCounts = teamTitles.reduce((acc, team) => {
         acc[team] = statsMembers.filter((m) => m.team === team).length;
         return acc;
     }, { Unassigned: statsMembers.filter((m) => !m.team).length });
@@ -794,7 +797,7 @@ export default function TeamAdmin() {
                             </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="All">All Teams</SelectItem>
-                                {TEAMS.map(team => (
+                                {teamTitles.map(team => (
                                     <SelectItem key={team} value={team}>{team}</SelectItem>
                                 ))}
                             </SelectContent>
@@ -1026,7 +1029,7 @@ export default function TeamAdmin() {
                                     <SelectValue placeholder="Select team" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {TEAMS.map((team) => (
+                                    {teamTitles.map((team) => (
                                         <SelectItem key={team} value={team}>{team}</SelectItem>
                                     ))}
                                 </SelectContent>
@@ -1163,7 +1166,7 @@ export default function TeamAdmin() {
                                         <Select value={editForm.team} onValueChange={(value) => setEditForm(prev => ({ ...prev, team: value }))} disabled={!isEditing || !isSuperAdmin}>
                                             <SelectTrigger><SelectValue placeholder="Select team" /></SelectTrigger>
                                             <SelectContent>
-                                                {TEAMS.map(team => (
+                                                {teamTitles.map(team => (
                                                     <SelectItem key={team} value={team}>{team}</SelectItem>
                                                 ))}
                                             </SelectContent>

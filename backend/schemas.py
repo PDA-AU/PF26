@@ -1460,7 +1460,7 @@ class PdaTeamCreate(BaseModel):
     gender: Optional[GenderEnum] = None
     phno: Optional[str] = None
     password: Optional[str] = None
-    team: Optional["PdaTeamName"] = None
+    team: Optional[str] = Field(default=None, max_length=120)
     designation: Optional["PdaTeamDesignation"] = None
     photo_url: Optional[str] = None
     instagram_url: Optional[str] = None
@@ -1491,7 +1491,7 @@ class PdaTeamUpdate(BaseModel):
     email: Optional[str] = None
     phno: Optional[str] = None
     dob: Optional[date] = None
-    team: Optional["PdaTeamName"] = None
+    team: Optional[str] = Field(default=None, max_length=120)
     designation: Optional["PdaTeamDesignation"] = None
     photo_url: Optional[str] = None
     instagram_url: Optional[str] = None
@@ -1527,7 +1527,7 @@ class PdaTeamResponse(BaseModel):
     phno: Optional[str] = None
     dob: Optional[date] = None
     resume_url: Optional[str] = None
-    team: Optional["PdaTeamName"] = None
+    team: Optional[str] = Field(default=None, max_length=120)
     designation: Optional["PdaTeamDesignation"] = None
     photo_url: Optional[str] = None
     instagram_url: Optional[str] = None
@@ -1559,7 +1559,7 @@ class PdaAdminUserResponse(BaseModel):
     preferred_team_3: Optional[str] = None
     resume_url: Optional[str] = None
     email_verified: bool = False
-    team: Optional["PdaTeamName"] = None
+    team: Optional[str] = Field(default=None, max_length=120)
     designation: Optional["PdaTeamDesignation"] = None
     photo_url: Optional[str] = None
     instagram_url: Optional[str] = None
@@ -1581,7 +1581,7 @@ class PdaAdminUserUpdate(BaseModel):
     dob: Optional[date] = None
     gender: Optional[GenderEnum] = None
     is_member: Optional[bool] = None
-    team: Optional["PdaTeamName"] = None
+    team: Optional[str] = Field(default=None, max_length=120)
     designation: Optional["PdaTeamDesignation"] = None
     photo_url: Optional[str] = None
     instagram_url: Optional[str] = None
