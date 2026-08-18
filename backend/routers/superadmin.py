@@ -1177,6 +1177,8 @@ def merge_recruitment_teams(
     db: Session = Depends(get_db),
     request: Request = None,
 ):
+    from sqlalchemy.orm.attributes import flag_modified
+
     if payload.source_id == payload.target_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Source and target must differ")
     source = db.query(PdaRecruitmentTeam).filter(PdaRecruitmentTeam.id == payload.source_id).first()
@@ -1184,39 +1186,47 @@ def merge_recruitment_teams(
     if not source or not target:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
 
-    applications = db.query(PdaRecruitment).all()
-    apps_updated = 0
-    for app in applications:
-        prefs = list(app.team_preferences or [])
-        if source.team_code not in prefs:
-            continue
-        new_prefs = []
-        for code in prefs:
-            replacement = target.team_code if code == source.team_code else code
-            if replacement not in new_prefs:
-                new_prefs.append(replacement)
-        app.team_preferences = new_prefs
-        apps_updated += 1
-
+    # Snapshot values BEFORE any mutation/commit — source will be deleted, target may be renamed.
+    source_code = source.team_code
+    source_title = source.title
+    target_code = target.team_code
     old_target_title = target.title
     new_title = payload.new_title
     renamed = bool(new_title and new_title != old_target_title)
-    if renamed:
-        target.title = new_title
+    final_target_title = new_title if renamed else old_target_title
 
-    # First reassign all rows that referenced the source title to the (possibly new) target title.
+    apps_updated = 0
+    applications = db.query(PdaRecruitment).all()
+    for app in applications:
+        prefs_raw = app.team_preferences
+        prefs = list(prefs_raw) if isinstance(prefs_raw, list) else []
+        if source_code not in prefs:
+            continue
+        new_prefs = []
+        for code in prefs:
+            replacement = target_code if code == source_code else code
+            if replacement and replacement not in new_prefs:
+                new_prefs.append(replacement)
+        app.team_preferences = new_prefs
+        flag_modified(app, "team_preferences")
+        apps_updated += 1
+
+    if renamed:
+        target.title = final_target_title
+
+    # Reassign rows that referenced the source title to the (possibly renamed) target title.
     members_reassigned = (
         db.query(PdaTeam)
-        .filter(PdaTeam.team == source.title)
-        .update({PdaTeam.team: target.title}, synchronize_session=False)
+        .filter(PdaTeam.team == source_title)
+        .update({PdaTeam.team: final_target_title}, synchronize_session=False)
     )
-    # Then rename existing target rows if the target was renamed.
+    # Rename existing target rows if the target was renamed.
     members_renamed = 0
     if renamed:
         members_renamed = (
             db.query(PdaTeam)
             .filter(PdaTeam.team == old_target_title)
-            .update({PdaTeam.team: target.title}, synchronize_session=False)
+            .update({PdaTeam.team: final_target_title}, synchronize_session=False)
         )
     members_updated = members_reassigned + members_renamed
 
@@ -1228,8 +1238,8 @@ def merge_recruitment_teams(
         request.method if request else None,
         request.url.path if request else None,
         {
-            "source": source.team_code,
-            "target": target.team_code,
+            "source": source_code,
+            "target": target_code,
             "renamed_to": new_title if renamed else None,
             "applications_updated": apps_updated,
             "team_members_updated": members_updated,
@@ -1237,8 +1247,8 @@ def merge_recruitment_teams(
     )
     return {
         "merged": True,
-        "source": source.team_code,
-        "target": target.team_code,
+        "source": source_code,
+        "target": target_code,
         "renamed_to": new_title if renamed else None,
         "applications_updated": apps_updated,
         "team_members_updated": members_updated,
